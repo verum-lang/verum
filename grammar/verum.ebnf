@@ -1,8 +1,29 @@
 (* ============================================================================ *)
-(* Verum Language Complete EBNF Grammar                                         *)
-(* Version: 1.0                                                                 *)
-(* Last Updated: 2025-11-15                                                     *)
+(* Verum Language Complete EBNF Grammar                                          *)
+(* Version: 3.0                                                                  *)
 (* Status: Production-Ready - Formal Specification                              *)
+(*                                                                              *)
+(* This is the AUTHORITATIVE source of truth for Verum syntax.                  *)
+(* All parsers, documentation, and tooling MUST conform to this grammar.        *)
+(*                                                                              *)
+(* Structure:                                                                   *)
+(*   1. LEXICAL GRAMMAR     - Tokens, keywords, literals                        *)
+(*   2. SYNTACTIC GRAMMAR   - Expressions, statements, declarations             *)
+(*   3. ERROR RECOVERY      - Parser recovery strategies                        *)
+(*                                                                              *)
+(* Key Design Principles:                                                       *)
+(*   - Reserved keywords: ONLY 'let', 'fn', 'is'                                *)
+(*   - Type definitions: Unified 'is' syntax (type T is ...)                    *)
+(*   - Context system: Explicit 'using' keyword                                 *)
+(*   - References: Three-tier (&T, &checked T, &unsafe T)                       *)
+(*   - No Rust-style `!` suffix - all compile-time uses @ prefix                *)
+(*   - Pattern testing: 'is' operator (x is Some(v))                            *)
+(*   - Format strings: f"..." literals                                          *)
+(*                                                                              *)
+(* Specification References:                                                    *)
+(*   - docs/detailed/05-syntax-grammar.md                                       *)
+(*   - docs/detailed/03-type-system.md                                          *)
+(*   - docs/detailed/16-context-system.md                                       *)
 (* ============================================================================ *)
 
 (* ============================================================================ *)
@@ -47,6 +68,7 @@ char_except_slash       = '\u0000'..'\u002E' | '\u0030'..'\uFFFF' ;
 char_except_quote       = '\u0000'..'\u0021' | '\u0023'..'\u005B' | '\u005D'..'\uFFFF' ;
 char_except_apostrophe  = '\u0000'..'\u0026' | '\u0028'..'\u005B' | '\u005D'..'\uFFFF' ;
 char_except_backslash   = '\u0000'..'\u005B' | '\u005D'..'\uFFFF' ;
+any_char                = '\u0000'..'\uFFFF' ;  (* Any Unicode character *)
 
 (* 1.3 Identifiers *)
 ident_start     = letter | '_' ;
@@ -56,7 +78,8 @@ type_param_name = uppercase_letter , { ident_continue } ;
 
 (* 1.4 Keywords *)
 
-(* Core reserved keywords - ONLY 3 *)
+(* Core reserved keywords - ONLY 3 per specification *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.1 - Keywords *)
 reserved_keyword = 'let' | 'fn' | 'is' ;
 
 (* Primary keywords *)
@@ -67,44 +90,69 @@ control_flow = 'if' | 'else' | 'match' | 'return'
              | 'for' | 'while' | 'loop' | 'break' | 'continue' ;
 
 (* Async/Context keywords *)
-async_keywords = 'async' | 'await' | 'spawn' | 'defer' | 'try' | 'yield' ;
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.1 - Explicit Async *)
+(* async and await keywords are MANDATORY - no implicit async infection *)
+(* errdefer: error-path-only cleanup (Zig-inspired) *)
+(* throws: typed error boundaries (Swift 6-inspired) *)
+(* select: async racing expressions *)
+(* nursery: structured concurrency with task scoping *)
+(* Spec: docs/improvements.md Section 9 - Structured Concurrency *)
+async_keywords = 'async' | 'await' | 'spawn' | 'defer' | 'errdefer' | 'try' | 'yield' | 'throws' | 'select' | 'nursery' ;
 
 (* Modifier keywords *)
-modifiers = 'pub' | 'mut' | 'const' | 'unsafe' ;
+(* pure: Compiler-verified no side effects - see function_modifiers *)
+modifiers = 'pub' | 'mut' | 'const' | 'unsafe' | 'pure' ;
 
 (* FFI keywords *)
 ffi_keywords = 'ffi' ;
 
 (* Module keywords *)
-module_keywords = 'module' | 'import' | 'implement' | 'context' | 'protocol' ;
+module_keywords = 'module' | 'import' | 'implement' | 'context' | 'protocol' | 'extends' ;
 
 (* Additional keywords *)
+(* 'some' for existential types *)
 additional_keywords = 'self' | 'super' | 'crate' | 'static' | 'meta'
                     | 'provide' | 'finally' | 'recover' | 'invariant'
-                    | 'decreases' | 'stream' | 'tensor' | 'affine'
-                    | 'public' | 'internal' | 'protected' ;
+                    | 'decreases' | 'stream' | 'tensor' | 'affine' | 'linear'
+                    | 'public' | 'internal' | 'protected'
+                    | 'ensures' | 'requires' | 'result' | 'some' ;
 
-(* Deprecated keywords - NOT used in Verum *)
-deprecated_keywords = 'struct' | 'enum' | 'trait' | 'impl' ;
+(* Note on 'default' keyword:                                                    *)
+(* 'default' is a CONTEXTUAL keyword, not in the token list.                    *)
+(* It's parsed as an identifier and checked contextually in impl_item.          *)
+(* This allows `fn default()` and `T.default()` to work correctly.              *)
+(* Spec: verum_lexer/src/token.rs lines 404-408                                 *)
+
+(* Proof-related keywords (Section 2.19) *)
+proof_keywords = 'theorem' | 'lemma' | 'axiom' | 'corollary' | 'proof' | 'calc'
+               | 'have' | 'show' | 'suffices' | 'obtain' | 'by' | 'qed'
+               | 'induction' | 'cases' | 'contradiction' | 'forall' | 'exists' ;
 
 (* Composite keyword definition *)
 keyword = reserved_keyword | primary_keyword | control_flow
         | async_keywords | modifiers | ffi_keywords
-        | module_keywords | additional_keywords ;
+        | module_keywords | additional_keywords | proof_keywords ;
 
 (* 1.5 Literals *)
 
 (* 1.5.1 Numeric Literals *)
 dec_digit       = '0'..'9' ;
 hex_digit       = dec_digit | 'a'..'f' | 'A'..'F' ;
+oct_digit       = '0'..'7' ;
 bin_digit       = '0' | '1' ;
 
 decimal_lit     = dec_digit , { dec_digit | '_' } ;
 hexadecimal_lit = '0x' , hex_digit , { hex_digit | '_' } ;
+octal_lit       = '0o' , oct_digit , { oct_digit | '_' } ;
 binary_lit      = '0b' , bin_digit , { bin_digit | '_' } ;
 
-integer_lit     = ( decimal_lit | hexadecimal_lit | binary_lit ) , [ '_' , identifier ] ;
-float_lit       = decimal_lit , '.' , decimal_lit , [ exponent ] , [ '_' , identifier ] ;
+(* Type suffixes for numeric literals - no underscore required before suffix *)
+int_suffix      = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize'
+                | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize' ;
+float_suffix    = 'f32' | 'f64' ;
+
+integer_lit     = ( decimal_lit | hexadecimal_lit | octal_lit | binary_lit ) , [ int_suffix ] ;
+float_lit       = decimal_lit , '.' , decimal_lit , [ exponent ] , [ float_suffix ] ;
 exponent        = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal_lit ;
 
 (* 1.5.2 Text Literals - Fully Specified *)
@@ -116,15 +164,105 @@ multiline_string= '"""' , { char_except_newline | '\n' | '\r\n' } , '"""' ;
 raw_string      = 'r' , raw_string_delim ;
 raw_string_delim= '#' , { '#' } , '"' , raw_string_content , '"' , '#' , { '#' } ;
 raw_string_content = { char_except_quote } ;
+
+(* Byte string literals - produces &[Byte] at compile time *)
+(* Like Rust's b"...", contains ASCII bytes with escape sequences *)
+(* Escapes: \n, \r, \t, \0, \\, \', \", \xNN (hex byte) *)
+byte_string_char = '\u0000'..'\u007F' ;  (* ASCII only *)
+byte_escape_seq = '\' , ( 'n' | 'r' | 't' | '0' | '\' | "'" | '"'
+                       | ( 'x' , hex_digit , hex_digit ) ) ;
+byte_string_lit = 'b' , '"' , { byte_string_char | byte_escape_seq } , '"' ;
+
 string_lit      = plain_string | multiline_string | raw_string ;
 
-tagged_literal  = identifier , '#' , ( plain_string | raw_string ) ;
-interpolated_string = identifier , '"' , { string_char | interpolation } , '"' ;
-interpolation   = '{' , expression , '}' ;
+(* ============================================================================ *)
+(* 1.5.2.1 TAGGED LITERALS                                                       *)
+(* ============================================================================ *)
+(* Tagged literals provide format-specific content with compile-time validation *)
+(* Syntax: tag#"content", tag#"""multiline""", tag#r#"raw"#                    *)
+(*                                                                              *)
+(* Format Categories:                                                           *)
+(*   Data Interchange: json, json5, yaml, toml, xml, html, csv                 *)
+(*   Query Languages:  sql, gql (GraphQL), cypher, sparql                      *)
+(*   Pattern Matching: rx (regex), re, glob, xpath, jpath (JSONPath)           *)
+(*   Identifiers:      url, uri, email, path, mime, uuid, urn                  *)
+(*   Temporal:         d (datetime), dur (duration), tz (timezone)             *)
+(*   Networking:       ip, cidr, mac, host                                     *)
+(*   Versioning:       ver (semver), b64, hex, pct (percent-encoded)           *)
+(*   Structured:       mat (matrix), vec (vector), interval, ratio             *)
+(*   Code/Script:      sh (shell), css, lua, asm                               *)
+(*   Scientific:       chem, music, geo                                        *)
+(*                                                                              *)
+(* Format Relaxation:                                                           *)
+(*   json#: Relaxed JSON (JSON5-style)                                          *)
+(*     - Unquoted keys: { name: "value" }                                       *)
+(*     - Trailing commas: [1, 2, 3,]                                            *)
+(*     - Single-line comments: // comment                                       *)
+(*     - Block comments: /* comment */                                          *)
+(*     - Single-quoted strings: 'hello'                                         *)
+(*                                                                              *)
+(* Compile-Time Validation:                                                     *)
+(*   - All format content is validated at compile-time                          *)
+(*   - Syntax errors produce compilation errors with line/column               *)
+(*   - Invalid format content is rejected before runtime                        *)
+(*                                                                              *)
+(* Type Inference:                                                              *)
+(*   - json# → JsonValue                                                        *)
+(*   - yaml# → YamlValue                                                        *)
+(*   - sql#  → SqlQuery                                                         *)
+(*   - rx#   → Regex                                                            *)
+(*   - url#  → Url                                                              *)
+(*   - d#    → DateTime                                                         *)
+(*   - With type annotation: let user: User = json#"..."; → User               *)
+(* ============================================================================ *)
+
+(* Format tag categories *)
+format_tag_data    = 'json' | 'json5' | 'yaml' | 'toml' | 'xml' | 'html' | 'csv' ;
+format_tag_query   = 'sql' | 'gql' | 'graphql' | 'cypher' | 'sparql' ;
+format_tag_pattern = 'rx' | 're' | 'regex' | 'glob' | 'xpath' | 'jpath' ;
+format_tag_ident   = 'url' | 'uri' | 'email' | 'path' | 'mime' | 'uuid' | 'urn' ;
+format_tag_time    = 'd' | 'dur' | 'tz' | 'date' | 'time' | 'datetime' ;
+format_tag_net     = 'ip' | 'cidr' | 'mac' | 'host' ;
+format_tag_version = 'ver' | 'semver' | 'b64' | 'hex' | 'pct' ;
+format_tag_struct  = 'mat' | 'vec' | 'interval' | 'ratio' | 'tensor' ;
+format_tag_code    = 'sh' | 'css' | 'lua' | 'asm' | 'contract' ;
+format_tag_science = 'chem' | 'music' | 'geo' ;
+
+(* All recognized format tags *)
+format_tag = format_tag_data | format_tag_query | format_tag_pattern
+           | format_tag_ident | format_tag_time | format_tag_net
+           | format_tag_version | format_tag_struct | format_tag_code
+           | format_tag_science | identifier ;  (* Custom tags allowed *)
+
+(* Tagged literal with format-specific content *)
+tagged_literal  = format_tag , '#' , tagged_content ;
+tagged_content  = plain_string
+                | raw_string
+                | multiline_string
+                | multiline_raw_string ;
+
+(* Multiline raw string for tagged literals: tag#r#"""..."""# or tag##"""..."""## *)
+multiline_raw_string = [ 'r' ] , '#' , { '#' } , '"""' , { any_char } , '"""' , '#' , { '#' } ;
+
+(* Interpolated strings with expression embedding: f"Hello {name}" *)
+interpolated_string = interpolated_prefix , '"' , { string_char | interpolation } , '"' ;
+interpolated_prefix = 'f' | 'fmt' ;
+interpolation       = '{' , expression , [ ':' , format_spec ] , '}' ;
+format_spec         = { format_spec_char } ;
+format_spec_char    = letter | digit | '.' | '<' | '>' | '^' | '+' | '-' | ' ' | '#' | '0' ;
+
+(* Tagged interpolated strings: allows ${expr} in tagged content *)
+(* Example: json#"""{ "name": "${user.name}", "age": ${user.age} }""" *)
+tagged_interpolated = format_tag , '#' , tagged_interpolated_content ;
+tagged_interpolated_content = multiline_string_interpolated | plain_string_interpolated ;
+multiline_string_interpolated = '"""' , { string_char | '\n' | '\r\n' | tagged_interpolation } , '"""' ;
+plain_string_interpolated = '"' , { string_char | tagged_interpolation } , '"' ;
+tagged_interpolation = '${' , expression , '}' ;
 
 char_lit        = "'" , ( char | escape_seq ) , "'" ;
 
-escape_seq      = '\' , ( 'n' | 'r' | 't' | '\' | '"' | "'"
+escape_seq      = '\' , ( 'n' | 'r' | 't' | '0' | 'a' | 'b' | 'f' | 'v'
+                | '\' | '"' | "'"
                 | 'x' , hex_digit , hex_digit
                 | 'u' , '{' , hex_sequence , '}' ) ;
 hex_sequence    = hex_digit | hex_digit , hex_sequence ;
@@ -149,8 +287,11 @@ composite_bracket = '[' , { composite_char } , ']' ;
 composite_brace  = '{' , { composite_char } , '}' ;
 composite_char  = char_except_newline - ( ')' | ']' | '}' ) ;
 
-semantic_literal = semantic_tag , '#' , ( plain_string | raw_string ) ;
-semantic_tag    = 'gql' | 'rx' | 'sql' | 'url' | 'email' | 'json' | 'xml' | 'yaml' | 'contract' ;
+(* Semantic literals - alias for tagged literals with safe interpolation support *)
+semantic_literal = semantic_tag , '#' , ( plain_string | raw_string | multiline_string ) ;
+semantic_tag    = 'gql' | 'graphql' | 'rx' | 're' | 'regex' | 'sql' | 'url' | 'uri'
+                | 'email' | 'json' | 'json5' | 'xml' | 'html' | 'yaml' | 'toml'
+                | 'css' | 'sh' | 'contract' ;
 
 contract_literal = 'contract' , '#' , ( plain_string | raw_string ) ;
 
@@ -160,6 +301,7 @@ safe_interpolation = '{' , expression , '}' ;
 literal_expr    = integer_lit
                 | float_lit
                 | string_lit
+                | byte_string_lit
                 | char_lit
                 | bool_lit
                 | context_adaptive_lit
@@ -167,6 +309,7 @@ literal_expr    = integer_lit
                 | semantic_literal
                 | contract_literal
                 | tagged_literal
+                | tagged_interpolated
                 | interpolated_string
                 | safe_interpolated ;
 
@@ -199,13 +342,17 @@ program_item    = item | statement ;
 item            = function_def
                 | type_def
                 | impl_block
+                | extern_block
                 | context_def
+                | context_protocol_def
+                | context_type_protocol_def
                 | context_group_def
                 | const_def
                 | static_def
                 | import_stmt
                 | module_def
                 | meta_def
+                | pattern_def
                 | ffi_declaration
                 | attribute_item ;
 
@@ -213,24 +360,41 @@ visibility      = 'public' | 'internal' | 'protected' | epsilon ;
 epsilon         = ;
 
 attribute_item  = '@' , attribute , item ;
-attribute       = identifier , [ '(' , attribute_args , ')' ] ;
+attribute       = std_attribute
+                | specialize_attribute
+                | derive_attribute
+                | verify_attribute
+                | identifier , [ '(' , attribute_args , ')' ] ;
 attribute_args  = expression_list ;
 expression_list = expression , { ',' , expression } ;
 
+(* Special attribute forms *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 3.1 - Specialization *)
+std_attribute   = 'std' , [ '(' , context_group_identifier , ')' ] ;
+specialize_attribute = 'specialize' ;
+derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
+verify_attribute = 'verify' , '(' , ( 'runtime' | 'static' | 'formal' ) , ')' ;
+context_group_identifier = identifier ;
+
 (* 2.2 Imports and Modules *)
 import_stmt     = 'import' , import_tree , [ 'as' , identifier ] , ';' ;
-import_tree     = path
+import_tree     = import_item , [ 'as' , identifier ]
                 | path , '.' , '{' , import_list , '}'
                 | path , '.' , '*' ;
+import_item     = path ;
 import_list     = import_tree , { ',' , import_tree } ;
 
-module_def      = visibility , 'module' , identifier , module_body ;
+module_def      = visibility , 'module' , module_path , module_body ;
+module_path     = identifier , { '.' , identifier } ;
 module_body     = '{' , { program_item } , '}' | ';' ;
 
 path            = [ '.' ] , path_segment , { '.' , path_segment } ;
 path_segment    = identifier | 'self' | 'super' | 'crate' ;
 
 (* 2.3 Type Definitions - Unified 'is' syntax *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 3.1 - Unified type definitions *)
+(* No more struct/enum/trait keywords - unified type is syntax *)
+(* All type definitions use the unified 'is' syntax *)
 type_def        = visibility , 'type' , [ 'affine' ] , identifier , [ generics ]
                 , [ meta_where_clause ]
                 , 'is' , type_definition_body ;
@@ -240,7 +404,21 @@ type_definition_body = type_expr , [ type_refinement ] , ';'
                      | '(' , type_list , ')' , ';'
                      | '{' , field_list , '}' , ';'
                      | variant_list , ';'
-                     | 'protocol' , '{' , protocol_items , '}' , ';' ;
+                     | protocol_def , ';' ;
+
+(* Protocol definition with optional extension and where clause *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 5.1 - Protocol Extension *)
+
+(* Shared: Protocol extension clause - reused by protocol_def and context protocols *)
+protocol_extension = 'extends' , trait_path , { '+' , trait_path } ;
+
+(* Shared: Protocol body - extension + where + items *)
+(* Reused by: protocol_def, context_protocol_def, context_type_protocol_def *)
+protocol_body   = [ protocol_extension ] , [ generic_where_clause ] ,
+                  '{' , protocol_items , '}' ;
+
+(* Standard protocol: type X is protocol { } *)
+protocol_def    = 'protocol' , protocol_body ;
 
 type_refinement = inline_refinement | value_where_clause ;
 
@@ -265,57 +443,309 @@ predicate_expr = expression ;
 sigma_type = identifier , ':' , type_expr , [ 'where' , expression ] ;
 
 variant_list    = [ '|' ] , variant , { '|' , variant } ;
-variant         = identifier , [ variant_data ] ;
+(* Variants can have attributes for serialization, defaults, deprecation *)
+(* Example: @default Ok | @deprecated Legacy | Error(Text) *)
+variant         = { attribute } , identifier , [ variant_data ] ;
 variant_data    = '{' , field_list , '}' | '(' , type_list , ')' ;
 
 field_list      = [ field , { ',' , field } , [ ',' ] ] ;
-field           = [ visibility ] , identifier , ':' , type_expr ;
+(* Fields can have attributes for serialization, validation, etc. *)
+(* Example: @serialize(rename = "id") @validate(min = 1) user_id: Int *)
+(* Fields can have optional default values for @builder pattern:       *)
+(* Example: headers: Map<Text, Text> = Map.new()                       *)
+(* Spec: docs/improvements.md Section 10 - Builder Pattern             *)
+field           = { attribute } , [ visibility ] , identifier , ':' , type_expr , [ field_default ] ;
+field_default   = '=' , expression ;
 
 protocol_items  = { protocol_item } ;
 
 (* 2.4 Functions *)
-function_def    = visibility , function_modifiers , 'fn' , identifier
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.1 - Explicit Async Required *)
+(* 'async' keyword is MANDATORY for async functions - no inference *)
+(* Optional throws clause for typed error boundaries (Swift 6 inspired) *)
+(* Generator function marker - fn* for sync, async fn* for async generators *)
+(* Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators *)
+
+(* Generator function marker - suffix on fn keyword *)
+(* fn* for sync generators, async fn* for async generators *)
+fn_keyword      = 'fn' , [ '*' ] ;
+
+(* Updated function_def with generator support *)
+(* CANONICAL FORM: Context clause AFTER return type (docs/detailed/16-context-system.md)  *)
+(*   fn foo() -> Type using [Database] { ... }                                            *)
+(*   fn foo() using [Database] { ... }  -- when return type is unit                       *)
+(* This is consistent with Verum's design: modifiers flow left-to-right                   *)
+function_def    = visibility , function_modifiers , fn_keyword , identifier
                 , [ generics ] , '(' , param_list , ')'
+                , [ throws_clause ]
                 , [ '->' , type_expr , [ ensures_clause ] ]
-                , [ whitespace_plus , context_clause ]
+                , [ context_clause ]
                 , [ generic_where_clause ]
                 , [ meta_where_clause ]
                 , function_body ;
 
+(* Typed throws clause - typed error boundaries *)
+(* Example: fn parse(input: Text) throws(ParseError) -> AST *)
+(* Example: fn process(data: Data) throws(ParseError | ValidationError) -> Result *)
+throws_clause   = 'throws' , '(' , error_type_list , ')' ;
+error_type_list = type_expr , { '|' , type_expr } ;
+
 whitespace_plus = whitespace , { whitespace } ;
 
-function_modifiers = [ 'meta' ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
+(* ============================================================================ *)
+(* FUNCTION MODIFIERS - Order matters for parsing                              *)
+(* ============================================================================ *)
+(*                                                                              *)
+(* Modifiers control function execution mode and safety properties:             *)
+(*                                                                              *)
+(* pure   - Compiler-verified no side effects. Pure functions cannot:           *)
+(*          - Mutate external state                                             *)
+(*          - Perform I/O operations                                            *)
+(*          - Call impure functions                                             *)
+(*          Pure functions enable: memoization, parallel execution, CSE.        *)
+(*                                                                              *)
+(* meta   - Compile-time execution (staged metaprogramming). Meta functions:    *)
+(*          - Execute during compilation, not at runtime                        *)
+(*          - Generate code, types, or AST fragments                            *)
+(*          - Support N-level staging via meta(N) syntax                        *)
+(*          Stage semantics:                                                    *)
+(*            Stage 0 = runtime (normal functions)                              *)
+(*            Stage 1 = meta fn (current meta, executes at compile time)        *)
+(*            Stage N = meta(N) fn (generates Stage N-1 code)                   *)
+(*          Examples:                                                           *)
+(*            meta fn derive_eq() { ... }           -- Stage 1: generates code  *)
+(*            meta(2) fn derive_gen() { ... }       -- Stage 2: generates meta  *)
+(*            meta(3) fn derive_derive() { ... }    -- Stage 3: meta-meta       *)
+(*                                                                              *)
+(* async  - Asynchronous execution. Async functions:                            *)
+(*          - Return Future<T> instead of T                                     *)
+(*          - Can use await expressions                                         *)
+(*          - Require async runtime context                                     *)
+(*                                                                              *)
+(* unsafe - Bypasses Verum's safety guarantees. Unsafe functions can:           *)
+(*          - Dereference raw pointers                                          *)
+(*          - Call other unsafe functions                                       *)
+(*          - Violate type invariants                                           *)
+(*          Caller must provide SAFETY documentation.                           *)
+(*                                                                              *)
+(* ============================================================================ *)
+function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
 
+(* Meta modifier with optional stage level for multi-stage metaprogramming     *)
+(* Syntax:                                                                      *)
+(*   meta      - Default stage 1 (compile-time execution)                      *)
+(*   meta(N)   - Explicit stage N where N >= 1                                 *)
+(*                                                                              *)
+(* Stage Coherence Rule:                                                        *)
+(*   A Stage N function can only DIRECTLY generate Stage N-1 code.             *)
+(*   To generate Stage N-2 code, the generated Stage N-1 code must contain     *)
+(*   meta functions that generate Stage N-2 code.                              *)
+(*                                                                              *)
+(* Examples:                                                                    *)
+(*   meta fn foo() { ... }      -- Stage 1: generates runtime code             *)
+(*   meta(1) fn bar() { ... }   -- Same as meta fn bar() (explicit stage 1)    *)
+(*   meta(2) fn baz() { ... }   -- Stage 2: generates Stage 1 (meta) code      *)
+(*   meta(3) fn qux() { ... }   -- Stage 3: generates Stage 2 code             *)
+(*                                                                              *)
+(* Quote with Target Stage:                                                     *)
+(*   quote { ... }        -- Quotes to Stage N-1 (default)                     *)
+(*   quote(M) { ... }     -- Quotes to explicit Stage M (M < current stage)    *)
+(*                                                                              *)
+meta_modifier = 'meta' , [ '(' , stage_level , ')' ] ;
+stage_level   = integer_lit ;  (* Non-negative integer, 1 if omitted *)
+
+(* Context clause - MUST use 'using' keyword (NOT 'with') *)
+(* Spec: docs/detailed/16-context-system.md Section 2 - Explicit Context System *)
+(* All contexts must be explicitly declared with 'using' *)
+(* Advanced patterns: conditional, aliased, transformed, negative *)
 context_clause  = 'using' , context_spec ;
-context_spec    = single_context | context_list ;
-single_context  = context_path ;
-context_list    = '[' , context_path , { ',' , context_path } , ']' ;
+context_spec    = single_context_spec | extended_context_list ;
+
+(* Single context with optional modifiers *)
+single_context_spec = [ '!' ] , context_path , [ context_alias ] , [ context_condition ] ;
+
+(* Extended context list with advanced patterns *)
+extended_context_list = '[' , extended_context_item , { ',' , extended_context_item } , ']' ;
+
+extended_context_item = negative_context
+                      | conditional_context
+                      | transformed_context
+                      | named_context
+                      | simple_context ;
+
+(* Negative context: !Context - explicitly excluded *)
+(* Example: using [!Database, !Network] - compiler verifies no usage *)
+negative_context = '!' , context_path ;
+
+(* Conditional context: Context if condition - feature flags *)
+(* Example: using [Analytics if cfg.analytics_enabled] *)
+conditional_context = context_path , [ context_alias ] , 'if' , compile_time_condition ;
+
+(* Transformed context: Context.transform() - cross-cutting concerns *)
+(* Example: using [Database.transactional(), Cache.scoped()] *)
+transformed_context = context_path , context_transform , { context_transform } , [ context_alias ] ;
+
+context_transform = '.' , identifier , [ '(' , [ transform_args ] , ')' ] ;
+transform_args    = expression , { ',' , expression } ;
+
+(* Named context: name: Context or Context as alias *)
+(* Example: using [db: Database, log: Logger] *)
+(* Example: using [Database as primary, Database as replica] *)
+named_context   = identifier , ':' , context_path
+                | context_path , 'as' , identifier ;
+
+(* Simple context (backward compatible) *)
+simple_context  = context_path , [ context_alias ] ;
+
+(* Context alias *)
+context_alias   = 'as' , identifier ;
+
+(* Context condition for conditional context requirements *)
+context_condition = 'if' , compile_time_condition ;
+
+(* Context path with optional type arguments *)
 context_path    = path , [ type_args ] ;
 
-function_body   = block_expr | '=' , expression , ';' ;
+(* Compile-time condition for conditional contexts *)
+(* Must be evaluable at compile-time *)
+compile_time_condition = config_condition
+                       | const_condition
+                       | type_constraint_condition
+                       | platform_condition
+                       | boolean_condition ;
+
+config_condition = 'cfg' , '.' , identifier ;
+const_condition  = identifier ;  (* Must be compile-time constant *)
+type_constraint_condition = identifier , ':' , bounds ;
+platform_condition = 'platform' , '.' , identifier ;
+boolean_condition = compile_time_condition , ( '&&' | '||' ) , compile_time_condition
+                  | '!' , compile_time_condition
+                  | '(' , compile_time_condition , ')' ;
+
+(* Function body: block, expression, or forward declaration (';') *)
+(* Forward declarations used for @intrinsic, @extern functions *)
+function_body   = block_expr | '=' , expression , ';' | ';' ;
 
 param_list      = [ param , { ',' , param } , [ ',' ] ] ;
 param           = param_pattern | self_param ;
-param_pattern   = pattern , ':' , type_expr ;
-self_param      = [ ref_modifier ] , 'self' ;
+(* Parameters can have attributes for unused marking, optimization hints *)
+(* Example: fn process(@unused x: Int, @must_use result: &mut Out) *)
+param_pattern   = { attribute } , pattern , ':' , type_expr ;
+self_param      = { attribute } , [ ref_modifier ] , 'self' ;
 ref_modifier    = '&' , [ ref_kind ] , [ 'mut' ] ;
 ref_kind        = 'checked' | 'unsafe' | epsilon ;
 
 generics        = '<' , generic_params , '>' ;
 generic_params  = generic_param , { ',' , generic_param } ;
-generic_param   = type_param | meta_param ;
+(* generic_param supports HKT via extended_generic_param *)
+generic_param   = extended_generic_param ;
 
 type_param      = identifier , [ ':' , bounds ] ;
 meta_param      = identifier , ':' , 'meta' , type_expr , [ refinement ] ;
 refinement      = '{' , predicate_expr , '}' ;
 
 bounds          = bound , { '+' , bound } ;
-bound           = protocol_bound ;
+bound           = protocol_bound | associated_type_bound | negative_bound ;
 protocol_bound  = path_type ;
+
+(* ============================================================================ *)
+(* Advanced Type Syntax Extensions                                               *)
+(* ============================================================================ *)
+(* Spec: docs/detailed/03-type-system.md Section 13                             *)
+(* These extensions enable HKT, existentials, type-level literals, and more    *)
+
+(* 2.4.1 Higher-Kinded Type Parameters *)
+(* Enables abstraction over type constructors like List<_>, Maybe<_>           *)
+(* Example: fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>       *)
+hk_type_param       = identifier , '<' , hk_placeholders , '>' , [ ':' , hk_bounds ] ;
+hk_placeholders     = '_' , { ',' , '_' } ;
+hk_bounds           = hk_bound , { '+' , hk_bound } ;
+hk_bound            = protocol_path ;
+protocol_path       = path ;
+
+(* Extended type_param to support HKT syntax: T or F<_> or F<_, _> *)
+extended_type_param = identifier , [ hk_params ] , [ ':' , bounds ] ;
+hk_params           = '<' , hk_placeholder_list , '>' ;
+hk_placeholder_list = '_' , { ',' , '_' } ;
+
+(* Extended generic_param to include HKT and context polymorphism *)
+(* Spec: docs/improvements.md Section 17.2 - Context Polymorphism *)
+extended_generic_param = extended_type_param | hk_type_param | meta_param | context_param ;
+
+(* Context parameter for context polymorphism *)
+(* Enables higher-order functions to propagate contexts from callbacks *)
+(* Example: fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter using C *)
+context_param = 'using' , identifier ;
+
+(* 2.4.2 Associated Type Bounds *)
+(* Constrain associated types in where clauses                                  *)
+(* Example: where type I: Iterator, type I.Item: Display                        *)
+associated_type_bound = type_path_expr , '.' , identifier , ':' , bounds ;
+associated_type_eq    = type_path_expr , '.' , identifier , '=' , type_expr ;
+type_path_expr        = identifier | 'Self' ;
+
+(* 2.4.3 Negative Bounds *)
+(* Exclude types from implementations: T: Send + !Sync                          *)
+negative_bound      = '!' , protocol_path ;
+
+(* 2.4.4 Inline Type Constraints *)
+(* Allows bounds directly on type parameters: fn sort<T: Ord>(list: List<T>)   *)
+(* Already supported via type_param = identifier , [ ':' , bounds ]            *)
+
+(* 2.4.5 Type-Level Functions *)
+(* Compute types from types at compile time                                     *)
+(* Example: type Apply<F<_>, A> = F<A>;                                         *)
+type_function_def   = 'type' , identifier , '<' , type_function_params , '>' , '=' , type_expr , ';' ;
+type_function_params = type_function_param , { ',' , type_function_param } ;
+type_function_param = identifier , [ hk_params ] , [ ':' , bounds ] ;
+
+(* 2.4.6 Constrained Type Aliases *)
+(* Type aliases with constraints: type NumList<T: Num> = List<T>               *)
+constrained_type_alias = 'type' , identifier , '<' , constrained_params , '>' ,
+                         '=' , type_expr , [ type_alias_where ] , ';' ;
+constrained_params  = constrained_param , { ',' , constrained_param } ;
+constrained_param   = identifier , [ hk_params ] , ':' , bounds ;
+type_alias_where    = 'where' , where_predicates ;
+
+(* 2.4.7 Existential Types *)
+(* Hide concrete type behind protocol bounds: some T: Display                   *)
+(* Example: fn make_iter() -> some I: Iterator<Item = Int>                     *)
+existential_type    = 'some' , identifier , ':' , existential_bounds ;
+existential_bounds  = existential_bound , { '+' , existential_bound } ;
+existential_bound   = protocol_path , [ associated_type_bindings ] ;
+
+(* Existential type definition: type Plugin is some P: PluginInterface;        *)
+existential_def     = 'type' , identifier , 'is' , existential_type , ';' ;
+
+(* 2.4.8 Type-Level Literals *)
+(* Use compile-time values in type position: [T; 10], Matrix<3, 4>             *)
+type_level_literal  = integer_lit | bool_lit | char_lit ;
+
+(* Meta arithmetic in type position: [T; N + M]                                *)
+meta_type_expr      = meta_arith_expr ;
+meta_arith_expr     = meta_term , { ( '+' | '-' ) , meta_term } ;
+meta_term           = meta_factor , { ( '*' | '/' ) , meta_factor } ;
+meta_factor         = identifier | integer_lit | '(' , meta_arith_expr , ')' ;
+
+(* Extended type_arg to accept literals and meta expressions *)
+extended_type_arg   = type_expr | expression | type_level_literal | meta_type_expr ;
+
+(* ============================================================================ *)
+(* End Advanced Type Syntax Extensions                                          *)
+(* ============================================================================ *)
 
 where_clause    = 'where' , where_predicates ;
 where_predicates= where_predicate , { ',' , where_predicate } ;
-where_predicate = type_expr , ':' , bounds | type_expr , '=' , type_expr ;
+where_predicate = type_bound_predicate
+                | type_equality_predicate
+                | associated_type_bound
+                | associated_type_eq ;
+
+(* Type bound: T: Protocol + Clone *)
+type_bound_predicate = type_expr , ':' , bounds ;
+
+(* Type equality: T = U or T::Item = Int *)
+type_equality_predicate = type_expr , '=' , type_expr ;
 
 generic_where_clause = 'where' , 'type' , type_constraint_list ;
 type_constraint_list = type_constraint , { ',' , type_constraint } ;
@@ -332,39 +762,119 @@ ensures_clause       = 'where' , ensures_item , { ',' , ensures_item } ;
 ensures_item         = 'ensures' , expression ;
 
 (* 2.5 Protocol Implementations *)
+(* Advanced Protocols - Generic Associated Types (GATs) *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 1 - GATs *)
 protocol_item   = protocol_function | protocol_type | protocol_const ;
-protocol_function = visibility , 'fn' , identifier , [ generics ]
-                  , '(' , param_list , ')' , [ '->' , type_expr ]
+
+(* Protocol functions with optional modifiers, generics, refinements *)
+(* Protocol methods may have context_clause requirements *)
+(* Example: fn query(&self) -> Data using [Database, Logger]; *)
+(* Example: meta fn to_tokens(&self) -> TokenStream using AstAccess; *)
+(* Note: function_modifiers = [ 'pure' ] , [ 'meta' ] , [ 'async' ] , [ 'unsafe' ] *)
+protocol_function = visibility , function_modifiers , 'fn' , identifier , [ generics ]
+                  , '(' , param_list , ')' , [ '->' , return_type_with_refinement ]
+                  , [ context_clause ]
                   , [ where_clause ] , [ default_impl ] ;
-protocol_type   = 'type' , identifier , [ ':' , bounds ] , ';' ;
+
+(* Return type with optional refinement for protocol methods *)
+return_type_with_refinement = type_expr , [ type_refinement ] ;
+
+(* Generic Associated Types - allow type parameters on associated types *)
+(* Example: type Item<T> or type Wrapped<T> *)
+protocol_type   = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
+                , [ where_clause ] , [ default_type ] , ';' ;
+
+(* Type parameters for GATs *)
+type_params     = '<' , type_param , { ',' , type_param } , '>' ;
+
+(* Type bounds including negative bounds *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 3.4 - Negative Reasoning *)
+type_bounds     = type_bound , { '+' , type_bound } ;
+type_bound      = [ '!' ] , trait_path ;
+(* trait_path supports generic arguments: Protocol<T>, Converter<A, B> *)
+trait_path      = path , [ type_args ] ;
+
+(* Default associated type for specialization *)
+default_type    = '=' , type_expr ;
+
 protocol_const  = 'const' , identifier , ':' , type_expr , ';' ;
 
 default_impl    = block_expr | '=' , expression , ';' ;
 
-impl_block      = 'implement' , [ generics ] , impl_type
+(* Implementation blocks with specialization support *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 3 - Specialization *)
+(* Note: 'unsafe' prefix required for implementing unsafe traits (Send, Sync) *)
+impl_block      = [ attribute ] , [ 'unsafe' ] , 'implement' , [ generics ] , impl_type
                 , [ where_clause ] , '{' , { impl_item } , '}' ;
 
 impl_type       = type_expr , 'for' , type_expr | type_expr ;
 
-impl_item       = visibility , ( function_def | type_alias | const_def ) ;
+impl_item       = visibility , [ 'default' ] , ( function_def | type_alias | const_def ) ;
 
-type_alias      = 'type' , identifier , [ generics ] , '=' , type_expr , ';' ;
+(* Associated type binding in implementations *)
+(* Example: type Item is T; or type Item<U> is List<U> *)
+type_alias      = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
+                , '=' , type_expr , ';' ;
 
 (* 2.6 Context Definitions *)
-context_def     = visibility , 'context' , identifier , [ generics ]
+(* Supports both 'context async Name' and 'async context Name' syntax *)
+context_def     = visibility , ( 'context' , [ 'async' ] | 'async' , 'context' ) , identifier , [ generics ]
                 , '{' , { context_item } , '}' ;
 
 context_item    = context_function | context_type | context_const ;
 
-context_function = visibility , 'fn' , identifier , [ generics ]
+context_function = visibility , [ 'async' ] , 'fn' , identifier , [ generics ]
                  , '(' , param_list , ')' , [ '->' , type_expr ]
-                 , [ where_clause ] , ';' ;
+                 , [ context_clause ] , ';' ;
 
 context_type    = 'type' , identifier , [ ':' , bounds ] , ';' ;
 context_const   = 'const' , identifier , ':' , type_expr , ';' ;
 
+(* 2.6.1 Context Protocol Definitions - Dual-Kind (Constraint & Injectable) *)
+(* Spec: docs/detailed/29-context-kind-modifier.md *)
+(* A context protocol can be used BOTH as a type constraint (generic bounds) *)
+(* AND as an injectable context (using [...] / provide).                     *)
+(*                                                                           *)
+(* Primary form (recommended):                                               *)
+(*   context protocol Serializable {                                         *)
+(*       fn serialize(&self) -> Text;                                        *)
+(*   }                                                                       *)
+(*                                                                           *)
+(* Alternative form (full, for symmetry with type definitions):              *)
+(*   context type Serializable is protocol {                                 *)
+(*       fn serialize(&self) -> Text;                                        *)
+(*   };                                                                      *)
+(*                                                                           *)
+(* Usage examples:                                                           *)
+(*   fn save<T: Serializable>(item: T) { }     // As type bound (0ns)        *)
+(*   fn save_all() using [Serializable] { }   // As context (~5-30ns)        *)
+
+(* Primary form: context protocol Name { } *)
+(* No trailing semicolon - matches context_def style *)
+context_protocol_def = visibility , 'context' , 'protocol' , identifier , [ generics ]
+                     , protocol_body ;
+
+(* Alternative form: context type Name is protocol { }; *)
+(* Has trailing semicolon - matches type_def style *)
+context_type_protocol_def = visibility , 'context' , 'type' , identifier , [ generics ]
+                          , [ meta_where_clause ] , 'is' , 'protocol' , protocol_body , ';' ;
+
+(* PARSER DIAGNOSTIC: Error recovery for invalid context type definitions *)
+(* When parser sees 'context type Name is' WITHOUT 'protocol', emit:      *)
+(*   Error: `context type` requires `protocol` keyword                    *)
+(*   Found: `context type Serializable is { ... }`                        *)
+(*   Expected: `context type Serializable is protocol { ... }`            *)
+(*   Suggestion: Add `protocol` after `is`, or use `context protocol Serializable { }` *)
+(*   Rationale: Contexts are not types. Only protocols can be dual-kind.  *)
+(*              Use `context Name { }` for pure contexts (Injectable).    *)
+(*              Use `context protocol Name { }` for dual-kind protocols.  *)
+
+(* Context group definition supports full context requirements including negation, *)
+(* type args, and transforms.                                                      *)
+(* Example: using Pure = [!IO, !State<_>, !Random];                                *)
+(* Example: using WebContext = [Database.transactional(), Logger];                 *)
 context_group_def = 'using' , identifier , '=' , context_list_def , ';' ;
-context_list_def  = '[' , identifier , { ',' , identifier } , ']' | identifier ;
+context_list_def  = '[' , context_spec , { ',' , context_spec } , ']' | context_spec ;
 
 (* 2.7 FFI Boundary Declarations *)
 ffi_declaration = visibility , 'ffi' , identifier , [ 'extends' , identifier ] ,
@@ -382,6 +892,21 @@ ffi_item = ffi_function_decl
 
 ffi_function_decl = '@extern' , '(' , string_lit , [ ',' , calling_convention_attr ] , ')' ,
                     'fn' , identifier , [ generics ] , '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
+
+(* Extern block - groups FFI functions with a common ABI *)
+(* Examples:
+   extern "C" {
+       fn malloc(size: Int) -> &unsafe Byte;
+       fn free(ptr: &unsafe Byte);
+   }
+   extern {
+       // Uses default C ABI
+       fn custom_func();
+   }
+*)
+extern_block = 'extern' , [ string_lit ] , '{' , { extern_fn_decl } , '}' ;
+extern_fn_decl = [ visibility ] , 'fn' , identifier , [ generics ] ,
+                 '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
 
 calling_convention_attr = 'calling_convention' , '=' , string_lit ;
 
@@ -415,6 +940,8 @@ ownership_mode    = 'transfer_to' , '=' , string_lit
 type_expr       = simple_type , [ type_refinement ] ;
 
 simple_type     = primitive_type
+                | never_type
+                | unknown_type
                 | path_type
                 | tuple_type
                 | array_type
@@ -424,26 +951,99 @@ simple_type     = primitive_type
                 | unsafe_reference_type
                 | pointer_type
                 | function_type
+                | rank2_function_type
                 | generic_type
+                | genref_type
+                | higher_kinded_type
+                | existential_type
                 | inferred_type
-                | dynamic_type ;
+                | dynamic_type
+                | capability_type ;
+
+(* Capability-restricted types - Type-safe capability attenuation                    *)
+(* Spec: docs/improvements.md Section 12 - Capability Attenuation as Types           *)
+(* Allows defining types with restricted capabilities for fine-grained access control*)
+(*                                                                                   *)
+(* Examples:                                                                         *)
+(*   type Database.Full is Database with [Read, Write, Admin];                       *)
+(*   type Database.ReadOnly is Database with [Read];                                 *)
+(*   fn analyze(db: Database with [Read]) -> Stats { ... }                           *)
+(*                                                                                   *)
+(* Subtyping: T with [A, B, C] <: T with [A, B] when capabilities are superset       *)
+(* This enables automatic capability attenuation at call sites                       *)
+capability_type = path_type , 'with' , capability_list ;
+capability_list = '[' , capability_item , { ',' , capability_item } , ']' ;
+capability_item = capability_name | capability_or_expr ;
+capability_name = 'Read' | 'Write' | 'ReadWrite' | 'Admin' | 'Transaction'
+                | 'Network' | 'FileSystem' | 'Query' | 'Execute'
+                | 'Logging' | 'Metrics' | 'Config' | 'Cache' | 'Auth'
+                | identifier ;  (* Custom capabilities *)
+capability_or_expr = capability_name , '|' , capability_name , { '|' , capability_name } ;
 
 primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' ;
+
+(* Never type: ! (bottom type) *)
+(* The type of expressions that never return (diverging expressions).           *)
+(* Examples: panic(), exit(), abort(), infinite loops, unreachable().           *)
+(* The never type is a subtype of all other types.                              *)
+(* Spec: docs/detailed/03-type-system.md                                        *)
+never_type      = '!' ;
+
+(* Unknown type: unknown (top type) *)
+(* The dual of Never: unknown is the top type, any value can be assigned to it. *)
+(* However, nothing can be done with an unknown value without type narrowing.   *)
+(* Type narrowing is done via pattern matching (match) or type guards (is).     *)
+(* This enables safe FFI, deserialization, and rapid prototyping.               *)
+(* Spec: docs/improvements.md Section 13.2 - Unknown Type                       *)
+unknown_type    = 'unknown' ;
+
 path_type       = path ;
 tuple_type      = '(' , type_expr , { ',' , type_expr } , ')' ;
 array_type      = '[' , type_expr , ';' , expression , ']' ;
 slice_type      = '[' , type_expr , ']' ;
 
+(* Three-tier reference system *)
+(* Spec: docs/detailed/26-cbgr-implementation.md Section 2 - Three-Tier Reference System *)
+(* &T = managed reference with CBGR (ThinRef 16 bytes / FatRef 24 bytes, automatic selection) *)
+(* &checked T = compile-time verified reference (0ns overhead) *)
+(* &unsafe T = unsafe reference with no checks (0ns overhead, manual safety proof required) *)
 managed_reference_type = '&' , [ 'mut' ] , type_expr ;
 checked_reference_type = '&' , 'checked' , [ 'mut' ] , type_expr ;
 unsafe_reference_type = '&' , 'unsafe' , [ 'mut' ] , type_expr ;
 
 pointer_type    = '*' , ( 'const' | 'mut' ) , type_expr ;
-function_type   = 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] ;
+
+(* Function type with optional context requirements *)
+(* CANONICAL FORM: Context clause AFTER return type (consistent with function_def)        *)
+(* Example: fn(Int) -> Bool                                                               *)
+(* Example: fn(Text) -> Result<(), Error> using [Logger]                                  *)
+(* Example: async fn(Request) -> Response using [Database]                                *)
+(* Example: fn(Data) using [Logger]  -- when return type is unit                          *)
+function_type   = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_expr ] , [ context_clause ] ;
+
+(* Rank-2 polymorphic function type with universal quantification                          *)
+(* Enables function types with their own type parameters (forall R. fn(...R...) -> ...R...)*)
+(* Spec: docs/improvements.md Section 17.3 - Transducers                                   *)
+(* Example: fn<R>(Reducer<B, R>) -> Reducer<A, R>                                          *)
+(* Example: fn<T: Clone>(T) -> (T, T)                                                      *)
+(* The quantified type parameters scope only within the function type itself               *)
+rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')'
+                    , [ '->' , type_expr ] , [ context_clause ] ;
 
 generic_type    = path , type_args ;
 type_args       = '<' , type_arg , { ',' , type_arg } , '>' ;
-type_arg        = type_expr | expression ;
+(* type_arg supports type-level literals and meta expressions *)
+type_arg        = extended_type_arg ;
+
+(* GenRef type for explicit generation tracking *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 2 - CBGR-Native Reference Patterns *)
+(* Example: GenRef<Text> for lending iterators *)
+genref_type     = 'GenRef' , '<' , type_expr , '>' ;
+
+(* Higher-Kinded Types - Type constructors with placeholder *)
+(* Spec: docs/detailed/18-advanced-protocols.md Section 1.3 - Type Constructor GATs *)
+(* Example: List<_> or Maybe<_> for higher-kinded type patterns *)
+higher_kinded_type = path , '<' , '_' , '>' ;
 
 inferred_type   = '_' ;
 
@@ -470,7 +1070,13 @@ range_expr      = logical_or_expr , [ range_op , logical_or_expr ] ;
 logical_or_expr = logical_and_expr , { '||' , logical_and_expr } ;
 logical_and_expr= equality_expr , { '&&' , equality_expr } ;
 
-equality_expr   = relational_expr , { ( '==' | '!=' ) , relational_expr } ;
+equality_expr   = is_relational_expr , { ( '==' | '!=' ) , is_relational_expr } ;
+
+(* is_relational_expr integrates the 'is' pattern test operator *)
+(* The 'is' operator has same precedence as relational operators *)
+(* Example: x is Some(v), value is not None *)
+is_relational_expr = relational_expr , [ 'is' , [ 'not' ] , pattern ] ;
+
 relational_expr = bitwise_expr , { ( '<' | '>' | '<=' | '>=' ) , bitwise_expr } ;
 
 bitwise_expr    = shift_expr , { ( '&' | '|' | '^' ) , shift_expr } ;
@@ -486,8 +1092,8 @@ unary_op        = '!' | '-' | '~' | '&' | '&' , 'mut'
                 | '&' , 'unsafe' | '&' , 'unsafe' , 'mut' | '*' ;
 
 postfix_expr    = primary_expr , { postfix_op } ;
-postfix_op      = '.' , identifier , [ call_args ]
-                | '?.' , identifier , [ call_args ]
+postfix_op      = '.' , identifier , [ type_args ] , [ call_args ]
+                | '?.' , identifier , [ type_args ] , [ call_args ]
                 | '.' , integer_lit
                 | '.' , 'await'
                 | '[' , expression , ']'
@@ -498,7 +1104,18 @@ postfix_op      = '.' , identifier , [ call_args ]
 call_args       = '(' , arg_list , ')' ;
 arg_list        = [ expression , { ',' , expression } , [ ',' ] ] ;
 
+(* argument_list - alias for arg_list for consistency *)
+argument_list   = arg_list ;
+
 (* 2.11 Stream Processing Syntax *)
+(* Spec: docs/improvements.md Section 17-18 - Stream Processing                 *)
+(*                                                                              *)
+(* Stream Comprehension: stream[x * 2 for x in source if pred]                  *)
+(* Stream Literal: stream[1, 2, 3, ...] or stream[0..100]                       *)
+(*                                                                              *)
+stream_expr     = stream_comprehension_expr
+                | stream_literal_expr ;
+
 stream_comprehension_expr = 'stream' , '[' , stream_body , ']' ;
 
 stream_body     = expression , 'for' , pattern , 'in' , expression
@@ -508,7 +1125,30 @@ stream_clause   = 'for' , pattern , 'in' , expression
                 | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
                 | 'if' , expression ;
 
+(* 2.11.1 Stream Literals *)
+(* Spec: docs/improvements.md Section 18.2 - Stream Literals                    *)
+(*                                                                              *)
+(* Syntax forms:                                                                *)
+(*   stream[1, 2, 3, ...]   - infinite cycle of elements                        *)
+(*   stream[0, 1, 2, ...]   - infinite sequence (pattern detection)             *)
+(*   stream[0..]            - infinite range from start                         *)
+(*   stream[0..100]         - lazy range [0, 100)                               *)
+(*   stream[0..=100]        - lazy inclusive range [0, 100]                     *)
+(*                                                                              *)
+stream_literal_expr = 'stream' , '[' , stream_literal_body , ']' ;
+
+stream_literal_body = stream_range_body
+                    | stream_elements_body ;
+
+(* Range-based stream: stream[0..100] or stream[0..] *)
+stream_range_body = expression , range_op , [ expression ] ;
+
+(* Element-based stream with optional ellipsis: stream[1, 2, 3, ...] *)
+stream_elements_body = expression_list , [ ',' , '...' ] ;
+
 (* 2.12 Primary Expressions *)
+(* Includes forall_expr, exists_expr for quantified expressions *)
+(* Includes meta_call, meta_function for @ prefix expressions *)
 primary_expr    = literal_expr
                 | path_expr
                 | '(' , expression , ')'
@@ -518,7 +1158,7 @@ primary_expr    = literal_expr
                 | map_expr
                 | set_expr
                 | comprehension_expr
-                | stream_comprehension_expr
+                | stream_expr
                 | record_expr
                 | block_expr
                 | if_expr
@@ -527,13 +1167,28 @@ primary_expr    = literal_expr
                 | try_expr
                 | closure_expr
                 | meta_expr
+                | meta_call
+                | meta_function
+                | quote_expr
                 | async_expr
                 | unsafe_expr
                 | return_expr
+                | throw_expr
                 | break_expr
                 | continue_expr
                 | spawn_expr
-                | yield_expr ;
+                | yield_expr
+                | select_expr
+                | nursery_expr
+                | forall_expr
+                | exists_expr
+                | typeof_expr ;
+
+(* typeof expression - runtime type introspection                       *)
+(* Returns TypeInfo for the runtime type of a value.                    *)
+(* Spec: docs/improvements.md Section 13.3 - Type Guards and typeof     *)
+(* Example: typeof(value) returns TypeInfo { id, name, kind, protocols }*)
+typeof_expr     = 'typeof' , '(' , expression , ')' ;
 
 path_expr       = path ;
 
@@ -561,7 +1216,8 @@ comprehension_clause = 'for' , pattern , 'in' , expression
 
 record_expr     = path , '{' , field_inits , '}' ;
 field_inits     = [ field_init , { ',' , field_init } , [ '..' , expression ] ] ;
-field_init      = identifier , [ ':' , expression ] ;
+(* Field init supports optional conditional attributes like @cfg(feature = "async") *)
+field_init      = { attribute } , identifier , [ ':' , expression ] ;
 
 block_expr      = '{' , { statement } , [ expression ] , '}' ;
 
@@ -573,13 +1229,26 @@ let_condition   = 'let' , pattern , '=' , expression | expression ;
 
 match_expr      = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
 match_arms      = [ match_arm , { ',' , match_arm } , [ ',' ] ] ;
-match_arm       = pattern , [ guard ] , '=>' , expression ;
-guard           = 'if' , expression ;
+(* Match arms can have attributes for optimization hints *)
+(* Example: @cold Err(e) => handle_error(e), @hot Ok(v) => process(v) *)
+match_arm       = { attribute } , pattern , [ guard ] , '=>' , expression ;
+(* Pattern guard supports both IF and WHERE syntax *)
+(* Example: x if x > 0 => ... (traditional) *)
+(* Example: x where x > 0 => ... (Verum-style) *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.4 WHERE Clause Disambiguation *)
+guard           = 'if' , expression
+                | 'where' , expression ;
 
-loop_expr       = infinite_loop | while_loop | for_loop ;
+loop_expr       = infinite_loop | while_loop | for_loop | for_await_loop ;
 infinite_loop   = 'loop' , block_expr ;
 while_loop      = 'while' , expression , { loop_annotation } , block_expr ;
 for_loop        = 'for' , pattern , 'in' , expression , { loop_annotation } , block_expr ;
+
+(* for await loop - iterates over AsyncIterator *)
+(* for await - async generator consumption *)
+(* Spec: docs/detailed/10-concurrency-model.md Section 12.2 - for await Loop *)
+for_await_loop  = 'for' , 'await' , pattern , 'in' , expression
+                , { loop_annotation } , block_expr ;
 
 loop_annotation = 'invariant' , expression | 'decreases' , expression ;
 
@@ -592,17 +1261,192 @@ unsafe_expr     = 'unsafe' , block_expr ;
 
 meta_expr       = 'meta' , block_expr ;
 
+(* 2.12.0.1 Quote Expressions - Staged Metaprogramming                          *)
+(*                                                                              *)
+(* Quote expressions create token streams for code generation in meta functions.*)
+(* Supports N-level staged metaprogramming with explicit target stage syntax.   *)
+(*                                                                              *)
+(* Basic syntax:                                                                *)
+(*   quote { ... }        -- Quotes tokens, lowers stage by 1                  *)
+(*                                                                              *)
+(* Explicit target stage:                                                       *)
+(*   quote(0) { ... }     -- Generate runtime code (stage 0)                   *)
+(*   quote(1) { ... }     -- Generate stage 1 meta code                        *)
+(*   quote(N) { ... }     -- Generate stage N code (must be < current stage)   *)
+(*                                                                              *)
+(* Interpolation:                                                               *)
+(*   $ident              -- Substitute identifier                              *)
+(*   ${expr}             -- Substitute expression result                       *)
+(*   $[for x in xs {...}] -- Repetition                                        *)
+(*                                                                              *)
+(* Stage escape (evaluate at specific stage):                                   *)
+(*   $(stage N){ expr }  -- Evaluate expr at stage N                           *)
+(*                                                                              *)
+(* Spec: docs/architecture/staged-meta-design.md                                *)
+quote_expr      = 'quote' , [ quote_stage ] , '{' , token_tree , '}' ;
+quote_stage     = '(' , stage_level , ')' ;
+
+(* Token tree for quote content - matches balanced delimiters                   *)
+token_tree      = { token_tree_item } ;
+token_tree_item = token_except_delim
+                | '(' , token_tree , ')'
+                | '[' , token_tree , ']'
+                | '{' , token_tree , '}'
+                | quote_interpolation
+                | quote_repetition
+                | quote_stage_escape
+                | quote_lift ;
+
+token_except_delim = ident_token | literal_token | operator_token | keyword_token ;
+ident_token     = identifier ;
+literal_token   = integer_lit | float_lit | string_lit | char_lit ;
+operator_token  = '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '!' | '~'
+                | '<' | '>' | '=' | '.' | ',' | ':' | ';' | '@' | '#' ;
+keyword_token   = 'let' | 'fn' | 'type' | 'if' | 'else' | 'match' | 'for' | 'while'
+                | 'loop' | 'return' | 'break' | 'continue' | 'in' | 'is' | 'as'
+                | 'public' | 'private' | 'module' | 'import' | 'meta' | 'async'
+                | 'await' | 'unsafe' | 'pure' | 'try' | 'recover' | 'finally' | 'lift' ;
+
+(* Quote interpolation - substitutes values into generated code                 *)
+quote_interpolation = '$' , ( identifier | '{' , expression , '}' ) ;
+
+(* Quote repetition - iterates and generates repeated code                      *)
+quote_repetition = '$' , '[' , 'for' , pattern , 'in' , expression , '{' , token_tree , '}' , ']' ;
+
+(* Stage escape - evaluates expression at specific stage within quote           *)
+(* Used to compute values at higher stage and splice results into lower stage   *)
+quote_stage_escape = '$' , '(' , 'stage' , stage_level , ')' , '{' , expression , '}' ;
+
+(* Lift operator - syntactic sugar for $(stage current){ expr }                 *)
+(* Lifts a compile-time value into the generated code at the current stage     *)
+(* Example: lift(value) is equivalent to $(stage current){ value }             *)
+(* Spec: docs/architecture/staged-meta-design-audit.md                         *)
+quote_lift      = 'lift' , '(' , expression , ')' ;
+
+(* 2.12.1 Try Expressions with Recover Blocks *)
+(* Supports two syntaxes for error recovery: *)
+(*   1. Match arms: recover { pattern => expr, ... } *)
+(*   2. Closure: recover |e| { expr } or recover |e| expr *)
+(* The closure form is equivalent to recover { e => expr } *)
+(* Spec: docs/detailed/20-error-handling.md Section 6.4 *)
+
 try_expr        = 'try' , block_expr , [ try_handlers ] ;
 try_handlers    = try_recovery , [ try_finally ]
                 | try_finally ;
-try_recovery    = 'recover' , '{' , match_arms , '}' ;
+
+(* Recover block - either match arms or closure syntax *)
+try_recovery    = 'recover' , recover_body ;
+recover_body    = recover_match_arms | recover_closure ;
+
+(* Match arms syntax: recover { Pattern1 => expr1, Pattern2 => expr2 } *)
+recover_match_arms = '{' , match_arms , '}' ;
+
+(* Closure syntax: recover |e| expr or recover |e| { statements; expr } *)
+(* Provides ergonomic syntax for simple error recovery *)
+recover_closure = closure_params , recover_closure_body ;
+recover_closure_body = block_expr | expression ;
+
 try_finally     = 'finally' , block_expr ;
 
 return_expr     = 'return' , [ expression ] ;
+(* Throw expression - throws an error value in functions with throws clause *)
+(* Example: throw ValidationError.Empty; *)
+throw_expr      = 'throw' , expression ;
 break_expr      = 'break' , [ expression ] ;
 continue_expr   = 'continue' ;
-spawn_expr      = 'spawn' , expression ;
+(* spawn with optional context forwarding:
+   spawn async { ... }  - inherits parent contexts automatically
+   spawn using [Database, Logger] async { ... }  - explicitly forwards contexts *)
+spawn_expr      = 'spawn' , [ 'using' , '[' , identifier_list , ']' ] , expression ;
+identifier_list = identifier , { ',' , identifier } ;
+
+(* 2.12.1.1 Yield Expression and Generator Semantics *)
+(* Generator function semantics for yield expression *)
+(* Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators *)
+(*                                                                              *)
+(* The yield expression suspends generator execution and produces a value:      *)
+(*   yield_expr = 'yield' , expression ;                                        *)
+(*                                                                              *)
+(* Generator semantics:                                                         *)
+(*   - fn* (sync generator): Returns Iterator<Item = T>                         *)
+(*     Example: fn* range(n: Int) -> Int { for i in 0..n { yield i; } }        *)
+(*                                                                              *)
+(*   - async fn* (async generator): Returns AsyncIterator<Item = T>             *)
+(*     Example: async fn* fetch_pages() -> Page using [Http] {                  *)
+(*                 while let Some(page) = next_page().await { yield page; }    *)
+(*              }                                                               *)
+(*                                                                              *)
+(*   - yield is ONLY valid inside fn* or async fn* function body               *)
+(*   - Generators cannot use 'return expr;' (only bare 'return;' to finish)    *)
+(*   - All yield expressions must produce compatible types                      *)
+(*                                                                              *)
+(* Consumption:                                                                 *)
+(*   - Sync generators: for item in generator() { ... }                        *)
+(*   - Async generators: for await item in async_generator() { ... }           *)
+(*                                                                              *)
 yield_expr      = 'yield' , expression ;
+
+(* 2.12.2 Select Expression - Async Multiplexing *)
+(* Races multiple async branches, executing the first to complete *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1 *)
+(* Spec: docs/detailed/10-concurrency-model.md Section 3.4 *)
+select_expr     = 'select' , [ 'biased' ] , '{' , select_arms , '}' ;
+
+select_arms     = select_arm , { ',' , select_arm } , [ ',' ] , [ select_else ] ;
+
+(* Each arm: pattern = future.await [if guard] => result *)
+select_arm      = { attribute } , pattern , '=' , await_expr , [ select_guard ] , '=>' , expression ;
+
+(* Guard for conditional branch activation *)
+select_guard    = 'if' , expression ;
+
+(* The awaited future expression - enforces .await on select futures *)
+await_expr      = expression , '.' , 'await' ;
+
+(* Optional else branch for when all guards are false or no branches complete *)
+select_else     = 'else' , '=>' , expression , [ ',' ] ;
+
+(* 2.12.3 Nursery Expression - Structured Concurrency *)
+(* Implements structured concurrency with guaranteed task completion and cancellation *)
+(* Spec: docs/improvements.md Section 9 - Structured Concurrency *)
+(*                                                                                    *)
+(* Nursery semantics:                                                                 *)
+(*   - All tasks spawned within nursery MUST complete before nursery exits            *)
+(*   - If any task panics, all other tasks are cancelled                              *)
+(*   - Supports optional timeout and cancellation handlers                            *)
+(*   - Tasks results are collected and available after nursery                        *)
+(*                                                                                    *)
+(* Examples:                                                                          *)
+(*   nursery {                                                                        *)
+(*       let a = spawn fetch_a();                                                     *)
+(*       let b = spawn fetch_b();                                                     *)
+(*   }  // Implicit: await all spawned tasks                                          *)
+(*                                                                                    *)
+(*   nursery(timeout: 5.seconds) {                                                    *)
+(*       let result = spawn fetch_data();                                             *)
+(*   } on_cancel { cleanup(); }                                                       *)
+(*                                                                                    *)
+(*   nursery {                                                                        *)
+(*       let a = spawn fetch_a();                                                     *)
+(*   } recover { TimeoutError => default_value }                                      *)
+(*                                                                                    *)
+nursery_expr    = 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ] ;
+
+(* Nursery options: timeout, on_error behavior *)
+nursery_options = '(' , nursery_option , { ',' , nursery_option } , ')' ;
+nursery_option  = 'timeout' , ':' , expression
+                | 'on_error' , ':' , ( 'cancel_all' | 'wait_all' | 'fail_fast' )
+                | 'max_tasks' , ':' , expression ;
+
+(* Nursery handlers: on_cancel and/or recover *)
+nursery_handlers = nursery_cancel , [ nursery_recover ]
+                 | nursery_recover ;
+
+(* on_cancel handler - executes when nursery is cancelled *)
+nursery_cancel  = 'on_cancel' , block_expr ;
+
+(* recover handler - error recovery similar to try_recovery *)
+nursery_recover = 'recover' , recover_body ;
 
 (* 2.13 Statements *)
 statement       = let_stmt
@@ -616,30 +1460,70 @@ let_stmt        = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] ,
 
 let_else_stmt   = 'let' , pattern , '=' , expression , 'else' , block_expr ;
 
-provide_stmt    = 'provide' , identifier , '=' , expression , ';' ;
+(* Provide statement for context injection *)
+(* Supports optional alias for multiple instances of same context type *)
+(* Spec: docs/detailed/16-context-system.md Section 2.11.2 - Aliased Contexts *)
+(* context_path is defined in Section 2.4 *)
+provide_stmt    = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
 
-defer_stmt      = 'defer' , ( expression , ';' | block_expr ) ;
+(* Defer and errdefer statements *)
+(* defer: Always executes at scope exit (success or error) *)
+(* errdefer: Only executes when scope exits via error path *)
+(* Spec: docs/detailed/20-error-handling.md Section 2.7 - The errdefer Pattern *)
+defer_stmt      = 'defer' , defer_body
+                | 'errdefer' , defer_body ;
+defer_body      = expression , ';'
+                | block_expr ;
 
 expression_stmt = expression , [ ';' ] ;
 
 (* 2.14 Patterns *)
+(* Active Patterns (F#-style) for custom pattern matchers                       *)
+(* Spec: docs/improvements.md Section 11 - Pattern Matching Enhancements        *)
+(*                                                                              *)
+(* Example:                                                                     *)
+(*   pattern Even(n: Int) -> Bool = n % 2 == 0;                                 *)
+(*   pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;         *)
+(*                                                                              *)
+(*   match n {                                                                  *)
+(*       Even() & Positive() => "positive even",                                *)
+(*       InRange(0, 100)() => "in range",                                       *)
+(*       _ => "other",                                                          *)
+(*   }                                                                          *)
 pattern         = or_pattern ;
 
 or_pattern      = and_pattern , { '|' , and_pattern } ;
 
-and_pattern     = simple_pattern ;
+(* Pattern combination with &: matches when BOTH patterns match                 *)
+(* Example: Even() & Positive() - matches positive even numbers                 *)
+and_pattern     = primary_pattern , { '&' , primary_pattern } ;
+
+primary_pattern = simple_pattern | active_pattern ;
 
 simple_pattern  = literal_pattern
+                | type_test_pattern
                 | identifier_pattern
                 | wildcard_pattern
                 | rest_pattern
                 | tuple_pattern
                 | array_pattern
                 | slice_pattern
+                | stream_pattern
                 | record_pattern
                 | variant_pattern
                 | reference_pattern
                 | range_pattern ;
+
+(* Type test pattern: binding is Type                                          *)
+(* Tests runtime type and binds narrowed value. Essential for unknown type.    *)
+(* Example: x is Int, s is Text, u is User                                     *)
+(* Spec: docs/improvements.md Section 13.2 - Unknown Type                      *)
+type_test_pattern = identifier , 'is' , type_expr ;
+
+(* Active pattern invocation: PatternName(args)() or PatternName()              *)
+(* The first () contains pattern parameters, the second () indicates invocation *)
+(* Example: Even() matches even numbers, InRange(0, 100)() matches 0..100       *)
+active_pattern  = identifier , [ '(' , expression_list , ')' ] , '(' , ')' ;
 
 literal_pattern = literal_expr ;
 
@@ -657,6 +1541,21 @@ slice_pattern   = '[' , slice_pattern_elements , ']' ;
 slice_pattern_elements = [ pattern , { ',' , pattern } , ',' ] , '..'
                        , [ ',' , pattern , { ',' , pattern } ] ;
 
+(* 2.14.0.1 Stream Pattern *)
+(* Spec: docs/improvements.md Section 18.3 - Stream Pattern Matching            *)
+(*                                                                              *)
+(* Matches stream/iterator head elements and binds rest:                        *)
+(*   stream[first, second, ...rest]   - consume 2 items, rest is remaining      *)
+(*   stream[head, ...tail]            - consume 1 item, tail is remaining       *)
+(*   stream[a, b, c, ...rest]         - consume 3 items                         *)
+(*   stream[]                         - matches empty stream                    *)
+(*                                                                              *)
+(* Unlike slice patterns, stream patterns consume from iterator lazily.         *)
+(*                                                                              *)
+stream_pattern  = 'stream' , '[' , stream_pattern_elements , ']' ;
+stream_pattern_elements = [ pattern , { ',' , pattern } , [ ',' , '...' , identifier ] ]
+                        | '...' , identifier ;  (* stream[...all] for entire stream *)
+
 record_pattern  = path , '{' , field_patterns , '}' ;
 field_patterns  = [ field_pattern , { ',' , field_pattern } , [ ',' , '..' ] ] ;
 field_pattern   = identifier , [ ':' , pattern ] ;
@@ -671,6 +1570,28 @@ range_pattern   = literal_expr , range_op , [ literal_expr ]
                 | range_op , literal_expr ;
 
 pattern_list    = [ pattern , { ',' , pattern } , [ ',' ] ] ;
+
+(* 2.14.1 Active Pattern Definitions *)
+(* Active patterns are user-defined pattern matchers that return Bool           *)
+(* They can have pattern parameters (for parameterized patterns)                *)
+(* Spec: docs/improvements.md Section 11 - Pattern Matching Enhancements        *)
+(*                                                                              *)
+(* Simple active pattern:                                                       *)
+(*   pattern Even(n: Int) -> Bool = n % 2 == 0;                                 *)
+(*                                                                              *)
+(* Parameterized active pattern:                                                *)
+(*   pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;         *)
+(*                                                                              *)
+(* Partial active pattern (returns Maybe for extraction):                       *)
+(*   pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();                   *)
+pattern_def     = visibility , 'pattern' , identifier , [ pattern_type_params ]
+                , '(' , pattern_params , ')' , '->' , type_expr , '=' , expression , ';' ;
+
+(* Pattern type parameters for parameterized patterns like InRange(lo, hi)      *)
+pattern_type_params = '(' , param_list , ')' ;
+
+(* Pattern parameters - the value being matched against                         *)
+pattern_params  = [ param , { ',' , param } ] ;
 
 (* 2.15 Constants and Statics *)
 const_def       = visibility , 'const' , identifier , ':' , type_expr
@@ -694,8 +1615,26 @@ meta_fragment   = 'expr' | 'stmt' | 'type' | 'pattern' | 'ident'
 meta_rules      = meta_rule , { '|' , meta_rule } ;
 meta_rule       = pattern , '=>' , expression ;
 
-meta_call       = path , '!' , meta_call_args ;
-meta_call_args  = '(' , token_tree , ')'
+(* User-defined macro invocation - uses @ prefix, NOT Rust-style ! suffix *)
+(* Verum philosophy: No magic syntax - @ prefix is consistent with attributes *)
+(* Example: @sql_query("SELECT * FROM users") *)
+(* Example: @derive_builder type User is { ... }; *)
+(*                                                                              *)
+(* @ PREFIX PARSING PRIORITY:                                                    *)
+(* The parser must disambiguate @ prefix based on context:                      *)
+(*   1. @name item      → attribute_item (@ followed by item declaration)       *)
+(*   2. @name(args)     → meta_call (@ with parenthesized arguments)            *)
+(*   3. @builtin        → meta_function (if name is const, cfg, file, etc.)     *)
+(*   4. @name           → at_literal (bare @ identifier, no args, no item)      *)
+(*                                                                              *)
+(* Resolution order:                                                            *)
+(*   - Check if next token after @name is item keyword → attribute_item         *)
+(*   - Check if @name is meta_function_name → meta_function                     *)
+(*   - Check if followed by ( or [ or { → meta_call                             *)
+(*   - Otherwise → at_literal                                                   *)
+(* ============================================================================ *)
+meta_call       = '@' , path , meta_call_args ;
+meta_call_args  = '(' , [ argument_list ] , ')'
                 | '[' , token_tree , ']'
                 | '{' , token_tree , '}' ;
 
@@ -708,6 +1647,352 @@ token           = identifier | keyword | literal_expr | operator | punctuation ;
 operator        = arith_op | compare_op | logical_op | bitwise_op
                 | assign_op | range_op | pipe_op | compose_op
                 | arrow_op | optional_chain | null_coalesce ;
+
+(* ============================================================================ *)
+(* 2.17 TYPE PROPERTIES - COMPILE-TIME TYPE INTROSPECTION                       *)
+(* ============================================================================ *)
+(* Type properties provide compile-time access to type metadata                 *)
+(* Syntax: Type.property where property is one of: size, alignment, stride      *)
+(*                                                                              *)
+(* Design Philosophy (Variant A - Type Properties):                             *)
+(* - Types are first-class values with accessible properties                    *)
+(* - No empty parentheses needed - properties, not functions                    *)
+(* - Consistent with Verum's "everything is an expression" philosophy           *)
+(* - Zero runtime overhead - all computed at compile time                       *)
+(*                                                                              *)
+(* Examples:                                                                    *)
+(*   Int.size           // Size of Int in bytes (8)                            *)
+(*   Float.alignment    // Alignment requirement of Float (8)                   *)
+(*   List<Int>.stride   // Memory stride for iteration (24)                    *)
+(*   T.size             // Generic: size of type parameter T                   *)
+(*   &Int.size          // Size of reference type (16 - ThinRef)               *)
+(*   [Int; 10].size     // Size of array type (80)                             *)
+(*                                                                              *)
+(* Replaces deprecated intrinsic functions:                                     *)
+(*   size_of<T>()   -> T.size                                                   *)
+(*   align_of<T>()  -> T.alignment                                              *)
+(*   stride_of<T>() -> T.stride                                                 *)
+(*                                                                              *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.17                        *)
+(* ============================================================================ *)
+
+(* Type property names - compile-time accessible properties of types *)
+type_property_name = 'size' | 'alignment' | 'stride'
+                   | 'min' | 'max' | 'bits' | 'name' | 'id' ;
+
+(* Type property expression - Type.property syntax *)
+(* Parsed as postfix_op on type expression, resolved at compile time *)
+type_property_expr = type_expr , '.' , type_property_name ;
+
+(* Extended type metadata protocol - types implement this implicitly *)
+(*
+   protocol TypeMetadata {
+       const size: Int;        // Size in bytes
+       const alignment: Int;   // Alignment requirement in bytes
+       const stride: Int;      // Memory stride for arrays/iteration
+       const min: Self;        // Minimum value (for numeric types)
+       const max: Self;        // Maximum value (for numeric types)
+       const bits: Int;        // Bit width (for numeric types)
+       const name: Text;       // Type name as string
+       const id: u64;          // Unique type identifier (hash of canonical name)
+   }
+*)
+
+(* ============================================================================ *)
+(* 2.18 ADVANCED PROTOCOLS - COMPREHENSIVE SYNTAX                               *)
+(* ============================================================================ *)
+(* Spec: docs/detailed/18-advanced-protocols.md *)
+(* This section documents all Advanced Protocol syntax features *)
+
+(* 2.18.1 Generic Associated Types (GATs) *)
+(* GATs allow associated types to have their own type parameters *)
+(* Example:
+   protocol Iterator {
+       type Item<T>
+       fn next(&mut self) -> Maybe<Self.Item>
+   }
+*)
+(* Already defined in Section 2.5 - protocol_type *)
+
+(* 2.18.2 Negative Bounds *)
+(* Negative bounds allow excluding types from implementations *)
+(* Example:
+   implement<T> MyProtocol for T where T: Send + !Sync { }
+*)
+(* Syntax: type_bound = [ '!' ] , trait_path *)
+(* Already defined in Section 2.5 - type_bound *)
+
+(* 2.18.3 Higher-Kinded Types *)
+(* Type constructors with placeholder for higher-kinded type patterns *)
+(* Example:
+   protocol Functor {
+       type F<_>
+       fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>
+   }
+*)
+(* Syntax: higher_kinded_type = path , '<' , '_' , '>' *)
+(* Already defined in Section 2.8 - higher_kinded_type *)
+
+(* 2.18.4 GenRef Type for Generation Tracking *)
+(* GenRef wraps references with explicit generation counters for CBGR *)
+(* Example:
+   type WindowIterator<T> {
+       data: GenRef<List<T>>
+   }
+*)
+(* Syntax: genref_type = 'GenRef' , '<' , type_expr , '>' *)
+(* Already defined in Section 2.8 - genref_type *)
+
+(* 2.18.5 Protocol Specialization *)
+(* More specific implementations override general ones *)
+(* Example:
+   @specialize
+   implement Display for List<Text> { }
+*)
+(* Syntax: impl_block with @specialize attribute *)
+(* Use 'default' modifier on impl items for default implementations *)
+(* ============================================================================ *)
+(* 2.19 FORMAL PROOFS AND VERIFICATION                                          *)
+(* ============================================================================ *)
+
+(* Section 2.19: Formal Proofs - Theorem/Lemma/Axiom/Corollary/Tactic *)
+(* These declarations enable formal verification and proof construction *)
+
+(* 2.19.1 Theorem Declaration *)
+(* Example:
+   theorem sum_positive(a: Int, b: Int)
+       requires a > 0, b > 0
+       ensures result > 0
+   {
+       proof by auto
+   }
+*)
+theorem_decl =
+    'theorem' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    [ '->' , type_expr ] , [ requires_clause ] , [ ensures_clause ] ,
+    proof_body ;
+
+(* 2.19.2 Lemma Declaration - Helper theorems *)
+lemma_decl =
+    'lemma' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    [ '->' , type_expr ] , [ requires_clause ] , [ ensures_clause ] ,
+    proof_body ;
+
+(* 2.19.3 Axiom Declaration - Unproven assumptions *)
+axiom_decl =
+    'axiom' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    [ '->' , type_expr ] , ';' ;
+
+(* 2.19.4 Corollary Declaration - Consequences of theorems *)
+corollary_decl =
+    'corollary' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
+    [ '->' , type_expr ] , [ requires_clause ] ,
+    'from' , identifier , proof_body ;
+
+(* 2.19.5 Tactic Declaration - Custom proof strategies *)
+(* tactic_decl uses block_expr *)
+tactic_decl =
+    'tactic' , identifier , '(' , [ param_list ] , ')' , block_expr ;
+
+(* requires_clause for proof preconditions *)
+requires_clause = 'requires' , expression , { ',' , expression } ;
+
+(* 2.19.6 Proof Body *)
+proof_body =
+    'proof' , ( proof_by_tactic | proof_by_term | proof_structured ) ;
+
+proof_by_tactic = 'by' , tactic_expr ;
+proof_by_term = '=' , expression ;
+proof_structured = '{' , { proof_step } , '}' ;
+
+proof_step =
+    have_step | show_step | obtain_step | calc_chain | tactic_application ;
+
+have_step = 'have' , identifier , ':' , expression , proof_justification ;
+show_step = 'show' , expression , proof_justification ;
+obtain_step = 'obtain' , pattern , 'from' , expression ;
+tactic_application = tactic_expr , ';' ;
+
+proof_justification = 'by' , ( tactic_expr | identifier ) ;
+
+(* 2.19.7 Tactic Expressions *)
+tactic_expr =
+    tactic_name , [ '(' , [ argument_list ] , ')' ]
+    | tactic_expr , ';' , tactic_expr
+    | '(' , tactic_expr , ')' ;
+
+tactic_name =
+    'auto' | 'simp' | 'ring' | 'field' | 'omega' | 'blast' | 'smt'
+    | 'trivial' | 'assumption' | 'contradiction' | 'induction' | 'cases'
+    | 'rewrite' | 'unfold' | 'apply' | 'exact' | 'intro' | 'intros'
+    | identifier ;
+
+(* 2.19.8 Calculational Proof Chains *)
+(* Example:
+   calc {
+       x + y
+       == { by associativity } y + x
+       == { by simplify } result
+   }
+*)
+calc_chain =
+    'calc' , '{' , calc_step , { calc_step } , '}' ;
+
+calc_step =
+    expression , calc_relation , '{' , proof_justification , '}' , expression ;
+
+calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!=' ;
+
+(* 2.19.9 Quantifier Expressions *)
+(* Used in specifications and proofs *)
+forall_expr =
+    'forall' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
+
+exists_expr =
+    'exists' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
+
+quantifier_binding =
+    pattern , [ ':' , type_expr ] , [ 'where' , expression ] ;
+
+(* 2.19.10 Is Expression - Pattern Testing *)
+(* is_expr is integrated into expression grammar as is_relational_expr *)
+(* See Section 2.10 - is_relational_expr for the production *)
+(* Example: if value is Some(x) { use(x) } *)
+(* Example: while result is not Done { poll(); } *)
+
+(* 2.19.11 Proof Keywords *)
+(* See proof_keywords production in Section 1.4 Keywords *)
+
+(* 2.19.12 AST Alignment Keywords *)
+ast_alignment_keyword =
+    'ref' | 'move' | 'as' | 'in' | 'Self' | 'private'
+    | 'checked' | 'view' | 'extern' | 'cofix' | 'dyn' | 'biased' ;
+
+(* ============================================================================ *)
+(* 2.20 BUILT-IN FUNCTIONS AND MACRO SYNTAX STANDARDIZATION                      *)
+(* ============================================================================ *)
+(* Spec: docs/detailed/05-syntax-grammar.md Section 2.20                         *)
+(* Spec: docs/detailed/08-standard-library.md Section 3 - Built-in Functions     *)
+(*                                                                              *)
+(* Verum does NOT use Rust-style `!` suffix for any calls.                      *)
+(* All compile-time constructs use the @ prefix for consistency:                *)
+(*   - @derive(...) - attributes                                                *)
+(*   - @const, @cfg - meta-level functions                                      *)
+(*   - @sql_query(...) - user-defined macros                                    *)
+(*                                                                              *)
+(* Design Philosophy:                                                           *)
+(*   1. No Magic Syntax: No special `!` - everything uses @ or regular calls    *)
+(*   2. Consistency: @ prefix for all compile-time constructs                   *)
+(*   3. IDE Support: Regular calls have better completion/hover support         *)
+(*   4. Semantic Honesty: Clear visual distinction between runtime and compile  *)
+(*                                                                              *)
+(* Categories of Built-in Functions:                                            *)
+(*   - I/O: print, eprint                                                       *)
+(*   - Assertions: assert, assert_eq, assert_ne, debug_assert                   *)
+(*   - Control Flow: panic, unreachable, unimplemented, todo                    *)
+(*   - Async: join, try_join, join_all, select_any, ready, pin                  *)
+(*                                                                              *)
+(* Pattern Testing: The `is` operator replaces Rust's matches!() macro          *)
+(*   - Rust: matches!(x, Pattern)                                               *)
+(*   - Verum: x is Pattern                                                      *)
+(*                                                                              *)
+(* Format Strings: Use format literals (f"...") instead of format!()            *)
+(*   - Rust: format!("x = {}", x)                                               *)
+(*   - Verum: f"x = {x}"                                                        *)
+(* ============================================================================ *)
+
+(* 2.20.1 Built-in Function Names *)
+(* These identifiers are recognized as built-in functions *)
+builtin_io = 'print' | 'eprint' ;
+
+builtin_assertion = 'assert' | 'assert_eq' | 'assert_ne' | 'debug_assert' ;
+
+builtin_control_flow = 'panic' | 'unreachable' | 'unimplemented' | 'todo' ;
+
+builtin_async = 'join' | 'try_join' | 'join_all' | 'select_any' | 'ready' | 'pin' ;
+
+builtin_name = builtin_io | builtin_assertion | builtin_control_flow | builtin_async ;
+
+(* 2.20.2 Built-in Function Calls *)
+(* Built-in functions use standard call syntax (NO `!` suffix) *)
+(* Grammar: builtin_call = builtin_name , '(' , [ argument_list ] , ')' *)
+(* Note: This is parsed as a regular Call expression, not MacroCall *)
+builtin_call = builtin_name , '(' , [ argument_list ] , ')' ;
+
+(* 2.20.3 User-Defined Macros *)
+(* User-defined macros (declared with `meta`) use @ prefix - same as attributes *)
+(* Verum does NOT use Rust-style `!` suffix - we have no "magic" syntax *)
+(* Grammar: meta_call = '@' , path , meta_call_args (defined in Section 2.16) *)
+
+(* 2.20.4 Syntax Examples *)
+(*
+   // I/O - print and eprint are built-in functions
+   print("Hello, World!");              // Standard function call
+   print(f"Value: {x}");                // With format literal
+   eprint("Error occurred");            // Error output
+
+   // Assertions - all built-in functions
+   assert(x > 0);                       // Standard function call
+   assert(x > 0, "x must be positive"); // With message
+   assert_eq(a, b);                     // Equality assertion
+   assert_ne(a, b);                     // Inequality assertion
+   debug_assert(invariant_holds());     // Debug-only assertion
+
+   // Control Flow - built-in functions
+   panic("Fatal error");                // Standard function call
+   unreachable();                       // Mark unreachable code
+   unimplemented();                     // Mark unimplemented
+   todo("Implement this later");        // Mark work in progress
+
+   // Async - built-in functions
+   let (a, b) = join(task_a, task_b);   // Concurrent execution
+   let result = try_join(a, b)?;        // With error handling
+
+   // Pattern Testing - use `is` operator
+   if value is Some(x) { ... }          // Pattern test expression
+   while result is Pending { ... }      // In loops
+
+   // Format Strings - use f"..." literals
+   let msg = f"x = {x}, y = {y}";       // Format string literal
+   let debug = f"{value:?}";            // Debug format
+
+   // User-defined macros - use @ prefix (NOT Rust-style !)
+   meta sql_query(input: tt) { ... }
+   let q = @sql_query("SELECT * FROM users");  // @ prefix for macros
+*)
+
+(* 2.20.5 Select Expression *)
+(* `select` is a keyword expression, not a function or macro *)
+(* Already defined in Section 2.12.1 - select_expr *)
+(* Syntax: select [biased] { arm1.await => expr1, arm2.await => expr2, ... } *)
+
+(* 2.20.6 Meta-Level Functions *)
+(* Compile-time functions use @ prefix, not ! suffix *)
+(*
+   @const expr         // Compile-time evaluation (NOT const_eval!())
+   @error("msg")       // Compile-time error (NOT compile_error!())
+   @warning("msg")     // Compile-time warning (NOT compile_warning!())
+   @stringify(tokens)  // Token stringification (NOT stringify!())
+   @concat(a, b)       // Token concatenation (NOT concat!())
+   @cfg(condition)     // Configuration check (NOT cfg!())
+*)
+meta_function = '@' , meta_function_name , [ '(' , [ argument_list ] , ')' ] ;
+meta_function_name = 'const' | 'error' | 'warning' | 'stringify' | 'concat' | 'cfg'
+                   | 'file' | 'line' | 'column' | 'module' | 'function'
+                   (* Type introspection intrinsics - Spec: docs/improvements.md Section 15 *)
+                   | 'type_name' | 'type_fields' | 'field_access'
+                   | 'type_of' | 'fields_of' | 'variants_of'
+                   | 'is_struct' | 'is_enum' | 'is_tuple' | 'implements' ;
+
+(* 2.20.7 Collection Literals *)
+(* Verum uses native literal syntax, not macro-based construction *)
+(*
+   [1, 2, 3]           // Array literal (NOT vec![1, 2, 3])
+   [0; 100]            // Repeat literal (NOT vec![0; 100])
+   List.of(1, 2, 3)    // List constructor (NOT list![1, 2, 3])
+   Set.of(1, 2, 3)     // Set constructor
+   Map.of(("a", 1))    // Map constructor
+*)
 
 (* ============================================================================ *)
 (* 3. ERROR RECOVERY                                                            *)
@@ -745,5 +2030,40 @@ unclosed_delimiter_error = '(' , { token - ')' } , end_of_file
 end_of_file = /* End of input stream */ ;
 
 (* ============================================================================ *)
-(* End of Grammar                                                               *)
+(* END OF GRAMMAR - Version 3.0                                                 *)
+(* ============================================================================ *)
+(*                                                                              *)
+(* This grammar is the AUTHORITATIVE specification for Verum syntax.            *)
+(* All productions are integrated and reachable from the root.                  *)
+(*                                                                              *)
+(* Grammar Structure Summary:                                                   *)
+(*   1. LEXICAL GRAMMAR (Section 1)                                            *)
+(*      - Character classes, identifiers, keywords, literals                   *)
+(*                                                                              *)
+(*   2. SYNTACTIC GRAMMAR (Section 2)                                          *)
+(*      2.1-2.3   Modules, Imports, Declarations                               *)
+(*      2.4-2.8   Types, Generics, References, Protocols                       *)
+(*      2.9-2.12  Expressions, Operators, Control Flow, Async                  *)
+(*      2.13-2.15 Patterns, Statements, Functions                              *)
+(*      2.16      Attributes and Macros (@ prefix)                             *)
+(*      2.17      Type Properties (Type.size, Type.alignment)                  *)
+(*      2.18      Advanced Protocols (GATs, HKT, Negative Bounds)              *)
+(*      2.19      Formal Proofs and Verification                               *)
+(*      2.20      Built-in Functions (print, assert, panic)                    *)
+(*                                                                              *)
+(*   3. ERROR RECOVERY (Section 3)                                             *)
+(*      - Parser synchronization and recovery strategies                       *)
+(*                                                                              *)
+(* Key Design Decisions:                                                        *)
+(*   - Reserved keywords: ONLY 'let', 'fn', 'is'                               *)
+(*   - No Rust-style `!` suffix - all compile-time uses @ prefix               *)
+(*   - Pattern testing via 'is' operator (x is Pattern)                        *)
+(*   - Format strings via f"..." literals                                      *)
+(*   - Built-in functions use standard call syntax                             *)
+(*                                                                              *)
+(* Related Documentation:                                                       *)
+(*   - docs/detailed/05-syntax-grammar.md                                       *)
+(*   - docs/detailed/03-type-system.md                                          *)
+(*   - docs/detailed/18-advanced-protocols.md                                   *)
+(*                                                                              *)
 (* ============================================================================ *)
