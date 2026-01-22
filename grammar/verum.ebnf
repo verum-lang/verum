@@ -107,7 +107,7 @@ modifiers = 'pub' | 'mut' | 'const' | 'unsafe' | 'pure' ;
 ffi_keywords = 'ffi' ;
 
 (* Module keywords *)
-module_keywords = 'module' | 'import' | 'implement' | 'context' | 'protocol' | 'extends' ;
+module_keywords = 'module' | 'link' | 'implement' | 'context' | 'protocol' | 'extends' ;
 
 (* Additional keywords *)
 (* 'some' for existential types *)
@@ -349,7 +349,7 @@ item            = function_def
                 | context_group_def
                 | const_def
                 | static_def
-                | import_stmt
+                | link_stmt
                 | module_def
                 | meta_def
                 | pattern_def
@@ -376,13 +376,13 @@ derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
 verify_attribute = 'verify' , '(' , ( 'runtime' | 'static' | 'formal' ) , ')' ;
 context_group_identifier = identifier ;
 
-(* 2.2 Imports and Modules *)
-import_stmt     = 'import' , import_tree , [ 'as' , identifier ] , ';' ;
-import_tree     = import_item , [ 'as' , identifier ]
-                | path , '.' , '{' , import_list , '}'
+(* 2.2 Cogs and Modules *)
+link_stmt       = 'link' , link_tree , [ 'as' , identifier ] , ';' ;
+link_tree       = link_item , [ 'as' , identifier ]
+                | path , '.' , '{' , link_list , '}'
                 | path , '.' , '*' ;
-import_item     = path ;
-import_list     = import_tree , { ',' , import_tree } ;
+link_item       = path ;
+link_list       = link_tree , { ',' , link_tree } ;
 
 module_def      = visibility , 'module' , module_path , module_body ;
 module_path     = identifier , { '.' , identifier } ;
@@ -1304,7 +1304,7 @@ operator_token  = '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '!' | '~'
                 | '<' | '>' | '=' | '.' | ',' | ':' | ';' | '@' | '#' ;
 keyword_token   = 'let' | 'fn' | 'type' | 'if' | 'else' | 'match' | 'for' | 'while'
                 | 'loop' | 'return' | 'break' | 'continue' | 'in' | 'is' | 'as'
-                | 'public' | 'private' | 'module' | 'import' | 'meta' | 'async'
+                | 'public' | 'private' | 'module' | 'link' | 'meta' | 'async'
                 | 'await' | 'unsafe' | 'pure' | 'try' | 'recover' | 'finally' | 'lift' ;
 
 (* Quote interpolation - substitutes values into generated code                 *)
