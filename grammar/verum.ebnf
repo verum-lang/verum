@@ -400,11 +400,19 @@ type_def        = visibility , 'type' , [ 'affine' ] , identifier , [ generics ]
                 , 'is' , type_definition_body ;
 
 type_definition_body = type_expr , [ type_refinement ] , ';'
-                     | identifier , ':' , type_expr , type_refinement , ';'
+                     | sigma_bindings , ';'
                      | '(' , type_list , ')' , ';'
-                     | '{' , field_list , '}' , ';'
+                     | '{' , field_list , '}' , [ type_refinement ] , ';'
                      | variant_list , ';'
                      | protocol_def , ';' ;
+
+(* Dependent type bindings (Sigma types) - supports single or multiple bindings     *)
+(* Spec: type theory dependent pairs (Σ-types)                                      *)
+(* Single: type Nat is n: Int where n >= 0;                                         *)
+(* Multi:  type SizedVec is n: Int, data: [Int; n];                                 *)
+(*         type Matrix is rows: Int, cols: Int, data: [[Float; cols]; rows];        *)
+sigma_bindings = sigma_binding , { ',' , sigma_binding } ;
+sigma_binding = identifier , ':' , type_expr , [ 'where' , expression ] ;
 
 (* Protocol definition with optional extension and where clause *)
 (* Spec: docs/detailed/18-advanced-protocols.md Section 5.1 - Protocol Extension *)
@@ -440,7 +448,8 @@ predicate_name = identifier ;
 bare_expr = expression ;
 predicate_expr = expression ;
 
-sigma_type = identifier , ':' , type_expr , [ 'where' , expression ] ;
+(* Legacy sigma_type alias - see sigma_bindings above for full definition *)
+sigma_type = sigma_bindings ;
 
 variant_list    = [ '|' ] , variant , { '|' , variant } ;
 (* Variants can have attributes for serialization, defaults, deprecation *)
@@ -944,6 +953,7 @@ simple_type     = primitive_type
                 | unknown_type
                 | path_type
                 | tuple_type
+                | record_type
                 | array_type
                 | slice_type
                 | managed_reference_type
@@ -959,6 +969,11 @@ simple_type     = primitive_type
                 | inferred_type
                 | dynamic_type
                 | capability_type ;
+
+(* Anonymous record type: { x: Int, y: Int }                                       *)
+(* Used in type expressions for anonymous structured data                           *)
+(* Can have refinement applied via type_expr: { x: Int, y: Int } { self.x > 0 }    *)
+record_type     = '{' , field_list , '}' ;
 
 (* Capability-restricted types - Type-safe capability attenuation                    *)
 (* Spec: docs/improvements.md Section 12 - Capability Attenuation as Types           *)
@@ -1097,9 +1112,16 @@ postfix_op      = '.' , identifier , [ type_args ] , [ call_args ]
                 | '.' , integer_lit
                 | '.' , 'await'
                 | '[' , expression , ']'
-                | call_args
+                | [ type_args ] , call_args
                 | '?'
                 | 'as' , type_expr ;
+
+(* Generic function call: func<T>(args) or just func(args)                      *)
+(* The type_args before call_args enables explicit type arguments:              *)
+(*   - process<Int>(data)      - explicit type argument                         *)
+(*   - List.new<Int>()         - constructor with type arg (via method call)    *)
+(*   - transform<A, B>(input)  - multiple type arguments                        *)
+(* When type_args is omitted, type inference determines the types.              *)
 
 call_args       = '(' , arg_list , ')' ;
 arg_list        = [ expression , { ',' , expression } , [ ',' ] ] ;
@@ -1149,8 +1171,10 @@ stream_elements_body = expression_list , [ ',' , '...' ] ;
 (* 2.12 Primary Expressions *)
 (* Includes forall_expr, exists_expr for quantified expressions *)
 (* Includes meta_call, meta_function for @ prefix expressions *)
+(* Unit expression '()' is the single value of the unit type   *)
 primary_expr    = literal_expr
                 | path_expr
+                | '(' , ')'
                 | '(' , expression , ')'
                 | tuple_expr
                 | array_expr
@@ -1192,9 +1216,13 @@ typeof_expr     = 'typeof' , '(' , expression , ')' ;
 
 path_expr       = path ;
 
-tuple_expr      = '(' , expression , { ',' , expression } , ')' ;
+(* Tuple expression: (a,) for single-element, (a, b, ...) for multi-element    *)
+(* Unit expression '()' is handled separately in primary_expr                  *)
+(* Note: (expr) is parenthesized expression, NOT a tuple - needs trailing comma*)
+tuple_expr      = '(' , expression , ',' , [ expression_list ] , ')' ;
 
-array_expr      = '[' , array_elements , ']' ;
+(* Array expression: can be empty [], have elements [a, b], or repeat [x; n]   *)
+array_expr      = '[' , [ array_elements ] , ']' ;
 array_elements  = expression_list | expression , ';' , expression ;
 
 tensor_literal_expr = 'tensor' , '<' , shape_params , '>' , type_expr , '{' , tensor_elements , '}' ;
