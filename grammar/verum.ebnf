@@ -107,7 +107,7 @@ modifiers = 'pub' | 'mut' | 'const' | 'unsafe' | 'pure' ;
 ffi_keywords = 'ffi' ;
 
 (* Module keywords *)
-module_keywords = 'module' | 'link' | 'implement' | 'context' | 'protocol' | 'extends' ;
+module_keywords = 'module' | 'mount' | 'implement' | 'context' | 'protocol' | 'extends' ;
 
 (* Additional keywords *)
 (* 'some' for existential types *)
@@ -155,15 +155,32 @@ integer_lit     = ( decimal_lit | hexadecimal_lit | octal_lit | binary_lit ) , [
 float_lit       = decimal_lit , '.' , decimal_lit , [ exponent ] , [ float_suffix ] ;
 exponent        = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal_lit ;
 
-(* 1.5.2 Text Literals - Fully Specified *)
+(* 1.5.2 Text Literals - Simplified Architecture                                *)
+(* ============================================================================ *)
+(* Verum uses a simplified literal architecture:                                *)
+(*   - plain_string: "..." with escape processing                              *)
+(*   - raw_multiline: """...""" ALWAYS raw (no escapes), multiline capable     *)
+(*                                                                              *)
+(* This eliminates the verbose r#"..."# Rust-style syntax.                     *)
+(* Triple-quote = raw = multiline. Single mental model.                        *)
+(*                                                                              *)
+(* Edge case: literal """ inside raw string uses doubling: """"                *)
+(* Example: """"content with """ inside"""" → content with """ inside          *)
+(* ============================================================================ *)
+
 string_char     = char_except_quote | ( '\' , char_except_backslash ) ;
 char            = char_except_apostrophe | ( '\' , char_except_backslash ) ;
 
 plain_string    = '"' , { string_char | escape_seq } , '"' ;
-multiline_string= '"""' , { char_except_newline | '\n' | '\r\n' } , '"""' ;
-raw_string      = 'r' , raw_string_delim ;
-raw_string_delim= '#' , { '#' } , '"' , raw_string_content , '"' , '#' , { '#' } ;
-raw_string_content = { char_except_quote } ;
+
+(* Raw multiline string: """...""" - NO escape processing, multiline *)
+(* Content can contain anything except unescaped """ *)
+(* For literal """, use doubled quotes: """" (4 quotes = 3 literal) *)
+raw_multiline   = '"""' , raw_multiline_content , '"""' ;
+raw_multiline_content = { any_char - '"""' | '""""' } ;
+
+(* REMOVED: r#"..."# syntax - use """...""" instead *)
+(* REMOVED: r##"..."## - no more # counting *)
 
 (* Byte string literals - produces &[Byte] at compile time *)
 (* Like Rust's b"...", contains ASCII bytes with escape sequences *)
@@ -173,13 +190,18 @@ byte_escape_seq = '\' , ( 'n' | 'r' | 't' | '0' | '\' | "'" | '"'
                        | ( 'x' , hex_digit , hex_digit ) ) ;
 byte_string_lit = 'b' , '"' , { byte_string_char | byte_escape_seq } , '"' ;
 
-string_lit      = plain_string | multiline_string | raw_string ;
+(* String literal: either escaped single-line or raw multiline *)
+string_lit      = plain_string | raw_multiline ;
 
 (* ============================================================================ *)
 (* 1.5.2.1 TAGGED LITERALS                                                       *)
 (* ============================================================================ *)
 (* Tagged literals provide format-specific content with compile-time validation *)
-(* Syntax: tag#"content", tag#"""multiline""", tag#r#"raw"#                    *)
+(* Syntax: tag#"content" or tag#"""multiline/raw content"""                    *)
+(*                                                                              *)
+(* Simplified from previous r#"..."# syntax:                                    *)
+(*   - tag#"..."   → single-line with escapes                                  *)
+(*   - tag#"""...""" → multiline, raw (no escapes)                             *)
 (*                                                                              *)
 (* Format Categories:                                                           *)
 (*   Data Interchange: json, json5, yaml, toml, xml, html, csv                 *)
@@ -235,14 +257,13 @@ format_tag = format_tag_data | format_tag_query | format_tag_pattern
            | format_tag_science | identifier ;  (* Custom tags allowed *)
 
 (* Tagged literal with format-specific content *)
+(* Simplified: tagged content uses same literal forms as regular strings *)
+(* Examples:                                                              *)
+(*   json#"{ \"key\": \"value\" }"      (plain string, escapes processed) *)
+(*   json#"""{ "key": "value" }"""      (raw multiline, no escapes)       *)
+(*   sql#"""SELECT * FROM users WHERE name = 'test'"""                    *)
 tagged_literal  = format_tag , '#' , tagged_content ;
-tagged_content  = plain_string
-                | raw_string
-                | multiline_string
-                | multiline_raw_string ;
-
-(* Multiline raw string for tagged literals: tag#r#"""..."""# or tag##"""..."""## *)
-multiline_raw_string = [ 'r' ] , '#' , { '#' } , '"""' , { any_char } , '"""' , '#' , { '#' } ;
+tagged_content  = plain_string | raw_multiline ;
 
 (* Interpolated strings with expression embedding: f"Hello {name}" *)
 interpolated_string = interpolated_prefix , '"' , { string_char | interpolation } , '"' ;
@@ -252,11 +273,22 @@ format_spec         = { format_spec_char } ;
 format_spec_char    = letter | digit | '.' | '<' | '>' | '^' | '+' | '-' | ' ' | '#' | '0' ;
 
 (* Tagged interpolated strings: allows ${expr} in tagged content *)
+(* Combines tagged literals with interpolation via ${...} *)
 (* Example: json#"""{ "name": "${user.name}", "age": ${user.age} }""" *)
+(* Example: sql#"""SELECT * FROM ${table} WHERE id = ${id}""" *)
 tagged_interpolated = format_tag , '#' , tagged_interpolated_content ;
-tagged_interpolated_content = multiline_string_interpolated | plain_string_interpolated ;
-multiline_string_interpolated = '"""' , { string_char | '\n' | '\r\n' | tagged_interpolation } , '"""' ;
+tagged_interpolated_content = raw_multiline_interpolated | plain_string_interpolated ;
+
+(* Raw multiline with interpolation: """..${expr}...""" *)
+(* Content is raw (no escape processing) except for ${...} which is interpolated *)
+raw_multiline_interpolated = '"""' , { raw_char | tagged_interpolation } , '"""' ;
+raw_char = any_char - '"""' - '${' | '""""' ;  (* Doubling escapes quotes, but not ${} *)
+
+(* Plain string with interpolation: "..${expr}.." *)
+(* Content uses escape processing AND ${...} interpolation *)
 plain_string_interpolated = '"' , { string_char | tagged_interpolation } , '"' ;
+
+(* Tagged interpolation syntax: ${expression} *)
 tagged_interpolation = '${' , expression , '}' ;
 
 char_lit        = "'" , ( char | escape_seq ) , "'" ;
@@ -287,13 +319,15 @@ composite_bracket = '[' , { composite_char } , ']' ;
 composite_brace  = '{' , { composite_char } , '}' ;
 composite_char  = char_except_newline - ( ')' | ']' | '}' ) ;
 
-(* Semantic literals - alias for tagged literals with safe interpolation support *)
-semantic_literal = semantic_tag , '#' , ( plain_string | raw_string | multiline_string ) ;
+(* Semantic literals - unified with tagged_literal, kept for backward reference *)
+(* NOTE: semantic_literal is now a subset of tagged_literal; use tagged_literal *)
+semantic_literal = semantic_tag , '#' , tagged_content ;  (* Uses plain_string | raw_multiline *)
 semantic_tag    = 'gql' | 'graphql' | 'rx' | 're' | 'regex' | 'sql' | 'url' | 'uri'
                 | 'email' | 'json' | 'json5' | 'xml' | 'html' | 'yaml' | 'toml'
                 | 'css' | 'sh' | 'contract' ;
 
-contract_literal = 'contract' , '#' , ( plain_string | raw_string ) ;
+(* Contract literals for formal verification annotations *)
+contract_literal = 'contract' , '#' , tagged_content ;  (* Uses plain_string | raw_multiline *)
 
 safe_interpolated = semantic_tag , '"' , { string_char | safe_interpolation } , '"' ;
 safe_interpolation = '{' , expression , '}' ;
@@ -349,7 +383,7 @@ item            = function_def
                 | context_group_def
                 | const_def
                 | static_def
-                | link_stmt
+                | mount_stmt
                 | module_def
                 | meta_def
                 | pattern_def
@@ -377,12 +411,12 @@ verify_attribute = 'verify' , '(' , ( 'runtime' | 'static' | 'formal' ) , ')' ;
 context_group_identifier = identifier ;
 
 (* 2.2 Cogs and Modules *)
-link_stmt       = 'link' , link_tree , [ 'as' , identifier ] , ';' ;
-link_tree       = link_item , [ 'as' , identifier ]
-                | path , '.' , '{' , link_list , '}'
+mount_stmt       = 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
+mount_tree       = mount_item , [ 'as' , identifier ]
+                | path , '.' , '{' , mount_list , '}'
                 | path , '.' , '*' ;
-link_item       = path ;
-link_list       = link_tree , { ',' , link_tree } ;
+mount_item       = path ;
+mount_list       = mount_tree , { ',' , mount_tree } ;
 
 module_def      = visibility , 'module' , module_path , module_body ;
 module_path     = identifier , { '.' , identifier } ;
@@ -1076,7 +1110,58 @@ expression      = pipeline_expr ;
 
 pipeline_expr   = assignment_expr , { '|>' , assignment_expr } ;
 
-assignment_expr = null_coalesce_expr , [ assign_op , assignment_expr ] ;
+(* 2.10.1 Assignment Expressions                                                *)
+(* Verum supports two forms of assignment:                                      *)
+(*                                                                              *)
+(* 1. Simple assignment: lvalue assign_op expression                            *)
+(*    x = 42, arr[i] = value, point.x = 10                                      *)
+(*                                                                              *)
+(* 2. Destructuring assignment: pattern assign_op expression                    *)
+(*    Allows patterns on the left side for parallel assignment and unpacking.   *)
+(*                                                                              *)
+(*    Tuple destructuring:                                                      *)
+(*      (a, b) = (b, a)           - parallel swap                               *)
+(*      (x, y, z) = get_coords()  - unpack tuple return                         *)
+(*                                                                              *)
+(*    Array destructuring:                                                      *)
+(*      [first, second, ..] = items     - extract first elements                *)
+(*      [head, ..tail] = list           - head/tail decomposition               *)
+(*                                                                              *)
+(*    Record destructuring:                                                     *)
+(*      Point { x, y } = compute()      - extract fields                        *)
+(*      Config { timeout, .. } = cfg    - extract specific fields               *)
+(*                                                                              *)
+(*    Compound destructuring (with compound operators):                         *)
+(*      (x, y) += (dx, dy)              - parallel compound update              *)
+(*      [a, b] *= 2                     - element-wise compound                 *)
+(*                                                                              *)
+(*    Nested destructuring:                                                     *)
+(*      ((a, b), c) = nested            - nested tuple                          *)
+(*      Shape { point: Point { x, y }, .. } = s  - nested record                *)
+(*                                                                              *)
+(* The parser recognizes pattern-like expressions (tuple, array, record)        *)
+(* and converts them to patterns when followed by an assignment operator.       *)
+(*                                                                              *)
+(* Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring   *)
+
+assignment_expr = destructuring_assign
+                | simple_assign ;
+
+(* Destructuring assignment: structural pattern on left side *)
+destructuring_assign = destructuring_target , assign_op , assignment_expr ;
+
+(* Destructuring targets: tuple, array, or record expression forms *)
+(* These are parsed as expressions but converted to patterns for assignment *)
+destructuring_target = '(' , expression_list , ')'       (* tuple: (a, b, c) *)
+                     | '[' , expression_list , ']'       (* array: [a, b, c] *)
+                     | path , '{' , field_expr_list , '}'  (* record: Type { a, b } *)
+                     | '(' , destructuring_target , ')' ; (* nested: ((a, b)) *)
+
+field_expr_list = [ field_expr , { ',' , field_expr } , [ ',' , '..' ] ] ;
+field_expr      = identifier , [ ':' , expression ] ;
+
+(* Simple assignment: lvalue on left side *)
+simple_assign   = null_coalesce_expr , [ assign_op , assignment_expr ] ;
 
 null_coalesce_expr = range_expr , { '??' , range_expr } ;
 
@@ -1092,6 +1177,20 @@ equality_expr   = is_relational_expr , { ( '==' | '!=' ) , is_relational_expr } 
 (* Example: x is Some(v), value is not None *)
 is_relational_expr = relational_expr , [ 'is' , [ 'not' ] , pattern ] ;
 
+(* DESIGN DECISION: Verum does NOT support Python-style chained comparisons.    *)
+(* Expressions like `a < b < c` parse as `(a < b) < c` (left-associative).      *)
+(* This comparison of Bool with Int will fail at type checking.                 *)
+(* Use explicit conjunction instead: `a < b && b < c`                           *)
+(*                                                                              *)
+(* Rationale:                                                                   *)
+(*   1. Conceptual integrity - consistent semantics across all operators        *)
+(*   2. Explicitness - clear about evaluation order and short-circuit behavior  *)
+(*   3. Flexibility - supports mixed conditions: `a < b && is_valid(b)`         *)
+(*   4. Language family consistency - matches Rust, C, C++, Java, JavaScript    *)
+(*                                                                              *)
+(* For range checks, use explicit pattern:                                      *)
+(*   if a < b && b < c { ... }  // Explicit, clear, composable                  *)
+(*   if let x = b && x > a && x < c { ... }  // With binding for reuse          *)
 relational_expr = bitwise_expr , { ( '<' | '>' | '<=' | '>=' ) , bitwise_expr } ;
 
 bitwise_expr    = shift_expr , { ( '&' | '|' | '^' ) , shift_expr } ;
@@ -1182,6 +1281,9 @@ primary_expr    = literal_expr
                 | map_expr
                 | set_expr
                 | comprehension_expr
+                | map_comprehension
+                | set_comprehension
+                | generator_expr
                 | stream_expr
                 | record_expr
                 | block_expr
@@ -1236,10 +1338,40 @@ map_entry       = expression , ':' , expression ;
 
 set_expr        = '{' , [ expression_list ] , '}' ;
 
+(* ============================================================================ *)
+(* Comprehension Expressions                                                    *)
+(* Spec: docs/architecture/new-features.md Cluster 2 - Comprehension Completeness *)
+(*                                                                              *)
+(* Verum supports five forms of comprehensions with unified clause syntax:      *)
+(*   - List comprehension:   [x for x in items]                                 *)
+(*   - Stream comprehension: stream[x for x in items]                           *)
+(*   - Map comprehension:    {k: v for (k, v) in items}                         *)
+(*   - Set comprehension:    set{x for x in items}                              *)
+(*   - Generator expression: gen{x for x in items}                              *)
+(* ============================================================================ *)
+
+(* List comprehension: [expr for pattern in iter clause*] *)
 comprehension_expr = '[' , expression , 'for' , pattern , 'in' , expression
                    , { comprehension_clause } , ']' ;
 
+(* Map comprehension: {key: value for pattern in iter clause*}                  *)
+(* Disambiguated from map literal by 'for' keyword after value expression       *)
+map_comprehension = '{' , expression , ':' , expression , 'for' , pattern , 'in' , expression
+                  , { comprehension_clause } , '}' ;
+
+(* Set comprehension: set{expr for pattern in iter clause*}                     *)
+(* Uses 'set' keyword prefix for explicit disambiguation from blocks/maps       *)
+set_comprehension = 'set' , '{' , expression , 'for' , pattern , 'in' , expression
+                  , { comprehension_clause } , '}' ;
+
+(* Generator expression: gen{expr for pattern in iter clause*}                  *)
+(* Produces lazy Iterator<T> evaluated on demand                                *)
+generator_expr = 'gen' , '{' , expression , 'for' , pattern , 'in' , expression
+               , { comprehension_clause } , '}' ;
+
+(* Comprehension clause: shared by all comprehension types *)
 comprehension_clause = 'for' , pattern , 'in' , expression
+                     | 'let' , pattern , [ ':' , type_expr ] , '=' , expression
                      | 'if' , expression ;
 
 record_expr     = path , '{' , field_inits , '}' ;
@@ -1252,7 +1384,32 @@ block_expr      = '{' , { statement } , [ expression ] , '}' ;
 if_expr         = 'if' , if_condition , block_expr
                 , [ 'else' , ( if_expr | block_expr ) ] ;
 
+(* IF-LET CHAINS (RFC 2497 Semantics)                                           *)
+(*                                                                              *)
+(* Conditions can be chained with '&&' for compound pattern matching.           *)
+(* Each condition is evaluated left-to-right with short-circuit AND semantics.  *)
+(* Pattern bindings from earlier conditions are in scope for later conditions   *)
+(* and the then-branch, but NOT in the else-branch.                             *)
+(*                                                                              *)
+(* Examples:                                                                    *)
+(*   if let Some(x) = opt { ... }                 -- single let                 *)
+(*   if let Some(x) = opt && x > 0 { ... }        -- let + expression           *)
+(*   if let Some(a) = o1 && let Some(b) = o2 { }  -- chained lets               *)
+(*   if cond && let Some(x) = opt { ... }         -- expression + let           *)
+(*   if let Some(x) = opt && x > 0 && x < 100 {}  -- let + multiple expr        *)
+(*                                                                              *)
+(* Semantic rules:                                                              *)
+(*   - All conditions must evaluate to true/match for then-branch to execute   *)
+(*   - Bindings accumulate: each let adds bindings available to later terms    *)
+(*   - Short-circuit: if any condition fails, remaining conditions not eval'd  *)
+(*   - Scope: all bindings visible in then-branch, none in else-branch         *)
+(*                                                                              *)
+(* Implementation note: Codegen iterates ALL conditions in the chain, not      *)
+(* just the first. Each ConditionKind is processed with proper scope mgmt.     *)
 if_condition    = let_condition , { '&&' , let_condition } ;
+
+(* let_condition is either a pattern-matching let or a boolean expression       *)
+(* Note: Only && is valid for chaining; || would require different scoping     *)
 let_condition   = 'let' , pattern , '=' , expression | expression ;
 
 match_expr      = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
@@ -1332,14 +1489,22 @@ operator_token  = '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '!' | '~'
                 | '<' | '>' | '=' | '.' | ',' | ':' | ';' | '@' | '#' ;
 keyword_token   = 'let' | 'fn' | 'type' | 'if' | 'else' | 'match' | 'for' | 'while'
                 | 'loop' | 'return' | 'break' | 'continue' | 'in' | 'is' | 'as'
-                | 'public' | 'private' | 'module' | 'link' | 'meta' | 'async'
+                | 'public' | 'private' | 'module' | 'mount' | 'meta' | 'async'
                 | 'await' | 'unsafe' | 'pure' | 'try' | 'recover' | 'finally' | 'lift' ;
 
 (* Quote interpolation - substitutes values into generated code                 *)
-quote_interpolation = '$' , ( identifier | '{' , expression , '}' ) ;
+(* Multi-stage splice: $var (stage 1), $$var (stage 2), $$$var (stage 3), etc. *)
+(* The number of $ characters indicates the target quote level:                 *)
+(*   $var   - splice into current quote (stage N-1)                             *)
+(*   $$var  - splice into parent quote (stage N-2)                              *)
+(*   $$$var - splice into grandparent quote (stage N-3)                         *)
+(* For expression splices: ${expr}, $${expr}, etc.                              *)
+quote_interpolation = splice_operator , ( identifier | '{' , expression , '}' ) ;
+splice_operator     = '$' , { '$' } ;  (* One or more $ characters *)
 
 (* Quote repetition - iterates and generates repeated code                      *)
-quote_repetition = '$' , '[' , 'for' , pattern , 'in' , expression , '{' , token_tree , '}' , ']' ;
+(* Also supports multi-stage: $$[for...], $$$[for...], etc.                     *)
+quote_repetition = splice_operator , '[' , 'for' , pattern , 'in' , expression , '{' , token_tree , '}' , ']' ;
 
 (* Stage escape - evaluates expression at specific stage within quote           *)
 (* Used to compute values at higher stage and splice results into lower stage   *)
@@ -1520,7 +1685,17 @@ expression_stmt = expression , [ ';' ] ;
 (*   }                                                                          *)
 pattern         = or_pattern ;
 
-or_pattern      = and_pattern , { '|' , and_pattern } ;
+(* Or patterns: alternatives separated by |                                      *)
+(* Each alternative can have its own guard (nested guard patterns)              *)
+(* Example: (Plan.Regular if credit >= 100) | (Plan.Premium if credit >= 80)    *)
+(* Spec: Rust RFC 3637 - Guard Patterns                                         *)
+or_pattern      = guarded_pattern , { '|' , guarded_pattern } ;
+
+(* Guarded pattern: pattern with optional inline guard                          *)
+(* Guards in patterns allow per-alternative conditions in or-patterns           *)
+(* Example: (x if x > 0) | (y if y < -10) => handle_extremes(x, y),             *)
+(* Note: Guards are evaluated left-to-right with short-circuit semantics        *)
+guarded_pattern = and_pattern , [ guard ] ;
 
 (* Pattern combination with &: matches when BOTH patterns match                 *)
 (* Example: Even() & Positive() - matches positive even numbers                 *)
@@ -1548,10 +1723,37 @@ simple_pattern  = literal_pattern
 (* Spec: docs/improvements.md Section 13.2 - Unknown Type                      *)
 type_test_pattern = identifier , 'is' , type_expr ;
 
-(* Active pattern invocation: PatternName(args)() or PatternName()              *)
-(* The first () contains pattern parameters, the second () indicates invocation *)
-(* Example: Even() matches even numbers, InRange(0, 100)() matches 0..100       *)
-active_pattern  = identifier , [ '(' , expression_list , ')' ] , '(' , ')' ;
+(* Active Pattern Invocation                                                    *)
+(* Spec: docs/improvements.md Section 11 - Pattern Matching Enhancements        *)
+(*                                                                              *)
+(* Active patterns come in two forms based on their return type:                *)
+(*                                                                              *)
+(* 1. TOTAL PATTERNS (return Bool) - test without extraction:                   *)
+(*    - PatternName()         - no params, just test (e.g., Even())             *)
+(*    - PatternName(p1,p2)()  - with params, test only (e.g., InRange(0,100)()) *)
+(*                                                                              *)
+(* 2. PARTIAL PATTERNS (return Maybe<T>) - extract on match:                    *)
+(*    - PatternName()(b)      - no params, extract and bind (e.g., ParseInt()(n)) *)
+(*    - PatternName(p)(b)     - with params, extract (e.g., RegexMatch(re)(m))  *)
+(*                                                                              *)
+(* IMPORTANT: Partial patterns ALWAYS use double parens syntax:                 *)
+(*   - First parens  = params (expressions), can be empty                       *)
+(*   - Second parens = bindings (patterns), contains extraction bindings        *)
+(*   - Total patterns with no params use single empty parens: PatternName()     *)
+(*                                                                              *)
+(* Examples:                                                                    *)
+(*   Even()              - total: matches even numbers (no extraction)          *)
+(*   Positive()          - total: matches positive numbers (no extraction)      *)
+(*   InRange(0, 100)()   - total with params: matches numbers in [0, 100]       *)
+(*   ParseInt()(n)       - partial: extracts Int from Text, binds to n          *)
+(*   HeadTail()((h, t))  - partial: extracts head and tail from List            *)
+(*   RegexMatch("\\d+")(groups) - partial: params + extraction binding          *)
+(*                                                                              *)
+active_pattern  = identifier , active_pattern_tail ;
+active_pattern_tail = '(' , ')' (* total pattern, no params *)
+                    | '(' , ')' , '(' , pattern_list_nonempty , ')' (* partial with bindings, no params: Pat()(b) *)
+                    | '(' , expression_list , ')' , '(' , [ pattern_list ] , ')' ; (* with params: Pat(p)(b) *)
+pattern_list_nonempty = pattern , { ',' , pattern } , [ ',' ] ;
 
 literal_pattern = literal_expr ;
 
@@ -1872,15 +2074,31 @@ calc_step =
 calc_relation = '==' | '<' | '<=' | '>' | '>=' | '!=' ;
 
 (* 2.19.9 Quantifier Expressions *)
-(* Used in specifications and proofs *)
+(* Used in specifications and proofs. Supports both type-based (∀x:T) and  *)
+(* collection-based (∀x∈S) quantification with optional guard conditions.  *)
+(*                                                                         *)
+(* Mathematical correspondence:                                            *)
+(*   forall x: T. P(x)                    ≡  ∀x:T. P(x)                    *)
+(*   forall x in S. P(x)                  ≡  ∀x∈S. P(x)                    *)
+(*   forall x in S where Q(x). P(x)       ≡  ∀x∈S. Q(x) → P(x)             *)
+(*   exists x in S. P(x)                  ≡  ∃x∈S. P(x)                    *)
+(*                                                                         *)
+(* Spec: docs/architecture/new-features.md Cluster 3                       *)
+
 forall_expr =
     'forall' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
 
 exists_expr =
     'exists' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
 
+(* Quantifier binding supports three forms:                                 *)
+(*   1. Type-based:       x: Int                  (type required)          *)
+(*   2. Collection-based: x in items              (type inferred)          *)
+(*   3. Combined:         x: Int in 0..100        (explicit type + domain) *)
+(* Optional guard 'where cond' filters the domain: x in items where x > 0  *)
+
 quantifier_binding =
-    pattern , [ ':' , type_expr ] , [ 'where' , expression ] ;
+    pattern , [ ':' , type_expr ] , [ 'in' , expression ] , [ 'where' , expression ] ;
 
 (* 2.19.10 Is Expression - Pattern Testing *)
 (* is_expr is integrated into expression grammar as is_relational_expr *)
