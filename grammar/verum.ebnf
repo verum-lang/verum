@@ -1060,7 +1060,7 @@ managed_reference_type = '&' , [ 'mut' ] , type_expr ;
 checked_reference_type = '&' , 'checked' , [ 'mut' ] , type_expr ;
 unsafe_reference_type = '&' , 'unsafe' , [ 'mut' ] , type_expr ;
 
-pointer_type    = '*' , ( 'const' | 'mut' ) , type_expr ;
+pointer_type    = '*' , ( 'const' | 'mut' | 'volatile' , [ 'mut' ] ) , type_expr ;
 
 (* Function type with optional context requirements *)
 (* CANONICAL FORM: Context clause AFTER return type (consistent with function_def)        *)
@@ -1077,7 +1077,8 @@ function_type   = [ 'async' ] , 'fn' , '(' , type_list , ')' , [ '->' , type_exp
 (* Example: fn<T: Clone>(T) -> (T, T)                                                      *)
 (* The quantified type parameters scope only within the function type itself               *)
 rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')'
-                    , [ '->' , type_expr ] , [ context_clause ] ;
+                    , [ '->' , type_expr ] , [ context_clause ]
+                    , [ generic_where_clause ] ;
 
 generic_type    = path , type_args ;
 type_args       = '<' , type_arg , { ',' , type_arg } , '>' ;
@@ -1108,7 +1109,10 @@ type_list       = [ type_expr , { ',' , type_expr } ] ;
 (* 2.10 Expressions *)
 expression      = pipeline_expr ;
 
-pipeline_expr   = assignment_expr , { '|>' , assignment_expr } ;
+pipeline_expr   = assignment_expr , { '|>' , ( pipe_method_call | assignment_expr ) } ;
+
+(* Pipe-to-method: x |> .method(args) desugars to x.method(args) *)
+pipe_method_call = '.' , identifier , [ generic_args ] , '(' , [ arg_list ] , ')' ;
 
 (* 2.10.1 Assignment Expressions                                                *)
 (* Verum supports two forms of assignment:                                      *)
