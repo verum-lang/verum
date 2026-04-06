@@ -895,7 +895,7 @@ jobs:
 
       - name: Upload to Codecov
         if: hashFiles('vcs/reports/coverage/lcov.info') != ''
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         with:
           files: vcs/reports/coverage/lcov.info
           flags: vcs

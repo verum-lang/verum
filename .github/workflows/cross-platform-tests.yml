@@ -232,7 +232,7 @@ jobs:
             -- cross_platform
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         with:
           files: coverage/cobertura.xml
           flags: cross-platform
