@@ -42,7 +42,7 @@ blake3 = { workspace = true }
 
 # Optional compression
 zstd = { version = "0.13", optional = true }
-lz4_flex = { version = "0.12", optional = true }
+lz4_flex = { version = "0.13", optional = true }
 
 # Unix libc for V-LLSI syscall operations
 [target.'cfg(unix)'.dependencies]
