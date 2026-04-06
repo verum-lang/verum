@@ -60,7 +60,7 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], opt
 proptest = { workspace = true }
 criterion = { workspace = true }
 lazy_static = "1.5"
-ctor = "0.6.1"
+ctor = "0.8.0"
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[bench]]
