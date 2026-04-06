@@ -39,7 +39,7 @@ is-terminal = "0.4"
 ctrlc = "3.4"
 
 # Package management
-reqwest = { version = "0.12", features = ["blocking", "json", "multipart", "stream"] }
+reqwest = { version = "0.13", features = ["blocking", "json", "multipart", "stream"] }
 ed25519-dalek = { version = "2.2.0", features = ["serde"] }
 tar = "0.4"
 flate2 = "1.1.5"

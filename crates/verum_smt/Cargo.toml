@@ -51,7 +51,7 @@ getrandom = "0.3"
 lazy_static = "1.5"
 hex = "0.4"
 tokio = { workspace = true, optional = true }
-reqwest = { version = "0.12", features = ["json"], optional = true }
+reqwest = { version = "0.13", features = ["json"], optional = true }
 hmac = { version = "0.12", optional = true }
 base64 = { version = "0.22", optional = true }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
