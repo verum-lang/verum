@@ -54,7 +54,7 @@ tokio = { workspace = true, optional = true }
 reqwest = { version = "0.12", features = ["json"], optional = true }
 hmac = { version = "0.12", optional = true }
 base64 = { version = "0.22", optional = true }
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
