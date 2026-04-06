@@ -23,7 +23,7 @@ indexmap = { version = "2.13", features = ["serde"] }
 
 # Serialization
 serde = { workspace = true }
-bincode = "1.3"
+bincode = "3.0"
 
 # Errors
 thiserror = { workspace = true }

@@ -32,7 +32,7 @@ semver = "1.0"
 tempfile = "3.14"
 sha2 = "0.10"
 blake3 = { workspace = true }
-bincode = "2.0.1"
+bincode = "3.0.0"
 crossbeam-channel = "0.5"
 num_cpus = "1.17.0"
 is-terminal = "0.4"
