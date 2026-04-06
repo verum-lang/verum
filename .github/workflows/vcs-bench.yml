@@ -197,7 +197,7 @@ jobs:
 
       - name: Upload baseline for later jobs
         if: steps.check.outputs.has_baseline == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: baseline-reference
           path: baseline/
@@ -330,7 +330,7 @@ jobs:
           fi
 
       - name: Upload CBGR Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bench-cbgr-${{ matrix.platform }}
@@ -448,7 +448,7 @@ jobs:
           fi
 
       - name: Upload Compilation Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bench-compilation-${{ matrix.platform }}
@@ -561,7 +561,7 @@ jobs:
           fi
 
       - name: Upload Type Inference Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bench-types-${{ matrix.platform }}
@@ -678,7 +678,7 @@ jobs:
           fi
 
       - name: Upload Runtime Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bench-runtime-${{ matrix.platform }}
@@ -764,7 +764,7 @@ jobs:
           fi
 
       - name: Upload Memory Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bench-memory-${{ matrix.platform }}
@@ -892,7 +892,7 @@ jobs:
           fi
 
       - name: Upload Benchmark Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-bench-report
           path: bench-report.md
@@ -916,7 +916,7 @@ jobs:
 
       - name: Save New Baseline
         if: needs.setup.outputs.save_baseline == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-bench-baseline
           path: baseline-new/
@@ -1051,7 +1051,7 @@ jobs:
           key: bench-history-${{ github.sha }}
 
       - name: Upload History Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-bench-history
           path: history/

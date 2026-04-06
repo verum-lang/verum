@@ -189,7 +189,7 @@ jobs:
           fi
 
       - name: Upload Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: diff-results-tier0-tier3-${{ matrix.test_set }}
@@ -270,7 +270,7 @@ jobs:
           fi
 
       - name: Upload Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: diff-results-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}
@@ -390,7 +390,7 @@ jobs:
           fi
 
       - name: Upload Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: diff-results-fuzzer-corpus
@@ -498,7 +498,7 @@ jobs:
           fi
 
       - name: Upload Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: diff-results-randomized
@@ -508,7 +508,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Divergent Cases
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: steps.diff.outputs.divergent > 0
         with:
           name: divergent-cases
@@ -582,7 +582,7 @@ jobs:
           fi
 
       - name: Upload Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: diff-results-memory
@@ -662,7 +662,7 @@ jobs:
           fi
 
       - name: Upload Differential Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-differential-report
           path: diff-report.md

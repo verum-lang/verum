@@ -193,7 +193,7 @@ jobs:
           cargo +nightly fuzz build
 
       - name: Upload fuzz binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-binaries
           path: vcs/fuzz/target/*/release/*_fuzz*
@@ -250,7 +250,7 @@ jobs:
           echo "Unified corpus size: $CORPUS_SIZE files"
 
       - name: Upload unified corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: corpus-unified
           path: corpus-unified/
@@ -339,7 +339,7 @@ jobs:
           done
 
       - name: Upload lexer crashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-crashes-lexer
@@ -350,7 +350,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload lexer corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-corpus-lexer
@@ -422,7 +422,7 @@ jobs:
           done
 
       - name: Upload parser crashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-crashes-parser
@@ -433,7 +433,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload parser corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-corpus-parser
@@ -494,7 +494,7 @@ jobs:
             2>&1 | tee reports/${{ matrix.target }}.log || true
 
       - name: Upload CBGR crashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-crashes-cbgr-${{ matrix.target }}
@@ -503,7 +503,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload CBGR corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-corpus-cbgr-${{ matrix.target }}
@@ -561,7 +561,7 @@ jobs:
             2>&1 | tee reports/types_inference_fuzz.log || true
 
       - name: Upload types crashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-crashes-types
@@ -570,7 +570,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload types corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-corpus-types
@@ -621,7 +621,7 @@ jobs:
             2>&1 | tee reports/smt_fuzz.log || true
 
       - name: Upload SMT crashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-crashes-smt
@@ -630,7 +630,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload SMT corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-corpus-smt
@@ -677,7 +677,7 @@ jobs:
           echo "Merged corpus size: $CORPUS_SIZE unique entries"
 
       - name: Upload merged corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus-merged
           path: merged-corpus/
@@ -762,7 +762,7 @@ jobs:
           cat fuzz-report.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nightly-fuzz-report
           path: fuzz-report.md

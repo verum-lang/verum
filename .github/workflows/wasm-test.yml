@@ -66,7 +66,7 @@ jobs:
         run: cargo build --release -p verum_cli --features target-wasm
 
       - name: Upload compiler artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verum-compiler
           path: target/release/verum
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload test artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-test-artifacts-${{ matrix.runtime }}
           path: vcs/specs/L3-extended/wasm/target/

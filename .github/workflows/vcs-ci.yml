@@ -160,7 +160,7 @@ jobs:
           echo "vbench_path=vcs/runner/vbench/target/release/vbench" >> $GITHUB_OUTPUT
 
       - name: Upload VCS Tools
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-tools
           path: |
@@ -264,7 +264,7 @@ jobs:
           fi
 
       - name: Upload L0 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l0-results
@@ -373,7 +373,7 @@ jobs:
           fi
 
       - name: Upload L1 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l1-results
@@ -469,7 +469,7 @@ jobs:
           fi
 
       - name: Upload L2 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l2-results
@@ -552,7 +552,7 @@ jobs:
           fi
 
       - name: Upload L3 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l3-results
@@ -612,7 +612,7 @@ jobs:
           fi
 
       - name: Upload L4 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l4-results
@@ -698,7 +698,7 @@ jobs:
           fi
 
       - name: Upload Differential Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: differential-results
@@ -765,7 +765,7 @@ jobs:
           fi
 
       - name: Upload Fuzz Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fuzz-results
@@ -833,7 +833,7 @@ jobs:
           fi
 
       - name: Upload Benchmark Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-results
@@ -905,7 +905,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload Coverage Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: vcs/reports/coverage/
@@ -970,7 +970,7 @@ jobs:
           cat vcs-report.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-report
           path: vcs-report.md

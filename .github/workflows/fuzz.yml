@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload parser artifacts
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: parser-fuzz-artifacts
           path: crates/verum_parser/fuzz/artifacts/
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload lexer artifacts
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: lexer-fuzz-artifacts
           path: crates/verum_lexer/fuzz/artifacts/
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload CBGR artifacts
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: cbgr-fuzz-artifacts-${{ matrix.target }}
           path: crates/verum_cbgr/fuzz/artifacts/${{ matrix.target }}/

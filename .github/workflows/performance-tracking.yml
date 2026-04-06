@@ -140,7 +140,7 @@ jobs:
           cargo build --release
 
       - name: Upload vbench
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vbench-binary
           path: vcs/runner/vbench/target/release/vbench
@@ -191,7 +191,7 @@ jobs:
           fi
 
       - name: Upload history for later jobs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-history-input
           path: |
@@ -276,7 +276,7 @@ jobs:
           fi
 
       - name: Upload CBGR results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-cbgr-linux-x64
           path: reports/cbgr-*
@@ -320,7 +320,7 @@ jobs:
             --config vcs/config/thresholds.toml
 
       - name: Upload CBGR results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-cbgr-macos-arm64
           path: reports/cbgr-*
@@ -390,7 +390,7 @@ jobs:
           fi
 
       - name: Upload Compilation results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-compilation-linux-x64
           path: reports/compilation-*
@@ -455,7 +455,7 @@ jobs:
           fi
 
       - name: Upload Type Inference results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-types-linux-x64
           path: reports/types-*
@@ -519,7 +519,7 @@ jobs:
           fi
 
       - name: Upload Runtime results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-runtime-linux-x64
           path: reports/runtime-*
@@ -583,7 +583,7 @@ jobs:
           fi
 
       - name: Upload Memory results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-memory-linux-x64
           path: reports/memory-*
@@ -764,14 +764,14 @@ jobs:
           key: perf-history-${{ github.sha }}
 
       - name: Upload trend report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-trend-report
           path: trend-report.md
           retention-days: 90
 
       - name: Upload historical data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-history
           path: history/
@@ -809,7 +809,7 @@ jobs:
           echo "{\"commit\":\"${{ github.sha }}\",\"date\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}" > baseline/metadata.json
 
       - name: Upload baseline
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-baseline
           path: baseline/

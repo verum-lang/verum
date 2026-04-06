@@ -183,7 +183,7 @@ jobs:
           EOF
 
       - name: Upload compliance report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compliance-report-${{ github.run_number }}
           path: vcs/reports/compliance.json

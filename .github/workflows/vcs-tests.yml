@@ -290,7 +290,7 @@ jobs:
             -o reports/coverage-l0-${{ matrix.os }}.lcov
 
       - name: Upload L0 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l0-results-${{ matrix.os }}-${{ matrix.rust }}
@@ -418,7 +418,7 @@ jobs:
             -o reports/coverage-l1-${{ matrix.os }}.lcov
 
       - name: Upload L1 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l1-results-${{ matrix.os }}-${{ matrix.rust }}
@@ -552,7 +552,7 @@ jobs:
           fi
 
       - name: Upload L2 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l2-results-${{ matrix.os }}-${{ matrix.rust }}
@@ -636,7 +636,7 @@ jobs:
           fi
 
       - name: Upload L3 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l3-results-${{ matrix.os }}
@@ -714,7 +714,7 @@ jobs:
           fi
 
       - name: Upload L4 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l4-results-${{ matrix.os }}
@@ -760,7 +760,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload Coverage Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: hashFiles('coverage/combined.lcov') != ''
         with:
           name: vcs-coverage
@@ -850,7 +850,7 @@ jobs:
           fi
 
       - name: Upload Aggregate Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-aggregate-report
           path: aggregate-report.md
@@ -1061,7 +1061,7 @@ jobs:
             '
 
       - name: Upload L0 aarch64 Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: l0-results-linux-aarch64
@@ -1118,7 +1118,7 @@ jobs:
           cat arch-report.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Architecture Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcs-architecture-report
           path: arch-report.md

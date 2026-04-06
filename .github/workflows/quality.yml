@@ -115,7 +115,7 @@ jobs:
 
       - name: Upload Clippy results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clippy-results
           path: clippy-output.txt
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-audit-report
           path: audit-report.json
@@ -241,7 +241,7 @@ jobs:
 
       - name: Upload deny reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cargo-deny-reports
           path: deny-*.txt
@@ -282,7 +282,7 @@ jobs:
 
       - name: Upload outdated report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: outdated-dependencies
           path: outdated.txt
@@ -327,7 +327,7 @@ jobs:
 
       - name: Upload compliance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: semantic-type-compliance
           path: compliance-report.txt
@@ -404,7 +404,7 @@ jobs:
 
       - name: Upload documentation artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: documentation-quality
           path: |
