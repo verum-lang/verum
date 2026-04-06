@@ -658,7 +658,7 @@ impl<'ctx> Z3Solver<'ctx> {
                 // Identify axiom-related proof rules and extract axiom names
                 match kind {
                     // User-asserted facts
-                    DeclKind::PR_ASSERTED => {
+                    DeclKind::PrAsserted => {
                         // The axiom is the first child (the asserted formula)
                         if let Some(child) = node.nth_child(0) {
                             let axiom_name = self.extract_axiom_name_from_formula(&child);
@@ -666,39 +666,39 @@ impl<'ctx> Z3Solver<'ctx> {
                         }
                     }
                     // Goals tagged by user
-                    DeclKind::PR_GOAL => {
+                    DeclKind::PrGoal => {
                         if let Some(child) = node.nth_child(0) {
                             let axiom_name = self.extract_axiom_name_from_formula(&child);
                             axioms.insert(axiom_name);
                         }
                     }
                     // Hypothesis in natural deduction
-                    DeclKind::PR_HYPOTHESIS => {
+                    DeclKind::PrHypothesis => {
                         if let Some(child) = node.nth_child(0) {
                             let axiom_name = self.extract_axiom_name_from_formula(&child);
                             axioms.insert(axiom_name);
                         }
                     }
                     // Theory lemmas (arithmetic, arrays, etc.)
-                    DeclKind::PR_TH_LEMMA => {
+                    DeclKind::PrThLemma => {
                         // Theory lemmas include the theory name in parameters
                         // For now, record the theory lemma application
                         axioms.insert(format!("th_lemma:{}", name).into());
                     }
                     // Definition axioms (Tseitin encoding)
-                    DeclKind::PR_DEF_AXIOM => {
+                    DeclKind::PrDefAxiom => {
                         axioms.insert(Text::from("def_axiom"));
                     }
                     // Definition introductions
-                    DeclKind::PR_DEF_INTRO => {
+                    DeclKind::PrDefIntro => {
                         axioms.insert(Text::from("def_intro"));
                     }
                     // Quantifier instantiation
-                    DeclKind::PR_QUANT_INST => {
+                    DeclKind::PrQuantInst => {
                         axioms.insert(Text::from("quant_inst"));
                     }
                     // Rewrite rules
-                    DeclKind::PR_REWRITE | DeclKind::PR_REWRITE_STAR => {
+                    DeclKind::PrRewrite | DeclKind::PrRewriteStar => {
                         axioms.insert(Text::from("rewrite"));
                     }
                     // Other proof rules don't introduce new axioms
@@ -725,7 +725,7 @@ impl<'ctx> Z3Solver<'ctx> {
             if let Ok(decl) = formula.safe_decl() {
                 let name = decl.name();
                 // If it's an uninterpreted constant, use its name
-                if decl.arity() == 0 && matches!(decl.kind(), DeclKind::UNINTERPRETED) {
+                if decl.arity() == 0 && matches!(decl.kind(), DeclKind::Uninterpreted) {
                     return name.into();
                 }
                 // Otherwise, format the top-level function application
@@ -785,43 +785,43 @@ impl<'ctx> Z3Solver<'ctx> {
     /// Convert a DeclKind to a human-readable proof rule name
     fn proof_rule_name(&self, kind: DeclKind) -> &'static str {
         match kind {
-            DeclKind::PR_UNDEF => "undef",
-            DeclKind::PR_TRUE => "true",
-            DeclKind::PR_ASSERTED => "asserted",
-            DeclKind::PR_GOAL => "goal",
-            DeclKind::PR_MODUS_PONENS => "modus-ponens",
-            DeclKind::PR_REFLEXIVITY => "reflexivity",
-            DeclKind::PR_SYMMETRY => "symmetry",
-            DeclKind::PR_TRANSITIVITY => "transitivity",
-            DeclKind::PR_TRANSITIVITY_STAR => "transitivity*",
-            DeclKind::PR_MONOTONICITY => "monotonicity",
-            DeclKind::PR_QUANT_INTRO => "quant-intro",
-            DeclKind::PR_BIND => "bind",
-            DeclKind::PR_DISTRIBUTIVITY => "distributivity",
-            DeclKind::PR_AND_ELIM => "and-elim",
-            DeclKind::PR_NOT_OR_ELIM => "not-or-elim",
-            DeclKind::PR_REWRITE => "rewrite",
-            DeclKind::PR_REWRITE_STAR => "rewrite*",
-            DeclKind::PR_PULL_QUANT => "pull-quant",
-            DeclKind::PR_PUSH_QUANT => "push-quant",
-            DeclKind::PR_ELIM_UNUSED_VARS => "elim-unused-vars",
-            DeclKind::PR_DER => "der",
-            DeclKind::PR_QUANT_INST => "quant-inst",
-            DeclKind::PR_HYPOTHESIS => "hypothesis",
-            DeclKind::PR_LEMMA => "lemma",
-            DeclKind::PR_UNIT_RESOLUTION => "unit-resolution",
-            DeclKind::PR_IFF_TRUE => "iff-true",
-            DeclKind::PR_IFF_FALSE => "iff-false",
-            DeclKind::PR_COMMUTATIVITY => "commutativity",
-            DeclKind::PR_DEF_AXIOM => "def-axiom",
-            DeclKind::PR_DEF_INTRO => "def-intro",
-            DeclKind::PR_APPLY_DEF => "apply-def",
-            DeclKind::PR_IFF_OEQ => "iff-oeq",
-            DeclKind::PR_NNF_POS => "nnf-pos",
-            DeclKind::PR_NNF_NEG => "nnf-neg",
-            DeclKind::PR_SKOLEMIZE => "skolemize",
-            DeclKind::PR_MODUS_PONENS_OEQ => "modus-ponens-oeq",
-            DeclKind::PR_TH_LEMMA => "th-lemma",
+            DeclKind::PrUndef => "undef",
+            DeclKind::PrTrue => "true",
+            DeclKind::PrAsserted => "asserted",
+            DeclKind::PrGoal => "goal",
+            DeclKind::PrModusPonens => "modus-ponens",
+            DeclKind::PrReflexivity => "reflexivity",
+            DeclKind::PrSymmetry => "symmetry",
+            DeclKind::PrTransitivity => "transitivity",
+            DeclKind::PrTransitivityStar => "transitivity*",
+            DeclKind::PrMonotonicity => "monotonicity",
+            DeclKind::PrQuantIntro => "quant-intro",
+            DeclKind::PrBind => "bind",
+            DeclKind::PrDistributivity => "distributivity",
+            DeclKind::PrAndElim => "and-elim",
+            DeclKind::PrNotOrElim => "not-or-elim",
+            DeclKind::PrRewrite => "rewrite",
+            DeclKind::PrRewriteStar => "rewrite*",
+            DeclKind::PrPullQuant => "pull-quant",
+            DeclKind::PrPushQuant => "push-quant",
+            DeclKind::PrElimUnusedVars => "elim-unused-vars",
+            DeclKind::PrDer => "der",
+            DeclKind::PrQuantInst => "quant-inst",
+            DeclKind::PrHypothesis => "hypothesis",
+            DeclKind::PrLemma => "lemma",
+            DeclKind::PrUnitResolution => "unit-resolution",
+            DeclKind::PrIffTrue => "iff-true",
+            DeclKind::PrIffFalse => "iff-false",
+            DeclKind::PrCommutativity => "commutativity",
+            DeclKind::PrDefAxiom => "def-axiom",
+            DeclKind::PrDefIntro => "def-intro",
+            DeclKind::PrApplyDef => "apply-def",
+            DeclKind::PrIffOeq => "iff-oeq",
+            DeclKind::PrNnfPos => "nnf-pos",
+            DeclKind::PrNnfNeg => "nnf-neg",
+            DeclKind::PrSkolemize => "skolemize",
+            DeclKind::PrModusPonensOeq => "modus-ponens-oeq",
+            DeclKind::PrThLemma => "th-lemma",
             _ => "unknown",
         }
     }

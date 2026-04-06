@@ -8,7 +8,7 @@ mod tests {
 
     #[test]
     fn test_secure_random() {
-        use rand::RngCore;
+        use rand::Rng;
 
         let mut rng = rand::rng();
         let mut bytes = [0u8; 32];

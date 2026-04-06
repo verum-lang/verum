@@ -523,7 +523,7 @@ impl CoverageGuidedFuzzer {
         } else {
             // Use energy-based selection: favor inputs with higher coverage
             let total_score: u64 = self.corpus.iter().map(|(_, s)| *s).sum();
-            let mut threshold = self.rng.gen_range(0..total_score.max(1));
+            let mut threshold = self.rng.random_range(0..total_score.max(1));
 
             let base = self
                 .corpus

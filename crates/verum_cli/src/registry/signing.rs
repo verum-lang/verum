@@ -37,7 +37,7 @@ impl CogSigner {
     /// Generate new signing key
     pub fn generate_key() -> SigningKey {
         // Generate random bytes and create signing key
-        use rand::RngCore;
+        use rand::Rng;
         let mut bytes = [0u8; 32];
         rand::rng().fill_bytes(&mut bytes);
         SigningKey::from_bytes(&bytes)

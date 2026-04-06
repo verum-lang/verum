@@ -341,7 +341,7 @@ impl Token {
 ///
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\r\n]+")] // Skip whitespace
-#[logos(skip r"//[^\n]*")] // Skip line comments
+#[logos(skip(r"//[^\n]*", allow_greedy = true))] // Skip line comments
 pub enum TokenKind {
     // Block comment (supports nesting) - handled with custom callback
     #[regex(r"/\*", skip_block_comment)]

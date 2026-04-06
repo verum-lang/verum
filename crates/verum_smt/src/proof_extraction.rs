@@ -1401,7 +1401,7 @@ impl ProofExtractor {
         // Parse based on Z3 proof rule
         match decl_kind {
             // Asserted axiom
-            DeclKind::PR_ASSERTED => {
+            DeclKind::PrAsserted => {
                 let name = decl.name();
                 Maybe::Some(ProofTerm::Axiom {
                     name: name.into(),
@@ -1409,8 +1409,8 @@ impl ProofExtractor {
                 })
             }
 
-            // Modus ponens: (PR_MODUS_PONENS premise implication)
-            DeclKind::PR_MODUS_PONENS | DeclKind::PR_MODUS_PONENS_OEQ => {
+            // Modus ponens: (PrModusPonens premise implication)
+            DeclKind::PrModusPonens | DeclKind::PrModusPonensOeq => {
                 if num_args >= 2 {
                     let premise = proof.nth_child(0)?;
                     let implication = proof.nth_child(1)?;
@@ -1428,7 +1428,7 @@ impl ProofExtractor {
             }
 
             // Reflexivity: A = A
-            DeclKind::PR_REFLEXIVITY => {
+            DeclKind::PrReflexivity => {
                 let term_str = if num_args > 0 {
                     if let Some(child) = proof.nth_child(0) {
                         format!("{:?}", child)
@@ -1445,7 +1445,7 @@ impl ProofExtractor {
             }
 
             // Symmetry: from A = B derive B = A
-            DeclKind::PR_SYMMETRY => {
+            DeclKind::PrSymmetry => {
                 if num_args >= 1 {
                     let equality = proof.nth_child(0)?;
                     let eq_term = self.parse_proof_object(&equality, depth + 1)?;
@@ -1459,7 +1459,7 @@ impl ProofExtractor {
             }
 
             // Transitivity: from A = B and B = C derive A = C
-            DeclKind::PR_TRANSITIVITY | DeclKind::PR_TRANSITIVITY_STAR => {
+            DeclKind::PrTransitivity | DeclKind::PrTransitivityStar => {
                 if num_args >= 2 {
                     let left = proof.nth_child(0)?;
                     let right = proof.nth_child(1)?;
@@ -1477,7 +1477,7 @@ impl ProofExtractor {
             }
 
             // Rewrite rule
-            DeclKind::PR_REWRITE | DeclKind::PR_REWRITE_STAR => {
+            DeclKind::PrRewrite | DeclKind::PrRewriteStar => {
                 if num_args >= 1 {
                     let source = proof.nth_child(0)?;
                     let source_term = self.parse_proof_object(&source, depth + 1)?;
@@ -1503,7 +1503,7 @@ impl ProofExtractor {
             }
 
             // Theory lemma (SMT theory reasoning)
-            DeclKind::PR_TH_LEMMA => {
+            DeclKind::PrThLemma => {
                 let theory_name = decl.name();
                 Maybe::Some(ProofTerm::TheoryLemma {
                     theory: theory_name.into(),
@@ -1512,7 +1512,7 @@ impl ProofExtractor {
             }
 
             // Unit resolution (SAT reasoning)
-            DeclKind::PR_UNIT_RESOLUTION => {
+            DeclKind::PrUnitResolution => {
                 let mut clauses = List::new();
                 for i in 0..num_args {
                     if let Some(clause_ast) = proof.nth_child(i)
@@ -1527,7 +1527,7 @@ impl ProofExtractor {
             }
 
             // Quantifier instantiation
-            DeclKind::PR_QUANT_INST => {
+            DeclKind::PrQuantInst => {
                 if num_args >= 1 {
                     let quantified = proof.nth_child(0)?;
                     let quant_term = self.parse_proof_object(&quantified, depth + 1)?;
@@ -1551,7 +1551,7 @@ impl ProofExtractor {
             }
 
             // Lemma
-            DeclKind::PR_LEMMA => {
+            DeclKind::PrLemma => {
                 if num_args >= 1 {
                     let proof_child = proof.nth_child(0)?;
                     let proof_term = self.parse_proof_object(&proof_child, depth + 1)?;
@@ -1566,25 +1566,25 @@ impl ProofExtractor {
             }
 
             // Hypothesis (local assumption)
-            DeclKind::PR_HYPOTHESIS => {
+            DeclKind::PrHypothesis => {
                 let id = num_args; // Use number of args as ID
                 Maybe::Some(ProofTerm::Hypothesis { id, formula })
             }
 
             // Goal
-            DeclKind::PR_GOAL => Maybe::Some(ProofTerm::Axiom {
+            DeclKind::PrGoal => Maybe::Some(ProofTerm::Axiom {
                 name: "goal".to_text(),
                 formula,
             }),
 
             // True constant
-            DeclKind::PR_TRUE => Maybe::Some(ProofTerm::Axiom {
+            DeclKind::PrTrue => Maybe::Some(ProofTerm::Axiom {
                 name: "true".to_text(),
                 formula: "true".to_text(),
             }),
 
             // Hyper resolution (generalized unit resolution)
-            DeclKind::PR_HYPER_RESOLVE => {
+            DeclKind::PrHyperResolve => {
                 let mut clauses = List::new();
                 for i in 0..num_args {
                     if let Some(clause_ast) = proof.nth_child(i)
@@ -1602,7 +1602,7 @@ impl ProofExtractor {
             }
 
             // And elimination: from (and l_1 ... l_n), derive l_i
-            DeclKind::PR_AND_ELIM => {
+            DeclKind::PrAndElim => {
                 if num_args >= 1 {
                     let conjunction_ast = proof.nth_child(0)?;
                     let conjunction_term = self.parse_proof_object(&conjunction_ast, depth + 1)?;
@@ -1622,7 +1622,7 @@ impl ProofExtractor {
             }
 
             // Not-or elimination: from (not (or l_1 ... l_n)), derive (not l_i)
-            DeclKind::PR_NOT_OR_ELIM => {
+            DeclKind::PrNotOrElim => {
                 if num_args >= 1 {
                     let negated_disjunction_ast = proof.nth_child(0)?;
                     let negated_disjunction_term =
@@ -1641,7 +1641,7 @@ impl ProofExtractor {
             }
 
             // Iff-true: from p, derive (iff p true)
-            DeclKind::PR_IFF_TRUE => {
+            DeclKind::PrIffTrue => {
                 if num_args >= 1 {
                     let proof_ast = proof.nth_child(0)?;
                     let proof_term = self.parse_proof_object(&proof_ast, depth + 1)?;
@@ -1657,7 +1657,7 @@ impl ProofExtractor {
             }
 
             // Iff-false: from (not p), derive (iff p false)
-            DeclKind::PR_IFF_FALSE => {
+            DeclKind::PrIffFalse => {
                 if num_args >= 1 {
                     let proof_ast = proof.nth_child(0)?;
                     let proof_term = self.parse_proof_object(&proof_ast, depth + 1)?;
@@ -1680,7 +1680,7 @@ impl ProofExtractor {
             }
 
             // Commutativity: (= (f a b) (f b a)) for commutative f
-            DeclKind::PR_COMMUTATIVITY => {
+            DeclKind::PrCommutativity => {
                 // Commutativity has no antecedents - extract from formula
                 // Formula is of the form (= (f a b) (f b a))
                 let (left, right) = Self::extract_equality_sides(&formula);
@@ -1688,7 +1688,7 @@ impl ProofExtractor {
             }
 
             // Monotonicity: from component proofs, derive function application equality
-            DeclKind::PR_MONOTONICITY => {
+            DeclKind::PrMonotonicity => {
                 let mut premises = List::new();
                 for i in 0..num_args {
                     if let Some(premise_ast) = proof.nth_child(i)
@@ -1706,13 +1706,13 @@ impl ProofExtractor {
             }
 
             // Distributivity: no antecedents, conclusion is the distributivity formula
-            DeclKind::PR_DISTRIBUTIVITY => Maybe::Some(ProofTerm::Distributivity { formula }),
+            DeclKind::PrDistributivity => Maybe::Some(ProofTerm::Distributivity { formula }),
 
             // Definition axiom: Tseitin-style CNF axiom
-            DeclKind::PR_DEF_AXIOM => Maybe::Some(ProofTerm::DefAxiom { formula }),
+            DeclKind::PrDefAxiom => Maybe::Some(ProofTerm::DefAxiom { formula }),
 
             // Definition introduction: introduces a name for an expression
-            DeclKind::PR_DEF_INTRO => {
+            DeclKind::PrDefIntro => {
                 // Extract the name being defined from the formula
                 // Format: (and (or n (not e)) (or (not n) e)) or (= n e)
                 let name = if let Some(idx) = formula.as_str().find("=") {
@@ -1733,7 +1733,7 @@ impl ProofExtractor {
             }
 
             // Apply definition: F ~ n given that n is defined as F
-            DeclKind::PR_APPLY_DEF => {
+            DeclKind::PrApplyDef => {
                 if num_args >= 1 {
                     let def_proof_ast = proof.nth_child(0)?;
                     let def_proof_term = self.parse_proof_object(&def_proof_ast, depth + 1)?;
@@ -1761,7 +1761,7 @@ impl ProofExtractor {
             }
 
             // Iff to oriented equality: from (iff p q), derive (~ p q)
-            DeclKind::PR_IFF_OEQ => {
+            DeclKind::PrIffOeq => {
                 if num_args >= 1 {
                     let iff_proof_ast = proof.nth_child(0)?;
                     let iff_proof_term = self.parse_proof_object(&iff_proof_ast, depth + 1)?;
@@ -1781,7 +1781,7 @@ impl ProofExtractor {
             }
 
             // NNF positive: negation normal form (positive context)
-            DeclKind::PR_NNF_POS => {
+            DeclKind::PrNnfPos => {
                 let mut premises = List::new();
                 for i in 0..num_args {
                     if let Some(premise_ast) = proof.nth_child(i)
@@ -1799,7 +1799,7 @@ impl ProofExtractor {
             }
 
             // NNF negative: negation normal form (negative context)
-            DeclKind::PR_NNF_NEG => {
+            DeclKind::PrNnfNeg => {
                 let mut premises = List::new();
                 for i in 0..num_args {
                     if let Some(premise_ast) = proof.nth_child(i)
@@ -1817,10 +1817,10 @@ impl ProofExtractor {
             }
 
             // Skolemization: introduce Skolem functions
-            DeclKind::PR_SKOLEMIZE => Maybe::Some(ProofTerm::Skolemize { formula }),
+            DeclKind::PrSkolemize => Maybe::Some(ProofTerm::Skolemize { formula }),
 
             // Quantifier introduction: from (~ p q), derive (~ (forall x p) (forall x q))
-            DeclKind::PR_QUANT_INTRO => {
+            DeclKind::PrQuantIntro => {
                 if num_args >= 1 {
                     let body_proof_ast = proof.nth_child(0)?;
                     let body_proof_term = self.parse_proof_object(&body_proof_ast, depth + 1)?;
@@ -1835,7 +1835,7 @@ impl ProofExtractor {
             }
 
             // Proof bind: from f, derive (forall x f)
-            DeclKind::PR_BIND => {
+            DeclKind::PrBind => {
                 if num_args >= 1 {
                     let body_proof_ast = proof.nth_child(0)?;
                     let body_proof_term = self.parse_proof_object(&body_proof_ast, depth + 1)?;
@@ -1854,16 +1854,16 @@ impl ProofExtractor {
             }
 
             // Pull quantifier: pull quantifier out of formula
-            DeclKind::PR_PULL_QUANT => Maybe::Some(ProofTerm::PullQuant { formula }),
+            DeclKind::PrPullQuant => Maybe::Some(ProofTerm::PullQuant { formula }),
 
             // Push quantifier: push quantifier into formula
-            DeclKind::PR_PUSH_QUANT => Maybe::Some(ProofTerm::PushQuant { formula }),
+            DeclKind::PrPushQuant => Maybe::Some(ProofTerm::PushQuant { formula }),
 
             // Eliminate unused variables
-            DeclKind::PR_ELIM_UNUSED_VARS => Maybe::Some(ProofTerm::ElimUnusedVars { formula }),
+            DeclKind::PrElimUnusedVars => Maybe::Some(ProofTerm::ElimUnusedVars { formula }),
 
             // Destructive equality resolution
-            DeclKind::PR_DER => Maybe::Some(ProofTerm::DestructiveEqRes { formula }),
+            DeclKind::PrDer => Maybe::Some(ProofTerm::DestructiveEqRes { formula }),
 
             // Unknown/undefined proof rule
             _ => {

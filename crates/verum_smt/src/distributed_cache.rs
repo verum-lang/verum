@@ -570,7 +570,7 @@ impl DistributedCache {
             }
             TrustLevel::Sampling { sample_rate } => {
                 // Probabilistically verify - sample_rate% of entries are verified
-                use rand::Rng;
+                use rand::RngExt;
                 let mut rng = rand::rng();
                 if rng.random_bool(sample_rate) {
                     // Verify this entry
@@ -1440,7 +1440,7 @@ type VerifyingKey = ed25519_dalek::VerifyingKey;
 /// Generate new signing key
 fn generate_signing_key() -> SigningKey {
     use ed25519_dalek::SigningKey;
-    use rand::Rng;
+    use rand::RngExt;
 
     // Generate 32 random bytes for the signing key
     let mut seed = [0u8; 32];

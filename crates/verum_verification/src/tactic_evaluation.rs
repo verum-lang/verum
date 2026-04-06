@@ -3654,7 +3654,7 @@ impl TacticEvaluator {
                     // Handle different declaration kinds
                     match decl_kind {
                         // Constants/Variables
-                        z3::DeclKind::UNINTERPRETED => {
+                        z3::DeclKind::Uninterpreted => {
                             let name_str = decl.name();
                             let var_name = var_names
                                 .get(&name_str)
@@ -3670,27 +3670,27 @@ impl TacticEvaluator {
                         }
 
                         // Boolean operations
-                        z3::DeclKind::TRUE => Ok(Expr::new(
+                        z3::DeclKind::True => Ok(Expr::new(
                             ExprKind::Literal(verum_ast::Literal::new(
                                 LiteralKind::Bool(true),
                                 Span::default(),
                             )),
                             Span::default(),
                         )),
-                        z3::DeclKind::FALSE => Ok(Expr::new(
+                        z3::DeclKind::False => Ok(Expr::new(
                             ExprKind::Literal(verum_ast::Literal::new(
                                 LiteralKind::Bool(false),
                                 Span::default(),
                             )),
                             Span::default(),
                         )),
-                        z3::DeclKind::AND => {
+                        z3::DeclKind::And => {
                             Self::translate_z3_nary_op(z3_ast, num_args, BinOp::And, var_names)
                         }
-                        z3::DeclKind::OR => {
+                        z3::DeclKind::Or => {
                             Self::translate_z3_nary_op(z3_ast, num_args, BinOp::Or, var_names)
                         }
-                        z3::DeclKind::NOT => {
+                        z3::DeclKind::Not => {
                             if num_args == 1 {
                                 let child = z3_ast.nth_child(0).ok_or_else(|| {
                                     TacticError::SmtError(Text::from("NOT missing child"))
@@ -3707,14 +3707,14 @@ impl TacticEvaluator {
                                 Err(TacticError::SmtError(Text::from("NOT expects 1 argument")))
                             }
                         }
-                        z3::DeclKind::IMPLIES => {
+                        z3::DeclKind::Implies => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Imply, var_names)
                         }
-                        z3::DeclKind::IFF => {
+                        z3::DeclKind::Iff => {
                             // IFF is equivalent to (a == b) for booleans
                             Self::translate_z3_binary_op(z3_ast, BinOp::Eq, var_names)
                         }
-                        z3::DeclKind::ITE => {
+                        z3::DeclKind::Ite => {
                             // If-then-else
                             if num_args == 3 {
                                 let cond_z3 = z3_ast.nth_child(0).ok_or_else(|| {
@@ -3758,10 +3758,10 @@ impl TacticEvaluator {
                         }
 
                         // Comparison operations
-                        z3::DeclKind::EQ => {
+                        z3::DeclKind::Eq => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Eq, var_names)
                         }
-                        z3::DeclKind::DISTINCT => {
+                        z3::DeclKind::Distinct => {
                             // DISTINCT(a, b) is equivalent to a != b for 2 args
                             if num_args == 2 {
                                 Self::translate_z3_binary_op(z3_ast, BinOp::Ne, var_names)
@@ -3772,36 +3772,36 @@ impl TacticEvaluator {
                                 )))
                             }
                         }
-                        z3::DeclKind::LT => {
+                        z3::DeclKind::Lt => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Lt, var_names)
                         }
-                        z3::DeclKind::LE => {
+                        z3::DeclKind::Le => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Le, var_names)
                         }
-                        z3::DeclKind::GT => {
+                        z3::DeclKind::Gt => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Gt, var_names)
                         }
-                        z3::DeclKind::GE => {
+                        z3::DeclKind::Ge => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Ge, var_names)
                         }
 
                         // Arithmetic operations
-                        z3::DeclKind::ADD => {
+                        z3::DeclKind::Add => {
                             Self::translate_z3_nary_op(z3_ast, num_args, BinOp::Add, var_names)
                         }
-                        z3::DeclKind::SUB => {
+                        z3::DeclKind::Sub => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Sub, var_names)
                         }
-                        z3::DeclKind::MUL => {
+                        z3::DeclKind::Mul => {
                             Self::translate_z3_nary_op(z3_ast, num_args, BinOp::Mul, var_names)
                         }
-                        z3::DeclKind::DIV | z3::DeclKind::IDIV => {
+                        z3::DeclKind::Div | z3::DeclKind::Idiv => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Div, var_names)
                         }
-                        z3::DeclKind::MOD | z3::DeclKind::REM => {
+                        z3::DeclKind::Mod | z3::DeclKind::Rem => {
                             Self::translate_z3_binary_op(z3_ast, BinOp::Rem, var_names)
                         }
-                        z3::DeclKind::UMINUS => {
+                        z3::DeclKind::Uminus => {
                             if num_args == 1 {
                                 let child = z3_ast.nth_child(0).ok_or_else(|| {
                                     TacticError::SmtError(Text::from("UMINUS missing child"))

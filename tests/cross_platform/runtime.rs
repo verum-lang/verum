@@ -110,13 +110,13 @@ mod tests {
 
     #[test]
     fn test_random_number_generation() {
-        use rand::Rng;
+        use rand::RngExt;
 
         let mut rng = rand::rng();
-        let value: u32 = rng.gen();
+        let value: u32 = rng.random();
         println!("Random value: {}", value);
 
-        let values: Vec<u32> = (0..100).map(|_| rng.gen()).collect();
+        let values: Vec<u32> = (0..100).map(|_| rng.random()).collect();
         assert_eq!(values.len(), 100);
     }
 }

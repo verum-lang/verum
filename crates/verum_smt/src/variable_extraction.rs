@@ -128,7 +128,7 @@ fn compute_ast_hash(node: &Dynamic) -> u64 {
 /// Check if a DeclKind represents a user variable (uninterpreted constant)
 #[inline]
 fn is_variable_decl_kind(kind: DeclKind) -> bool {
-    matches!(kind, DeclKind::UNINTERPRETED)
+    matches!(kind, DeclKind::Uninterpreted)
 }
 
 /// Check if a name is a user variable (not Z3 internal)

@@ -384,7 +384,7 @@ impl FixedPointEngine {
                     z3::SortKind::Int => Sort::int(),
                     z3::SortKind::Bool => Sort::bool(),
                     z3::SortKind::Real => Sort::real(),
-                    z3::SortKind::BV => Sort::bitvector(32), // Default BV size
+                    z3::SortKind::Bv => Sort::bitvector(32), // Default BV size
                     _ => Sort::int(),                        // Default fallback
                 };
                 domain_sorts.push(sort);
@@ -457,7 +457,7 @@ impl FixedPointEngine {
                 self.fp.ctx_ptr(),
                 self.fp.as_ptr(),
                 get_z3_ast(rule),
-                symbol,
+                Some(symbol),
             );
         }
 
@@ -620,9 +620,9 @@ impl FixedPointEngine {
 
         // DeclKind is the high-level enum returned by Z3_get_decl_kind
         match kind {
-            DeclKind::TRUE => Ok(1),
-            DeclKind::FALSE => Ok(0),
-            DeclKind::BNUM => {
+            DeclKind::True => Ok(1),
+            DeclKind::False => Ok(0),
+            DeclKind::Bnum => {
                 // Bitvector numeral - extract value
                 self.extract_numeral_value(ctx, ast)
             }
