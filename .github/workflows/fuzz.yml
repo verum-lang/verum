@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -140,7 +140,7 @@ jobs:
           - fuzz_target_capabilities
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -191,7 +191,7 @@ jobs:
     if: always()
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
         uses: actions/download-artifact@v3

@@ -35,7 +35,7 @@ jobs:
     name: WASM Compile Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -83,7 +83,7 @@ jobs:
         # wasmer can be added when WASI support is stable
         # runtime: [wasmtime, wasmer]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download compiler artifact
         uses: actions/download-artifact@v4

@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -152,7 +152,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -171,7 +171,7 @@ jobs:
           path: current/
 
       - name: Checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           path: main-branch
@@ -201,7 +201,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download benchmark results
         uses: actions/download-artifact@v3
@@ -247,7 +247,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download benchmark results
         uses: actions/download-artifact@v3

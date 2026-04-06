@@ -167,7 +167,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -209,7 +209,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download previous corpus
         uses: dawidd6/action-download-artifact@v3
@@ -268,7 +268,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -369,7 +369,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -461,7 +461,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -522,7 +522,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -589,7 +589,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly

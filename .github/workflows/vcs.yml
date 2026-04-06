@@ -18,7 +18,7 @@ jobs:
     name: L0 Critical Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run L0 tests
@@ -35,7 +35,7 @@ jobs:
     needs: l0-critical
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Z3
@@ -54,7 +54,7 @@ jobs:
     needs: l1-core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
@@ -68,7 +68,7 @@ jobs:
     needs: l1-core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run differential tests
@@ -80,7 +80,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install LLVM and Z3
@@ -100,7 +100,7 @@ jobs:
     needs: [l0-critical, l1-core, l2-standard, differential]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
       - name: Generate HTML report
         run: cargo run -p verum_vtest -- report --format html --output vcs-report.html
