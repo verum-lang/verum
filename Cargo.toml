@@ -38,8 +38,6 @@ members = [
     "vcs/runner/vtest",
     "vcs/runner/vbench",
     "vcs/runner/vfuzz",
-    "vcs/differential/runner",
-    "vcs/fuzz",
     "vcs/proof_stability",
 ]
 
