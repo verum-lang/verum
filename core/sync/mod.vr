@@ -1,0 +1,159 @@
+// =============================================================================
+// sync/mod.vr - Synchronization primitives module
+// =============================================================================
+// Layer: 2.5 (Between Collections and I/O)
+// Dependencies: core
+// =============================================================================
+//
+// This module provides thread-safe synchronization primitives:
+//
+// - atomic.vr: Atomic types (AtomicInt, AtomicBool, AtomicPtr)
+// - mutex.vr: Mutex<T> for mutual exclusion
+// - rwlock.vr: RwLock<T> for read-write locking
+// - condvar.vr: Condvar for condition variables
+// - semaphore.vr: Semaphore for counting semaphore
+// - once.vr: Once for one-time initialization
+// - barrier.vr: Barrier for thread synchronization
+//
+// =============================================================================
+
+module sync;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module atomic;
+public module mutex;
+public module rwlock;
+public module once;
+public module semaphore;
+public module condvar;
+public module barrier;
+public module waitgroup;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// From atomic
+public mount .atomic.AtomicInt;
+public mount .atomic.AtomicU8;
+public mount .atomic.AtomicU16;
+public mount .atomic.AtomicU32;
+public mount .atomic.AtomicU64;
+public mount .atomic.AtomicBool;
+public mount .atomic.AtomicPtr;
+public mount .atomic.MemoryOrdering;
+public mount .atomic.AtomicOrdering;
+public mount .atomic.Ordering;
+public mount .atomic.fence;
+// Note: compiler_fence is available via link from stdlib.intrinsics.compiler_fence
+
+// From mutex
+public mount .mutex.Mutex;
+public mount .mutex.MutexGuard;
+
+// From rwlock
+public mount .rwlock.RwLock;
+public mount .rwlock.RwLockReadGuard;
+public mount .rwlock.RwLockWriteGuard;
+
+// From once
+public mount .once.Once;
+public mount .once.OnceState;
+
+// From semaphore
+public mount .semaphore.Semaphore;
+public mount .semaphore.SemaphoreGuard;
+
+// From condvar
+public mount .condvar.Condvar;
+public mount .condvar.CondvarNotifyGuard;
+public mount .condvar.producer_consumer_pair;
+
+// From barrier
+public mount .barrier.Barrier;
+public mount .barrier.BarrierWaitResult;
+public mount .barrier.Phaser;
+public mount .barrier.CountDownLatch;
+
+// From waitgroup
+public mount .waitgroup.WaitGroup;
+
+// =============================================================================
+// Marker Protocols (re-exported from core/base/protocols.vr)
+// =============================================================================
+
+// NOTE: Send and Sync protocols are defined in core/base/protocols.vr (canonical source).
+// We re-export them here for convenience.
+mount core.base.protocols.{Send, Sync};
+
+// All primitive types implement Send && Sync
+implement Send for Int {}
+implement Sync for Int {}
+implement Send for Float {}
+implement Sync for Float {}
+implement Send for Bool {}
+implement Sync for Bool {}
+implement Send for Byte {}
+implement Sync for Byte {}
+implement Send for Char {}
+implement Sync for Char {}
+
+// Text (immutable string) is Send + Sync
+implement Send for Text {}
+implement Sync for Text {}
+
+// Collection types: Send/Sync when element types are Send/Sync
+implement Send for List<T> where T: Send {}
+implement Sync for List<T> where T: Send + Sync {}
+
+implement Send for Map<K, V> where K: Send, V: Send {}
+implement Sync for Map<K, V> where K: Send + Sync, V: Send + Sync {}
+
+implement Send for Set<T> where T: Send {}
+implement Sync for Set<T> where T: Send + Sync {}
+
+// Heap<T> (owned heap allocation) — Send if T is Send
+implement Send for Heap<T> where T: Send {}
+implement Sync for Heap<T> where T: Send + Sync {}
+
+// Shared<T> (atomic reference counted) — Send + Sync if T is Send + Sync
+implement Send for Shared<T> where T: Send + Sync {}
+implement Sync for Shared<T> where T: Send + Sync {}
+
+// Channel<T> — Send if T is Send (channels transfer ownership)
+implement Send for Channel<T> where T: Send {}
+implement Sync for Channel<T> where T: Send {}
+
+// Mutex<T> — always Sync (that's its purpose), Send if T is Send
+implement Send for Mutex<T> where T: Send {}
+implement Sync for Mutex<T> where T: Send {}
+
+// Maybe<T> / Result<T, E> — Send/Sync if contents are
+implement Send for Maybe<T> where T: Send {}
+implement Sync for Maybe<T> where T: Send + Sync {}
+
+implement Send for Result<T, E> where T: Send, E: Send {}
+implement Sync for Result<T, E> where T: Send + Sync, E: Send + Sync {}
+
+// AtomicInt / AtomicBool are always Send + Sync
+implement Send for AtomicInt {}
+implement Sync for AtomicInt {}
+implement Send for AtomicBool {}
+implement Sync for AtomicBool {}
+
+// =============================================================================
+// Prelude exports
+// =============================================================================
+
+public module prelude {
+    public mount super.Mutex;
+    public mount super.MutexGuard;
+    public mount super.RwLock;
+    public mount super.AtomicInt;
+    public mount super.AtomicBool;
+    public mount super.Send;
+    public mount super.Sync;
+}

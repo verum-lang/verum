@@ -1,0 +1,209 @@
+// =============================================================================
+// style/theme.vr - Semantic theme system
+// =============================================================================
+// Theme maps semantic roles (surface, primary, error, text, etc.) to concrete
+// styles. Includes Catppuccin-inspired dark and light factory methods, plus
+// auto-detection via OSC 11 background color query.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.3
+// =============================================================================
+
+module theme;
+
+mount super.color.{Color, Rgb};
+mount super.style.Style;
+mount super.modifier.Modifier;
+
+// =============================================================================
+// Theme — semantic color roles
+// =============================================================================
+
+/// Theme defines visual styles through semantic roles, not concrete colors.
+/// Switching between dark() and light() changes the entire application palette.
+///
+/// Roles are organized into categories:
+/// - Surface: background areas and text on them
+/// - Interactive: primary/secondary accent colors
+/// - Semantic: error, warning, success, info
+/// - Border: borders and dividers
+/// - Text: various text emphasis levels
+/// - Selection: cursor and selection highlight
+public type Theme is {
+    // Surface (background) roles
+    surface: Style,           // Primary background
+    surface_dim: Style,       // Secondary panel background
+    on_surface: Style,        // Text on primary background
+
+    // Interactive element roles
+    primary: Style,           // Main accent (buttons, links, focus rings)
+    on_primary: Style,        // Text on primary-colored background
+    secondary: Style,         // Secondary accent
+    on_secondary: Style,      // Text on secondary-colored background
+
+    // Semantic roles
+    error: Style,             // Errors, destructive actions
+    warning: Style,           // Warnings, caution
+    success: Style,           // Success, confirmations
+    info: Style,              // Informational messages
+
+    // Border and divider roles
+    border: Style,            // Default border
+    border_focused: Style,    // Focused element border
+    divider: Style,           // Separator lines
+
+    // Text emphasis roles
+    text: Style,              // Default text
+    text_dim: Style,          // Dimmed / secondary text
+    text_muted: Style,        // Muted / disabled text
+    text_highlight: Style,    // Highlighted / important text
+
+    // Selection and cursor
+    selection: Style,         // Selected text background
+    cursor: Style,            // Cursor appearance
+};
+
+implement Theme {
+    /// Standard dark theme (Catppuccin Mocha inspired).
+    ///
+    /// Base palette:
+    ///   Surface:   #1E1E2E (Mocha Base)
+    ///   Surface2:  #181825 (Mocha Mantle)
+    ///   Text:      #CDD6F4 (Mocha Text)
+    ///   Primary:   #89B4FA (Mocha Blue)
+    ///   Secondary: #B4BEFE (Mocha Lavender)
+    ///   Error:     #F38BA8 (Mocha Red)
+    ///   Warning:   #F9E2AF (Mocha Yellow)
+    ///   Success:   #A6E3A1 (Mocha Green)
+    ///   Info:      #94E2D5 (Mocha Teal)
+    public fn dark() -> Theme {
+        Theme {
+            // Surface
+            surface:         Style.new().bg(Color.Rgb(Rgb.new(30, 30, 46))),
+            surface_dim:     Style.new().bg(Color.Rgb(Rgb.new(24, 24, 37))),
+            on_surface:      Style.new().fg(Color.Rgb(Rgb.new(205, 214, 244))),
+
+            // Interactive
+            primary:         Style.new().fg(Color.Rgb(Rgb.new(137, 180, 250))),
+            on_primary:      Style.new()
+                                .fg(Color.Rgb(Rgb.new(30, 30, 46)))
+                                .bg(Color.Rgb(Rgb.new(137, 180, 250))),
+            secondary:       Style.new().fg(Color.Rgb(Rgb.new(180, 190, 254))),
+            on_secondary:    Style.new().fg(Color.Rgb(Rgb.new(30, 30, 46))),
+
+            // Semantic
+            error:           Style.new().fg(Color.Rgb(Rgb.new(243, 139, 168))),
+            warning:         Style.new().fg(Color.Rgb(Rgb.new(249, 226, 175))),
+            success:         Style.new().fg(Color.Rgb(Rgb.new(166, 227, 161))),
+            info:            Style.new().fg(Color.Rgb(Rgb.new(148, 226, 213))),
+
+            // Borders
+            border:          Style.new().fg(Color.Rgb(Rgb.new(88, 91, 112))),
+            border_focused:  Style.new().fg(Color.Rgb(Rgb.new(137, 180, 250))),
+            divider:         Style.new().fg(Color.Rgb(Rgb.new(69, 71, 90))),
+
+            // Text
+            text:            Style.new().fg(Color.Rgb(Rgb.new(205, 214, 244))),
+            text_dim:        Style.new().fg(Color.Rgb(Rgb.new(147, 153, 178))),
+            text_muted:      Style.new().fg(Color.Rgb(Rgb.new(108, 112, 134))),
+            text_highlight:  Style.new().fg(Color.Rgb(Rgb.new(249, 226, 175))).bold(),
+
+            // Selection
+            selection:       Style.new().bg(Color.Rgb(Rgb.new(69, 71, 90))),
+            cursor:          Style.new().reversed(),
+        }
+    }
+
+    /// Standard light theme (Catppuccin Latte inspired).
+    ///
+    /// Base palette:
+    ///   Surface:   #EFF1F5 (Latte Base)
+    ///   Surface2:  #DCE0E8 (Latte Mantle)
+    ///   Text:      #4C4F69 (Latte Text)
+    ///   Primary:   #1E66F5 (Latte Blue)
+    ///   Secondary: #7287FD (Latte Lavender)
+    ///   Error:     #D20F39 (Latte Red)
+    ///   Warning:   #DF8E1D (Latte Yellow)
+    ///   Success:   #40A02B (Latte Green)
+    ///   Info:      #179299 (Latte Teal)
+    public fn light() -> Theme {
+        Theme {
+            // Surface
+            surface:         Style.new().bg(Color.Rgb(Rgb.new(239, 241, 245))),
+            surface_dim:     Style.new().bg(Color.Rgb(Rgb.new(220, 224, 232))),
+            on_surface:      Style.new().fg(Color.Rgb(Rgb.new(76, 79, 105))),
+
+            // Interactive
+            primary:         Style.new().fg(Color.Rgb(Rgb.new(30, 102, 245))),
+            on_primary:      Style.new()
+                                .fg(Color.Rgb(Rgb.new(239, 241, 245)))
+                                .bg(Color.Rgb(Rgb.new(30, 102, 245))),
+            secondary:       Style.new().fg(Color.Rgb(Rgb.new(114, 135, 253))),
+            on_secondary:    Style.new().fg(Color.Rgb(Rgb.new(239, 241, 245))),
+
+            // Semantic
+            error:           Style.new().fg(Color.Rgb(Rgb.new(210, 15, 57))),
+            warning:         Style.new().fg(Color.Rgb(Rgb.new(223, 142, 29))),
+            success:         Style.new().fg(Color.Rgb(Rgb.new(64, 160, 43))),
+            info:            Style.new().fg(Color.Rgb(Rgb.new(23, 146, 153))),
+
+            // Borders
+            border:          Style.new().fg(Color.Rgb(Rgb.new(172, 176, 190))),
+            border_focused:  Style.new().fg(Color.Rgb(Rgb.new(30, 102, 245))),
+            divider:         Style.new().fg(Color.Rgb(Rgb.new(188, 192, 204))),
+
+            // Text
+            text:            Style.new().fg(Color.Rgb(Rgb.new(76, 79, 105))),
+            text_dim:        Style.new().fg(Color.Rgb(Rgb.new(124, 127, 147))),
+            text_muted:      Style.new().fg(Color.Rgb(Rgb.new(156, 160, 176))),
+            text_highlight:  Style.new().fg(Color.Rgb(Rgb.new(223, 142, 29))).bold(),
+
+            // Selection
+            selection:       Style.new().bg(Color.Rgb(Rgb.new(188, 192, 204))),
+            cursor:          Style.new().reversed(),
+        }
+    }
+
+    /// Auto-detect theme based on terminal background color.
+    /// Queries the terminal via OSC 11; if the background luminance
+    /// is above 0.5, selects light theme; otherwise dark.
+    /// Falls back to dark theme if detection fails.
+    public fn auto_detect(bg_color: Maybe<Rgb>) -> Theme {
+        match bg_color {
+            Some(bg) => {
+                let luminance = 0.299 * (bg.r as Float / 255.0)
+                              + 0.587 * (bg.g as Float / 255.0)
+                              + 0.114 * (bg.b as Float / 255.0);
+                if luminance > 0.5 { Theme.light() } else { Theme.dark() }
+            }
+            None => Theme.dark(),
+        }
+    }
+
+    /// Get the appropriate style for a given semantic role by name.
+    /// Useful for dynamic / configuration-driven theming.
+    public fn role(&self, name: &Text) -> Style {
+        match name.as_str() {
+            "surface"        => self.surface,
+            "surface_dim"    => self.surface_dim,
+            "on_surface"     => self.on_surface,
+            "primary"        => self.primary,
+            "on_primary"     => self.on_primary,
+            "secondary"      => self.secondary,
+            "on_secondary"   => self.on_secondary,
+            "error"          => self.error,
+            "warning"        => self.warning,
+            "success"        => self.success,
+            "info"           => self.info,
+            "border"         => self.border,
+            "border_focused" => self.border_focused,
+            "divider"        => self.divider,
+            "text"           => self.text,
+            "text_dim"       => self.text_dim,
+            "text_muted"     => self.text_muted,
+            "text_highlight" => self.text_highlight,
+            "selection"      => self.selection,
+            "cursor"         => self.cursor,
+            _                => Style.new(),
+        }
+    }
+}

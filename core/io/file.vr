@@ -1,0 +1,630 @@
+// =============================================================================
+// file.vr - File operations
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, io/protocols, io/path, sys/{linux,darwin,windows}/syscall
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI system interfaces:
+// - Linux: Uses sys/linux/syscall.{open, close, read, write, lseek, fstat, fsync}
+// - macOS: Uses sys/darwin/libsystem bindings to libSystem.B.dylib
+// - Windows: Uses sys/windows/kernel32 bindings to kernel32.dll
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// This module provides file I/O operations.
+//
+// =============================================================================
+
+module core.io.file;
+mount core.*;
+mount io.protocols.*;
+
+// =============================================================================
+// V-LLSI Native I/O Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{
+    open as sys_open,
+    close as sys_close,
+    read as sys_read,
+    write as sys_write,
+    lseek as sys_lseek,
+    fstat as sys_fstat,
+    fsync as sys_fsync,
+    ftruncate as sys_ftruncate,
+    dup as sys_dup,
+    FileDesc,
+    Stat,
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{
+    safe_open as sys_open,
+    safe_close as sys_close,
+    safe_read as sys_read,
+    safe_write as sys_write,
+    safe_lseek as sys_lseek,
+    safe_fstat as sys_fstat,
+    safe_fsync as sys_fsync,
+    safe_ftruncate as sys_ftruncate,
+    safe_dup as sys_dup,
+    Stat,
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+};
+@cfg(target_os = "macos")
+mount sys.common.FileDesc;
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{
+    safe_open as sys_open,
+    safe_close as sys_close,
+    safe_read as sys_read,
+    safe_write as sys_write,
+    safe_lseek as sys_lseek,
+    safe_fstat as sys_fstat,
+    safe_fsync as sys_fsync,
+    safe_ftruncate as sys_ftruncate,
+    safe_dup as sys_dup,
+    Stat,
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+};
+@cfg(target_os = "windows")
+mount sys.common.FileDesc;
+
+// =============================================================================
+// Open Flags (Re-exported from sys layer for convenience)
+// =============================================================================
+// These constants are re-exported for user convenience.
+
+// Platform-agnostic open flag values (POSIX standard)
+/// Open for reading only.
+public const O_RDONLY: Int = 0x0000;
+/// Open for writing only.
+public const O_WRONLY: Int = 0x0001;
+/// Open for reading and writing.
+public const O_RDWR: Int = 0x0002;
+/// Create file if it does not exist.
+public const O_CREAT: Int = 0x0200;
+/// Fail if file exists (with O_CREAT).
+public const O_EXCL: Int = 0x0800;
+/// Truncate file to zero length.
+public const O_TRUNC: Int = 0x0400;
+/// Append to end of file.
+public const O_APPEND: Int = 0x0008;
+
+// =============================================================================
+// OpenOptions
+// =============================================================================
+
+// Options for opening a file.
+public type OpenOptions is {
+    read: Bool,
+    write: Bool,
+    append: Bool,
+    truncate: Bool,
+    create: Bool,
+    create_new: Bool,
+};
+
+implement OpenOptions {
+    // Create default options.
+    public fn new() -> OpenOptions {
+        OpenOptions {
+            read: false,
+            write: false,
+            append: false,
+            truncate: false,
+            create: false,
+            create_new: false,
+        }
+    }
+
+    // Enable reading.
+    public fn read(&mut self, read: Bool) -> &mut OpenOptions {
+        self.read = read;
+        self
+    }
+
+    // Enable writing.
+    public fn write(&mut self, write: Bool) -> &mut OpenOptions {
+        self.write = write;
+        self
+    }
+
+    // Enable append mode.
+    public fn append(&mut self, append: Bool) -> &mut OpenOptions {
+        self.append = append;
+        self
+    }
+
+    // Enable truncation.
+    public fn truncate(&mut self, truncate: Bool) -> &mut OpenOptions {
+        self.truncate = truncate;
+        self
+    }
+
+    // Enable creation.
+    public fn create(&mut self, create: Bool) -> &mut OpenOptions {
+        self.create = create;
+        self
+    }
+
+    // Enable create new (fail if exists).
+    public fn create_new(&mut self, create_new: Bool) -> &mut OpenOptions {
+        self.create_new = create_new;
+        self
+    }
+
+    // Open file with these options.
+    public fn open(&self, path: &Text) -> IoResult<File> {
+        let mut flags = 0;
+
+        // Determine access mode
+        if self.read && self.write {
+            flags = flags | O_RDWR;
+        } else if self.write {
+            flags = flags | O_WRONLY;
+        } else {
+            flags = flags | O_RDONLY;
+        }
+
+        // Additional flags
+        if self.create {
+            flags = flags | O_CREAT;
+        }
+        if self.create_new {
+            flags = flags | O_CREAT | O_EXCL;
+        }
+        if self.truncate {
+            flags = flags | O_TRUNC;
+        }
+        if self.append {
+            flags = flags | O_APPEND;
+        }
+
+        File.open_with_flags(path, flags)
+    }
+}
+
+// =============================================================================
+// File
+// =============================================================================
+
+// File handle.
+public type File is {
+    fd: Int,
+};
+
+implement File {
+    // Open file for reading.
+    public fn open(path: &Text) -> IoResult<File> {
+        File.open_with_flags(path, O_RDONLY)
+    }
+
+    // Create file for writing (truncates if exists).
+    public fn create(path: &Text) -> IoResult<File> {
+        File.open_with_flags(path, O_WRONLY | O_CREAT | O_TRUNC)
+    }
+
+    // Create file, error if exists.
+    public fn create_new(path: &Text) -> IoResult<File> {
+        File.open_with_flags(path, O_WRONLY | O_CREAT | O_EXCL)
+    }
+
+    // Open with custom options.
+    public fn options() -> OpenOptions {
+        OpenOptions.new()
+    }
+
+    // Internal: open with flags.
+    fn open_with_flags(path: &Text, flags: Int) -> IoResult<File> {
+        let bytes = path.as_bytes();
+        // Default mode: rw-r--r-- (0644)
+        let mode = 0o644;
+
+        match sys_open(bytes, flags, mode) {
+            Ok(fd) => Ok(File { fd: fd.as_raw() }),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    // Get file size.
+    public fn size(&self) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(self.fd);
+        // Initialize stat buffer with zeros (syscall will fill it)
+        let mut stat_buf: Stat = unsafe { @zeroed() };
+        match sys_fstat(fd, &mut stat_buf) {
+            Ok(()) => Ok(stat_buf.st_size as Int),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    // Sync file to disk.
+    public fn sync_all(&self) -> IoResult<()> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_fsync(fd) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    // Sync data to disk (may skip metadata).
+    public fn sync_data(&self) -> IoResult<()> {
+        // For simplicity, use fsync. A full implementation would use fdatasync on Linux.
+        self.sync_all()
+    }
+
+    // Set length of file.
+    public fn set_len(&self, size: Int) -> IoResult<()> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_ftruncate(fd, size) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    // Get file descriptor (for advanced use).
+    public fn as_raw_fd(&self) -> Int {
+        self.fd
+    }
+
+    // Create from raw file descriptor.
+    public unsafe fn from_raw_fd(fd: Int) -> File {
+        File { fd: fd }
+    }
+}
+
+implement Read for File {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_read(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+}
+
+implement Write for File {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_write(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_fsync(fd) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+}
+
+implement Seek for File {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        let (offset, whence) = match pos {
+            Start(n) => (n, SEEK_SET),
+            Current(n) => (n, SEEK_CUR),
+            End(n) => (n, SEEK_END),
+        };
+
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_lseek(fd, offset, whence) {
+            Ok(pos) => Ok(pos),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+}
+
+implement Drop for File {
+    fn drop(&mut self) {
+        let fd = FileDesc.from_raw(self.fd);
+        let _ = sys_close(fd);
+    }
+}
+
+implement Clone for File {
+    fn clone(&self) -> File {
+        // Use dup() to create a new file descriptor pointing to the same file
+        let fd = FileDesc.from_raw(self.fd);
+        match sys_dup(fd) {
+            Ok(new_fd) => File { fd: new_fd.as_raw() },
+            Err(_) => {
+                // Fallback to shallow clone if dup fails
+                // This maintains the original behavior but is not ideal
+                File { fd: self.fd }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+// Read entire file to Text.
+public fn read_to_string(path: &Text) -> IoResult<Text> {
+    let mut file = File.open(path)?;
+    let mut content = Text.new();
+    file.read_to_string(&mut content)?;
+    Ok(content)
+}
+
+// Read entire file to bytes.
+public fn read(path: &Text) -> IoResult<List<Byte>> {
+    let mut file = File.open(path)?;
+    let mut content = List.new();
+    file.read_to_end(&mut content)?;
+    Ok(content)
+}
+
+// Write text to file.
+public fn write(path: &Text, contents: &Text) -> IoResult<()> {
+    let mut file = File.create(path)?;
+    file.write_all(contents.as_bytes())
+}
+
+// Write bytes to file.
+public fn write_bytes(path: &Text, contents: &[Byte]) -> IoResult<()> {
+    let mut file = File.create(path)?;
+    file.write_all(contents)
+}
+
+// NOTE: BufReader and BufWriter are defined in core/io/buffer.vr as the
+// canonical source. Re-exported here for convenience.
+mount core.io.buffer.{BufReader, BufWriter};
+public mount core.io.buffer.BufReader;
+public mount core.io.buffer.BufWriter;
+
+// =============================================================================
+// Async File Operations
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// Async file operations now use the native V-LLSI infrastructure:
+// - Linux: Uses sys/linux/io.vr IOEngine (io_uring)
+// - macOS: Uses sys/darwin/io.vr IOEngine (kqueue)
+// - Windows: Uses sys/windows/io.vr IOEngine (IOCP)
+//
+// The AsyncFile type wraps synchronous File operations in async context.
+// For truly non-blocking I/O, the IOEngine should be used directly.
+//
+// =============================================================================
+
+/// Async wrapper around File for non-blocking I/O.
+///
+/// AsyncFile provides async versions of all File operations by
+/// integrating with the async executor's I/O driver.
+///
+/// # Example
+/// ```verum
+/// let file = AsyncFile.open("data.txt").await?;
+/// let mut buf = [0_u8; 1024];
+/// let n = file.read(&mut buf).await?;
+/// ```
+public type AsyncFile is {
+    inner: File,
+};
+
+implement AsyncFile {
+    /// Open a file asynchronously for reading.
+    public async fn open(path: &Text) -> IoResult<AsyncFile> {
+        // Opening itself is synchronous, but we wrap in async File
+        let file = File.open(path)?;
+        Ok(AsyncFile { inner: file })
+    }
+
+    /// Create a file asynchronously for writing.
+    public async fn create(path: &Text) -> IoResult<AsyncFile> {
+        let file = File.create(path)?;
+        Ok(AsyncFile { inner: file })
+    }
+
+    /// Open with custom options.
+    public async fn open_with_options(path: &Text, options: &OpenOptions) -> IoResult<AsyncFile> {
+        let file = options.open(path)?;
+        Ok(AsyncFile { inner: file })
+    }
+
+    /// Read data asynchronously.
+    ///
+    /// Yields to the executor while waiting for data to be available.
+    /// Note: Current implementation uses synchronous read. For true async I/O,
+    /// use the IOEngine directly with io_uring/kqueue/IOCP.
+    public async fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        // Sync-under-async: delegates to synchronous File.read().
+        // For true non-blocking I/O, use the platform IOEngine directly
+        // (io_uring on Linux, kqueue on macOS, IOCP on Windows).
+        self.inner.read(buf)
+    }
+
+    /// Write data asynchronously.
+    ///
+    /// Yields to the executor while waiting for write buffer to be available.
+    /// Note: Current implementation uses synchronous write. For true async I/O,
+    /// use the IOEngine directly with io_uring/kqueue/IOCP.
+    public async fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        // Sync-under-async: delegates to synchronous File.write().
+        // For true non-blocking I/O, use the platform IOEngine directly
+        // (io_uring on Linux, kqueue on macOS, IOCP on Windows).
+        self.inner.write(buf)
+    }
+
+    /// Read all data until EOF asynchronously.
+    public async fn read_to_end(&mut self, buf: &mut List<Byte>) -> IoResult<Int> {
+        let mut total = 0;
+        let mut temp = [0_u8; 4096];
+
+        loop {
+            let n = self.read(&mut temp).await?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&temp[..n]);
+            total = total + n;
+        }
+
+        Ok(total)
+    }
+
+    /// Read all data as string asynchronously.
+    public async fn read_to_string(&mut self, buf: &mut Text) -> IoResult<Int> {
+        let mut bytes = List.new();
+        let n = self.read_to_end(&mut bytes).await?;
+        *buf = Text.from_utf8(bytes)?;
+        Ok(n)
+    }
+
+    /// Write all data asynchronously.
+    public async fn write_all(&mut self, buf: &[Byte]) -> IoResult<()> {
+        let mut written = 0;
+        while written < buf.len() {
+            let n = self.write(&buf[written..]).await?;
+            if n == 0 {
+                return Err(StreamError.new(IoErrorKind.WriteZero));
+            }
+            written = written + n;
+        }
+        Ok(())
+    }
+
+    /// Flush the file asynchronously.
+    public async fn flush(&mut self) -> IoResult<()> {
+        self.inner.flush()
+    }
+
+    /// Sync all data to disk asynchronously.
+    public async fn sync_all(&self) -> IoResult<()> {
+        self.inner.sync_all()
+    }
+
+    /// Get file size.
+    public fn size(&self) -> IoResult<Int> {
+        self.inner.size()
+    }
+
+    /// Seek to position.
+    public async fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        self.inner.seek(pos)
+    }
+
+    /// Get reference to inner File.
+    public fn get_ref(&self) -> &File {
+        &self.inner
+    }
+
+    /// Get mutable reference to inner File.
+    public fn get_mut(&mut self) -> &mut File {
+        &mut self.inner
+    }
+
+    /// Consume && return inner File.
+    public fn into_inner(self) -> File {
+        self.inner
+    }
+}
+
+implement Drop for AsyncFile {
+    fn drop(&mut self) {
+        // File handle is automatically closed when inner File is dropped
+    }
+}
+
+// =============================================================================
+// Async Convenience Functions
+// =============================================================================
+
+/// Read entire file to string asynchronously.
+public async fn read_to_string_async(path: &Text) -> IoResult<Text> {
+    let mut file = AsyncFile.open(path).await?;
+    let mut content = Text.new();
+    file.read_to_string(&mut content).await?;
+    Ok(content)
+}
+
+/// Read entire file to bytes asynchronously.
+public async fn read_async(path: &Text) -> IoResult<List<Byte>> {
+    let mut file = AsyncFile.open(path).await?;
+    let mut content = List.new();
+    file.read_to_end(&mut content).await?;
+    Ok(content)
+}
+
+/// Write text to file asynchronously.
+public async fn write_async(path: &Text, contents: &Text) -> IoResult<()> {
+    let mut file = AsyncFile.create(path).await?;
+    file.write_all(contents.as_bytes()).await
+}
+
+/// Write bytes to file asynchronously.
+public async fn write_bytes_async(path: &Text, contents: &[Byte]) -> IoResult<()> {
+    let mut file = AsyncFile.create(path).await?;
+    file.write_all(contents).await
+}
+
+// =============================================================================
+// Async BufReader
+// =============================================================================
+
+/// Async buffered reader.
+public type AsyncBufReader<R> is {
+    inner: R,
+    buffer: List<Byte>,
+    pos: Int,
+    cap: Int,
+};
+
+implement<R> AsyncBufReader<R> {
+    /// Create with default buffer size (8KB).
+    public fn new(inner: R) -> AsyncBufReader<R> {
+        AsyncBufReader.with_capacity(8192, inner)
+    }
+
+    /// Create with custom buffer size.
+    public fn with_capacity(capacity: Int, inner: R) -> AsyncBufReader<R> {
+        let mut buffer = List.with_capacity(capacity);
+        for _ in range(0, capacity) {
+            buffer.push(0);
+        }
+        AsyncBufReader {
+            inner: inner,
+            buffer: buffer,
+            pos: 0,
+            cap: 0,
+        }
+    }
+
+    /// Get reference to inner.
+    public fn get_ref(&self) -> &R {
+        &self.inner
+    }
+
+    /// Get mutable reference to inner.
+    public fn get_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
+
+    /// Consume && return inner.
+    public fn into_inner(self) -> R {
+        self.inner
+    }
+}
+
+// Async file I/O is provided through the IOEngine integration in
+// async/executor.vr. The AsyncRead/AsyncWrite protocols are defined
+// in core/io/async_protocols.vr and implemented for File via the
+// platform I/O engine (io_uring on Linux, kqueue on macOS, IOCP on Windows).

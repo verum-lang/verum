@@ -1,0 +1,196 @@
+module sys.embedded;
+
+// =============================================================================
+// sys/embedded.vr - Minimal runtime for embedded/bare-metal targets
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None (no heap, no threads, no async, no OS)
+// Activated by: @cfg(runtime = "embedded")
+// =============================================================================
+//
+// Provides stack-only allocation for embedded targets where heap allocation
+// is unavailable or undesirable. All memory comes from a caller-provided
+// buffer (typically a static array or linker-placed section).
+//
+// Design constraints:
+//   - Zero OS dependencies
+//   - No heap (malloc/free never called)
+//   - No threads or async primitives
+//   - No CBGR runtime (static references only)
+//   - Deterministic allocation (bump allocator, O(1) alloc)
+//
+// Typical usage:
+//   let mut buf: [Int; 1024] = [0; 1024];
+//   let mut alloc = StackAllocator.new(@ptr_of(buf), 8192);
+//   let ptr = alloc.alloc(64, 8);  // 64 bytes, 8-byte aligned
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// =============================================================================
+
+// =============================================================================
+// Stack Allocator — bump allocator over a fixed buffer
+// =============================================================================
+
+type StackAllocator is {
+    buffer_ptr: Int,
+    capacity: Int,
+    offset: Int,
+};
+
+implement StackAllocator {
+    /// Create a new stack allocator over the given buffer.
+    ///
+    /// `buffer` must be a valid pointer to at least `size` bytes of memory.
+    /// The caller is responsible for ensuring the buffer outlives the allocator.
+    public fn new(buffer: Int, size: Int) -> StackAllocator {
+        StackAllocator {
+            buffer_ptr: buffer,
+            capacity: size,
+            offset: 0,
+        }
+    }
+
+    /// Allocate `size` bytes with the given alignment.
+    ///
+    /// Returns the aligned pointer, or 0 if the allocator is exhausted.
+    /// Alignment must be a power of two.
+    public fn alloc(&mut self, size: Int, align: Int) -> Int {
+        // Align the current offset up to the requested alignment
+        let mask = align - 1;
+        let aligned_offset = (self.offset + mask) & (~mask);
+        let new_offset = aligned_offset + size;
+        if new_offset > self.capacity {
+            return 0;  // Out of memory
+        }
+        self.offset = new_offset;
+        self.buffer_ptr + aligned_offset
+    }
+
+    /// Reset the allocator, freeing all allocations at once.
+    ///
+    /// This is O(1) — simply resets the bump pointer to the start.
+    /// All previously returned pointers become invalid.
+    public fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    /// Returns the number of bytes remaining in the allocator.
+    public fn remaining(&self) -> Int {
+        self.capacity - self.offset
+    }
+
+    /// Returns the total capacity of the allocator in bytes.
+    public fn capacity(&self) -> Int {
+        self.capacity
+    }
+
+    /// Returns the number of bytes currently allocated.
+    public fn used(&self) -> Int {
+        self.offset
+    }
+}
+
+// =============================================================================
+// Embedded Panic Handler — minimal, no formatting
+// =============================================================================
+
+type PanicAction is Halt | Reset | Custom(fn() -> ());
+
+/// Global panic action for embedded targets.
+/// Default: Halt (infinite loop).
+static mut PANIC_ACTION: PanicAction = Halt;
+
+/// Set the panic action for the embedded target.
+public fn set_panic_action(action: PanicAction) {
+    PANIC_ACTION = action;
+}
+
+/// Embedded panic handler — called by the compiler on panic().
+/// No heap allocation, no formatting, no unwinding.
+public fn embedded_panic() {
+    match PANIC_ACTION {
+        Halt => {
+            // Spin forever — debugger can inspect state
+            loop {}
+        }
+        Reset => {
+            // Platform-specific reset would go here
+            // For now, halt
+            loop {}
+        }
+        Custom(handler) => {
+            handler();
+        }
+    }
+}
+
+// =============================================================================
+// Static Ring Buffer — fixed-size circular buffer for embedded I/O
+// =============================================================================
+
+type RingBuffer is {
+    buffer_ptr: Int,
+    capacity: Int,
+    head: Int,
+    tail: Int,
+    count: Int,
+};
+
+implement RingBuffer {
+    /// Create a ring buffer over an existing memory region.
+    public fn new(buffer: Int, capacity: Int) -> RingBuffer {
+        RingBuffer {
+            buffer_ptr: buffer,
+            capacity: capacity,
+            head: 0,
+            tail: 0,
+            count: 0,
+        }
+    }
+
+    /// Push a byte into the ring buffer. Returns false if full.
+    public fn push(&mut self, value: Int) -> Bool {
+        if self.count >= self.capacity {
+            return false;
+        }
+        // Store byte at tail position
+        // In real embedded code this would be a volatile store
+        self.tail = (self.tail + 1) % self.capacity;
+        self.count = self.count + 1;
+        true
+    }
+
+    /// Pop a byte from the ring buffer. Returns -1 if empty.
+    public fn pop(&mut self) -> Int {
+        if self.count == 0 {
+            return -1;
+        }
+        let pos = self.head;
+        self.head = (self.head + 1) % self.capacity;
+        self.count = self.count - 1;
+        // In real embedded code this would be a volatile load
+        pos  // placeholder — actual byte read would happen via MMIO
+    }
+
+    /// Returns true if the buffer is empty.
+    public fn is_empty(&self) -> Bool {
+        self.count == 0
+    }
+
+    /// Returns true if the buffer is full.
+    public fn is_full(&self) -> Bool {
+        self.count >= self.capacity
+    }
+
+    /// Returns the number of elements in the buffer.
+    public fn len(&self) -> Int {
+        self.count
+    }
+
+    /// Reset the ring buffer to empty state.
+    public fn reset(&mut self) {
+        self.head = 0;
+        self.tail = 0;
+        self.count = 0;
+    }
+}

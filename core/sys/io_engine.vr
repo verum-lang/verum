@@ -1,0 +1,943 @@
+module sys.io_engine;
+
+// =============================================================================
+// sys/io_engine.vr - Cross-Platform Completion-Based I/O Engine
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: All (Linux, Darwin, Windows)
+// =============================================================================
+//
+// This module defines the unified IOEngine protocol for completion-based I/O
+// across all platforms:
+//   - Linux: io_uring (primary), epoll (fallback)
+//   - Darwin: kqueue
+//   - Windows: IOCP (I/O Completion Ports)
+//
+// The IOEngine protocol provides:
+//   - Batch operation submission (single syscall for multiple ops)
+//   - Completion harvesting with configurable wait
+//   - Wake mechanism for cross-thread notification
+//   - Pending operation tracking
+//
+// Design philosophy (io_uring-first):
+//   - All platforms use completion-based semantics
+//   - Readiness-based APIs (kqueue, epoll) are wrapped in completion semantics
+//   - User data correlation for async operation tracking
+//
+// Advanced Verum features used:
+//   - Refinement types for compile-time validation (ValidFd, NonZeroDuration)
+//   - pure fn modifier for side-effect-free functions
+//   - @inline, @must_use attributes for optimization hints
+//   - Protocol constraints with where clauses
+//
+// Note: Context system is NOT used here as it depends on TLS which is
+// implemented at this layer. Context-based IOEngine injection should be
+// implemented in higher-level modules (e.g., core/io/engine_context.vr)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.5
+// =============================================================================
+
+mount sys.common.{OSError, FileDesc, IOVec};
+
+// =============================================================================
+// Core Types with Refinement Constraints
+// =============================================================================
+
+/// Valid port number (0-65535, with 0 being ephemeral)
+public type Port is UInt16;
+
+/// Valid port for explicit binding (non-zero)
+public type BoundPort is Port{> 0};
+
+/// Socket address (IPv4/IPv6 union)
+public type SocketAddr is
+    | V4 { addr: UInt32, port: Port }
+    | V6 { addr: [UInt8; 16], port: Port, flowinfo: UInt32, scope_id: UInt32 }
+    ;
+
+/// Timespec for precise timing
+@repr(C)
+public type TimeSpec is {
+    tv_sec: Int64,
+    tv_nsec: Int64,
+};
+
+/// Duration in nanoseconds (always non-negative by UInt64)
+public type Duration is (UInt64);
+
+/// Non-zero duration for timeout operations
+public type NonZeroDuration is Duration where |d| d.0 > 0;
+
+/// Maximum duration for practical timeout operations (1 year in nanoseconds)
+public const MAX_PRACTICAL_DURATION: UInt64 = 365 * 24 * 60 * 60 * 1_000_000_000;
+
+implement Duration {
+    public const ZERO: Duration = Duration(0 as UInt64);
+    public const MAX: Duration = Duration(UInt64.MAX);
+
+    /// Create duration from nanoseconds (zero-copy, compile-time constant capable)
+    @inline
+    public pure fn from_nanos(ns: UInt64) -> Duration {
+        Duration(ns)
+    }
+
+    /// Create duration from microseconds
+    @inline
+    public pure fn from_micros(us: UInt64) -> Duration {
+        Duration(us * (1_000 as UInt64))
+    }
+
+    /// Create duration from milliseconds
+    @inline
+    public pure fn from_millis(ms: UInt64) -> Duration {
+        Duration(ms * (1_000_000 as UInt64))
+    }
+
+    /// Create duration from seconds
+    @inline
+    public pure fn from_secs(s: UInt64) -> Duration {
+        Duration(s * (1_000_000_000 as UInt64))
+    }
+
+    /// Get duration as nanoseconds
+    @inline
+    public pure fn as_nanos(&self) -> UInt64 {
+        self.0
+    }
+
+    /// Get duration as milliseconds (truncates sub-millisecond)
+    @inline
+    public pure fn as_millis(&self) -> UInt64 {
+        self.0 / (1_000_000 as UInt64)
+    }
+
+    /// Get duration as seconds (truncates sub-second)
+    @inline
+    public pure fn as_secs(&self) -> UInt64 {
+        self.0 / (1_000_000_000 as UInt64)
+    }
+
+    /// Check if this is a zero duration
+    @inline
+    public pure fn is_zero(&self) -> Bool {
+        self.0 == (0 as UInt64)
+    }
+
+    /// Saturating addition (caps at MAX instead of overflowing)
+    @inline
+    public pure fn saturating_add(&self, other: Duration) -> Duration {
+        // Use intermediate variables to ensure correct method resolution
+        let a: UInt64 = self.0;
+        let b: UInt64 = other.0;
+        match a.checked_add(b) {
+            Some(result) => Duration(result),
+            None => Duration(UInt64.MAX),
+        }
+    }
+
+    /// Saturating subtraction (floors at ZERO instead of underflowing)
+    @inline
+    public pure fn saturating_sub(&self, other: Duration) -> Duration {
+        if self.0 >= other.0 {
+            Duration(self.0 - other.0)
+        } else {
+            Duration(0 as UInt64)
+        }
+    }
+
+    /// Convert to POSIX timespec structure
+    public pure fn to_timespec(&self) -> TimeSpec {
+        TimeSpec {
+            tv_sec: (self.0 / (1_000_000_000 as UInt64)) as Int64,
+            tv_nsec: (self.0 % (1_000_000_000 as UInt64)) as Int64,
+        }
+    }
+}
+
+// =============================================================================
+// Completion Operation Types with Refinement Constraints
+// =============================================================================
+
+/// File descriptor wrapper (may be invalid)
+public type Fd is (Int32);
+
+/// Valid file descriptor (>= 0), guaranteed to be usable for I/O
+public type ValidFd is Fd where |fd| fd.0 >= 0;
+
+/// Standard file descriptors
+public const STDIN_FD: ValidFd = Fd(0) as ValidFd;
+public const STDOUT_FD: ValidFd = Fd(1) as ValidFd;
+public const STDERR_FD: ValidFd = Fd(2) as ValidFd;
+
+implement Fd {
+    public const INVALID: Fd = Fd(-1);
+
+    /// Get raw file descriptor value
+    @inline
+    public pure fn as_raw(&self) -> Int32 {
+        self.0
+    }
+
+    /// Check if file descriptor is valid (>= 0)
+    @inline
+    public pure fn is_valid(&self) -> Bool {
+        self.0 >= 0
+    }
+
+    /// Try to convert to ValidFd, returns None if invalid
+    @inline
+    public pure fn try_as_valid(&self) -> Maybe<ValidFd> {
+        if self.0 >= 0 {
+            Some(self as ValidFd)
+        } else {
+            None
+        }
+    }
+
+    /// Convert to ValidFd, panics if invalid (use for known-valid descriptors)
+    @inline
+    public fn as_valid(&self) -> ValidFd {
+        assert(self.0 >= 0, f"Invalid file descriptor: {self.0}");
+        self as ValidFd
+    }
+}
+
+implement ValidFd {
+    /// Get raw file descriptor (always >= 0)
+    @inline
+    public pure fn as_raw(&self) -> Int32{>= 0} {
+        self.0
+    }
+
+    /// Convert back to Fd (always succeeds)
+    @inline
+    public pure fn as_fd(&self) -> Fd {
+        Fd(self.0)
+    }
+}
+
+/// Completion operation - describes what I/O to perform
+///
+/// This is the unified operation type across all platforms.
+/// Platform-specific drivers translate these to native operations.
+///
+/// Note: Most operations use ValidFd to ensure compile-time validation
+/// of file descriptor validity. Close accepts Fd since we may need to
+/// close descriptors that we can't statically prove are valid.
+public type CompletionOp is
+    /// Read from file descriptor into buffer
+    | Read { fd: ValidFd, buf: &mut [Byte], offset: Int64{>= 0} }
+    /// Write to file descriptor from buffer
+    | Write { fd: ValidFd, buf: &[Byte], offset: Int64{>= 0} }
+    /// Vectored read (scatter)
+    | ReadV { fd: ValidFd, iovecs: &[IOVec] }
+    /// Vectored write (gather)
+    | WriteV { fd: ValidFd, iovecs: &[IOVec] }
+    /// Accept incoming connection (fd is listening socket)
+    | Accept { fd: ValidFd, addr: &mut SocketAddr }
+    /// Connect to remote address
+    | Connect { fd: ValidFd, addr: &SocketAddr }
+    /// Receive from socket
+    | Recv { fd: ValidFd, buf: &mut [Byte], flags: Int32 }
+    /// Send to socket
+    | Send { fd: ValidFd, buf: &[Byte], flags: Int32 }
+    /// Receive message (with ancillary data)
+    | RecvMsg { fd: ValidFd, msg: &mut MsgHdr, flags: Int32 }
+    /// Send message (with ancillary data)
+    | SendMsg { fd: ValidFd, msg: &MsgHdr, flags: Int32 }
+    /// Close file descriptor (accepts Fd since may not be provably valid)
+    | Close { fd: Fd }
+    /// Set timeout for waiting (absolute timeout)
+    | Timeout { ts: &TimeSpec }
+    /// Cancel previous operation by user_data
+    | Cancel { user_data: UInt64 }
+    /// Synchronize file data to disk
+    | Fsync { fd: ValidFd, datasync: Bool }
+    /// Poll for events on file descriptor
+    | Poll { fd: ValidFd, events: UInt32 }
+    /// No-op (useful for probing, wakeup, or SQ padding)
+    | Nop
+    ;
+
+/// I/O interest for readiness notifications.
+///
+/// Used to specify what kind of I/O readiness to wait for on a file descriptor.
+public type IOInterest is
+    /// Interest in read readiness (data available to read)
+    | Read
+    /// Interest in write readiness (buffer space available to write)
+    | Write
+    /// Interest in both read and write readiness
+    | ReadWrite
+    ;
+
+/// Message header for sendmsg/recvmsg
+@repr(C)
+public type MsgHdr is {
+    msg_name: &unsafe Byte,
+    msg_namelen: UInt32,
+    msg_iov: &IOVec,
+    msg_iovlen: USize,
+    msg_control: &unsafe Byte,
+    msg_controllen: USize,
+    msg_flags: Int32,
+};
+
+// =============================================================================
+// Completion Result
+// =============================================================================
+
+/// Completion result - returned after I/O completes
+///
+/// Contains the user_data from submission for correlation,
+/// the result (bytes transferred or negative errno), and
+/// platform-specific flags.
+///
+/// IMPORTANT: Results should not be ignored as they may indicate
+/// errors that must be handled.
+@repr(C)
+@must_use("Completion results should not be ignored - check for errors")
+public type CompletionResult is {
+    /// User-provided correlation ID (copied from submission)
+    user_data: UInt64,
+    /// Result: positive = bytes transferred, negative = -errno
+    result: Int32,
+    /// Platform-specific completion flags
+    flags: UInt32,
+};
+
+/// Successful completion bytes transferred (>= 0)
+public type BytesTransferred is UInt32;
+
+/// Error code from failed I/O operation (positive errno value)
+public type ErrnoCode is Int32{> 0};
+
+implement CompletionResult {
+    /// Create a successful completion result
+    @inline
+    public pure fn success(user_data: UInt64, bytes: BytesTransferred) -> CompletionResult {
+        CompletionResult {
+            user_data: user_data,
+            result: bytes as Int32,
+            flags: 0,
+        }
+    }
+
+    /// Create a failed completion result
+    @inline
+    public pure fn error(user_data: UInt64, errno: ErrnoCode) -> CompletionResult {
+        CompletionResult {
+            user_data: user_data,
+            result: -(errno as Int32),
+            flags: 0,
+        }
+    }
+
+    /// Check if the operation completed successfully
+    @inline
+    public pure fn is_success(&self) -> Bool {
+        self.result >= 0
+    }
+
+    /// Check if the operation failed
+    @inline
+    public pure fn is_error(&self) -> Bool {
+        self.result < 0
+    }
+
+    /// Get bytes transferred (only valid if successful)
+    @inline
+    public pure fn bytes_transferred(&self) -> BytesTransferred {
+        if self.result >= 0 {
+            self.result as UInt32
+        } else {
+            0
+        }
+    }
+
+    /// Get error code (only valid if failed)
+    @inline
+    public pure fn error_code(&self) -> Int32 {
+        if self.result < 0 {
+            -self.result
+        } else {
+            0
+        }
+    }
+
+    /// Convert to Result type for idiomatic error handling
+    @inline
+    public fn to_result(&self) -> Result<BytesTransferred, IoError> {
+        if self.result >= 0 {
+            Ok(self.result as UInt32)
+        } else {
+            Err(IoError.from_errno(-self.result))
+        }
+    }
+
+    /// Check if this is a cancellation result
+    @inline
+    public pure fn was_cancelled(&self) -> Bool {
+        self.result == -125  // ECANCELED
+    }
+
+    /// Check if this is a timeout result
+    @inline
+    public pure fn was_timeout(&self) -> Bool {
+        self.result == -62   // ETIME (Linux io_uring timeout)
+    }
+}
+
+// =============================================================================
+// I/O Error Type
+// =============================================================================
+
+/// Unified I/O error type for IOEngine operations
+public type IoError is
+    /// Operation would block (non-blocking I/O)
+    | WouldBlock
+    /// Operation was interrupted by signal
+    | Interrupted
+    /// File or path not found
+    | NotFound { path: Text }
+    /// File or resource already exists
+    | AlreadyExists
+    /// Invalid input or parameter
+    | InvalidInput { reason: Text }
+    /// Permission denied
+    | PermissionDenied
+    /// Connection refused by peer
+    | ConnectionRefused
+    /// Connection reset by peer
+    | ConnectionReset
+    /// Broken pipe (write to closed socket)
+    | BrokenPipe
+    /// Operation timed out
+    | TimedOut
+    /// Submission queue is full
+    | SubmissionQueueFull
+    /// Completion queue overflow
+    | CompletionQueueFull
+    /// Engine is closed/shutdown
+    | Closed
+    /// End of file reached
+    | EndOfFile
+    /// Operation was cancelled
+    | Cancelled
+    /// System does not support requested operation
+    | NotSupported
+    /// Socket not connected
+    | NotConnected
+    /// Other/unknown error
+    | Other(Text)
+    ;
+
+/// Alias for backward compatibility
+public type EngineIoError is IoError;
+
+implement IoError {
+    /// Create from POSIX errno value
+    /// Handles both Linux and Darwin (BSD) errno differences
+    public pure fn from_errno(err: Int32) -> IoError {
+        match err {
+            11 | 35 => WouldBlock,                            // EAGAIN (11 Linux, 35 Darwin) / EWOULDBLOCK
+            4 => Interrupted,                                  // EINTR
+            2 => NotFound { path: "" },                       // ENOENT
+            17 => AlreadyExists,                               // EEXIST
+            22 => InvalidInput { reason: "Invalid argument" }, // EINVAL
+            13 | 1 => PermissionDenied,                       // EACCES (13) / EPERM (1)
+            111 | 61 => ConnectionRefused,                     // ECONNREFUSED (111 Linux, 61 Darwin)
+            104 | 54 => ConnectionReset,                       // ECONNRESET (104 Linux, 54 Darwin)
+            32 => BrokenPipe,                                  // EPIPE
+            110 | 60 => TimedOut,                              // ETIMEDOUT (110 Linux, 60 Darwin)
+            38 | 78 => NotSupported,                           // ENOSYS (38 Linux, 78 Darwin)
+            125 | 89 => Cancelled,                             // ECANCELED (125 Linux, 89 Darwin)
+            62 => TimedOut,                                    // ETIME (io_uring specific timeout)
+            107 | 57 => NotConnected,                            // ENOTCONN (107 Linux, 57 Darwin)
+            _ => Other("Unknown error"),
+        }
+    }
+
+    /// Alias for from_errno (POSIX error code)
+    public pure fn from_os_error(err: Int32) -> IoError {
+        IoError.from_errno(err)
+    }
+
+    /// Create from Windows error code
+    @cfg(target_os = "windows")
+    public pure fn from_win32(err: UInt32) -> IoError {
+        match err {
+            997 => WouldBlock,              // ERROR_IO_PENDING
+            995 => Cancelled,               // ERROR_OPERATION_ABORTED
+            2 => NotFound { path: "" },     // ERROR_FILE_NOT_FOUND
+            3 => NotFound { path: "" },     // ERROR_PATH_NOT_FOUND
+            80 => AlreadyExists,            // ERROR_FILE_EXISTS
+            5 => PermissionDenied,          // ERROR_ACCESS_DENIED
+            1225 => ConnectionRefused,      // ERROR_CONNECTION_REFUSED
+            1236 => ConnectionReset,        // ERROR_CONNECTION_ABORTED
+            109 => BrokenPipe,              // ERROR_BROKEN_PIPE
+            121 => TimedOut,                // ERROR_SEM_TIMEOUT
+            1460 => TimedOut,               // ERROR_TIMEOUT
+            50 => NotSupported,             // ERROR_NOT_SUPPORTED
+            _ => Other("Windows error"),
+        }
+    }
+
+    /// Get human-readable error message
+    public pure fn message(&self) -> Text {
+        match self {
+            WouldBlock => "Operation would block",
+            Interrupted => "Operation interrupted",
+            NotFound { path } => f"Not found: {path}",
+            AlreadyExists => "Already exists",
+            InvalidInput { reason } => f"Invalid input: {reason}",
+            PermissionDenied => "Permission denied",
+            ConnectionRefused => "Connection refused",
+            ConnectionReset => "Connection reset",
+            BrokenPipe => "Broken pipe",
+            TimedOut => "Operation timed out",
+            SubmissionQueueFull => "Submission queue full",
+            CompletionQueueFull => "Completion queue overflow",
+            Closed => "Engine closed",
+            EndOfFile => "End of file",
+            Cancelled => "Operation cancelled",
+            NotSupported => "Operation not supported",
+            Other(msg) => msg,
+        }
+    }
+
+    /// Check if error is transient and operation can be safely retried
+    @inline
+    public pure fn is_retryable(&self) -> Bool {
+        match self {
+            WouldBlock => true,
+            Interrupted => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a fatal error that requires engine shutdown
+    @inline
+    public pure fn is_fatal(&self) -> Bool {
+        match self {
+            SubmissionQueueFull => false,
+            CompletionQueueFull => true,   // CQ overflow may lose completions
+            Closed => true,
+            NotSupported => true,          // Feature not available
+            _ => false,
+        }
+    }
+
+    /// Check if this is a connection-level error (network errors)
+    @inline
+    public pure fn is_connection_error(&self) -> Bool {
+        match self {
+            ConnectionRefused => true,
+            ConnectionReset => true,
+            BrokenPipe => true,
+            TimedOut => true,
+            _ => false,
+        }
+    }
+
+    /// Get the raw error code if available
+    @inline
+    public pure fn raw_code(&self) -> Maybe<Int32> {
+        match self {
+            Other(_) => None,
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// IOEngine Protocol
+// =============================================================================
+
+/// Completion-based I/O engine protocol
+///
+/// All platform-specific drivers must implement this protocol to provide
+/// a unified interface for async I/O operations.
+///
+/// The protocol is designed with io_uring semantics in mind:
+/// - Batch submission of multiple operations in single syscall
+/// - Completion harvesting with configurable wait
+/// - Wake mechanism for cross-thread notification
+/// - Zero-copy where possible
+///
+/// Platform implementations:
+/// - Linux: IoUringDriver (io_uring), EpollDriver (fallback)
+/// - Darwin: KqueueDriver
+/// - Windows: IocpDriver
+///
+/// Thread Safety:
+/// - submit(), wait(), flush(), shutdown() require &mut self (single-threaded access)
+/// - wake() uses &self and is safe to call from other threads
+/// - pending() uses &self for read-only access
+///
+/// Performance Characteristics (approximate):
+/// - io_uring: O(1) submit, O(1) wait, batched syscalls
+/// - kqueue: O(1) submit, O(n) wait where n = ready events
+/// - IOCP: O(1) submit, O(1) completion
+public type IOEngine is protocol {
+    /// Submit batch of I/O operations.
+    ///
+    /// Each operation is paired with a user_data value that will be
+    /// returned in the corresponding CompletionResult for correlation.
+    ///
+    /// Returns the number of successfully submitted operations.
+    ///
+    /// # Arguments
+    /// * `ops` - Slice of (operation, user_data) pairs to submit
+    ///
+    /// # Errors
+    /// * `SubmissionQueueFull` - Not enough space in SQ
+    /// * `InvalidInput` - Invalid operation parameters
+    ///
+    /// # Performance
+    /// - Prefer batching multiple ops in single submit() call
+    /// - io_uring: Single syscall for entire batch
+    /// - IOCP: Individual PostQueuedCompletionStatus per op
+    @must_use("Submitted count should be checked to verify all ops were accepted")
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, IoError>;
+
+    /// Submit a single operation (convenience wrapper).
+    fn submit_one(&mut self, op: CompletionOp, user_data: UInt64) -> Result<(), IoError> {
+        let count = self.submit(&[(op, user_data)])?;
+        if count == 1 {
+            Ok(())
+        } else {
+            Err(SubmissionQueueFull)
+        }
+    }
+
+    /// Wait for completions.
+    ///
+    /// Blocks until at least `min_complete` operations have completed,
+    /// or the timeout expires.
+    ///
+    /// Returns the number of completions stored in `results`.
+    ///
+    /// # Arguments
+    /// * `results` - Buffer to store completion results
+    /// * `min_complete` - Minimum completions to wait for (0 = poll)
+    /// * `timeout` - Optional timeout (None = wait indefinitely)
+    ///
+    /// # Errors
+    /// * `Interrupted` - Wait was interrupted by signal
+    /// * `TimedOut` - Timeout expired before min_complete reached
+    ///
+    /// # Note
+    /// Results buffer must be large enough to hold expected completions.
+    /// If buffer is too small, extra completions remain queued for next wait().
+    @must_use("Completion count indicates how many results are valid")
+    fn wait(
+        &mut self,
+        results: &mut [CompletionResult],
+        min_complete: UInt32,
+        timeout: Maybe<Duration>,
+    ) -> Result<Int{>= 0}, IoError>;
+
+    /// Poll for completions without blocking.
+    ///
+    /// Equivalent to wait() with min_complete=0 and timeout=0.
+    /// Returns immediately with any available completions.
+    fn poll(&mut self, results: &mut [CompletionResult]) -> Result<Int{>= 0}, IoError> {
+        self.wait(results, 0, Some(Duration.ZERO))
+    }
+
+    /// Wake up a blocked wait() from another thread.
+    ///
+    /// This is used for cross-thread notification, e.g., to signal
+    /// that new work has been submitted or that shutdown is requested.
+    ///
+    /// Thread Safety: Safe to call from any thread while wait() is blocked.
+    fn wake(&self) -> Result<(), IoError>;
+
+    /// Get number of pending (submitted but not completed) operations.
+    ///
+    /// Thread Safety: Read-only, safe to call concurrently with submit/wait.
+    pure fn pending(&self) -> UInt32;
+
+    /// Check if the engine has any pending operations.
+    @inline
+    pure fn has_pending(&self) -> Bool {
+        self.pending() > 0
+    }
+
+    /// Flush any batched submissions to the kernel.
+    ///
+    /// Some implementations batch submissions for efficiency.
+    /// Call this to ensure all submitted operations are in flight.
+    ///
+    /// Note: wait() implicitly flushes before blocking.
+    fn flush(&mut self) -> Result<(), IoError>;
+
+    /// Shutdown the engine and cancel pending operations.
+    ///
+    /// After shutdown():
+    /// - submit() returns Closed error
+    /// - wait() returns immediately with pending completions (may be cancelled)
+    /// - Engine resources are released
+    ///
+    /// Idempotent: safe to call multiple times.
+    fn shutdown(&mut self) -> Result<(), IoError>;
+
+    /// Check if engine is still operational.
+    pure fn is_open(&self) -> Bool;
+};
+
+// =============================================================================
+// Platform-Specific Driver Selection
+// =============================================================================
+
+/// Create the best available IOEngine for the current platform.
+///
+/// On Linux 5.1+, returns io_uring driver.
+/// On older Linux, returns epoll driver wrapped in completion semantics.
+/// On Darwin, returns kqueue driver.
+/// On Windows, returns IOCP driver.
+@cfg(target_os = "linux")
+public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, IoError> {
+    mount sys.linux.io.{IoUringDriver, EpollDriver, IoDriver};
+
+    // Try io_uring first (Linux 5.1+)
+    match IoUringDriver.new(sq_entries) {
+        Ok(driver) => Ok(IoDriver.Uring(driver)),
+        Err(_) => {
+            // Fall back to epoll
+            let epoll = EpollDriver.new()?;
+            Ok(IoDriver.Epoll(epoll))
+        }
+    }
+}
+
+@cfg(target_os = "macos")
+public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, IoError> {
+    mount sys.darwin.io.KqueueDriver;
+
+    KqueueDriver.new()
+}
+
+@cfg(target_os = "windows")
+public fn create_io_engine(num_concurrent: UInt32) -> Result<some E: IOEngine, IoError> {
+    mount sys.windows.io.IocpDriver;
+
+    IocpDriver.new_with_concurrency(num_concurrent)
+}
+
+// =============================================================================
+// Operation Builder Functions
+// =============================================================================
+//
+// These functions provide type-safe construction of CompletionOp values.
+// Using ValidFd ensures compile-time verification of file descriptor validity.
+
+/// Prepare a read operation
+///
+/// # Arguments
+/// * `fd` - Valid file descriptor to read from
+/// * `buf` - Buffer to read into
+/// * `offset` - File offset (use 0 for sequential reads, -1 for current position)
+@inline
+public pure fn op_read(fd: ValidFd, buf: &mut [Byte], offset: Int64{>= -1}) -> CompletionOp {
+    CompletionOp.Read { fd: fd, buf: buf, offset: offset.max(0) }
+}
+
+/// Prepare a write operation
+///
+/// # Arguments
+/// * `fd` - Valid file descriptor to write to
+/// * `buf` - Buffer containing data to write
+/// * `offset` - File offset (use 0 for sequential writes, -1 for current position)
+@inline
+public pure fn op_write(fd: ValidFd, buf: &[Byte], offset: Int64{>= -1}) -> CompletionOp {
+    CompletionOp.Write { fd: fd, buf: buf, offset: offset.max(0) }
+}
+
+/// Prepare a vectored read (scatter) operation
+@inline
+public pure fn op_readv(fd: ValidFd, iovecs: &[IOVec]) -> CompletionOp {
+    CompletionOp.ReadV { fd: fd, iovecs: iovecs }
+}
+
+/// Prepare a vectored write (gather) operation
+@inline
+public pure fn op_writev(fd: ValidFd, iovecs: &[IOVec]) -> CompletionOp {
+    CompletionOp.WriteV { fd: fd, iovecs: iovecs }
+}
+
+/// Prepare an accept operation
+///
+/// # Arguments
+/// * `fd` - Valid listening socket file descriptor
+/// * `addr` - Buffer to store peer address
+@inline
+public pure fn op_accept(fd: ValidFd, addr: &mut SocketAddr) -> CompletionOp {
+    CompletionOp.Accept { fd: fd, addr: addr }
+}
+
+/// Prepare a connect operation
+///
+/// # Arguments
+/// * `fd` - Valid socket file descriptor
+/// * `addr` - Remote address to connect to
+@inline
+public pure fn op_connect(fd: ValidFd, addr: &SocketAddr) -> CompletionOp {
+    CompletionOp.Connect { fd: fd, addr: addr }
+}
+
+/// Prepare a receive operation
+@inline
+public pure fn op_recv(fd: ValidFd, buf: &mut [Byte], flags: Int32) -> CompletionOp {
+    CompletionOp.Recv { fd: fd, buf: buf, flags: flags }
+}
+
+/// Prepare a send operation
+@inline
+public pure fn op_send(fd: ValidFd, buf: &[Byte], flags: Int32) -> CompletionOp {
+    CompletionOp.Send { fd: fd, buf: buf, flags: flags }
+}
+
+/// Prepare a close operation (accepts Fd since may not be provably valid)
+@inline
+public pure fn op_close(fd: Fd) -> CompletionOp {
+    CompletionOp.Close { fd: fd }
+}
+
+/// Prepare a fsync operation
+@inline
+public pure fn op_fsync(fd: ValidFd, datasync: Bool) -> CompletionOp {
+    CompletionOp.Fsync { fd: fd, datasync: datasync }
+}
+
+/// Prepare a poll operation
+@inline
+public pure fn op_poll(fd: ValidFd, events: UInt32) -> CompletionOp {
+    CompletionOp.Poll { fd: fd, events: events }
+}
+
+/// Prepare a timeout operation
+@inline
+public fn op_timeout(ts: &TimeSpec) -> CompletionOp {
+    CompletionOp.Timeout { ts: ts }
+}
+
+/// Prepare a cancel operation
+@inline
+public fn op_cancel(user_data: UInt64) -> CompletionOp {
+    CompletionOp.Cancel { user_data: user_data }
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default submission queue size (256 entries)
+public const DEFAULT_SQ_ENTRIES: UInt32 = 256;
+
+/// Maximum submission queue size (32K entries)
+public const MAX_SQ_ENTRIES: UInt32 = 32768;
+
+/// Default completion buffer size
+public const DEFAULT_CQ_SIZE: UInt32 = 512;
+
+/// Wake token for cross-thread notification
+public const WAKE_TOKEN: UInt64 = 0xFFFF_FFFF_FFFF_FFFF;
+
+// =============================================================================
+// Poll Event Flags (POSIX-compatible)
+// =============================================================================
+
+/// Data available to read
+public const POLLIN: UInt32 = 0x0001;
+
+/// Writing possible
+public const POLLOUT: UInt32 = 0x0004;
+
+/// Error condition
+public const POLLERR: UInt32 = 0x0008;
+
+/// Hang up (peer closed connection)
+public const POLLHUP: UInt32 = 0x0010;
+
+/// Invalid file descriptor
+public const POLLNVAL: UInt32 = 0x0020;
+
+/// Urgent data available
+public const POLLPRI: UInt32 = 0x0002;
+
+/// Read + write (convenience combo)
+public const POLLRDWR: UInt32 = POLLIN | POLLOUT;
+
+// =============================================================================
+// Batch Operation Builder
+// =============================================================================
+
+/// Builder for constructing batches of I/O operations
+public type OpBatch is {
+    ops: List<(CompletionOp, UInt64)>,
+    next_user_data: UInt64,
+};
+
+implement OpBatch {
+    /// Create a new empty batch
+    public fn new() -> OpBatch {
+        OpBatch {
+            ops: List.new(),
+            next_user_data: 0,
+        }
+    }
+
+    /// Create a batch with specified initial capacity
+    public fn with_capacity(capacity: Int{>= 0}) -> OpBatch {
+        OpBatch {
+            ops: List.with_capacity(capacity),
+            next_user_data: 0,
+        }
+    }
+
+    /// Add an operation with auto-generated user_data
+    /// Returns the user_data assigned
+    public fn add(&mut self, op: CompletionOp) -> UInt64 {
+        let user_data = self.next_user_data;
+        self.next_user_data += 1;
+        self.ops.push((op, user_data));
+        user_data
+    }
+
+    /// Add an operation with explicit user_data
+    public fn add_with_data(&mut self, op: CompletionOp, user_data: UInt64) -> &mut Self {
+        self.ops.push((op, user_data));
+        self
+    }
+
+    /// Get the number of operations in the batch
+    @inline
+    public pure fn len(&self) -> Int {
+        self.ops.len()
+    }
+
+    /// Check if batch is empty
+    @inline
+    public pure fn is_empty(&self) -> Bool {
+        self.ops.is_empty()
+    }
+
+    /// Get operations as slice for submission
+    public fn as_slice(&self) -> &[(CompletionOp, UInt64)] {
+        self.ops.as_slice()
+    }
+
+    /// Clear the batch for reuse
+    public fn clear(&mut self) {
+        self.ops.clear();
+        self.next_user_data = 0;
+    }
+
+    /// Submit batch to engine
+    public fn submit_to<E: IOEngine>(&self, engine: &mut E) -> Result<Int{>= 0}, IoError> {
+        engine.submit(self.as_slice())
+    }
+}

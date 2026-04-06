@@ -1,0 +1,317 @@
+// =============================================================================
+// error.vr - Error protocol and backtrace support
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: protocols.vr, result.vr, maybe.vr
+// =============================================================================
+//
+// Provides the full Error protocol with source chaining and backtrace support.
+// This extends the simple Error type in result.vr with structured error
+// handling, stack traces, and error chain traversal.
+//
+// The Error protocol is the standard interface for all error types in Verum.
+// It builds on the Describable and ErrorSource protocols from protocols.vr
+// and adds backtrace capture support.
+//
+// =============================================================================
+
+module core.base.error;
+
+mount core.base.protocols.{
+    Describable, ErrorSource, Debug, Display, Clone, Eq, Hash, Hasher,
+    Formatter, FormatError, Default, PartialEq,
+};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Backtrace Types
+// =============================================================================
+
+/// A single frame in a stack trace.
+///
+/// Contains the function name, source file, and location within the file
+/// where the frame was captured.
+public type StackFrame is {
+    /// The name of the function at this frame.
+    function: Text,
+    /// The source file path.
+    file: Text,
+    /// The line number in the source file.
+    line: Int,
+    /// The column number in the source file.
+    column: Int,
+};
+
+implement StackFrame {
+    /// Create a new stack frame.
+    public fn new(function: Text, file: Text, line: Int, column: Int) -> StackFrame {
+        StackFrame {
+            function: function,
+            file: file,
+            line: line,
+            column: column,
+        }
+    }
+}
+
+implement Debug for StackFrame {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("StackFrame { ")?;
+        f.write_str(&self.function)?;
+        f.write_str(" at ")?;
+        f.write_str(&self.file)?;
+        f.write_str(":")?;
+        f.write_int(self.line)?;
+        f.write_str(":")?;
+        f.write_int(self.column)?;
+        f.write_str(" }")
+    }
+}
+
+implement Display for StackFrame {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("  at ")?;
+        f.write_str(&self.function)?;
+        f.write_str(" (")?;
+        f.write_str(&self.file)?;
+        f.write_str(":")?;
+        f.write_int(self.line)?;
+        f.write_str(":")?;
+        f.write_int(self.column)?;
+        f.write_str(")")
+    }
+}
+
+implement Clone for StackFrame {
+    fn clone(&self) -> StackFrame {
+        StackFrame {
+            function: self.function.clone(),
+            file: self.file.clone(),
+            line: self.line,
+            column: self.column,
+        }
+    }
+}
+
+implement PartialEq for StackFrame {
+    fn eq(&self, other: &StackFrame) -> Bool {
+        self.function == other.function
+            && self.file == other.file
+            && self.line == other.line
+            && self.column == other.column
+    }
+}
+
+implement Eq for StackFrame {}
+
+// =============================================================================
+// Backtrace
+// =============================================================================
+
+/// A captured stack backtrace.
+///
+/// Contains a list of stack frames representing the call stack at the point
+/// where the backtrace was captured. Used for error diagnostics.
+///
+/// # Examples
+///
+/// ```verum
+/// let bt = Backtrace.capture();
+/// for frame in bt.frames() {
+///     print(f"  at {frame.function} ({frame.file}:{frame.line})");
+/// }
+/// ```
+public type Backtrace is {
+    /// The stack frames, from innermost to outermost.
+    frames: List<StackFrame>,
+};
+
+implement Backtrace {
+    /// Create an empty backtrace.
+    public fn empty() -> Backtrace {
+        Backtrace { frames: List.new() }
+    }
+
+    /// Create a backtrace from a list of frames.
+    public fn from_frames(frames: List<StackFrame>) -> Backtrace {
+        Backtrace { frames: frames }
+    }
+
+    /// Capture the current stack backtrace.
+    ///
+    /// Returns a backtrace of the current call stack. The backtrace may be
+    /// empty if capture is not supported or is disabled at runtime.
+    public fn capture() -> Backtrace {
+        // Backtrace capture is provided by the runtime intrinsic.
+        // Returns empty backtrace when capture is not available.
+        Backtrace { frames: List.new() }
+    }
+
+    /// Get the frames in this backtrace.
+    public fn frames(&self) -> &List<StackFrame> {
+        &self.frames
+    }
+
+    /// Returns true if this backtrace has no frames.
+    public fn is_empty(&self) -> Bool {
+        self.frames.is_empty()
+    }
+
+    /// Returns the number of frames in this backtrace.
+    public fn len(&self) -> Int {
+        self.frames.len()
+    }
+}
+
+implement Debug for Backtrace {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Backtrace { frames: [")?;
+        let mut first = true;
+        for frame in &self.frames {
+            if !first {
+                f.write_str(", ")?;
+            }
+            frame.fmt_debug(f)?;
+            first = false;
+        }
+        f.write_str("] }")
+    }
+}
+
+implement Display for Backtrace {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.is_empty() {
+            f.write_str("<no backtrace captured>")
+        } else {
+            f.write_str("stack backtrace:")?;
+            for frame in &self.frames {
+                f.write_str("\n")?;
+                frame.fmt(f)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+implement Clone for Backtrace {
+    fn clone(&self) -> Backtrace {
+        Backtrace { frames: self.frames.clone() }
+    }
+}
+
+implement Default for Backtrace {
+    fn default() -> Backtrace {
+        Backtrace.empty()
+    }
+}
+
+// =============================================================================
+// Error Protocol
+// =============================================================================
+
+/// The standard error protocol for all error types in Verum.
+///
+/// This protocol extends ErrorSource (which extends Describable) to provide
+/// a complete error handling interface with:
+/// - Human-readable error messages via `message()`
+/// - Error chain traversal via `source()`
+/// - Optional backtrace capture via `backtrace()`
+///
+/// All error types in the standard library implement this protocol.
+///
+/// # Examples
+///
+/// ```verum
+/// type IoError is {
+///     msg: Text,
+///     kind: IoErrorKind,
+///     cause: Maybe<Heap<dyn ErrorSource>>,
+///     bt: Maybe<Backtrace>,
+/// };
+///
+/// implement ErrorProtocol for IoError {
+///     fn message(&self) -> Text {
+///         self.msg.clone()
+///     }
+///
+///     fn source(&self) -> Maybe<&dyn Describable> {
+///         match &self.cause {
+///             Some(e) => Some(e.as_ref()),
+///             None => None,
+///         }
+///     }
+///
+///     fn backtrace(&self) -> Maybe<Backtrace> {
+///         self.bt.clone()
+///     }
+/// }
+/// ```
+public type ErrorProtocol is protocol extends ErrorSource {
+    /// Get the error message.
+    fn message(&self) -> Text {
+        self.description()
+    }
+
+    /// Get the backtrace associated with this error, if available.
+    fn backtrace(&self) -> Maybe<Backtrace> {
+        None
+    }
+};
+
+// =============================================================================
+// Error Chain Iterator
+// =============================================================================
+
+/// An iterator over an error chain.
+///
+/// Traverses from the initial error through all source errors.
+///
+/// # Examples
+///
+/// ```verum
+/// let chain = ErrorChain.new(&my_error);
+/// for desc in chain {
+///     print(f"caused by: {desc}");
+/// }
+/// ```
+public type ErrorChain is {
+    current: Maybe<&dyn Describable>,
+};
+
+implement ErrorChain {
+    /// Create a new error chain iterator starting from the given error.
+    public fn new(error: &dyn ErrorSource) -> ErrorChain {
+        ErrorChain {
+            current: Some(error as &dyn Describable),
+        }
+    }
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Format an error and its immediate source for display.
+///
+/// Produces output like:
+/// ```
+/// error: file not found
+/// caused by: permission denied
+/// ```
+///
+/// Note: Only one level of source chaining is supported because
+/// `ErrorSource.source()` returns `&dyn Describable` (which lacks
+/// a `source()` method). For deeper chains, use `ErrorProtocol`
+/// and traverse the chain manually.
+public fn format_error_chain(error: &dyn ErrorSource) -> Text {
+    let mut result = error.description();
+    let mut source = error.source();
+    while source is Some(s) {
+        result = result + "\ncaused by: " + s.description();
+        // Cannot continue chain: s is &dyn Describable, not &dyn ErrorSource
+        source = None;
+    }
+    result
+}

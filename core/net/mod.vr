@@ -1,0 +1,145 @@
+// =============================================================================
+// net/mod.vr - Network module
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, io, async
+// Spec: docs/new-model/RUNTIME_CONSOLIDATION_PLAN.md Appendix B.1
+// =============================================================================
+//
+// This module provides networking primitives:
+//
+// - tcp.vr: TCP streams and listeners
+// - udp.vr: UDP sockets
+// - addr.vr: IP addresses and socket addresses
+// - resolve.vr: DNS resolution
+//
+// # V-LLSI Architecture (Zero FFI)
+//
+// All networking modules use native V-LLSI syscalls with no FFI dependencies.
+// This provides maximum control for building high-performance protocols (QUIC,
+// HTTP/2, HTTP/3).
+//
+// ```
+// Application Layer
+//     │
+//     ▼
+// ┌─────────────────────────────────────────┐
+// │           core/net/                    │
+// │  TcpStream, TcpListener, UdpSocket      │
+// │  dns.vr (pure DNS protocol over UDP)    │
+// └─────────────────────────────────────────┘
+//     │ V-LLSI
+//     ▼
+// ┌─────────────────────────────────────────┐
+// │          sys/linux/syscall.vr           │   ← Linux: direct syscalls
+// │        sys/darwin/libsystem.vr          │   ← macOS: libSystem.B.dylib
+// └─────────────────────────────────────────┘
+//     │
+//     ▼
+// ┌─────────────────────────────────────────┐
+// │              OS Kernel                   │
+// └─────────────────────────────────────────┘
+// ```
+//
+// # Key Features
+//
+// - Platform-specific syscall implementations (Linux/macOS)
+// - FileDesc type for type-safe file descriptors
+// - SO_REUSEPORT for multi-threaded accept scaling
+// - MSG_NOSIGNAL/SO_NOSIGPIPE for SIGPIPE prevention
+// - SOCK_CLOEXEC/SOCK_NONBLOCK for atomic socket creation (Linux)
+// - Native async I/O via IOEngine (io_uring/kqueue)
+// - Pure DNS resolver (RFC 1035) without libc getaddrinfo
+//
+// =============================================================================
+
+module net;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module addr;
+public module tcp;
+public module udp;
+public module dns;
+public module http;
+public module tls;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// From addr
+public mount .addr.IpAddr;
+public mount .addr.Ipv4Addr;
+public mount .addr.Ipv6Addr;
+public mount .addr.SocketAddr;
+public mount .addr.SocketAddrV4;
+public mount .addr.SocketAddrV6;
+public mount .addr.ToSocketAddrs;
+
+// From tcp
+public mount .tcp.TcpStream;
+public mount .tcp.TcpListener;
+public mount .tcp.Incoming;
+
+// From udp
+public mount .udp.UdpSocket;
+
+// From http
+public mount .http.Method;
+public mount .http.StatusCode;
+public mount .http.Version;
+public mount .http.Headers;
+public mount .http.Request;
+public mount .http.Response;
+public mount .http.HttpClient;
+public mount .http.HttpHandler;
+public mount .http.HttpError;
+public mount .http.Url;
+public mount .http.Cookie;
+public mount .http.ClientConfig;
+public mount .http.PoolConfig;
+
+// From tls
+public mount .tls.TlsVersion;
+public mount .tls.Certificate;
+public mount .tls.PrivateKey;
+public mount .tls.TlsConfig;
+public mount .tls.TlsStream;
+public mount .tls.TlsConnector;
+public mount .tls.TlsAcceptor;
+public mount .tls.TlsError;
+
+// From dns
+public mount .dns.lookup_host;
+public mount .dns.lookup_host_v4;
+public mount .dns.lookup_host_v6;
+public mount .dns.lookup_addr;
+public mount .dns.lookup_host_async;
+public mount .dns.lookup_addr_async;
+public mount .dns.resolve;
+public mount .dns.resolve_async;
+public mount .dns.is_valid_domain;
+public mount .dns.is_ip_address;
+public mount .dns.DnsError;
+public mount .dns.DnsRecord;
+public mount .dns.DnsRecordEntry;
+public mount .dns.DnsRecordType;
+public mount .dns.Resolver;
+
+// =============================================================================
+// Prelude
+// =============================================================================
+
+public module prelude {
+    public mount super.TcpStream;
+    public mount super.TcpListener;
+    public mount super.UdpSocket;
+    public mount super.SocketAddr;
+    public mount super.IpAddr;
+    public mount super.lookup_host;
+    public mount super.resolve;
+    public mount super.Resolver;
+}

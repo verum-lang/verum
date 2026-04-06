@@ -1,0 +1,11 @@
+// Minimal context test
+
+// Step 1: Define a simple context
+context Logger {
+    fn log(message: Text);
+}
+
+// Step 2: Test main without using the context
+fn main() {
+    print("Testing context parsing");
+}

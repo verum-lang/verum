@@ -1,0 +1,56 @@
+// Benchmark: PB-001/PB-002 - Fibonacci performance
+// Priority: High
+// Expected: Performance comparison across tiers
+
+// Recursive Fibonacci (exponential time complexity)
+fn fib_recursive(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib_recursive(n - 1) + fib_recursive(n - 2)
+    }
+}
+
+// Iterative Fibonacci (linear time complexity)
+fn fib_iterative(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 0..n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    a
+}
+
+// Tail-recursive Fibonacci (with accumulator)
+fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 {
+        a
+    } else {
+        fib_tail(n - 1, b, a + b)
+    }
+}
+
+fn fib_tail_wrapper(n: Int) -> Int {
+    fib_tail(n, 0, 1)
+}
+
+fn main() {
+    // Test correctness
+    print(f"Recursive fib(10) = {fib_recursive(10)}");
+    print(f"Iterative fib(10) = {fib_iterative(10)}");
+    print(f"Tail-rec  fib(10) = {fib_tail_wrapper(10)}");
+
+    // Benchmark recursive (small n due to exponential time)
+    let start = now();
+    let result = fib_recursive(30);
+    let elapsed = now() - start;
+    print(f"Recursive fib(30) = {result} in {elapsed}ms");
+
+    // Benchmark iterative (can handle large n)
+    let start = now();
+    let result = fib_iterative(45);
+    let elapsed = now() - start;
+    print(f"Iterative fib(45) = {result} in {elapsed}ms");
+}

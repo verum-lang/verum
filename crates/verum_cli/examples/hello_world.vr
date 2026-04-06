@@ -1,0 +1,21 @@
+// Hello World example in Verum
+// Demonstrates the simplest Verum program with correct syntax
+
+// Import the println function from standard library
+// Note: using dots (.) not slashes (/) for module paths
+link std.io.stdio.println;
+
+fn main() {
+    // Basic print usage
+    print(f"Hello, World!");
+
+    // String interpolation in Verum
+    // Variables are interpolated using {} syntax
+    let name = "Verum";
+    print(f"Hello from {name}!");
+
+    // Multiple values can be printed
+    let version = "1.0";
+    let year = 2025;
+    print(f"Welcome to {name} version {version} ({year})");
+}

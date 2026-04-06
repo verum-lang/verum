@@ -1,0 +1,17 @@
+module runtime.cbgr;
+
+/// CBGR generation counter.
+@intrinsic("verum.runtime.cbgr_generation")
+public fn cbgr_generation() -> Int;
+
+/// CBGR epoch capability.
+@intrinsic("verum.runtime.cbgr_epoch")
+public fn cbgr_epoch() -> Int;
+
+/// CBGR check reference validity.
+@intrinsic("verum.runtime.cbgr_check")
+public fn cbgr_check(gen: Int, epoch: Int) -> Bool;
+
+/// CBGR invalidate a generation.
+@intrinsic("verum.runtime.cbgr_invalidate")
+public fn cbgr_invalidate(gen: Int);

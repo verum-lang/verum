@@ -1,0 +1,55 @@
+[package]
+name = "verum_lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language Server Protocol implementation for Verum"
+
+# NOTE: No [[bin]] - LSP is accessed via `verum lsp` command
+# The verum_cli crate provides the unified CLI interface
+
+[lib]
+name = "verum_lsp"
+path = "src/lib.rs"
+
+[dependencies]
+# LSP framework
+tower-lsp = "0.20"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Verum compiler crates
+verum_common = { workspace = true, features = ["lsp"] }
+verum_parser = { workspace = true }
+verum_lexer = { workspace = true }
+verum_ast = { workspace = true }
+verum_types = { workspace = true }
+verum_diagnostics = { workspace = true }
+# DEPRECATED: Superseded by stdlib/ and verum_common types
+verum_cbgr = { workspace = true }
+verum_modules = { workspace = true }
+verum_smt = { workspace = true }
+verum_syntax = { workspace = true }
+
+# Data structures
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+# Testing tokio: use workspace definition plus test utilities
+tokio = { workspace = true, features = ["test-util"] }
+

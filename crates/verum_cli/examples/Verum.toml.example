@@ -1,0 +1,415 @@
+# Verum.toml - Complete LLVM Optimization Configuration Example
+# This file demonstrates all available LLVM backend and optimization settings
+
+[package]
+name = "my-verum-project"
+version = "0.1.0"
+authors = ["Your Name <you@example.com>"]
+description = "A high-performance Verum application"
+license = "MIT OR Apache-2.0"
+
+# Language profile determines available features
+# Options: application (default), systems, research
+[language]
+profile = "application"
+
+# ============================================================================
+# LLVM Backend Configuration
+# ============================================================================
+
+[llvm]
+# Target triple for compilation
+# Examples:
+#   - "x86_64-unknown-linux-gnu" (Linux x86_64)
+#   - "aarch64-apple-darwin" (macOS ARM64)
+#   - "x86_64-pc-windows-msvc" (Windows)
+# Default: host triple (auto-detected)
+target_triple = "x86_64-unknown-linux-gnu"
+
+# CPU model for optimization
+# Options:
+#   - "native" - detect host CPU (best for local builds)
+#   - "generic" - portable across CPUs
+#   - Specific: "skylake", "apple-m1", "cortex-a72", etc.
+# Default: "generic"
+cpu = "native"
+
+# CPU features (enable with '+', disable with '-')
+# Examples:
+#   - "+avx2,+fma" - Enable AVX2 and FMA instructions
+#   - "+neon" - Enable ARM NEON SIMD
+#   - "-sse4.2" - Disable SSE4.2
+# Default: "" (auto-detect from CPU)
+features = "+avx2,+fma"
+
+# Relocation mode
+# Options: static, pic, dynamic-no-pic, ropi, rwpi, ropi-rwpi
+# Default: pic (required for shared libraries)
+reloc_mode = "pic"
+
+# Code model (memory layout)
+# Options: default, small, kernel, medium, large
+# Default: default
+code_model = "default"
+
+# Enable position-independent code (PIC)
+# Default: true
+pic = true
+
+# Enable position-independent executable (PIE)
+# Default: true
+pie = true
+
+# ============================================================================
+# Optimization Pass Configuration
+# ============================================================================
+
+[optimization]
+# Custom pass pipeline string (overrides opt_level from profile)
+# Examples:
+#   - "default<O0>" - No optimization
+#   - "default<O1>" - Basic optimization
+#   - "default<O2>" - Standard optimization
+#   - "default<O3>" - Aggressive optimization
+#   - "default<Os>" - Size optimization
+#   - "default<Oz>" - Aggressive size optimization
+#   - "module(inline,function(sroa,early-cse))" - Custom pipeline
+# Default: None (use profile.opt_level)
+# passes = "default<O3>"
+
+# Inlining threshold (0-65535)
+# Higher = more aggressive inlining
+# Default: 225
+inline_threshold = 275
+
+# Loop unrolling threshold (0-65535)
+# Higher = more aggressive unrolling
+# Default: 100
+unroll_threshold = 150
+
+# Enable loop vectorization (SIMD)
+# Default: true
+vectorize = true
+
+# Enable SLP (superword-level parallelism) vectorization
+# Default: true
+slp_vectorize = true
+
+# Enable loop unrolling
+# Default: true
+loop_unroll = true
+
+# Enable loop interleaving (O3 only)
+# Default: false
+loop_interleaving = true
+
+# Enable function merging (identical code elimination)
+# Default: true
+merge_functions = true
+
+# Enable call graph profiling
+# Default: true
+call_graph_profile = true
+
+# Enable LICM (loop-invariant code motion) with MemorySSA
+# Default: true
+licm_mssa = true
+
+# LICM optimization cap (0-10)
+# Default: 1
+licm_mssa_opt_cap = 1
+
+# Enable verification of each pass (debug builds only)
+# Default: false (expensive)
+verify_each = false
+
+# Enable debug logging (requires LLVM built with debug)
+# Default: false
+debug_logging = false
+
+# Vectorization strategy
+# Options: none, basic, aggressive, full
+# Default: aggressive
+vectorization_strategy = "full"
+
+# Enable CBGR-specific optimizations (check elimination)
+# Default: true
+cbgr_optimizations = true
+
+# ============================================================================
+# Link-Time Optimization (LTO) Configuration
+# ============================================================================
+
+[lto]
+# LTO mode
+# Options:
+#   - none - No LTO (fastest compilation)
+#   - thin - Thin LTO (5-15% perf gain, parallel, 2-3x faster than fat)
+#   - fat - Fat LTO (whole program optimization, maximum performance)
+# Default: thin
+mode = "thin"
+
+# Enable incremental LTO (with caching)
+# Only applies to Thin LTO
+# Default: true
+incremental = true
+
+# Maximum threads for parallel compilation (Thin LTO only)
+# Default: None (use all CPU cores)
+# max_threads = 8
+
+# Import instruction limit
+# Functions larger than this won't be imported across modules
+# Default: 100
+import_instr_limit = 100
+
+# Cache directory for incremental builds
+# Default: None (no caching)
+cache_dir = "target/lto-cache"
+
+# Enable aggressive cross-module inlining
+# Default: true
+aggressive_inlining = true
+
+# Enable devirtualization (virtual call elimination)
+# Default: true
+enable_devirtualization = true
+
+# Enable global dead code elimination
+# Default: true
+enable_global_dce = true
+
+# ============================================================================
+# Profile-Guided Optimization (PGO) Configuration
+# ============================================================================
+
+[pgo]
+# Enable PGO workflow
+# Default: false
+enabled = false
+
+# PGO mode
+# Options:
+#   - none - No PGO
+#   - generate - Generate instrumented binary (Phase 1)
+#   - use - Use collected profile data (Phase 3)
+# Default: none
+mode = "none"
+
+# Profile data directory
+# Default: "pgo-data"
+profile_dir = "pgo-data"
+
+# Hot function threshold (execution count)
+# Default: None (auto-detect at 90th percentile)
+# hot_threshold = 1000
+
+# Enable basic block reordering based on profile
+# Default: true
+enable_bb_reordering = true
+
+# Inline threshold multiplier for hot functions
+# Default: 1.5 (50% more aggressive for hot code)
+hot_inline_multiplier = 1.5
+
+# Use sampling-based profiling (lower overhead)
+# Default: false (use instrumentation-based)
+use_sampling = false
+
+# ============================================================================
+# Cross-Compilation Configuration
+# ============================================================================
+
+[cross_compile]
+# Enable cross-compilation
+# Default: false
+enabled = false
+
+# Target triple for cross-compilation
+# Required if enabled=true
+# Examples:
+#   - "aarch64-unknown-linux-gnu" - ARM64 Linux
+#   - "x86_64-pc-windows-gnu" - Windows x64
+#   - "armv7-unknown-linux-gnueabihf" - ARM32 Linux
+# target_triple = "aarch64-unknown-linux-gnu"
+
+# Sysroot path for cross-compilation
+# Default: None (auto-detect)
+# sysroot = "/usr/aarch64-linux-gnu"
+
+# Custom linker path
+# Default: None (auto-detect)
+# linker = "/usr/bin/aarch64-linux-gnu-gcc"
+
+# Additional linker arguments
+# Default: []
+# link_args = ["-static", "-L/custom/lib"]
+
+# Linking strategy
+# Options: static, dynamic, hybrid
+# Default: dynamic
+linking_strategy = "dynamic"
+
+# Strip symbols from output
+# Default: false
+strip_symbols = false
+
+# Enable universal binary for macOS (x86_64 + aarch64)
+# Default: false
+universal_binary = false
+
+# Minimum runtime dependencies (static builds)
+# Default: false
+minimal_runtime = false
+
+# ============================================================================
+# Build Profiles
+# ============================================================================
+
+[profile.dev]
+# Development profile - fast compilation, easy debugging
+tier = 0  # Interpreter
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[profile.release]
+# Release profile - maximum performance
+tier = 2  # AOT compilation
+verification = "runtime"
+opt_level = 3
+debug = false
+debug_assertions = false
+overflow_checks = false
+lto = true
+incremental = false
+codegen_units = 16
+cbgr_checks = "optimized"
+
+[profile.release-with-debug]
+# Release with debug info (for profiling)
+tier = 2
+verification = "runtime"
+opt_level = 3
+debug = true  # Enable debug symbols
+debug_assertions = false
+overflow_checks = false
+lto = true
+incremental = false
+codegen_units = 16
+cbgr_checks = "optimized"
+
+[profile.size]
+# Size-optimized profile
+tier = 2
+verification = "runtime"
+opt_level = 2  # Os optimization
+debug = false
+debug_assertions = false
+overflow_checks = false
+lto = true
+incremental = false
+codegen_units = 1
+cbgr_checks = "optimized"
+
+# ============================================================================
+# Example: PGO-Optimized Build Configuration
+# ============================================================================
+
+# Phase 1: Generate instrumented binary
+# [pgo]
+# enabled = true
+# mode = "generate"
+# profile_dir = "pgo-data"
+
+# Run your instrumented binary with representative workload:
+# $ ./target/release/my-project-instrumented
+
+# Phase 2: Merge profiles (if multiple runs)
+# $ llvm-profdata merge -output=pgo-data/merged.profdata pgo-data/*.profraw
+
+# Phase 3: Build with profile data
+# [pgo]
+# enabled = true
+# mode = "use"
+# profile_dir = "pgo-data"
+#
+# [lto]
+# mode = "fat"
+# aggressive_inlining = true
+
+# ============================================================================
+# Example: Cross-Compilation for ARM64 Linux
+# ============================================================================
+
+# [llvm]
+# target_triple = "aarch64-unknown-linux-gnu"
+# cpu = "cortex-a72"
+# features = "+neon"
+#
+# [cross_compile]
+# enabled = true
+# target_triple = "aarch64-unknown-linux-gnu"
+# sysroot = "/usr/aarch64-linux-gnu"
+# linker = "/usr/bin/aarch64-linux-gnu-gcc"
+
+# ============================================================================
+# Example: Maximum Performance Configuration
+# ============================================================================
+
+# [llvm]
+# cpu = "native"
+# features = "+avx2,+fma,+bmi2"
+#
+# [optimization]
+# inline_threshold = 325
+# unroll_threshold = 200
+# vectorize = true
+# slp_vectorize = true
+# loop_unroll = true
+# loop_interleaving = true
+# vectorization_strategy = "full"
+#
+# [lto]
+# mode = "fat"
+# aggressive_inlining = true
+# enable_devirtualization = true
+#
+# [pgo]
+# enabled = true
+# mode = "use"
+# hot_inline_multiplier = 2.0
+
+# ============================================================================
+# Example: Size-Optimized Configuration
+# ============================================================================
+
+# [optimization]
+# passes = "default<Oz>"
+# inline_threshold = 50
+# unroll_threshold = 0
+# vectorize = false
+# slp_vectorize = false
+# loop_unroll = false
+# merge_functions = true
+#
+# [lto]
+# mode = "thin"
+# aggressive_inlining = false
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+[dependencies]
+verum_std = "0.1"
+
+[dev_dependencies]
+
+[build_dependencies]

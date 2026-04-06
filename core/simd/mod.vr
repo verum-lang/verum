@@ -1,0 +1,583 @@
+/// Verum Standard Library: Portable SIMD Types
+///
+/// This module provides portable SIMD (Single Instruction, Multiple Data) types
+/// that compile to optimal instructions on any platform. Unlike platform-specific
+/// intrinsics, these types provide:
+/// - Cross-platform portability (SSE, AVX, AVX-512, NEON)
+/// - Compile-time lane count verification
+/// - Automatic multi-versioning via @multiversion
+/// - Zero-cost abstractions (all operations inline to single instructions)
+///
+/// # Architecture
+///
+/// SIMD types use the @repr(simd) attribute which:
+/// 1. Selects optimal vector width for target platform
+/// 2. Generates platform-specific intrinsics
+/// 3. Supports runtime CPU feature detection for multi-versioning
+///
+/// VBC (Verum Bytecode) opcodes 0xC0-0xCF are reserved for SIMD operations.
+///
+/// # Examples
+///
+/// ```verum
+/// // Portable SIMD vector operations
+/// let a = Vec4f.splat(1.0);
+/// let b = Vec4f.splat(2.0);
+/// let c = a.add(b);  // All lanes = 3.0
+///
+/// // Fused multiply-add (single instruction)
+/// let result = a.fma(b, c);  // a * b + c
+///
+/// // Horizontal reduction
+/// let sum = c.reduce_add();  // Sum all lanes
+/// ```
+///
+/// Implementation Reference: docs/architecture/low-level-features.md Section 5
+
+// GPU compute types and kernel API (CUDA, ROCm, Metal, Vulkan)
+
+module core.simd;
+public module gpu;
+
+// =============================================================================
+// SIMD ELEMENT PROTOCOL
+// =============================================================================
+
+/// Protocol for types that can be SIMD vector elements.
+///
+/// Types must implement this protocol to be used in Vec<T, N>.
+/// The compiler uses these constants to select optimal implementations.
+public type SimdElement is protocol {
+    /// Number of bits per element.
+    const BITS: USize;
+
+    /// Number of lanes in 128-bit vector (SSE/NEON).
+    /// Calculated as 128 / BITS at compile time.
+    const LANES_128: USize;
+
+    /// Number of lanes in 256-bit vector (AVX).
+    /// Calculated as 256 / BITS at compile time.
+    const LANES_256: USize;
+
+    /// Number of lanes in 512-bit vector (AVX-512).
+    /// Calculated as 512 / BITS at compile time.
+    const LANES_512: USize;
+};
+
+// Implement SimdElement for floating point types
+implement SimdElement for Float32 {
+    const BITS: USize = 32;
+    const LANES_128: USize = 4;   // 128 / 32
+    const LANES_256: USize = 8;   // 256 / 32
+    const LANES_512: USize = 16;  // 512 / 32
+}
+implement SimdElement for Float64 {
+    const BITS: USize = 64;
+    const LANES_128: USize = 2;   // 128 / 64
+    const LANES_256: USize = 4;   // 256 / 64
+    const LANES_512: USize = 8;   // 512 / 64
+}
+
+// Implement SimdElement for integer types
+implement SimdElement for Int8 {
+    const BITS: USize = 8;
+    const LANES_128: USize = 16;  // 128 / 8
+    const LANES_256: USize = 32;  // 256 / 8
+    const LANES_512: USize = 64;  // 512 / 8
+}
+implement SimdElement for Int16 {
+    const BITS: USize = 16;
+    const LANES_128: USize = 8;   // 128 / 16
+    const LANES_256: USize = 16;  // 256 / 16
+    const LANES_512: USize = 32;  // 512 / 16
+}
+implement SimdElement for Int32 {
+    const BITS: USize = 32;
+    const LANES_128: USize = 4;   // 128 / 32
+    const LANES_256: USize = 8;   // 256 / 32
+    const LANES_512: USize = 16;  // 512 / 32
+}
+implement SimdElement for Int64 {
+    const BITS: USize = 64;
+    const LANES_128: USize = 2;   // 128 / 64
+    const LANES_256: USize = 4;   // 256 / 64
+    const LANES_512: USize = 8;   // 512 / 64
+}
+implement SimdElement for UInt8 {
+    const BITS: USize = 8;
+    const LANES_128: USize = 16;  // 128 / 8
+    const LANES_256: USize = 32;  // 256 / 8
+    const LANES_512: USize = 64;  // 512 / 8
+}
+implement SimdElement for UInt16 {
+    const BITS: USize = 16;
+    const LANES_128: USize = 8;   // 128 / 16
+    const LANES_256: USize = 16;  // 256 / 16
+    const LANES_512: USize = 32;  // 512 / 16
+}
+implement SimdElement for UInt32 {
+    const BITS: USize = 32;
+    const LANES_128: USize = 4;   // 128 / 32
+    const LANES_256: USize = 8;   // 256 / 32
+    const LANES_512: USize = 16;  // 512 / 32
+}
+implement SimdElement for UInt64 {
+    const BITS: USize = 64;
+    const LANES_128: USize = 2;   // 128 / 64
+    const LANES_256: USize = 4;   // 256 / 64
+    const LANES_512: USize = 8;   // 512 / 64
+}
+
+// =============================================================================
+// PORTABLE SIMD VECTOR TYPE
+// =============================================================================
+
+/// Portable SIMD vector type.
+///
+/// Compiles to optimal instructions on any platform:
+/// - x86_64: SSE4.2 (128-bit), AVX2 (256-bit), AVX-512 (512-bit)
+/// - aarch64: NEON (128-bit), SVE (scalable)
+///
+/// # Type Parameters
+/// - `T`: Element type (must implement SimdElement)
+/// - `N`: Number of lanes (must be power of 2)
+///
+/// # Alignment
+/// Vectors are naturally aligned to their size (16/32/64 bytes).
+///
+/// Note: Vec is a newtype around [T; N] to ensure its own methods
+/// (like min/max) take priority over Iterator methods on arrays.
+@repr(simd)
+public type Vec<T: SimdElement, N: meta USize> is { lanes: [T; N] };
+
+// =============================================================================
+// COMMON VECTOR TYPE ALIASES
+// =============================================================================
+
+// 128-bit vectors (SSE/NEON)
+public type Vec4f  = Vec<Float32, 4>;   // 4x32-bit float
+public type Vec2d  = Vec<Float64, 2>;   // 2x64-bit float
+public type Vec4i  = Vec<Int32, 4>;     // 4x32-bit int
+public type Vec2l  = Vec<Int64, 2>;     // 2x64-bit int
+public type Vec16b = Vec<UInt8, 16>;    // 16x8-bit byte
+public type Vec8s  = Vec<Int16, 8>;     // 8x16-bit short
+
+// 256-bit vectors (AVX)
+public type Vec8f  = Vec<Float32, 8>;   // 8x32-bit float
+public type Vec4d  = Vec<Float64, 4>;   // 4x64-bit float
+public type Vec8i  = Vec<Int32, 8>;     // 8x32-bit int
+public type Vec4l  = Vec<Int64, 4>;     // 4x64-bit int
+public type Vec32b = Vec<UInt8, 32>;    // 32x8-bit byte
+public type Vec16s = Vec<Int16, 16>;    // 16x16-bit short
+
+// 512-bit vectors (AVX-512)
+public type Vec16f = Vec<Float32, 16>;  // 16x32-bit float
+public type Vec8d  = Vec<Float64, 8>;   // 8x64-bit float
+public type Vec16i = Vec<Int32, 16>;    // 16x32-bit int
+public type Vec8l  = Vec<Int64, 8>;     // 8x64-bit int
+public type Vec64b = Vec<UInt8, 64>;    // 64x8-bit byte
+public type Vec32s = Vec<Int16, 32>;    // 32x16-bit short
+
+// =============================================================================
+// SIMD MASK TYPE
+// =============================================================================
+
+/// SIMD mask type for conditional operations.
+///
+/// Each lane is a boolean indicating whether the operation should apply.
+/// Used for masked loads, stores, and conditional selects.
+///
+/// Note: Mask is a newtype around [Bool; N] to ensure its own methods
+/// take priority over array/slice methods like count() and any().
+@repr(simd_mask)
+public type Mask<N: meta USize> is { lanes: [Bool; N] };
+
+// Common mask aliases
+public type Mask4  = Mask<4>;
+public type Mask8  = Mask<8>;
+public type Mask16 = Mask<16>;
+
+// =============================================================================
+// VECTOR CONSTRUCTION
+// =============================================================================
+
+implement<T: SimdElement, N: meta USize> Vec<T, N> {
+    /// Broadcast scalar to all lanes.
+    ///
+    /// ```verum
+    /// let v = Vec4f.splat(1.0);  // [1.0, 1.0, 1.0, 1.0]
+    /// ```
+    @inline(always)
+    @intrinsic("simd_splat")
+    public fn splat(value: T) -> Vec<T, N>;
+
+    /// Create vector from array.
+    @inline(always)
+    public fn from_array(arr: [T; N]) -> Vec<T, N> {
+        arr as Vec<T, N>
+    }
+
+    /// Convert to array.
+    @inline(always)
+    public fn to_array(self) -> [T; N] {
+        self as [T; N]
+    }
+
+    /// Load from aligned memory.
+    ///
+    /// # Safety
+    /// Pointer must be aligned to N * sizeof(T) bytes.
+    /// Use @static_assert or meta constraint to verify alignment.
+    @inline(always)
+    @intrinsic("simd_load_aligned")
+    public fn load_aligned(ptr: *const T) -> Vec<T, N>
+    where meta ptr.is_aligned_to(N * T.size);
+
+    /// Load from unaligned memory.
+    ///
+    /// Slightly slower than aligned load but works with any pointer.
+    @inline(always)
+    @intrinsic("simd_load_unaligned")
+    public fn load_unaligned(ptr: *const T) -> Vec<T, N>;
+
+    /// Store to aligned memory.
+    @inline(always)
+    @intrinsic("simd_store_aligned")
+    public fn store_aligned(self, ptr: *mut T)
+    where meta ptr.is_aligned_to(N * T.size);
+
+    /// Store to unaligned memory.
+    @inline(always)
+    @intrinsic("simd_store_unaligned")
+    public fn store_unaligned(self, ptr: *mut T);
+}
+
+// =============================================================================
+// ARITHMETIC OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement + Numeric, N: meta USize> Vec<T, N> {
+    /// Lane-wise addition.
+    @inline(always)
+    @intrinsic("simd_add")
+    public fn add(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Lane-wise subtraction.
+    @inline(always)
+    @intrinsic("simd_sub")
+    public fn sub(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Lane-wise multiplication.
+    @inline(always)
+    @intrinsic("simd_mul")
+    public fn mul(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Lane-wise division.
+    @inline(always)
+    @intrinsic("simd_div")
+    public fn div(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Fused multiply-add: a * b + c (single rounding).
+    ///
+    /// This is more accurate and faster than separate mul + add.
+    /// Maps to FMA instruction on supported platforms.
+    @inline(always)
+    @intrinsic("simd_fma")
+    public fn fma(self, b: Vec<T, N>, c: Vec<T, N>) -> Vec<T, N>;
+
+    /// Lane-wise absolute value.
+    @inline(always)
+    @intrinsic("simd_abs")
+    public fn abs(self) -> Vec<T, N>;
+
+    /// Lane-wise negation.
+    @inline(always)
+    @intrinsic("simd_neg")
+    public fn neg(self) -> Vec<T, N>;
+
+    /// Lane-wise minimum.
+    @inline(always)
+    @intrinsic("simd_min")
+    public fn min(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Lane-wise maximum.
+    @inline(always)
+    @intrinsic("simd_max")
+    public fn max(self, other: Vec<T, N>) -> Vec<T, N>;
+}
+
+// =============================================================================
+// HORIZONTAL (REDUCTION) OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement + Numeric, N: meta USize> Vec<T, N> {
+    /// Sum all lanes (horizontal add).
+    @inline(always)
+    @intrinsic("simd_reduce_add")
+    public fn reduce_add(self) -> T;
+
+    /// Multiply all lanes (horizontal mul).
+    @inline(always)
+    @intrinsic("simd_reduce_mul")
+    public fn reduce_mul(self) -> T;
+
+    /// Find minimum across all lanes.
+    @inline(always)
+    @intrinsic("simd_reduce_min")
+    public fn reduce_min(self) -> T;
+
+    /// Find maximum across all lanes.
+    @inline(always)
+    @intrinsic("simd_reduce_max")
+    public fn reduce_max(self) -> T;
+}
+
+// =============================================================================
+// COMPARISON OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement + Ord, N: meta USize> Vec<T, N> {
+    /// Lane-wise less-than comparison.
+    @inline(always)
+    @intrinsic("simd_lt")
+    public fn cmp_lt(self, other: Vec<T, N>) -> Mask<N>;
+
+    /// Lane-wise less-than-or-equal comparison.
+    @inline(always)
+    @intrinsic("simd_le")
+    public fn cmp_le(self, other: Vec<T, N>) -> Mask<N>;
+
+    /// Lane-wise greater-than comparison.
+    @inline(always)
+    @intrinsic("simd_gt")
+    public fn cmp_gt(self, other: Vec<T, N>) -> Mask<N>;
+
+    /// Lane-wise greater-than-or-equal comparison.
+    @inline(always)
+    @intrinsic("simd_ge")
+    public fn cmp_ge(self, other: Vec<T, N>) -> Mask<N>;
+
+    /// Lane-wise equality comparison.
+    @inline(always)
+    @intrinsic("simd_eq")
+    public fn cmp_eq(self, other: Vec<T, N>) -> Mask<N>;
+
+    /// Lane-wise not-equal comparison.
+    @inline(always)
+    @intrinsic("simd_ne")
+    public fn cmp_ne(self, other: Vec<T, N>) -> Mask<N>;
+}
+
+// =============================================================================
+// CONDITIONAL OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement, N: meta USize> Vec<T, N> {
+    /// Conditional select: choose a or b per lane based on mask.
+    ///
+    /// ```verum
+    /// let mask = a.cmp_lt(b);
+    /// let min = Vec.select(mask, a, b);  // Per-lane minimum
+    /// ```
+    @inline(always)
+    @intrinsic("simd_select")
+    public fn select(mask: Mask<N>, a: Vec<T, N>, b: Vec<T, N>) -> Vec<T, N>;
+
+    /// Masked load: load from memory, zeroing inactive lanes.
+    @inline(always)
+    @intrinsic("simd_masked_load")
+    public fn masked_load(ptr: *const T, mask: Mask<N>) -> Vec<T, N>;
+
+    /// Masked store: store to memory, skipping inactive lanes.
+    @inline(always)
+    @intrinsic("simd_masked_store")
+    public fn masked_store(self, ptr: *mut T, mask: Mask<N>);
+}
+
+// =============================================================================
+// SHUFFLE AND PERMUTE OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement, N: meta USize> Vec<T, N> {
+    /// Shuffle elements using compile-time mask.
+    ///
+    /// Each index in MASK selects a lane from self (0..N-1) or other (N..2N-1).
+    ///
+    /// ```verum
+    /// let a = Vec4i.from_array([1, 2, 3, 4]);
+    /// let b = Vec4i.from_array([5, 6, 7, 8]);
+    /// let c = a.shuffle<[0, 5, 2, 7]>(b);  // [1, 6, 3, 8]
+    /// ```
+    @inline(always)
+    @intrinsic("simd_shuffle")
+    public fn shuffle<MASK: meta [UInt32; N]>(self, other: Vec<T, N>) -> Vec<T, N>;
+
+    /// Reverse lane order.
+    /// Generates appropriate shuffle mask at compile time.
+    @inline(always)
+    @intrinsic("simd_reverse")
+    public fn reverse(self) -> Vec<T, N>;
+
+    /// Rotate lanes left by COUNT positions.
+    /// Generates appropriate shuffle mask at compile time.
+    @inline(always)
+    @intrinsic("simd_rotate_left")
+    public fn rotate_left<COUNT: meta USize>(self) -> Vec<T, N>;
+}
+
+// =============================================================================
+// GATHER/SCATTER OPERATIONS
+// =============================================================================
+
+implement<T: SimdElement, N: meta USize> Vec<T, N> {
+    /// Gather: indexed load from memory.
+    ///
+    /// Loads T elements from base[indices[i]] for each lane i.
+    /// Useful for non-contiguous memory access patterns.
+    @inline(always)
+    @intrinsic("simd_gather")
+    public fn gather(base: *const T, indices: Vec<Int32, N>) -> Vec<T, N>;
+
+    /// Scatter: indexed store to memory.
+    ///
+    /// Stores self[i] to base[indices[i]] for each lane i.
+    @inline(always)
+    @intrinsic("simd_scatter")
+    public fn scatter(self, base: *mut T, indices: Vec<Int32, N>);
+
+    /// Masked gather: load with mask.
+    @inline(always)
+    @intrinsic("simd_masked_gather")
+    public fn masked_gather(
+        base: *const T,
+        indices: Vec<Int32, N>,
+        mask: Mask<N>,
+        default: Vec<T, N>,
+    ) -> Vec<T, N>;
+
+    /// Masked scatter: store with mask.
+    @inline(always)
+    @intrinsic("simd_masked_scatter")
+    public fn masked_scatter(self, base: *mut T, indices: Vec<Int32, N>, mask: Mask<N>);
+}
+
+// =============================================================================
+// MASK OPERATIONS
+// =============================================================================
+
+implement<N: meta USize> Mask<N> {
+    /// Create mask with all lanes active.
+    @intrinsic("simd_mask_all")
+    public fn all() -> Mask<N>;
+
+    /// Create mask with no lanes active.
+    @intrinsic("simd_mask_none")
+    public fn none() -> Mask<N>;
+
+    /// Count active lanes.
+    @intrinsic("simd_mask_count")
+    public fn count(self) -> USize;
+
+    /// Check if any lane is active.
+    @intrinsic("simd_mask_any")
+    public fn any(self) -> Bool;
+
+    /// Check if all lanes are active.
+    @intrinsic("simd_mask_all_active")
+    public fn all_active(self) -> Bool;
+
+    /// Bitwise AND of masks.
+    @inline(always)
+    @intrinsic("simd_mask_and")
+    public fn and(self, other: Mask<N>) -> Mask<N>;
+
+    /// Bitwise OR of masks.
+    @inline(always)
+    @intrinsic("simd_mask_or")
+    public fn or(self, other: Mask<N>) -> Mask<N>;
+
+    /// Bitwise NOT of mask.
+    @inline(always)
+    @intrinsic("simd_mask_not")
+    public fn not(self) -> Mask<N>;
+}
+
+// =============================================================================
+// PLATFORM DETECTION
+// =============================================================================
+
+/// Compile-time platform feature detection.
+///
+/// Use these constants to conditionally compile code for specific platforms.
+
+@cfg(target_feature = "sse4.2")
+public const HAS_SSE42: Bool = true;
+@cfg(not(target_feature = "sse4.2"))
+public const HAS_SSE42: Bool = false;
+
+@cfg(target_feature = "avx")
+public const HAS_AVX: Bool = true;
+@cfg(not(target_feature = "avx"))
+public const HAS_AVX: Bool = false;
+
+@cfg(target_feature = "avx2")
+public const HAS_AVX2: Bool = true;
+@cfg(not(target_feature = "avx2"))
+public const HAS_AVX2: Bool = false;
+
+@cfg(target_feature = "avx512f")
+public const HAS_AVX512: Bool = true;
+@cfg(not(target_feature = "avx512f"))
+public const HAS_AVX512: Bool = false;
+
+@cfg(target_arch = "aarch64")
+public const HAS_NEON: Bool = true;
+@cfg(not(target_arch = "aarch64"))
+public const HAS_NEON: Bool = false;
+
+// =============================================================================
+// MULTI-VERSIONING
+// =============================================================================
+
+/// Multi-version attribute for automatic CPU dispatch.
+///
+/// The compiler generates multiple versions of the function and selects
+/// the optimal one at runtime based on CPU capabilities.
+///
+/// ```verum
+/// @multiversion(
+///     avx512f = "avx512_impl",
+///     avx2 = "avx2_impl",
+///     sse4_2 = "sse_impl",
+///     default = "scalar_impl",
+/// )
+/// public fn process_batch(data: &mut [Float32]) {
+///     // Compiler generates dispatcher
+/// }
+/// ```
+///
+/// The @multiversion attribute is processed by the compiler and generates:
+/// 1. Function variants for each target feature
+/// 2. Runtime CPU feature detection
+/// 3. Function pointer dispatch table
+
+// =============================================================================
+// VBC OPCODE REFERENCE
+// =============================================================================
+
+/// VBC SIMD opcodes (0xC0-0xCF range).
+///
+/// These opcodes are used by the VBC interpreter and JIT compiler.
+/// The kernel dispatch layer selects optimal implementations based on
+/// runtime CPU capabilities.
+///
+/// | Operation          | VBC Opcode     | Description              |
+/// |--------------------|----------------|--------------------------|
+/// | Vec.splat()        | SIMD_SPLAT     | Broadcast scalar         |
+/// | Vec.load_aligned() | SIMD_LOAD      | Aligned load             |
+/// | Vec.add()          | SIMD_BINOP     | Element-wise arithmetic  |
+/// | Vec.fma()          | SIMD_FMA       | Fused multiply-add       |
+/// | Vec.reduce_add()   | SIMD_REDUCE    | Horizontal reduction     |
+/// | Vec.shuffle()      | SIMD_SHUFFLE   | Permute elements         |
+/// | Vec.gather()       | SIMD_GATHER    | Indexed load             |
+/// | Vec.scatter()      | SIMD_SCATTER   | Indexed store            |

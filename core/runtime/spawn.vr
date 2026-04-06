@@ -1,0 +1,1003 @@
+/// # SpawnConfig - Task Spawn Configuration
+///
+/// Spec: docs/detailed/26-unified-execution-architecture.md#spawn-configuration-type
+/// Spec: docs/detailed/26-unified-execution-architecture.md#spawn_with()
+///
+/// Provides fine-grained control over spawned task behavior with a zero-cost
+/// builder pattern. SpawnConfig allows customization of:
+/// - Recovery strategy (retry, circuit breaker)
+/// - Restart policy (permanent, transient, temporary)
+/// - Isolation level (shared, send-only, full)
+/// - Priority level (for scheduling hints)
+/// - Context injection (add contexts to child environment)
+/// - Supervision attachment (link to supervisor)
+///
+/// ## Architecture
+///
+/// ```
+/// ┌────────────────────────────────────────────────────────────────────────────┐
+/// │                       spawn_with() FLOW                                    │
+/// ├────────────────────────────────────────────────────────────────────────────┤
+/// │                                                                            │
+/// │    SpawnConfig                    ExecutionEnv                             │
+/// │   ┌─────────────┐              ┌─────────────┐                             │
+/// │   │ recovery    │──override───▶│error_recovery│                            │
+/// │   │ restart     │──override───▶│concurrency   │                            │
+/// │   │ isolation   │──override───▶│concurrency   │                            │
+/// │   │ priority    │──hint───────▶│scheduler     │                            │
+/// │   │ contexts    │──merge──────▶│capabilities  │                            │
+/// │   │ supervisor  │──link───────▶│error_recovery│                            │
+/// │   └─────────────┘              └─────────────┘                             │
+/// │          │                            │                                    │
+/// │          │         ┌──────────────────┘                                    │
+/// │          │         │                                                       │
+/// │          ▼         ▼                                                       │
+/// │    ┌──────────────────────┐                                                │
+/// │    │   fork() + apply()   │  ~100-170ns total                              │
+/// │    └──────────┬───────────┘                                                │
+/// │               │                                                            │
+/// │               ▼                                                            │
+/// │    ┌──────────────────────┐                                                │
+/// │    │   spawn on executor  │  ~150ns (V-LLSI)                               │
+/// │    └──────────────────────┘                                                │
+/// │                                                                            │
+/// └────────────────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// ## Performance
+///
+/// | Operation               | Time      | Notes                           |
+/// |-------------------------|-----------|----------------------------------|
+/// | SpawnConfig::new()      | ~10ns     | Zero-cost builder init          |
+/// | Each builder method     | ~0-5ns    | Inline assignment               |
+/// | apply_to_env()          | ~50-100ns | Conditional overrides           |
+/// | Context merge           | ~5-30ns   | Per context                     |
+/// | spawn_with() overhead   | ~100-170ns| Over baseline spawn             |
+///
+/// ## Zero-Allocation Design
+///
+/// SpawnConfig uses inline storage for all fields:
+/// - No heap allocation for default configs
+/// - Inline context storage (up to 4 contexts)
+/// - Overflow to heap only for >4 contexts (rare)
+
+module runtime.spawn;
+
+mount core.{List, Map, Text, Maybe, Result, TypeId, Any};
+mount sync.{AtomicU64, MemoryOrdering};
+mount core.memory.null_ptr;
+mount sys.{monotonic_nanos};
+mount async.{Future, Task, JoinHandle};
+
+mount super.env.{
+    ExecutionEnv,
+    IsolationLevel,
+    RestartStrategy,
+    RestartPolicy,
+};
+mount super.recovery.{
+    RecoveryStrategy,
+    RetryConfig,
+    BackoffStrategy,
+    CircuitBreakerConfig,
+};
+mount super.supervisor.{
+    SupervisorHandle,
+    ChildSpec,
+    ChildId,
+};
+mount core.intrinsics.{
+    spawn_with_env as spawn_with_env_intrinsic,
+    spawn_supervised as spawn_supervised_intrinsic,
+    FutureHandle,
+    JoinHandleOpaque,
+};
+
+// =============================================================================
+// Priority Level
+// =============================================================================
+
+/// Task priority level for scheduling hints
+///
+/// Higher priority tasks are scheduled preferentially when contention exists.
+/// Priority is a hint - the executor may ignore it under certain conditions.
+@repr(UInt8)
+public type PriorityLevel is
+    /// Background tasks (batch processing, cleanup)
+    | Background
+    /// Low priority (non-urgent work)
+    | Low
+    /// Normal priority (default)
+    | Normal
+    /// High priority (user-facing operations)
+    | High
+    /// Critical priority (system operations, health checks)
+    | Critical;
+
+implement PriorityLevel {
+    /// Convert to numeric value (0-255)
+    @inline
+    public fn to_u8(self) -> UInt8 {
+        match self {
+            Background => 32,
+            Low => 64,
+            Normal => 128,
+            High => 192,
+            Critical => 255,
+        }
+    }
+
+    /// Create from numeric value
+    public fn from_u8(val: UInt8) -> Self {
+        match val {
+            0..48 => Background,
+            48..96 => Low,
+            96..160 => Normal,
+            160..224 => High,
+            _ => Critical,
+        }
+    }
+}
+
+implement Default for PriorityLevel {
+    fn default() -> Self {
+        PriorityLevel.Normal
+    }
+}
+
+// =============================================================================
+// Inline Context Storage
+// =============================================================================
+
+/// Inline context entry (fits in 24 bytes)
+@repr(C)
+@size(24)
+public type InlineContextEntry is {
+    /// Type ID hash for fast matching
+    type_id_hash: UInt64,
+
+    /// Pointer to context value
+    value_ptr: *const (),
+
+    /// Padding
+    _padding: UInt64,
+};
+
+/// Inline context storage (4 entries = 96 bytes)
+public type InlineContextStorage is {
+    /// Inline entries
+    entries: [InlineContextEntry; 4],
+
+    /// Number of inline entries
+    count: UInt8,
+
+    /// Padding
+    _padding: [Byte; 7],
+};
+
+implement InlineContextStorage {
+    public fn new() -> Self {
+        Self {
+            entries: [InlineContextEntry {
+                type_id_hash: 0,
+                value_ptr: null_ptr(),
+                _padding: 0,
+            }; 4],
+            count: 0,
+            _padding: [0; 7],
+        }
+    }
+
+    /// Add context (returns false if overflow)
+    public fn push(&mut self, type_id: TypeId, value: &dyn Any) -> Bool {
+        if self.count >= 4 {
+            return false;
+        }
+        let idx = self.count as Int;
+        self.entries[idx] = InlineContextEntry {
+            type_id_hash: type_id.hash(),
+            value_ptr: value as *const () as *const (),
+            _padding: 0,
+        };
+        self.count += 1;
+        true
+    }
+
+    /// Get number of entries
+    @inline
+    public fn len(&self) -> Int {
+        self.count as Int
+    }
+
+    /// Check if empty
+    @inline
+    public fn is_empty(&self) -> Bool {
+        self.count == 0
+    }
+}
+
+// =============================================================================
+// SpawnConfig
+// =============================================================================
+
+/// Spawn configuration for task spawning with custom overrides
+///
+/// SpawnConfig allows customization of spawned task behavior:
+/// - Override parent error recovery strategy
+/// - Override parent restart policy
+/// - Override parent isolation level
+/// - Set task priority
+/// - Add new contexts (merged with parent contexts)
+/// - Attach to supervisor
+///
+/// ## Performance
+/// - Building config: <50ns (zero-cost builder pattern)
+/// - Applying overrides: ~50-100ns (conditional pointer swaps)
+/// - Context merging: ~5-30ns per context
+///
+/// ## Thread Safety
+/// - Config is value type (Copy for small configs)
+/// - Safe to build and pass across threads
+/// - Applied to task-local ExecutionEnv fork
+public type SpawnConfig is {
+    /// Task name for identification and logging
+    name: Maybe<Text>,
+
+    /// Override parent error recovery strategy
+    recovery: Maybe<RecoveryStrategy>,
+
+    /// Override parent restart policy
+    restart: Maybe<RestartPolicy>,
+
+    /// Override parent isolation level
+    isolation: Maybe<IsolationLevel>,
+
+    /// Task priority hint
+    priority: PriorityLevel,
+
+    /// Circuit breaker configuration (creates new breaker for this task)
+    circuit_breaker: Maybe<CircuitBreakerConfig>,
+
+    /// Retry configuration (creates retry policy for this task)
+    retry: Maybe<RetryConfig>,
+
+    /// Inline context storage (up to 4 contexts)
+    contexts_inline: InlineContextStorage,
+
+    /// Overflow contexts (heap allocated, rare)
+    contexts_overflow: Maybe<&List<(TypeId, &dyn Any)>>,
+
+    /// Supervisor attachment
+    supervisor: Maybe<&SupervisorHandle>,
+
+    /// Child specification for supervised tasks
+    child_spec: Maybe<ChildSpec>,
+
+    /// Deadline in monotonic nanoseconds (0 = no deadline)
+    deadline_ns: UInt64,
+
+    /// Stack size hint (0 = default)
+    stack_size: Int,
+};
+
+implement SpawnConfig {
+    /// Create new spawn config with default values
+    ///
+    /// ## Performance
+    /// - ~10ns (inline initialization)
+    public fn new() -> Self {
+        Self {
+            name: None,
+            recovery: None,
+            restart: None,
+            isolation: None,
+            priority: PriorityLevel.Normal,
+            circuit_breaker: None,
+            retry: None,
+            contexts_inline: InlineContextStorage.new(),
+            contexts_overflow: None,
+            supervisor: None,
+            child_spec: None,
+            deadline_ns: 0,
+            stack_size: 0,
+        }
+    }
+
+    /// Set task name for identification and logging
+    ///
+    /// ## Performance
+    /// - ~10ns (Text allocation)
+    @inline
+    public fn with_name<N: Into<Text>>(mut self, name: N) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Set recovery strategy override
+    ///
+    /// ## Performance
+    /// - 0ns (inline enum assignment)
+    @inline
+    public fn with_recovery(mut self, strategy: RecoveryStrategy) -> Self {
+        self.recovery = Some(strategy);
+        self
+    }
+
+    /// Set restart policy override
+    ///
+    /// ## Performance
+    /// - 0ns (inline struct copy)
+    @inline
+    public fn with_restart(mut self, policy: RestartPolicy) -> Self {
+        self.restart = Some(policy);
+        self
+    }
+
+    /// Set isolation level override
+    ///
+    /// ## Performance
+    /// - 0ns (inline enum assignment)
+    @inline
+    public fn with_isolation(mut self, isolation: IsolationLevel) -> Self {
+        self.isolation = Some(isolation);
+        self
+    }
+
+    /// Set task priority hint
+    ///
+    /// ## Performance
+    /// - 0ns (inline enum assignment)
+    @inline
+    public fn with_priority(mut self, priority: PriorityLevel) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Set circuit breaker configuration
+    ///
+    /// Creates a new circuit breaker for this task with the given configuration.
+    ///
+    /// ## Performance
+    /// - ~5ns (struct copy)
+    @inline
+    public fn with_circuit_breaker(mut self, config: CircuitBreakerConfig) -> Self {
+        self.circuit_breaker = Some(config);
+        self
+    }
+
+    /// Set retry configuration (convenience wrapper for with_recovery)
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_retry(mut self, config: RetryConfig) -> Self {
+        self.retry = Some(config);
+        self.recovery = Some(RecoveryStrategy.Retry);
+        self
+    }
+
+    /// Set retry with simple parameters
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_simple_retry(mut self, max_attempts: UInt16, delay_ms: UInt32) -> Self {
+        self.retry = Some(RetryConfig {
+            max_attempts: max_attempts,
+            backoff: BackoffStrategy.Fixed,
+            backoff_base_ms: delay_ms,
+            backoff_max_ms: delay_ms,
+            jitter_factor: 0.0,
+            retryable_errors: None,
+        });
+        self.recovery = Some(RecoveryStrategy.Retry);
+        self
+    }
+
+    /// Set exponential backoff retry
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_exponential_retry(
+        mut self,
+        max_attempts: UInt16,
+        base_ms: UInt32,
+        max_ms: UInt32,
+        jitter: Float32,
+    ) -> Self {
+        self.retry = Some(RetryConfig {
+            max_attempts: max_attempts,
+            backoff: BackoffStrategy.Exponential,
+            backoff_base_ms: base_ms,
+            backoff_max_ms: max_ms,
+            jitter_factor: jitter,
+            retryable_errors: None,
+        });
+        self.recovery = Some(RecoveryStrategy.Retry);
+        self
+    }
+
+    /// Set restart limits (convenience wrapper for with_restart)
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_restart_limits(mut self, max_restarts: Int, time_window_secs: UInt64) -> Self {
+        self.restart = Some(RestartPolicy {
+            strategy: RestartStrategy.Permanent,
+            max_restarts: max_restarts,
+            time_window_secs: time_window_secs,
+        });
+        self
+    }
+
+    /// Add a context to the spawned task
+    ///
+    /// The context is added to the child environment in addition to parent contexts.
+    /// If a context with the same TypeId exists, the new context takes precedence.
+    ///
+    /// ## Performance
+    /// - ~5-10ns for inline storage (first 4)
+    /// - ~30ns for overflow (5+)
+    public fn with_context<T>(mut self, value: &T) -> Self {
+        let type_id = TypeId.of<T>();
+
+        // Try inline storage first
+        if !self.contexts_inline.push(type_id, value as &dyn Any) {
+            // Overflow to heap
+            if self.contexts_overflow.is_none() {
+                self.contexts_overflow = Some(&List.new());
+            }
+            let overflow = self.contexts_overflow.unwrap();
+            overflow.push((type_id, value as &dyn Any));
+        }
+        self
+    }
+
+    /// Attach task to supervisor
+    ///
+    /// The task will be supervised and automatically restarted according to
+    /// the supervisor's strategy and the child specification.
+    ///
+    /// ## Performance
+    /// - ~5ns (pointer assignment)
+    @inline
+    public fn with_supervisor(mut self, supervisor: &SupervisorHandle) -> Self {
+        self.supervisor = Some(supervisor);
+        self
+    }
+
+    /// Set child specification for supervised tasks
+    ///
+    /// ## Performance
+    /// - ~10ns (struct copy)
+    @inline
+    public fn with_child_spec(mut self, spec: ChildSpec) -> Self {
+        self.child_spec = Some(spec);
+        self
+    }
+
+    /// Set deadline (absolute monotonic time in nanoseconds)
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_deadline_ns(mut self, deadline_ns: UInt64) -> Self {
+        self.deadline_ns = deadline_ns;
+        self
+    }
+
+    /// Set deadline relative to now
+    ///
+    /// ## Performance
+    /// - ~5ns (clock read)
+    @inline
+    public fn with_timeout_ms(mut self, timeout_ms: UInt64) -> Self {
+        self.deadline_ns = monotonic_nanos() + (timeout_ms * 1_000_000);
+        self
+    }
+
+    /// Set stack size hint
+    ///
+    /// ## Performance
+    /// - 0ns (inline)
+    @inline
+    public fn with_stack_size(mut self, size: Int) -> Self {
+        self.stack_size = size;
+        self
+    }
+
+    /// Apply configuration overrides to a forked environment
+    ///
+    /// This is called internally by `spawn_with()` to customize the child environment.
+    ///
+    /// ## Performance
+    /// - ~50-100ns (conditional pointer swaps + context merging)
+    public fn apply_to_env(&self, env: &mut ExecutionEnv) {
+        // Apply recovery strategy override
+        if let Some(strategy) = &self.recovery {
+            // Set recovery strategy in error_recovery context
+            env.error_recovery_mut().set_recovery_strategy(*strategy);
+        }
+
+        // Apply retry configuration
+        if let Some(config) = &self.retry {
+            env.error_recovery_mut().register_retry_policy(
+                TypeId.of<()>(), // Default type
+                config.clone(),
+            );
+        }
+
+        // Apply circuit breaker configuration
+        if let Some(config) = &self.circuit_breaker {
+            let name = self.name.as_ref()
+                .map(|n| n.clone())
+                .unwrap_or_else(|| "spawn_task".into());
+            env.error_recovery_mut().register_circuit_breaker(name, config.clone());
+        }
+
+        // Apply restart policy override
+        if let Some(policy) = &self.restart {
+            env.concurrency_mut().restart_policy = Some(*policy);
+        }
+
+        // Apply isolation level override
+        if let Some(isolation) = &self.isolation {
+            env.concurrency_mut().isolation = *isolation;
+        }
+
+        // Apply inline contexts
+        for i in 0..self.contexts_inline.count {
+            let entry = &self.contexts_inline.entries[i as Int];
+            // Apply context to capabilities
+            env.capabilities_mut().set_slot_raw(
+                entry.type_id_hash,
+                entry.value_ptr,
+            );
+        }
+
+        // Apply overflow contexts
+        if let Some(overflow) = &self.contexts_overflow {
+            for (type_id, value) in overflow.iter() {
+                env.capabilities_mut().provide_dynamic(*type_id, *value);
+            }
+        }
+
+        // Link to supervisor if specified
+        if let Some(supervisor) = &self.supervisor {
+            env.error_recovery_mut().supervision = Some(*supervisor);
+        }
+    }
+}
+
+implement Default for SpawnConfig {
+    fn default() -> Self {
+        Self.new()
+    }
+}
+
+implement Clone for SpawnConfig {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            recovery: self.recovery,
+            restart: self.restart,
+            isolation: self.isolation,
+            priority: self.priority,
+            circuit_breaker: self.circuit_breaker.clone(),
+            retry: self.retry.clone(),
+            contexts_inline: self.contexts_inline,
+            contexts_overflow: self.contexts_overflow,
+            supervisor: self.supervisor,
+            child_spec: self.child_spec.clone(),
+            deadline_ns: self.deadline_ns,
+            stack_size: self.stack_size,
+        }
+    }
+}
+
+// =============================================================================
+// SpawnConfigBuilder
+// =============================================================================
+
+/// Builder for SpawnConfig with validation
+///
+/// Provides additional validation and convenience methods over SpawnConfig.
+public type SpawnConfigBuilder is {
+    config: SpawnConfig,
+    errors: List<Text>,
+};
+
+implement SpawnConfigBuilder {
+    /// Create new builder
+    public fn new() -> Self {
+        Self {
+            config: SpawnConfig.new(),
+            errors: List.new(),
+        }
+    }
+
+    /// Create builder from existing config
+    public fn from_config(config: SpawnConfig) -> Self {
+        Self {
+            config: config,
+            errors: List.new(),
+        }
+    }
+
+    /// Set task name
+    @inline
+    public fn name<N: Into<Text>>(mut self, name: N) -> Self {
+        self.config = self.config.with_name(name);
+        self
+    }
+
+    /// Set as permanent worker (always restart)
+    @inline
+    public fn permanent(mut self) -> Self {
+        self.config.restart = Some(RestartPolicy {
+            strategy: RestartStrategy.Permanent,
+            max_restarts: 10,
+            time_window_secs: 60,
+        });
+        self
+    }
+
+    /// Set as transient task (restart on failure only)
+    @inline
+    public fn transient(mut self) -> Self {
+        self.config.restart = Some(RestartPolicy {
+            strategy: RestartStrategy.Transient,
+            max_restarts: 5,
+            time_window_secs: 60,
+        });
+        self
+    }
+
+    /// Set as temporary task (never restart)
+    @inline
+    public fn temporary(mut self) -> Self {
+        self.config.restart = Some(RestartPolicy {
+            strategy: RestartStrategy.Temporary,
+            max_restarts: 0,
+            time_window_secs: 0,
+        });
+        self
+    }
+
+    /// Set as background task
+    @inline
+    public fn background(mut self) -> Self {
+        self.config.priority = PriorityLevel.Background;
+        self
+    }
+
+    /// Set as high priority task
+    @inline
+    public fn high_priority(mut self) -> Self {
+        self.config.priority = PriorityLevel.High;
+        self
+    }
+
+    /// Set as critical task
+    @inline
+    public fn critical(mut self) -> Self {
+        self.config.priority = PriorityLevel.Critical;
+        self
+    }
+
+    /// Enable retry with default settings
+    @inline
+    public fn with_retry_default(mut self) -> Self {
+        self.config = self.config.with_simple_retry(3, 1000);
+        self
+    }
+
+    /// Enable circuit breaker with default settings
+    @inline
+    public fn with_circuit_breaker_default(mut self) -> Self {
+        self.config = self.config.with_circuit_breaker(CircuitBreakerConfig.default());
+        self
+    }
+
+    /// Set full isolation (copy-on-write semantics)
+    @inline
+    public fn isolated(mut self) -> Self {
+        self.config.isolation = Some(IsolationLevel.Full);
+        self
+    }
+
+    /// Set send-only isolation
+    @inline
+    public fn send_only(mut self) -> Self {
+        self.config.isolation = Some(IsolationLevel.SendOnly);
+        self
+    }
+
+    /// Validate and build configuration
+    ///
+    /// Returns Err if validation fails.
+    public fn build(self) -> Result<SpawnConfig, Text> {
+        // Validation checks
+        if let Some(retry) = &self.config.retry {
+            if retry.max_attempts == 0 {
+                return Err("retry max_attempts must be > 0".into());
+            }
+        }
+
+        if let Some(restart) = &self.config.restart {
+            if restart.strategy == RestartStrategy.Permanent && restart.max_restarts == 0 {
+                return Err("permanent restart requires max_restarts > 0".into());
+            }
+        }
+
+        if !self.errors.is_empty() {
+            return Err(self.errors.join("; "));
+        }
+
+        Ok(self.config)
+    }
+
+    /// Build without validation (trust the caller)
+    @inline
+    public fn build_unchecked(self) -> SpawnConfig {
+        self.config
+    }
+}
+
+// =============================================================================
+// spawn_with Function
+// =============================================================================
+
+/// Spawn an async task with custom configuration
+///
+/// Spec: docs/detailed/26-unified-execution-architecture.md Lines 521-556
+///
+/// This function spawns a new async task with the ability to override
+/// parent environment settings (recovery, restart, isolation, etc.).
+///
+/// ## Performance
+/// - Overhead vs spawn(): ~100-170ns
+/// - Environment fork: ~50-70ns
+/// - Config application: ~50-100ns
+///
+/// ## Behavior
+/// 1. Get or create current ExecutionEnv
+/// 2. Fork environment (inherits parent state)
+/// 3. Apply SpawnConfig overrides to forked environment
+/// 4. Spawn task with customized environment
+/// 5. Return JoinHandle for awaiting result
+///
+/// ## Thread Safety
+/// - ExecutionEnv is task-local (not shared across threads)
+/// - Config overrides are applied to forked environment only
+/// - Parent environment is unchanged
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_with(
+///     async {
+///         // Work here with automatic retry on failure
+///         Ok(42)
+///     },
+///     SpawnConfig.new()
+///         .with_name("my-task")
+///         .with_simple_retry(3, 100),
+/// );
+///
+/// let result = handle.await;
+/// ```
+public fn spawn_with<F, T>(
+    future: F,
+    config: SpawnConfig,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    // Get current environment
+    let parent_env = current_env();
+
+    // Fork environment for child task
+    let mut child_env = parent_env.fork();
+
+    // Apply configuration overrides
+    config.apply_to_env(&mut child_env);
+
+    // Check if supervised
+    match config.supervisor {
+        Some(supervisor) => {
+            // Use supervisor's spawn mechanism
+            let spec = config.child_spec.unwrap_or_else(|| {
+                let name = config.name.unwrap_or_else(|| "spawned".into());
+                ChildSpec.new(name)
+            });
+
+            return spawn_supervised_internal(supervisor, future, spec, child_env);
+        }
+        None => {}
+    }
+
+    // Spawn directly on executor
+    spawn_on_env(future, child_env)
+}
+
+/// Spawn task with specific ExecutionEnv
+///
+/// Internal helper that integrates with the executor.
+fn spawn_on_env<F, T>(
+    future: F,
+    child_env: ExecutionEnv,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    // Generate task ID
+    let task_id = TaskId.new(Some(child_env.concurrency.task_id));
+
+    // Wrap future to set environment as current for the task
+    let wrapped_future = async move {
+        // Set environment as current for this task
+        ctx_set(EXEC_ENV_SLOT, &child_env as &unsafe Byte);
+
+        // Execute future
+        let result = future.await;
+
+        // Clear environment before task completion
+        ctx_set(EXEC_ENV_SLOT, 0 as &unsafe Byte);
+
+        result
+    };
+
+    // Spawn on executor - cast wrapped future to opaque handle for intrinsic
+    let handle: FutureHandle = transmute(wrapped_future);
+    let opaque_result = spawn_with_env_intrinsic(handle, task_id as UInt64);
+    // Cast opaque join handle back to typed JoinHandle
+    transmute(opaque_result)
+}
+
+/// Internal: Spawn supervised task
+fn spawn_supervised_internal<F, T>(
+    supervisor: &SupervisorHandle,
+    future: F,
+    spec: ChildSpec,
+    child_env: ExecutionEnv,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    // This integrates with the supervisor module
+    // Convert to opaque types for the intrinsic
+    let opaque_result = spawn_supervised_intrinsic(
+        transmute(supervisor),
+        transmute(future),
+        transmute(spec),
+        transmute(child_env),
+    );
+    // Cast opaque join handle back to typed JoinHandle
+    transmute(opaque_result)
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Spawn a task with retry recovery
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_with_retry(
+///     async { fetch_data().await },
+///     3,    // max attempts
+///     100,  // delay ms
+/// );
+/// ```
+public fn spawn_with_retry<F, T>(
+    future: F,
+    max_attempts: UInt16,
+    delay_ms: UInt32,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_simple_retry(max_attempts, delay_ms))
+}
+
+/// Spawn a high-priority task
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_high_priority(async {
+///     handle_user_request().await
+/// });
+/// ```
+public fn spawn_high_priority<F, T>(future: F) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_priority(PriorityLevel.High))
+}
+
+/// Spawn a background task
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_background(async {
+///     cleanup_old_logs().await
+/// });
+/// ```
+public fn spawn_background<F, T>(future: F) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_priority(PriorityLevel.Background))
+}
+
+/// Spawn a task with timeout
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_with_timeout(
+///     async { slow_operation().await },
+///     5000, // 5 seconds
+/// );
+/// ```
+public fn spawn_with_timeout<F, T>(
+    future: F,
+    timeout_ms: UInt64,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_timeout_ms(timeout_ms))
+}
+
+/// Spawn a named task
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_named("data-processor", async {
+///     process_data().await
+/// });
+/// ```
+public fn spawn_named<N: Into<Text>, F, T>(
+    name: N,
+    future: F,
+) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_name(name))
+}
+
+/// Spawn an isolated task (full memory isolation)
+///
+/// ## Example
+/// ```verum
+/// let handle = spawn_isolated(async {
+///     untrusted_code().await
+/// });
+/// ```
+public fn spawn_isolated<F, T>(future: F) -> JoinHandle<T>
+where type
+    F: Future<T> + Send,
+    T: Send,
+{
+    spawn_with(future, SpawnConfig.new().with_isolation(IsolationLevel.Full))
+}
+
+// =============================================================================
+// Imports from other modules (forward declarations)
+// =============================================================================
+
+mount super.{current_env, EXEC_ENV_SLOT};
+mount sys.common.ctx_set;
+mount super.env.TaskId;

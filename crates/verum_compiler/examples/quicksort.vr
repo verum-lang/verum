@@ -1,0 +1,24 @@
+// Quicksort implementation
+// Spec: 03-type-system.md#1.3.1 (List type with parametricity)
+
+fn main() {
+    // Create and sort a list
+    let numbers = [3, 1, 4, 1, 5, 9, 2, 6];
+    let sorted = quicksort(numbers);
+    print(f"Sorted array: {sorted}");
+}
+
+fn quicksort(arr: List<Int>) -> List<Int> {
+    if arr.len() <= 1 {
+        arr
+    } else {
+        let pivot = arr[0];
+        let left = arr.filter(fn(x) { x < pivot });
+        let right = arr.filter(fn(x) { x >= pivot });
+
+        let sorted_left = quicksort(left);
+        let sorted_right = quicksort(right);
+
+        sorted_left.append([pivot]).append(sorted_right)
+    }
+}

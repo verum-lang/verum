@@ -1,0 +1,213 @@
+// =============================================================================
+// diff.vr - Buffer diff algorithm for differential rendering
+// =============================================================================
+// Optimizations:
+// - Skip unchanged cells
+// - Cursor movement minimization (relative vs absolute)
+// - Style coalescing for consecutive cells
+// - Synchronized output (Mode 2026)
+// - Adaptive color downscaling via ColorProfile
+// =============================================================================
+module diff;
+
+mount core.io.{Write, IoResult};
+mount super.cell.Cell;
+mount super.buffer.Buffer;
+mount super.super.raw.{EscapeWriter, ClearMode};
+mount super.super.style.{Style, Color, Modifier};
+mount super.super.style.profile.{ColorProfile, adapt_color};
+
+/// Compute and write the minimal set of escape sequences
+/// to transition from `prev` state to `next`.
+public fn flush_diff(
+    writer: &mut (dyn EscapeWriter),
+    prev: &Buffer,
+    next: &Buffer,
+    profile: ColorProfile,
+) -> IoResult<()> {
+    let mut current_style = Style.DEFAULT;
+    let mut cursor_x: Int = -1;
+    let mut cursor_y: Int = -1;
+
+    // Begin synchronized output (Mode 2026)
+    writer.begin_sync()?;
+
+    for y in 0..next.height {
+        for x in 0..next.width {
+            let cell = next.get(x, y);
+
+            // Skip unchanged cells (compare with prev if same size)
+            if prev.width == next.width && prev.height == next.height {
+                let prev_cell = prev.get(x, y);
+                if cell.eq(prev_cell) { continue; }
+            }
+
+            if cell.skip { continue; }
+
+            // Move cursor if needed
+            if cursor_x != x || cursor_y != y {
+                if cursor_y == y && x == cursor_x + 1 {
+                    // Natural advancement — no movement needed
+                } else if cursor_y == y && (x - cursor_x) > 0 && (x - cursor_x) <= 4 {
+                    // Short forward horizontal movement
+                    writer.write_csi(&[x - cursor_x], 'C' as Byte)?;
+                } else if cursor_y == y && (cursor_x - x) > 0 && (cursor_x - x) <= 4 {
+                    // Short backward horizontal movement
+                    writer.write_csi(&[cursor_x - x], 'D' as Byte)?;
+                } else {
+                    // Absolute positioning
+                    writer.move_to(x, y)?;
+                }
+            }
+
+            // Update style if changed
+            if cell.style.fg != current_style.fg
+                || cell.style.bg != current_style.bg
+                || cell.style.add_modifier.bits != current_style.add_modifier.bits
+                || cell.style.sub_modifier.bits != current_style.sub_modifier.bits
+            {
+                let prev_style = current_style;
+                current_style = cell.style;
+                write_style_diff(writer, &prev_style, &current_style, profile)?;
+            }
+
+            // Write the grapheme
+            let grapheme_bytes = cell.grapheme.as_bytes();
+            match writer.write(grapheme_bytes) {
+                Ok(_) => {}
+                Err(e) => return Err(e),
+            };
+            cursor_x = x + cell.width();
+            cursor_y = y;
+        }
+    }
+
+    // Reset style
+    writer.write_csi(&[0], 'm' as Byte)?;
+
+    // End synchronized output
+    writer.end_sync()?;
+
+    writer.flush()
+}
+
+/// Check if two styles are equal.
+fn style_eq(a: &Style, b: &Style) -> Bool {
+    a.fg == b.fg && a.bg == b.bg
+        && a.underline_color == b.underline_color
+        && a.add_modifier.bits == b.add_modifier.bits
+        && a.sub_modifier.bits == b.sub_modifier.bits
+}
+
+/// Write minimal SGR to transition between styles.
+public fn write_style_diff(
+    writer: &mut (dyn EscapeWriter),
+    from: &Style,
+    to: &Style,
+    profile: ColorProfile,
+) -> IoResult<()> {
+    // Check if we need a full reset (when removing modifiers)
+    let removed_mods = from.add_modifier.bits & (~to.add_modifier.bits);
+    let need_reset = removed_mods != 0;
+
+    if need_reset {
+        writer.write_csi(&[0], 'm' as Byte)?;
+    }
+
+    // Foreground
+    if from.fg != to.fg || need_reset {
+        match to.fg {
+            Some(fg) => write_color(writer, &adapt_color(fg, profile), true)?,
+            None => {
+                if !need_reset {
+                    writer.write_csi(&[39], 'm' as Byte)?;  // Default fg
+                }
+            }
+        }
+    }
+
+    // Background
+    if from.bg != to.bg || need_reset {
+        match to.bg {
+            Some(bg) => write_color(writer, &adapt_color(bg, profile), false)?,
+            None => {
+                if !need_reset {
+                    writer.write_csi(&[49], 'm' as Byte)?;  // Default bg
+                }
+            }
+        }
+    }
+
+    // Underline color
+    if from.underline_color != to.underline_color || need_reset {
+        match to.underline_color {
+            Some(Color.Rgb(rgb)) => {
+                writer.write_csi(&[58, 2, 0, rgb.r as Int, rgb.g as Int, rgb.b as Int], 'm' as Byte)?;
+            }
+            Some(_) => {}  // Non-RGB underline colors not widely supported
+            None => {
+                if !need_reset {
+                    writer.write_csi(&[59], 'm' as Byte)?;  // Default underline color
+                }
+            }
+        }
+    }
+
+    // Modifiers
+    let new_mods = to.add_modifier.bits;
+    if new_mods != from.add_modifier.bits || need_reset {
+        write_modifiers(writer, to.add_modifier)?;
+    }
+
+    Ok(())
+}
+
+/// Write ANSI color code (fg or bg).
+public fn write_color(writer: &mut (dyn EscapeWriter), color: &Color, is_fg: Bool) -> IoResult<()> {
+    let base = if is_fg { 30 } else { 40 };
+    match color {
+        Reset => writer.write_csi(&[if is_fg { 39 } else { 49 }], 'm' as Byte),
+        Black => writer.write_csi(&[base + 0], 'm' as Byte),
+        DarkRed => writer.write_csi(&[base + 1], 'm' as Byte),
+        DarkGreen => writer.write_csi(&[base + 2], 'm' as Byte),
+        DarkYellow => writer.write_csi(&[base + 3], 'm' as Byte),
+        DarkBlue => writer.write_csi(&[base + 4], 'm' as Byte),
+        DarkMagenta => writer.write_csi(&[base + 5], 'm' as Byte),
+        DarkCyan => writer.write_csi(&[base + 6], 'm' as Byte),
+        Grey => writer.write_csi(&[base + 7], 'm' as Byte),
+        DarkGrey => writer.write_csi(&[base + 60], 'm' as Byte),
+        Red => writer.write_csi(&[base + 61], 'm' as Byte),
+        Green => writer.write_csi(&[base + 62], 'm' as Byte),
+        Yellow => writer.write_csi(&[base + 63], 'm' as Byte),
+        Blue => writer.write_csi(&[base + 64], 'm' as Byte),
+        Magenta => writer.write_csi(&[base + 65], 'm' as Byte),
+        Cyan => writer.write_csi(&[base + 66], 'm' as Byte),
+        White => writer.write_csi(&[base + 67], 'm' as Byte),
+        Ansi256(n) => writer.write_csi(&[if is_fg { 38 } else { 48 }, 5, n], 'm' as Byte),
+        Rgb(rgb) => writer.write_csi(
+            &[if is_fg { 38 } else { 48 }, 2, rgb.r as Int, rgb.g as Int, rgb.b as Int],
+            'm' as Byte,
+        ),
+        Hsl(hsl) => {
+            let rgb = hsl.to_rgb();
+            write_color(writer, &Color.Rgb(rgb), is_fg)
+        }
+    }
+}
+
+/// Write modifier SGR codes.
+public fn write_modifiers(writer: &mut (dyn EscapeWriter), mods: Modifier) -> IoResult<()> {
+    if mods.contains(Modifier.BOLD) { writer.write_csi(&[1], 'm' as Byte)?; }
+    if mods.contains(Modifier.DIM) { writer.write_csi(&[2], 'm' as Byte)?; }
+    if mods.contains(Modifier.ITALIC) { writer.write_csi(&[3], 'm' as Byte)?; }
+    if mods.contains(Modifier.UNDERLINED) { writer.write_csi(&[4], 'm' as Byte)?; }
+    if mods.contains(Modifier.SLOW_BLINK) { writer.write_csi(&[5], 'm' as Byte)?; }
+    if mods.contains(Modifier.RAPID_BLINK) { writer.write_csi(&[6], 'm' as Byte)?; }
+    if mods.contains(Modifier.REVERSED) { writer.write_csi(&[7], 'm' as Byte)?; }
+    if mods.contains(Modifier.HIDDEN) { writer.write_csi(&[8], 'm' as Byte)?; }
+    if mods.contains(Modifier.CROSSED_OUT) { writer.write_csi(&[9], 'm' as Byte)?; }
+    if mods.contains(Modifier.OVERLINED) { writer.write_csi(&[53], 'm' as Byte)?; }
+    if mods.contains(Modifier.DOUBLE_UNDERLINED) { writer.write_csi(&[21], 'm' as Byte)?; }
+    if mods.contains(Modifier.CURLY_UNDERLINED) { writer.write_csi(&[4, 3], 'm' as Byte)?; }
+    Ok(())
+}

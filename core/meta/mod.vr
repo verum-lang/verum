@@ -1,0 +1,459 @@
+// =============================================================================
+// mod.vr - Verum Meta Programming System
+// =============================================================================
+// Version: 0.1.0
+// Spec: docs/architecture/meta-audit.md
+// =============================================================================
+//
+// # Meta Programming System
+//
+// The meta module provides compile-time programming capabilities through:
+//
+// 1. **Meta Contexts** - Capability-based access to compiler services
+// 2. **Token Streams** - Source code representation for code generation
+// 3. **Reflection** - Type introspection at compile-time
+// 4. **Quote/Unquote** - Quasi-quotation for code generation
+//
+// ## Architecture
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                       META PROGRAMMING ARCHITECTURE                          │
+// ├─────────────────────────────────────────────────────────────────────────────┤
+// │                                                                             │
+// │  ┌─────────────────────────────────────────────────────────────────────┐   │
+// │  │                      META CONTEXTS (Capabilities)                    │   │
+// │  │                                                                      │   │
+// │  │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐           │   │
+// │  │  │  BuildAssets  │  │   TypeInfo    │  │  AstAccess    │           │   │
+// │  │  │  load/exists  │  │  fields/name  │  │  parse/emit   │           │   │
+// │  │  └───────────────┘  └───────────────┘  └───────────────┘           │   │
+// │  │                                                                      │   │
+// │  │  ┌───────────────┐  ┌───────────────┐                               │   │
+// │  │  │  CompileDiag  │  │ MetaRuntime   │  ← Compiler-provided         │   │
+// │  │  │  warn/error   │  │  limits/cfg   │                               │   │
+// │  │  └───────────────┘  └───────────────┘                               │   │
+// │  └─────────────────────────────────────────────────────────────────────┘   │
+// │                                    │                                        │
+// │                                    ▼                                        │
+// │  ┌─────────────────────────────────────────────────────────────────────┐   │
+// │  │                      TOKEN & AST MANIPULATION                        │   │
+// │  │                                                                      │   │
+// │  │  TokenStream  ────────────►  AST Nodes  ────────────►  Code Output  │   │
+// │  │                                                                      │   │
+// │  │  quote { ... }              Expr, Type                Generated .vr │   │
+// │  │  $ident, ${expr}            Item, Pattern            Emitted tokens │   │
+// │  └─────────────────────────────────────────────────────────────────────┘   │
+// │                                                                             │
+// └─────────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// ## Isomorphism with Runtime Contexts
+//
+// Meta contexts follow the same design as runtime contexts (core/runtime/):
+//
+// | Aspect               | Runtime Contexts          | Meta Contexts              |
+// |----------------------|---------------------------|----------------------------|
+// | Syntax               | `fn f() -> T using [C]`   | `meta fn f() -> T using C` |
+// | Provider             | Explicit `provide C = v`  | Compiler implicit          |
+// | Overhead             | ~2-30ns (slot lookup)     | 0ns (compile-time)         |
+// | Groups               | `using WebCtx = [A, B]`   | `using MetaCore = [A, B]`  |
+// | Negative             | `using [!Database]`       | `using [!BuildAssets]`     |
+// | Implicit purity      | No (need `pure fn`)       | Yes (`meta fn` = `pure`)   |
+//
+// ## Usage Examples
+//
+// ```verum
+// // Simple meta function (pure by default)
+// meta fn double_tokens(input: TokenStream) -> TokenStream {
+//     quote { $input + $input }
+// }
+//
+// // Meta function with type introspection
+// meta fn derive_debug<T>() -> TokenStream using TypeInfo {
+//     let fields = TypeInfo.fields_of<T>();
+//     let name = TypeInfo.name_of<T>();
+//
+//     quote {
+//         implement Debug for $name {
+//             fn fmt(&self, f: &mut Formatter) -> FormatResult {
+//                 f.debug_struct($name)
+//                     $[for field in fields {
+//                         .field(${field.name}, &self.${field.name})
+//                     }]
+//                     .finish()
+//             }
+//         }
+//     }
+// }
+//
+// // Meta function with build-time assets
+// meta fn load_schema() -> Schema using BuildAssets {
+//     let content = BuildAssets.load_text("schema/api.json")?;
+//     Schema.parse(content)?
+// }
+//
+// // Meta function with multiple contexts
+// meta fn generate_api<T>() -> TokenStream using [BuildAssets, TypeInfo, CompileDiag] {
+//     let schema = BuildAssets.load_text("api/spec.yaml")?;
+//
+//     if schema.is_empty() {
+//         CompileDiag.emit_warning("Empty API schema", Span.call_site());
+//     }
+//
+//     generate_client_impl(schema, TypeInfo.name_of<T>())
+// }
+// ```
+//
+// ## Embedded/No-Runtime Mode
+//
+// In embedded configurations (@cfg(runtime = "embedded") or @cfg(runtime = "no_runtime")),
+// meta contexts remain fully functional since they operate at compile-time:
+//
+// - All meta functions work identically across runtime configurations
+// - Generated code adapts to target runtime via @cfg attributes
+// - Meta contexts have zero runtime footprint
+//
+// =============================================================================
+
+module meta;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+/// Meta-specific contexts (capabilities)
+/// Provides: BuildAssets, TypeInfo, AstAccess, CompileDiag, MetaRuntime
+public module contexts;
+
+/// Source span and location tracking
+/// Provides: Span, SourceLocation, SpanRange
+public module span;
+
+/// Token stream representation
+/// Provides: TokenStream, Token, TokenKind
+public module token;
+
+/// Quasi-quotation support
+/// Provides: quote macro internals
+public module quote;
+
+/// Type reflection at compile-time
+/// Provides: FieldInfo, VariantInfo, TypeKind
+public module reflection;
+
+/// Attribute processing
+/// Provides: Attribute, AttributeArg
+public module attribute;
+
+// =============================================================================
+// Contexts (Primary API)
+// =============================================================================
+// Note: Context definitions and context groups are accessed via meta.contexts module.
+// Use: `using meta.contexts.BuildAssets` or `using meta.contexts.MetaCore`
+//
+// Available contexts:
+//   BuildAssets  - Build-time asset loading
+//   TypeInfo     - Type introspection
+//   AstAccess    - AST access and manipulation
+//   CompileDiag  - Compile-time diagnostics
+//   MetaRuntime  - Meta runtime configuration
+//   MacroState   - Build-time caching and memoization
+//   StageInfo    - N-level staged metaprogramming
+//
+// Advanced contexts (for productivity):
+//   CodeSearch   - Codebase search and analysis
+//   ProjectInfo  - Project metadata and dependencies
+//   SourceMap    - Source location mapping for generated code
+//   Schema       - Generated code validation
+//   DepGraph     - Dependency graph analysis
+//   MetaBench    - Compile-time benchmarking
+//
+// Context groups:
+//   MetaCore     = [TypeInfo, AstAccess, CompileDiag]
+//   MetaFull     = [all standard contexts]
+//   MetaTypes    = [TypeInfo]
+//   MetaSafe     = [TypeInfo, AstAccess, CompileDiag]
+//   MetaNoIO     = [TypeInfo, AstAccess, CompileDiag, MetaRuntime, MacroState, StageInfo]
+//   MetaDerive   = [TypeInfo, AstAccess, CompileDiag, MacroState]
+//   MetaAttr     = [BuildAssets, TypeInfo, AstAccess, CompileDiag, MacroState]
+//   MetaStaged   = [StageInfo, TypeInfo, AstAccess, CompileDiag, MacroState]
+//   MetaAnalysis = [CodeSearch, TypeInfo, AstAccess, CompileDiag]
+//   MetaProject  = [ProjectInfo, TypeInfo, AstAccess, CompileDiag]
+//   MetaSourced  = [SourceMap, TypeInfo, AstAccess, CompileDiag]
+//   MetaValidated= [Schema, TypeInfo, AstAccess, CompileDiag]
+//   MetaDeps     = [DepGraph, ProjectInfo, CompileDiag]
+//   MetaProfiled = [MetaBench, TypeInfo, AstAccess, CompileDiag]
+//   MetaTooling  = [all analysis and productivity contexts]
+
+// =============================================================================
+// Re-exports: Parsing and Formatting
+// =============================================================================
+
+/// Parse result with error recovery
+public mount .contexts.ParseResult;
+
+/// Parse error information
+public mount .contexts.ParseError;
+
+/// Formatting options for pretty printing
+public mount .contexts.FormatOptions;
+
+/// Brace style for formatting
+public mount .contexts.BraceStyle;
+
+/// Cache statistics
+public mount .contexts.CacheStats;
+
+/// Stage record for generation chain tracing
+public mount .contexts.StageRecord;
+
+/// Trace marker for debugging staged compilation
+public mount .contexts.TraceMarker;
+
+/// Function search result
+public mount .contexts.FunctionSearchResult;
+
+/// Type search result
+public mount .contexts.TypeSearchResult;
+
+/// Usage information for code analysis
+public mount .contexts.UsageInfo;
+
+/// Usage context classification
+public mount .contexts.UsageContext;
+
+/// Pattern match result
+public mount .contexts.PatternMatch;
+
+/// Item information
+public mount .contexts.ItemInfo;
+
+/// Item kind classification
+public mount .contexts.ItemKind;
+
+/// Dependency information
+public mount .contexts.DependencyInfo;
+
+/// Span mapping for source maps
+public mount .contexts.SpanMapping;
+
+/// Schema error information
+public mount .contexts.SchemaError;
+
+/// Schema error severity
+public mount .contexts.SchemaErrorSeverity;
+
+/// Benchmark timer
+public mount .contexts.BenchTimer;
+
+/// Benchmark result
+public mount .contexts.BenchResult;
+
+/// Benchmark statistics
+public mount .contexts.BenchStats;
+
+/// Diagnostic builder for complex diagnostics
+public mount .contexts.DiagnosticBuilder;
+
+/// Diagnostic severity levels
+public mount .contexts.DiagnosticSeverity;
+
+// =============================================================================
+// Re-exports: Token & AST
+// =============================================================================
+
+/// Token stream for code generation
+public mount .token.TokenStream;
+
+/// Individual token
+public mount .token.Token;
+
+/// Token classification
+public mount .token.TokenKind;
+
+/// Token tree (balanced delimiters)
+public mount .token.TokenTree;
+
+// =============================================================================
+// Re-exports: Span & Location
+// =============================================================================
+
+/// Source span
+public mount .span.Span;
+
+/// Source file location
+public mount .span.SourceLocation;
+
+/// Span range with start/end
+public mount .span.SpanRange;
+
+// =============================================================================
+// Re-exports: Reflection
+// =============================================================================
+
+/// Field information for struct types
+public mount .reflection.FieldInfo;
+
+/// Variant information for enum types
+public mount .reflection.VariantInfo;
+
+/// Type kind classification
+public mount .reflection.TypeKind;
+
+/// Generic parameter info
+public mount .reflection.GenericParam;
+
+/// Protocol (trait) information
+public mount .reflection.ProtocolInfo;
+
+/// Function signature information
+public mount .reflection.FunctionInfo;
+
+/// Trait/Protocol bound information
+public mount .reflection.TraitBound;
+
+/// Lifetime parameter information
+public mount .reflection.LifetimeParam;
+
+/// Ownership semantics information
+public mount .reflection.OwnershipInfo;
+
+/// Field memory layout information
+public mount .reflection.FieldOffset;
+
+/// Method resolution result
+public mount .reflection.MethodResolution;
+
+/// Method source classification
+public mount .reflection.MethodSource;
+
+// =============================================================================
+// Re-exports: Attributes
+// =============================================================================
+
+/// Attribute representation
+public mount .attribute.Attribute;
+
+/// Attribute argument
+public mount .attribute.AttributeArg;
+
+// =============================================================================
+// Meta Function Marker Protocol
+// =============================================================================
+
+/// Marker protocol for meta function return types
+///
+/// Types implementing this protocol can be returned from meta functions
+/// and will be properly processed by the compiler.
+///
+/// Built-in implementations:
+/// - `TokenStream` - generates code
+/// - `()` - no output (side-effect only via CompileDiag)
+/// - `Result<T, E>` where T: MetaOutput - fallible meta functions
+public type MetaOutput is protocol {
+    /// Emit this output to the compiler (compile-time only)
+    meta fn emit(&self) using AstAccess;
+};
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// Meta function error type
+///
+/// These errors can be returned from meta functions during compile-time execution.
+/// The compiler maps its internal errors to these stdlib-visible error types.
+@repr(UInt8)
+public type MetaError is
+    /// Asset not found
+    | AssetNotFound { path: Text }
+    /// Asset read error
+    | AssetReadError { path: Text, reason: Text }
+    /// Syntax error in AST manipulation
+    | SyntaxError { message: Text, span: Span }
+    /// Parse failed with multiple errors (from recovery parsing)
+    | ParseFailed(List<ParseError>)
+    /// Type error in reflection
+    | TypeError { expected: Text, found: Text }
+    /// Recursion limit exceeded
+    | RecursionLimit { depth: Int, limit: Int }
+    /// Iteration limit exceeded
+    | IterationLimit { count: Int, limit: Int }
+    /// Memory limit exceeded
+    | MemoryLimit { used: Int, limit: Int }
+    /// Timeout exceeded
+    | Timeout { elapsed_ms: Int, limit_ms: Int }
+    /// Invalid operation for context
+    | InvalidOperation { operation: Text, reason: Text }
+    /// Cache error
+    | CacheError { key: Text, reason: Text }
+    /// Method not found
+    | MethodNotFound { type_name: Text, method_name: Text }
+    /// Generic error with message
+    | Other { message: Text };
+
+implement MetaError {
+    /// Get human-readable error message
+    public fn message(&self) -> Text {
+        match self {
+            AssetNotFound { path } =>
+                f"Asset not found: {path}",
+            AssetReadError { path, reason } =>
+                f"Failed to read asset '{path}': {reason}",
+            SyntaxError { message, span } =>
+                f"Syntax error at {span}: {message}",
+            ParseFailed(errors) => {
+                let count = errors.len();
+                f"Parse failed with {count} error(s)"
+            },
+            TypeError { expected, found } =>
+                f"Type error: expected {expected}, found {found}",
+            RecursionLimit { depth, limit } =>
+                f"Recursion limit exceeded: depth {depth} > limit {limit}",
+            IterationLimit { count, limit } =>
+                f"Iteration limit exceeded: {count} > {limit}",
+            MemoryLimit { used, limit } =>
+                f"Memory limit exceeded: {used} bytes > {limit} bytes",
+            Timeout { elapsed_ms, limit_ms } =>
+                f"Timeout: {elapsed_ms}ms > {limit_ms}ms limit",
+            InvalidOperation { operation, reason } =>
+                f"Invalid operation '{operation}': {reason}",
+            CacheError { key, reason } =>
+                f"Cache error for key '{key}': {reason}",
+            MethodNotFound { type_name, method_name } =>
+                f"Method '{method_name}' not found on type '{type_name}'",
+            Other { message } =>
+                message.clone(),
+        }
+    }
+}
+
+/// Result type for meta functions
+public type MetaResult<T> is Result<T, MetaError>;
+
+// =============================================================================
+// Compile-Time Constants
+// =============================================================================
+
+/// Default recursion limit for meta functions
+public const DEFAULT_RECURSION_LIMIT: Int = 256;
+
+/// Default iteration limit for meta function loops
+public const DEFAULT_ITERATION_LIMIT: Int = 1_000_000;
+
+/// Default memory limit for meta functions (64 MB)
+public const DEFAULT_MEMORY_LIMIT: Int = 64 * 1024 * 1024;
+
+/// Default timeout for meta functions (30 seconds)
+public const DEFAULT_TIMEOUT_MS: Int = 30_000;
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+/// Meta system version
+public const VERSION: &Text = "0.1.0";
+
+/// Meta system version tuple
+public const VERSION_INFO: (Int, Int, Int) = (0, 1, 0);

@@ -1,0 +1,302 @@
+module sys.bitfield;
+
+/// Verum Standard Library: Bitfield Support
+///
+/// This module provides first-class bitfield support for systems programming.
+/// Unlike Rust (which requires external crates) or C (which has ABI-undefined behavior),
+/// Verum bitfields are:
+/// - Type-safe with compile-time verification
+/// - C ABI compatible via @repr(C) + @bitfield
+/// - Zero-cost with inlined accessors
+///
+/// # Core Concepts
+///
+/// ## @bits(N) Attribute
+/// The @bits(N) attribute specifies the bit width of a field within a @bitfield type.
+/// Fields are packed in declaration order, respecting endianness annotations.
+///
+/// ## Bitfield Constraints
+/// - Bitfield fields CANNOT have their address taken (&field is forbidden)
+/// - Total bits must align to byte boundaries (or use explicit @padding)
+/// - Enum fields must have @repr(UIntN, bits = M) with M bits sufficient for variants
+///
+/// # Examples
+///
+/// ```verum
+/// // TCP header flags - C ABI compatible
+/// @repr(C)
+/// @bitfield
+/// public type TcpFlags is {
+///     @bits(1) fin: Bool,
+///     @bits(1) syn: Bool,
+///     @bits(1) rst: Bool,
+///     @bits(1) psh: Bool,
+///     @bits(1) ack: Bool,
+///     @bits(1) urg: Bool,
+///     @bits(2) reserved: UInt8,
+/// };
+///
+/// // Usage
+/// let flags = TcpFlags { fin: true, syn: true, ..TcpFlags.zero() };
+/// assert(flags.fin);
+/// assert(flags.syn);
+/// ```
+///
+/// Implementation Reference: docs/architecture/low-level-features.md Section 2
+
+// =============================================================================
+// BITFIELD TRAITS
+// =============================================================================
+
+/// Protocol for types that can be stored in bitfields.
+///
+/// Types implementing this protocol can be used as bitfield fields.
+/// The compiler verifies that the type fits within the specified bit width.
+public type BitfieldElement is protocol {
+    /// Number of bits required to represent this type.
+    const BIT_WIDTH: USize;
+
+    /// Convert from raw bits to this type.
+    fn from_bits(bits: USize) -> Self;
+
+    /// Convert this type to raw bits.
+    fn to_bits(self) -> USize;
+};
+
+/// Implement BitfieldElement for Bool (1 bit).
+implement BitfieldElement for Bool {
+    const BIT_WIDTH: USize = 1;
+
+    @inline(always)
+    fn from_bits(bits: USize) -> Bool {
+        bits != 0
+    }
+
+    @inline(always)
+    fn to_bits(self) -> USize {
+        if self { 1 } else { 0 }
+    }
+}
+
+/// Implement BitfieldElement for UInt8.
+implement BitfieldElement for UInt8 {
+    const BIT_WIDTH: USize = 8;
+
+    @inline(always)
+    fn from_bits(bits: USize) -> UInt8 {
+        bits as UInt8
+    }
+
+    @inline(always)
+    fn to_bits(self) -> USize {
+        self as USize
+    }
+}
+
+/// Implement BitfieldElement for UInt16.
+implement BitfieldElement for UInt16 {
+    const BIT_WIDTH: USize = 16;
+
+    @inline(always)
+    fn from_bits(bits: USize) -> UInt16 {
+        bits as UInt16
+    }
+
+    @inline(always)
+    fn to_bits(self) -> USize {
+        self as USize
+    }
+}
+
+/// Implement BitfieldElement for UInt32.
+implement BitfieldElement for UInt32 {
+    const BIT_WIDTH: USize = 32;
+
+    @inline(always)
+    fn from_bits(bits: USize) -> UInt32 {
+        bits as UInt32
+    }
+
+    @inline(always)
+    fn to_bits(self) -> USize {
+        self as USize
+    }
+}
+
+/// Implement BitfieldElement for UInt64.
+implement BitfieldElement for UInt64 {
+    const BIT_WIDTH: USize = 64;
+
+    @inline(always)
+    fn from_bits(bits: USize) -> UInt64 {
+        bits as UInt64
+    }
+
+    @inline(always)
+    fn to_bits(self) -> USize {
+        self as USize
+    }
+}
+
+// =============================================================================
+// BITFIELD OPERATIONS
+// =============================================================================
+
+/// Protocol for bitfield types (types with @bitfield attribute).
+///
+/// The compiler automatically implements this protocol for any type
+/// annotated with @bitfield. It provides:
+/// - Zero initialization
+/// - Raw byte access
+/// - Bit manipulation primitives
+public type Bitfield is protocol {
+    /// Size of this bitfield in bytes.
+    const SIZE_BYTES: USize;
+
+    /// Total number of bits in this bitfield.
+    const SIZE_BITS: USize;
+
+    /// Create a zero-initialized bitfield.
+    fn zero() -> Self;
+
+    /// Get the raw bytes of this bitfield.
+    fn as_bytes(&self) -> &[UInt8];
+
+    /// Get mutable raw bytes of this bitfield.
+    fn as_bytes_mut(&mut self) -> &mut [UInt8];
+};
+
+// =============================================================================
+// ENDIANNESS SUPPORT
+// =============================================================================
+
+/// Endianness for bitfield layout.
+///
+/// Used with @endian(little|big|native) attribute.
+public type Endianness is
+    | Little   // Least significant byte first
+    | Big      // Most significant byte first
+    | Native;  // Platform default
+
+/// Protocol for endian-aware bitfield operations.
+public type EndianBitfield is protocol {
+    /// The endianness of this bitfield.
+    const ENDIAN: Endianness;
+
+    /// Convert to little-endian byte order.
+    fn to_le(self) -> Self;
+
+    /// Convert to big-endian byte order.
+    fn to_be(self) -> Self;
+
+    /// Convert from little-endian byte order.
+    fn from_le(bytes: &[UInt8]) -> Self;
+
+    /// Convert from big-endian byte order.
+    fn from_be(bytes: &[UInt8]) -> Self;
+};
+
+// =============================================================================
+// BITFIELD VERIFICATION
+// =============================================================================
+
+/// Compile-time verification constraints for bitfields.
+///
+/// These meta functions are used by the compiler to verify bitfield layouts.
+/// They are evaluated at compile time and produce errors if constraints are violated.
+
+/// Verify that a bitfield's total bits align to byte boundaries.
+///
+/// # Compile-Time Error
+/// If total_bits % 8 != 0, produces: "Bitfield must be byte-aligned, got N bits"
+@const
+public fn verify_byte_alignment<TOTAL_BITS: meta USize>() -> Bool
+where TOTAL_BITS % 8 == 0
+{
+    true
+}
+
+/// Verify that a field's bit width fits within its backing type.
+///
+/// # Compile-Time Error
+/// If field_bits > type_bits, produces: "Field requires N bits but type only provides M"
+@const
+public fn verify_field_width<FIELD_BITS: meta USize, TYPE_BITS: meta USize>() -> Bool
+where FIELD_BITS <= TYPE_BITS
+{
+    true
+}
+
+/// Verify that an enum's variants fit within the specified bit width.
+///
+/// # Compile-Time Error
+/// If max_variant > 2^bits - 1, produces: "Enum variant N exceeds bit width"
+@const
+public fn verify_enum_fits<MAX_VARIANT: meta USize, BITS: meta USize>() -> Bool
+where MAX_VARIANT < (1 << BITS)
+{
+    true
+}
+
+// =============================================================================
+// BITFIELD MACROS
+// =============================================================================
+
+/// Static assertion for bitfield properties.
+///
+/// Use @static_assert to verify bitfield layouts at compile time:
+///
+/// ```verum
+/// @static_assert(TcpFlags.size == 1, "TcpFlags must be 1 byte")
+/// @static_assert(TcpFlags.alignment == 1, "TcpFlags must be byte-aligned")
+/// ```
+///
+/// The compiler evaluates these at compile time and produces an error
+/// with the provided message if the condition is false.
+
+// =============================================================================
+// EXAMPLE TYPES
+// =============================================================================
+
+/// Example: GPIO configuration register.
+///
+/// Demonstrates enum bitfields with explicit bit representation.
+@repr(UInt8, bits = 4)
+public type GpioMode is
+    | @value(0b0000) Input
+    | @value(0b0001) OutputPushPull
+    | @value(0b0010) OutputOpenDrain
+    | @value(0b0011) AlternateFunction
+    | @value(0b0100) Analog;
+
+/// Example: GPIO speed setting.
+@repr(UInt8, bits = 2)
+public type GpioSpeed is
+    | @value(0b00) Low
+    | @value(0b01) Medium
+    | @value(0b10) High
+    | @value(0b11) VeryHigh;
+
+/// Example: Complete GPIO configuration bitfield.
+///
+/// This type demonstrates all bitfield features:
+/// - Enum fields with explicit bit representation
+/// - Bool fields for single bits
+/// - Reserved bits for hardware compatibility
+/// - Explicit endianness annotation
+@repr(C)
+@bitfield
+@endian(little)
+public type GpioConfig is {
+    @bits(4) mode: GpioMode,
+    @bits(2) speed: GpioSpeed,
+    @bits(1) pull_up: Bool,
+    @bits(1) pull_down: Bool,
+    @bits(4) alternate_function: UInt8,
+    @bits(4) reserved: UInt8,
+};
+
+// Compile-time verification of GpioConfig layout
+// Compile-time assertions for GpioConfig layout
+// GpioConfig.SIZE_BYTES == 2 (2 bytes)
+// GpioConfig.SIZE_BITS == 16 (16 bits)

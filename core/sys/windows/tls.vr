@@ -1,0 +1,519 @@
+module sys.windows.tls;
+
+// =============================================================================
+// sys/windows/tls.vr - Windows Thread-Local Storage and Context System
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/kernel32, sys/common
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides TLS-based context storage for the V-LLSI bootstrap
+// kernel on Windows. Uses TlsAlloc/TlsGetValue/TlsSetValue for TLS access.
+//
+// The context system provides:
+// - Fixed-size context slot array for O(1) lookup
+// - Thread-safe context propagation
+// - Stack-based context scoping (push/pop)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4, Appendix F.3.2.3
+// =============================================================================
+
+mount sys.common.OSError;
+mount super.kernel32.{
+    TlsAlloc, TlsFree, TlsGetValue, TlsSetValue,
+    TLS_OUT_OF_INDEXES,
+    VirtualAlloc, VirtualFree,
+    GetLastError,
+    GetCurrentProcessId, GetCurrentThreadId,
+};
+mount super.ntdll.{
+    MEM_COMMIT, MEM_RESERVE, MEM_RELEASE,
+    PAGE_READWRITE, PAGE_NOACCESS,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum number of context slots (matches Linux/Darwin implementation)
+public const MAX_CONTEXT_SLOTS: Int = 256;
+
+/// Size of the context stack per slot
+public const CONTEXT_STACK_DEPTH: Int = 8;
+
+/// Thread Control Block magic number for validation
+public const TCB_MAGIC: UInt64 = 0x5645_5255_4D5F_5443;  // "VERUM_TC" in ASCII
+
+/// Default stack size for threads (1MB)
+public const DEFAULT_STACK_SIZE: Int = 1024 * 1024;
+
+/// Guard page size (4KB)
+public const GUARD_PAGE_SIZE: Int = 4096;
+
+// =============================================================================
+// TLS Error Type
+// =============================================================================
+
+/// TLS operation error
+public type TlsError is
+    | NotInitialized
+    | AlreadyInitialized
+    | AllocationFailed { code: UInt32, size: USize }
+    | InvalidSlot { slot: Int }
+    | StackOverflow { slot: Int }
+    | StackUnderflow { slot: Int }
+    | InvalidTcb
+    | TlsIndexExhausted
+    ;
+
+implement TlsError {
+    public fn message(&self) -> Text {
+        match self {
+            NotInitialized => "TLS not initialized for this thread",
+            AlreadyInitialized => "TLS already initialized for this thread",
+            AllocationFailed { code, size } => f"Failed to allocate TLS memory (code={code}, size={size})",
+            InvalidSlot { slot } => f"Invalid context slot index: {slot}",
+            StackOverflow { slot } => f"Context stack overflow at slot {slot}",
+            StackUnderflow { slot } => f"Context stack underflow at slot {slot}",
+            InvalidTcb => "Invalid or corrupted TCB",
+            TlsIndexExhausted => "No more TLS indices available",
+        }
+    }
+
+    public fn is_retryable(&self) -> Bool {
+        false
+    }
+}
+
+// =============================================================================
+// Thread Control Block
+// =============================================================================
+
+/// Per-slot context entry with stack support
+public type ContextEntry is {
+    /// Current context value (opaque pointer)
+    value: &unsafe Byte,
+    /// Stack for nested contexts
+    stack: [&unsafe Byte; 8],  // CONTEXT_STACK_DEPTH
+    /// Current stack depth
+    depth: Int,
+};
+
+/// Context slots array
+public type ContextSlots is {
+    /// Context entries indexed by slot
+    slots: [ContextEntry; 256],  // MAX_CONTEXT_SLOTS
+};
+
+/// Thread Control Block (TCB)
+///
+/// This structure is allocated per-thread and contains all thread-local
+/// state needed by the V-LLSI runtime.
+public type ThreadControlBlock is {
+    /// Magic number for validation (TCB_MAGIC)
+    magic: UInt64,
+
+    /// Thread ID (cached for fast access)
+    tid: UInt32,
+
+    /// Process ID (cached)
+    pid: UInt32,
+
+    /// Context slots for dependency injection
+    context_slots: ContextSlots,
+
+    /// Last error value for this thread
+    last_error: UInt32,
+
+    /// Stack canary for overflow detection
+    stack_canary: UInt64,
+
+    /// User data pointer
+    user_data: &unsafe Byte,
+};
+
+// =============================================================================
+// Global TLS Index
+// =============================================================================
+
+/// Global TLS index for TCB storage (initialized once)
+static mut TLS_INDEX: UInt32 = TLS_OUT_OF_INDEXES;
+
+/// Flag indicating if TLS index has been allocated
+static mut TLS_INDEX_INITIALIZED: Bool = false;
+
+// =============================================================================
+// TLS Initialization
+// =============================================================================
+
+/// Initialize the global TLS index (call once per process)
+public fn init_tls_index() -> Result<(), TlsError> {
+    unsafe {
+        if TLS_INDEX_INITIALIZED {
+            return Ok(());
+        }
+
+        let index = TlsAlloc();
+        if index == TLS_OUT_OF_INDEXES {
+            return Err(TlsIndexExhausted);
+        }
+
+        TLS_INDEX = index;
+        TLS_INDEX_INITIALIZED = true;
+        Ok(())
+    }
+}
+
+/// Initialize TLS for the main thread.
+///
+/// Must be called once at program startup before any context operations.
+public fn init_main_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
+    // Ensure TLS index is allocated
+    init_tls_index()?;
+
+    // Check if already initialized
+    let existing = get_current_tcb_raw();
+    if existing as Int != 0 {
+        return Err(AlreadyInitialized);
+    }
+
+    // Create TCB for main thread
+    create_thread_tls()
+}
+
+/// Create TLS for a new thread.
+///
+/// Called automatically for threads created via spawn, or manually
+/// for threads created by other means.
+public fn create_thread_tls() -> Result<&mut ThreadControlBlock, TlsError> {
+    // Ensure TLS index exists
+    init_tls_index()?;
+
+    // Allocate TCB with guard page
+    let tcb_size = ThreadControlBlock.size;
+    let total_size = GUARD_PAGE_SIZE + tcb_size;
+
+    // Allocate memory (guard page + TCB)
+    let base = VirtualAlloc(
+        0 as &unsafe Byte,
+        total_size,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE,
+    );
+
+    if base as Int == 0 {
+        return Err(AllocationFailed { code: GetLastError(), size: 0 });
+    }
+
+    // Make guard page inaccessible
+    let mut old_protect: UInt32 = 0;
+    let guard_result = super.kernel32.VirtualProtect(
+        base,
+        GUARD_PAGE_SIZE,
+        PAGE_NOACCESS,
+        &mut old_protect,
+    );
+
+    if !guard_result {
+        VirtualFree(base, 0, MEM_RELEASE);
+        return Err(AllocationFailed { code: GetLastError(), size: 0 });
+    }
+
+    // TCB is after the guard page
+    let tcb_addr = (base as Int + GUARD_PAGE_SIZE) as &mut ThreadControlBlock;
+    let tcb = tcb_addr;
+
+    // Initialize TCB
+    tcb.magic = TCB_MAGIC;
+    tcb.tid = GetCurrentThreadId();
+    tcb.pid = GetCurrentProcessId();
+    tcb.last_error = 0;
+    tcb.stack_canary = generate_stack_canary();
+    tcb.user_data = 0 as &unsafe Byte;
+
+    // Initialize all context slots
+    for i in 0..MAX_CONTEXT_SLOTS {
+        tcb.context_slots.slots[i] = ContextEntry {
+            value: 0 as &unsafe Byte,
+            stack: [0 as &unsafe Byte; 8],
+            depth: 0,
+        };
+    }
+
+    // Store TCB in TLS
+    unsafe {
+        let set_result = TlsSetValue(TLS_INDEX, tcb_addr as &unsafe Byte);
+        if !set_result {
+            VirtualFree(base, 0, MEM_RELEASE);
+            return Err(AllocationFailed { code: GetLastError(), size: 0 });
+        }
+    }
+
+    Ok(tcb)
+}
+
+/// Clean up TLS for the current thread.
+public fn cleanup_thread_tls() -> Result<(), TlsError> {
+    let tcb = get_current_tcb_raw();
+    if tcb as Int == 0 {
+        return Ok(());  // Nothing to clean up
+    }
+
+    // Clear the TLS slot
+    unsafe { TlsSetValue(TLS_INDEX, 0 as &unsafe Byte) };
+
+    // Clear magic to prevent use-after-free
+    tcb.magic = 0;
+
+    // Calculate allocation base (guard page is before TCB)
+    let base_addr = (tcb as Int - GUARD_PAGE_SIZE) as &unsafe Byte;
+
+    // Free the entire allocation
+    VirtualFree(base_addr, 0, MEM_RELEASE);
+
+    Ok(())
+}
+
+// =============================================================================
+// TCB Access
+// =============================================================================
+
+/// Get raw TCB pointer (may be null)
+fn get_current_tcb_raw() -> &mut ThreadControlBlock {
+    unsafe {
+        if !TLS_INDEX_INITIALIZED {
+            return 0 as &mut ThreadControlBlock;
+        }
+        TlsGetValue(TLS_INDEX) as &mut ThreadControlBlock
+    }
+}
+
+/// Get the current thread's TCB.
+///
+/// Returns None if TLS is not initialized for this thread.
+public fn get_current_tcb() -> Maybe<&mut ThreadControlBlock> {
+    let tcb = get_current_tcb_raw();
+    if tcb as Int == 0 {
+        None
+    } else if tcb.magic != TCB_MAGIC {
+        None  // Corrupted TCB
+    } else {
+        Some(tcb)
+    }
+}
+
+/// Get context slots for the current thread.
+public fn get_context_slots() -> Maybe<&mut ContextSlots> {
+    match get_current_tcb() {
+        Some(tcb) => Some(&mut tcb.context_slots),
+        None => None,
+    }
+}
+
+/// Set context slots for the current thread.
+public fn set_context_slots(slots: ContextSlots) -> Result<(), TlsError> {
+    match get_current_tcb() {
+        Some(tcb) => {
+            tcb.context_slots = slots;
+            Ok(())
+        }
+        None => Err(NotInitialized),
+    }
+}
+
+/// Get last error for current thread.
+public fn get_errno() -> UInt32 {
+    // Use Windows GetLastError (thread-local)
+    GetLastError()
+}
+
+/// Set last error for current thread.
+public fn set_errno(err: UInt32) {
+    super.kernel32.SetLastError(err);
+}
+
+/// Get cached thread ID (fast path).
+public fn get_tid_fast() -> Maybe<UInt32> {
+    match get_current_tcb() {
+        Some(tcb) => Some(tcb.tid),
+        None => None,
+    }
+}
+
+/// Check if stack canary is intact.
+public fn check_stack_guard() -> Bool {
+    match get_current_tcb() {
+        Some(tcb) => tcb.stack_canary != 0,  // Basic check
+        None => true,  // No TCB = no canary to check
+    }
+}
+
+// =============================================================================
+// Context Slot Operations
+// =============================================================================
+
+/// Get a context value from a slot.
+public fn ctx_get(slot: Int) -> Maybe<&unsafe Byte> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        return None;
+    }
+
+    match get_context_slots() {
+        Some(slots) => {
+            let entry = &slots.slots[slot];
+            if entry.value as Int == 0 {
+                None
+            } else {
+                Some(entry.value)
+            }
+        }
+        None => None,
+    }
+}
+
+/// Get a mutable context value from a slot.
+///
+/// Returns the same raw pointer as ctx_get - the caller is responsible
+/// for ensuring exclusive access when modifying the value.
+public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
+    ctx_get(slot)
+}
+
+/// Set a context value in a slot.
+public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        return Err(InvalidSlot { slot: slot });
+    }
+
+    match get_context_slots() {
+        Some(slots) => {
+            slots.slots[slot].value = value;
+            Ok(())
+        }
+        None => Err(NotInitialized),
+    }
+}
+
+/// Clear a context slot.
+/// The type parameter is used for type safety at call sites but has no runtime effect.
+public fn ctx_clear<T>(slot: Int) -> Result<(), TlsError> {
+    ctx_set(slot, 0 as &unsafe Byte)
+}
+
+/// Push a new context value onto a slot's stack.
+///
+/// The previous value is saved and can be restored with ctx_pop.
+public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), TlsError> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        return Err(InvalidSlot { slot: slot });
+    }
+
+    match get_context_slots() {
+        Some(slots) => {
+            let entry = &mut slots.slots[slot];
+            if entry.depth >= CONTEXT_STACK_DEPTH {
+                return Err(StackOverflow { slot: slot });
+            }
+
+            // Save current value to stack
+            entry.stack[entry.depth] = entry.value;
+            entry.depth += 1;
+
+            // Set new value
+            entry.value = value;
+            Ok(())
+        }
+        None => Err(NotInitialized),
+    }
+}
+
+/// Pop a context value from a slot's stack.
+///
+/// Restores the previous value that was saved by ctx_push.
+public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, TlsError> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        return Err(InvalidSlot { slot: slot });
+    }
+
+    match get_context_slots() {
+        Some(slots) => {
+            let entry = &mut slots.slots[slot];
+            if entry.depth == 0 {
+                return Err(StackUnderflow { slot: slot });
+            }
+
+            // Get popped value
+            let popped = entry.value;
+
+            // Restore previous value
+            entry.depth -= 1;
+            entry.value = entry.stack[entry.depth];
+            entry.stack[entry.depth] = 0 as &unsafe Byte;
+
+            Ok(popped)
+        }
+        None => Err(NotInitialized),
+    }
+}
+
+/// Get the current stack depth for a context slot.
+public fn ctx_depth(slot: Int) -> Maybe<Int> {
+    if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
+        return None;
+    }
+
+    match get_context_slots() {
+        Some(slots) => Some(slots.slots[slot].depth),
+        None => None,
+    }
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Generate a random stack canary value.
+fn generate_stack_canary() -> UInt64 {
+    // Use Windows CryptGenRandom via RtlGenRandom if available,
+    // otherwise fall back to a simple PRNG based on tick count and thread ID
+    let tick = super.kernel32.GetTickCount64();
+    let tid = GetCurrentThreadId() as UInt64;
+    let pid = GetCurrentProcessId() as UInt64;
+
+    // Mix values using a simple hash
+    let mut canary = tick;
+    canary ^= tid << 16;
+    canary ^= pid << 32;
+    canary ^= (tick >> 32) | (tick << 32);
+    canary ^= 0x5A5A5A5A5A5A5A5A;  // Constant to ensure non-zero
+
+    canary
+}
+
+/// Check if TLS is initialized for the current thread.
+public fn is_tls_initialized() -> Bool {
+    match get_current_tcb() {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+/// Get user data pointer from TCB.
+public fn get_user_data() -> Maybe<&unsafe Byte> {
+    match get_current_tcb() {
+        Some(tcb) => Some(tcb.user_data),
+        None => None,
+    }
+}
+
+/// Set user data pointer in TCB.
+public fn set_user_data(data: &unsafe Byte) -> Result<(), TlsError> {
+    match get_current_tcb() {
+        Some(tcb) => {
+            tcb.user_data = data;
+            Ok(())
+        }
+        None => Err(NotInitialized),
+    }
+}

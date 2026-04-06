@@ -1,0 +1,46 @@
+// Test multi-field tuple variant constructors
+// This tests the fix for the bug where variant constructors with multiple tuple fields
+// (like `Rgb(Int, Int, Int)`) failed with "Expected 1 arguments, got 3".
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int)
+    | Rgba(Int, Int, Int, Int);
+
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float)
+    | Triangle(Float, Float, Float);
+
+fn main() {
+    // Test unit variants
+    let c1 = Color.Red;
+
+    // Test single-field tuple variant
+    let s1 = Shape.Circle(5.0);
+
+    // Test three-field tuple variant (the original bug case)
+    let c2 = Color.Rgb(255, 128, 0);
+
+    // Test four-field tuple variant
+    let c3 = Color.Rgba(255, 128, 0, 200);
+
+    // Test two-field tuple variant
+    let s2 = Shape.Rectangle(10.0, 20.0);
+
+    // Test three-field tuple variant with different type
+    let s3 = Shape.Triangle(3.0, 4.0, 5.0);
+
+    // Test pattern matching with multi-field variants
+    match c2 {
+        Color.Red => print(f"Red"),
+        Color.Green => print(f"Green"),
+        Color.Blue => print(f"Blue"),
+        Color.Rgb(r, g, b) => print(f"RGB variant matched"),
+        Color.Rgba(r, g, b, a) => print(f"RGBA"),
+    }
+
+    print(f"All multi-field variant tests passed!");
+}

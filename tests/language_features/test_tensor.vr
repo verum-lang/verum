@@ -1,0 +1,193 @@
+// Test: Tensor Operations - Basic array operations
+// Priority: Advanced
+// Expected output: Basic tensor/array manipulation
+// NOTE: Advanced features (comprehensions, pipe operators) not yet fully supported
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+fn test_tensor_literals() {
+    print(f"=== Tensor Literals ===");
+
+    // 1D tensor literal
+    let vec: [Int; 5] = [1, 2, 3, 4, 5];
+    print(f"1D tensor: {vec}");
+
+    // 2D tensor literal (matrix)
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+    print(f"2D tensor: {matrix}");
+
+    // 3D tensor literal (cube)
+    let cube: [[[Int; 2]; 2]; 2] = [
+        [[1, 2], [3, 4]],
+        [[5, 6], [7, 8]],
+    ];
+    print(f"3D tensor: {cube}");
+}
+
+fn test_tensor_initialization() {
+    print(f"=== Tensor Initialization ===");
+
+    // Fill with value
+    let zeros: [Int; 5] = [0; 5];
+    print(f"Zeros: {zeros}");
+
+    let ones: [Int; 3] = [1; 3];
+    print(f"Ones: {ones}");
+}
+
+fn test_tensor_indexing() {
+    print(f"=== Tensor Indexing ===");
+
+    // 1D indexing
+    let vec = [10, 20, 30, 40, 50];
+    print(f"vec[0] = {vec[0]}");
+    print(f"vec[2] = {vec[2]}");
+    print(f"vec[4] = {vec[4]}");
+
+    // 2D indexing
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    print(f"matrix[0][0] = {matrix[0][0]}");
+    print(f"matrix[1][2] = {matrix[1][2]}");
+
+    // Row access
+    let row = matrix[0];
+    print(f"First row: {row}");
+}
+
+fn test_tensor_mutation() {
+    print(f"=== Tensor Mutation ===");
+
+    let mut vec = [0; 5];
+    vec[0] = 10;
+    vec[1] = 20;
+    vec[2] = 30;
+    print(f"Mutated vec: {vec}");
+
+    let mut matrix = [[0; 2]; 2];
+    matrix[0][0] = 1;
+    matrix[0][1] = 2;
+    matrix[1][0] = 3;
+    matrix[1][1] = 4;
+    print(f"Mutated matrix: {matrix}");
+}
+
+fn test_tensor_arithmetic() {
+    print(f"=== Tensor Arithmetic ===");
+
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30, 40, 50];
+
+    // Element-wise addition (manual loop)
+    let mut sum = [0; 5];
+    let mut i = 0;
+    while i < 5 {
+        sum[i] = a[i] + b[i];
+        i = i + 1;
+    }
+    print(f"Addition: {sum}");
+
+    // Element-wise multiplication
+    let mut product = [0; 5];
+    i = 0;
+    while i < 5 {
+        product[i] = a[i] * b[i];
+        i = i + 1;
+    }
+    print(f"Product: {product}");
+
+    // Scalar multiplication
+    let mut scaled = [0; 5];
+    i = 0;
+    while i < 5 {
+        scaled[i] = a[i] * 10;
+        i = i + 1;
+    }
+    print(f"Scaled: {scaled}");
+}
+
+fn test_matrix_operations() {
+    print(f"=== Matrix Operations ===");
+
+    let m1 = [[1, 2], [3, 4]];
+    let m2 = [[5, 6], [7, 8]];
+
+    // Matrix addition
+    let mut m_sum = [[0; 2]; 2];
+    let mut i = 0;
+    while i < 2 {
+        let mut j = 0;
+        while j < 2 {
+            m_sum[i][j] = m1[i][j] + m2[i][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    print(f"Matrix sum: {m_sum}");
+
+    // Transpose
+    let mut transpose = [[0; 2]; 2];
+    i = 0;
+    while i < 2 {
+        let mut j = 0;
+        while j < 2 {
+            transpose[j][i] = m1[i][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    print(f"Transpose: {transpose}");
+
+    // Matrix multiplication (2x2)
+    let mut m_prod = [[0; 2]; 2];
+    i = 0;
+    while i < 2 {
+        let mut j = 0;
+        while j < 2 {
+            m_prod[i][j] = m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    print(f"Matrix product: {m_prod}");
+}
+
+fn test_tensor_iteration() {
+    print(f"=== Tensor Iteration ===");
+
+    let vec = [10, 20, 30, 40, 50];
+
+    // Sum using for loop
+    let mut sum = 0;
+    for x in vec {
+        sum = sum + x;
+    }
+    print(f"Sum: {sum}");
+
+    // Max using for loop
+    let mut max = vec[0];
+    for x in vec {
+        if x > max {
+            max = x;
+        }
+    }
+    print(f"Max: {max}");
+}
+
+fn main() {
+    print(f"Starting tensor tests...");
+
+    test_tensor_literals();
+    test_tensor_initialization();
+    test_tensor_indexing();
+    test_tensor_mutation();
+    test_tensor_arithmetic();
+    test_matrix_operations();
+    test_tensor_iteration();
+
+    print(f"All tensor tests complete");
+}

@@ -1,0 +1,298 @@
+// =============================================================================
+// system_time.vr - Wall-clock system time
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Dependencies: core, time/duration, sys/{linux,darwin,windows}/time
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// Uses native platform wall-clock time instead of verum_runtime FFI:
+// - Linux: clock_gettime(CLOCK_REALTIME) via sys/linux/time.realtime_nanos
+// - macOS: clock_gettime(CLOCK_REALTIME) via sys/darwin/time.realtime_nanos
+// - Windows: GetSystemTimePreciseAsFileTime() via sys/windows/time.realtime_nanos
+//
+// =============================================================================
+//
+// SystemTime represents wall-clock time, suitable for timestamps.
+// Unlike Instant, SystemTime can go backwards (e.g., due to NTP sync).
+//
+// # Example
+// ```verum
+// let now = SystemTime.now();
+// let epoch_secs = now.duration_since_epoch().as_secs();
+// print(f"Unix timestamp: {epoch_secs}");
+// ```
+//
+// =============================================================================
+
+module core.time.system_time;
+mount core.*;
+mount time.duration.Duration;
+
+// =============================================================================
+// V-LLSI Native Time Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// - Linux: clock_gettime(CLOCK_REALTIME)
+// - macOS: clock_gettime(CLOCK_REALTIME)
+// - Windows: GetSystemTimePreciseAsFileTime()
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.time.realtime_nanos;
+
+@cfg(target_os = "macos")
+mount sys.darwin.time.realtime_nanos;
+
+@cfg(target_os = "windows")
+mount sys.windows.time.realtime_nanos;
+
+/// Nanoseconds per second constant for conversion.
+const NANOS_PER_SEC: Int = 1_000_000_000;
+
+// =============================================================================
+// SystemTime
+// =============================================================================
+
+/// Wall-clock time, represented as duration since Unix epoch.
+///
+/// SystemTime is suitable for:
+/// - File timestamps
+/// - Logging timestamps
+/// - Formatting dates and times
+///
+/// **WARNING**: SystemTime can go backwards! Use Instant for measuring
+/// elapsed time in performance-sensitive code.
+///
+/// # Example
+/// ```verum
+/// let now = SystemTime.now();
+/// let since_epoch = now.duration_since_epoch();
+/// print(f"Seconds since epoch: {since_epoch.as_secs()}");
+/// ```
+public type SystemTime is {
+    /// Seconds since Unix epoch (1970-01-01 00:00:00 UTC)
+    secs: Int,
+    /// Additional nanoseconds [0, 999_999_999]
+    nanos: Int,
+};
+
+implement SystemTime {
+    /// The Unix epoch: January 1, 1970, 00:00:00 UTC.
+    public fn UNIX_EPOCH() -> SystemTime {
+        SystemTime { secs: 0, nanos: 0 }
+    }
+
+    /// Get the current system time.
+    ///
+    /// Uses native platform wall-clock time:
+    /// - Linux: clock_gettime(CLOCK_REALTIME)
+    /// - macOS: clock_gettime(CLOCK_REALTIME)
+    /// - Windows: GetSystemTimePreciseAsFileTime()
+    public fn now() -> SystemTime {
+        let total_nanos = realtime_nanos() as Int;
+        let secs = total_nanos / NANOS_PER_SEC;
+        let nanos = total_nanos % NANOS_PER_SEC;
+        SystemTime { secs: secs, nanos: nanos }
+    }
+
+    /// Get the duration since the Unix epoch.
+    ///
+    /// Returns None if the time is before the epoch (rare, but possible
+    /// on misconfigured systems).
+    public fn duration_since_epoch(&self) -> Duration {
+        Duration.new(self.secs, self.nanos)
+    }
+
+    /// Get the duration since another system time.
+    ///
+    /// Returns Err if `earlier` is actually later than `self`.
+    public fn duration_since(&self, earlier: &SystemTime) -> Result<Duration, SystemTimeError> {
+        let self_nanos = self.secs * 1_000_000_000 + self.nanos;
+        let earlier_nanos = earlier.secs * 1_000_000_000 + earlier.nanos;
+
+        if self_nanos >= earlier_nanos {
+            Ok(Duration.from_nanos(self_nanos - earlier_nanos))
+        } else {
+            Err(SystemTimeError.WentBackwards(Duration.from_nanos(earlier_nanos - self_nanos)))
+        }
+    }
+
+    /// Get the elapsed time since this system time.
+    ///
+    /// May return an error if the system clock was adjusted backwards.
+    public fn elapsed(&self) -> Result<Duration, SystemTimeError> {
+        SystemTime.now().duration_since(self)
+    }
+
+    /// Add a duration to this time.
+    public fn checked_add(&self, duration: Duration) -> Maybe<SystemTime> {
+        let total_nanos = self.nanos + duration.subsec_nanos();
+        let extra_secs = total_nanos / 1_000_000_000;
+        let remaining_nanos = total_nanos % 1_000_000_000;
+
+        let new_secs = self.secs + duration.as_secs() + extra_secs;
+        if new_secs < self.secs {
+            // Overflow
+            None
+        } else {
+            Some(SystemTime { secs: new_secs, nanos: remaining_nanos })
+        }
+    }
+
+    /// Subtract a duration from this time.
+    public fn checked_sub(&self, duration: Duration) -> Maybe<SystemTime> {
+        let total_nanos = self.secs * 1_000_000_000 + self.nanos;
+        let dur_nanos = duration.as_nanos();
+
+        if dur_nanos > total_nanos {
+            None
+        } else {
+            let res_nanos = total_nanos - dur_nanos;
+            Some(SystemTime {
+                secs: res_nanos / NANOS_PER_SEC,
+                nanos: res_nanos % NANOS_PER_SEC,
+            })
+        }
+    }
+
+    /// Get Unix timestamp in seconds.
+    public fn timestamp(&self) -> Int {
+        self.secs
+    }
+
+    /// Get Unix timestamp in milliseconds.
+    public fn timestamp_millis(&self) -> Int {
+        self.secs * 1000 + self.nanos / 1_000_000
+    }
+
+    /// Get Unix timestamp in nanoseconds.
+    public fn timestamp_nanos(&self) -> Int {
+        self.secs * 1_000_000_000 + self.nanos
+    }
+
+    /// Create from Unix timestamp in seconds.
+    public fn from_timestamp(secs: Int) -> SystemTime {
+        SystemTime { secs: secs, nanos: 0 }
+    }
+
+    /// Create from Unix timestamp in milliseconds.
+    public fn from_timestamp_millis(ms: Int) -> SystemTime {
+        SystemTime {
+            secs: ms / 1000,
+            nanos: (ms % 1000) * 1_000_000,
+        }
+    }
+}
+
+// =============================================================================
+// SystemTimeError
+// =============================================================================
+
+/// Error returned when computing duration between system times.
+public type SystemTimeError is
+    | WentBackwards(Duration);
+
+implement SystemTimeError {
+    /// Get the duration by which time went backwards.
+    public fn duration(&self) -> Duration {
+        match self {
+            WentBackwards(d) => *d,
+        }
+    }
+}
+
+implement Debug for SystemTimeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WentBackwards(d) => f.write_str(f"SystemTimeError.WentBackwards({d})"),
+        }
+    }
+}
+
+implement Display for SystemTimeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WentBackwards(d) => f.write_str(f"system time went backwards by {d}"),
+        }
+    }
+}
+
+// =============================================================================
+// Operator Implementations
+// =============================================================================
+
+implement Add<Duration> for SystemTime {
+    type Output = SystemTime;
+
+    fn add(self, duration: Duration) -> SystemTime {
+        self.checked_add(duration).expect("SystemTime overflow")
+    }
+}
+
+implement Sub<Duration> for SystemTime {
+    type Output = SystemTime;
+
+    fn sub(self, duration: Duration) -> SystemTime {
+        self.checked_sub(duration).expect("SystemTime underflow")
+    }
+}
+
+// =============================================================================
+// Comparison Implementations
+// =============================================================================
+
+implement Eq for SystemTime {
+    fn eq(&self, other: &SystemTime) -> Bool {
+        self.secs == other.secs && self.nanos == other.nanos
+    }
+}
+
+implement Ord for SystemTime {
+    fn cmp(&self, other: &SystemTime) -> Ordering {
+        match self.secs.cmp(&other.secs) {
+            Equal => self.nanos.cmp(&other.nanos),
+            ord => ord,
+        }
+    }
+}
+
+implement PartialOrd for SystemTime {
+    fn partial_cmp(&self, other: &SystemTime) -> Maybe<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// =============================================================================
+// Other Implementations
+// =============================================================================
+
+implement Clone for SystemTime {
+    fn clone(&self) -> SystemTime {
+        SystemTime { secs: self.secs, nanos: self.nanos }
+    }
+}
+
+implement Copy for SystemTime {}
+
+implement Hash for SystemTime {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.secs.hash(hasher);
+        self.nanos.hash(hasher);
+    }
+}
+
+implement Debug for SystemTime {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SystemTime {{ secs: {self.secs}, nanos: {self.nanos} }}")
+    }
+}
+
+implement Display for SystemTime {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Display as Unix timestamp with subsecond precision
+        let ms = self.nanos / 1_000_000;
+        f.write_str(f"{self.secs}.{ms:03}s")
+    }
+}

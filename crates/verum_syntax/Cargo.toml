@@ -1,0 +1,25 @@
+[package]
+name = "verum_syntax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lossless syntax tree infrastructure for the Verum language (red-green trees)"
+
+[dependencies]
+# Minimal dependencies for core syntax tree functionality
+smallvec = { workspace = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[lints]
+workspace = true

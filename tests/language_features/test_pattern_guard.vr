@@ -1,0 +1,10 @@
+fn main() {
+    // Test 4: Guards
+    let val = 15;
+    match val {
+        n if n < 10 => print(f"small: {n}"),
+        n if n < 20 => print(f"medium: {n}"),
+        _ => print(f"large"),
+    }
+    print(f"Guard pattern test complete!");
+}

@@ -1,0 +1,21 @@
+// Test: Field access on reference types
+// This test verifies that we can access fields on reference types like &Point
+
+type Point is { x: Int, y: Int };
+
+fn get_x(p: &Point) -> Int {
+    p.x
+}
+
+fn get_y(p: &Point) -> Int {
+    p.y
+}
+
+fn main() {
+    let p = Point { x: 10, y: 20 };
+    print(f"Point: ({p.x}, {p.y})");
+
+    // Test field access on references
+    print(f"x via ref: {get_x(&p)}");
+    print(f"y via ref: {get_y(&p)}");
+}

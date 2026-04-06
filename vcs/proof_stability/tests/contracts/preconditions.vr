@@ -1,0 +1,442 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, contracts, preconditions, requires
+// @timeout: 15000
+// @expected-proof-time: <60ms
+
+/// Description: Tests SMT stability for precondition verification
+/// Regression Detection: Precondition checking is a core SMT operation.
+/// Proofs should complete within 60ms. Non-deterministic failures or
+/// proof times exceeding 120ms indicate SMT regression.
+
+// ============================================================================
+// Simple Preconditions
+// ============================================================================
+
+/// Non-zero divisor
+@verify(proof)
+fn safe_divide(a: Int, b: Int) -> Int {
+    contract#"
+        requires b != 0;
+        ensures result * b == a || (a % b != 0 && result == a / b);
+    "
+    a / b
+}
+
+/// Non-negative argument
+@verify(proof)
+fn safe_sqrt_int(x: Int) -> Int {
+    contract#"
+        requires x >= 0;
+        ensures result >= 0;
+        ensures result * result <= x;
+    "
+    let mut r = 0;
+    while (r + 1) * (r + 1) <= x {
+        r += 1;
+    }
+    r
+}
+
+/// Non-empty collection
+@verify(proof)
+fn safe_first<T>(list: &List<T>) -> &T {
+    contract#"
+        requires list.len() > 0;
+    "
+    &list[0]
+}
+
+/// Valid index
+@verify(proof)
+fn safe_get<T>(list: &List<T>, idx: Int) -> &T {
+    contract#"
+        requires idx >= 0;
+        requires idx < list.len();
+    "
+    &list[idx]
+}
+
+// ============================================================================
+// Range Preconditions
+// ============================================================================
+
+/// Index within bounds
+@verify(proof)
+fn bounded_access<T>(arr: &[T; 10], idx: Int) -> &T {
+    contract#"
+        requires idx >= 0 && idx < 10;
+    "
+    &arr[idx]
+}
+
+/// Slice bounds
+@verify(proof)
+fn safe_slice<T>(list: &List<T>, start: Int, end: Int) -> List<T> {
+    contract#"
+        requires start >= 0;
+        requires end >= start;
+        requires end <= list.len();
+        ensures result.len() == end - start;
+    "
+    list.slice(start, end)
+}
+
+/// Percentage bounds
+@verify(proof)
+fn apply_percentage(value: Float, percent: Int) -> Float {
+    contract#"
+        requires percent >= 0 && percent <= 100;
+        ensures result >= 0.0 || value < 0.0;
+    "
+    value * (percent as Float / 100.0)
+}
+
+// ============================================================================
+// Multiple Preconditions
+// ============================================================================
+
+/// Valid triangle sides
+@verify(proof)
+fn triangle_area(a: Float, b: Float, c: Float) -> Float {
+    contract#"
+        requires a > 0.0 && b > 0.0 && c > 0.0;
+        requires a + b > c;
+        requires b + c > a;
+        requires a + c > b;
+        ensures result >= 0.0;
+    "
+    // Heron's formula
+    let s = (a + b + c) / 2.0;
+    (s * (s - a) * (s - b) * (s - c)).sqrt()
+}
+
+/// Valid date components
+@verify(proof)
+fn is_valid_date(year: Int, month: Int, day: Int) -> Bool {
+    contract#"
+        requires year >= 1 && year <= 9999;
+        requires month >= 1 && month <= 12;
+        requires day >= 1 && day <= 31;
+    "
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => if is_leap_year(year) { 29 } else { 28 },
+        _ => 0  // Unreachable due to precondition
+    };
+    day <= days_in_month
+}
+
+fn is_leap_year(year: Int) -> Bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Matrix multiplication dimensions
+@verify(proof)
+fn matrix_mul_check(a_rows: Int, a_cols: Int, b_rows: Int, b_cols: Int) -> Bool {
+    contract#"
+        requires a_rows > 0 && a_cols > 0;
+        requires b_rows > 0 && b_cols > 0;
+        requires a_cols == b_rows;
+    "
+    true  // Dimensions are compatible
+}
+
+// ============================================================================
+// Ordering Preconditions
+// ============================================================================
+
+/// Sorted array for binary search
+@verify(proof)
+fn binary_search(sorted: &List<Int>, target: Int) -> Maybe<Int> {
+    contract#"
+        requires forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j];
+    "
+    let mut low = 0;
+    let mut high = sorted.len();
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if sorted[mid] == target {
+            return Some(mid);
+        } else if sorted[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    None
+}
+
+/// Heap property for extract-min
+@verify(proof)
+fn heap_min<T: Ord>(heap: &List<T>) -> &T {
+    contract#"
+        requires heap.len() > 0;
+        requires forall i. i > 0 && i < heap.len() implies heap[(i - 1) / 2] <= heap[i];
+    "
+    &heap[0]
+}
+
+// ============================================================================
+// Relational Preconditions
+// ============================================================================
+
+/// Start before end
+@verify(proof)
+fn range_size(start: Int, end: Int) -> Int {
+    contract#"
+        requires start <= end;
+        ensures result >= 0;
+        ensures result == end - start;
+    "
+    end - start
+}
+
+/// Min/Max ordering
+@verify(proof)
+fn clamp(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min;
+        ensures result <= max;
+    "
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+/// Capacity greater than or equal to size
+@verify(proof)
+fn resize<T: Default>(list: &mut List<T>, new_size: Int, capacity: Int) {
+    contract#"
+        requires new_size >= 0;
+        requires capacity >= new_size;
+    "
+    while list.len() < new_size {
+        list.push(T.default());
+    }
+    while list.len() > new_size {
+        list.pop();
+    }
+}
+
+// ============================================================================
+// Implication Preconditions
+// ============================================================================
+
+/// Conditional requirement
+@verify(proof)
+fn conditional_divide(a: Int, b: Int, do_divide: Bool) -> Int {
+    contract#"
+        requires do_divide implies b != 0;
+    "
+    if do_divide { a / b } else { a }
+}
+
+/// Optional with precondition on Some
+@verify(proof)
+fn unwrap_or_default(opt: Maybe<Int>, default: Int, must_be_positive: Bool) -> Int {
+    contract#"
+        requires must_be_positive implies match opt {
+            Some(x) => x > 0,
+            None => default > 0
+        };
+    "
+    match opt {
+        Some(x) => x,
+        None => default
+    }
+}
+
+// ============================================================================
+// State Preconditions
+// ============================================================================
+
+type File is { handle: Int, is_open: Bool };
+
+/// File must be open
+@verify(proof)
+fn file_read(file: &File, buffer: &mut List<Byte>) -> Result<Int, Text> {
+    contract#"
+        requires file.is_open;
+    "
+    // Simulated read
+    Ok(buffer.len())
+}
+
+/// File must be open and writable
+@verify(proof)
+fn file_write(file: &File, data: &List<Byte>) -> Result<Int, Text> {
+    contract#"
+        requires file.is_open;
+    "
+    // Simulated write
+    Ok(data.len())
+}
+
+// ============================================================================
+// Resource Preconditions
+// ============================================================================
+
+type Buffer is { data: List<Byte>, capacity: Int };
+
+/// Buffer has space
+@verify(proof)
+fn buffer_write(buf: &mut Buffer, data: &List<Byte>) -> Result<(), Text> {
+    contract#"
+        requires buf.data.len() + data.len() <= buf.capacity;
+        ensures buf.data.len() == old(buf.data.len()) + data.len();
+    "
+    for byte in data {
+        buf.data = buf.data.push(*byte);
+    }
+    Ok(())
+}
+
+/// Buffer has data
+@verify(proof)
+fn buffer_read(buf: &mut Buffer, count: Int) -> Result<List<Byte>, Text> {
+    contract#"
+        requires count >= 0;
+        requires count <= buf.data.len();
+        ensures result.len() == count;
+    "
+    let result = buf.data.slice(0, count);
+    buf.data = buf.data.slice(count, buf.data.len());
+    Ok(result)
+}
+
+// ============================================================================
+// Preconditions with Quantifiers
+// ============================================================================
+
+/// All elements non-negative
+@verify(proof)
+fn sum_non_negative(list: &List<Int>) -> Int {
+    contract#"
+        requires forall i. 0 <= i < list.len() implies list[i] >= 0;
+        ensures result >= 0;
+    "
+    let mut sum = 0;
+    for x in list {
+        sum += *x;
+    }
+    sum
+}
+
+/// All elements unique
+@verify(proof)
+fn check_unique<T: Eq>(list: &List<T>) -> Bool {
+    contract#"
+        requires forall i, j. 0 <= i < j < list.len() implies list[i] != list[j];
+    "
+    true  // Uniqueness guaranteed by precondition
+}
+
+/// All pairs satisfy relation
+@verify(proof)
+fn check_pairwise<T>(list: &List<T>, rel: fn(&T, &T) -> Bool) -> Bool {
+    contract#"
+        requires forall i, j. 0 <= i < j < list.len() implies rel(&list[i], &list[j]);
+    "
+    true  // Relation satisfied by precondition
+}
+
+// ============================================================================
+// Chained Preconditions
+// ============================================================================
+
+/// Division chain
+@verify(proof)
+fn divide_chain(a: Int, b: Int, c: Int) -> Int {
+    contract#"
+        requires b != 0;
+        requires c != 0;
+        requires (a / b) != Int.MIN || c != -1;  // Avoid overflow
+    "
+    (a / b) / c
+}
+
+/// Nested structure access
+@verify(proof)
+fn nested_access(outer: &List<List<Int>>, i: Int, j: Int) -> Int {
+    contract#"
+        requires i >= 0 && i < outer.len();
+        requires j >= 0 && j < outer[i].len();
+    "
+    outer[i][j]
+}
+
+// ============================================================================
+// Precondition Weakening/Strengthening
+// ============================================================================
+
+/// Stronger precondition (positive) satisfies weaker (non-negative)
+@verify(proof)
+fn uses_non_negative(x: Int) -> Int {
+    contract#"
+        requires x >= 0;
+        ensures result >= 0;
+    "
+    x
+}
+
+@verify(proof)
+fn provides_positive(x: Int) -> Int {
+    contract#"
+        requires x > 0;  // Stronger
+        ensures result >= 0;
+    "
+    uses_non_negative(x)  // x > 0 implies x >= 0
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Simple preconditions
+    assert(safe_divide(10, 2) == 5);
+    assert(safe_sqrt_int(16) == 4);
+    assert(*safe_first(&list![1, 2, 3]) == 1);
+    assert(*safe_get(&list![10, 20, 30], 1) == 20);
+
+    // Range preconditions
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    assert(*bounded_access(&arr, 5) == 5);
+    assert(safe_slice(&list![1, 2, 3, 4, 5], 1, 4) == list![2, 3, 4]);
+    assert(apply_percentage(100.0, 50) == 50.0);
+
+    // Multiple preconditions
+    assert(triangle_area(3.0, 4.0, 5.0) > 5.9 && triangle_area(3.0, 4.0, 5.0) < 6.1);
+    assert(is_valid_date(2024, 2, 29));  // Leap year
+    assert(matrix_mul_check(3, 4, 4, 5));
+
+    // Ordering preconditions
+    assert(binary_search(&list![1, 2, 3, 4, 5], 3) == Some(2));
+    assert(binary_search(&list![1, 2, 3, 4, 5], 6) == None);
+
+    // Relational preconditions
+    assert(range_size(5, 10) == 5);
+    assert(clamp(50, 0, 100) == 50);
+    assert(clamp(-10, 0, 100) == 0);
+
+    // Implication preconditions
+    assert(conditional_divide(10, 2, true) == 5);
+    assert(conditional_divide(10, 0, false) == 10);
+
+    // Quantifier preconditions
+    assert(sum_non_negative(&list![1, 2, 3, 4, 5]) == 15);
+    assert(check_unique(&list![1, 2, 3, 4, 5]));
+
+    // Chained preconditions
+    assert(divide_chain(100, 2, 5) == 10);
+    assert(nested_access(&list![list![1, 2], list![3, 4, 5]], 1, 2) == 5);
+
+    // Weakening/strengthening
+    assert(provides_positive(5) >= 0);
+
+    println("All precondition tests verified successfully!");
+}

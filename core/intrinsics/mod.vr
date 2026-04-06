@@ -1,0 +1,218 @@
+// =============================================================================
+// core/intrinsics/mod.vr - Unified Intrinsics Module
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (intrinsics are compiler-provided)
+//
+// This module provides a unified, modular organization of all Verum intrinsics.
+// Intrinsics are compiler-provided functions that map directly to CPU instructions,
+// runtime operations, or compile-time computations.
+//
+// # Module Organization
+//
+// ## Core Intrinsics (VBC-compatible, zero-allocation)
+// - arithmetic: Basic math, checked/wrapping/saturating arithmetic
+// - bitwise: Bit operations, shifts, rotations
+// - float: Floating-point math, classification
+// - memory: Memory operations (memcpy, memset, etc.)
+// - atomic: Atomic operations and memory ordering
+// - type_info: Type metadata (size_of, align_of, etc.)
+// - conversion: Type conversions and casts
+// - control: Control flow hints and traps
+// - platform: Platform detection and CPU features
+// - simd: SIMD lane operations
+//
+// ## Runtime Intrinsics (@requires_runtime)
+// - runtime/async: Async runtime operations
+// - runtime/tls: Thread-local storage
+// - runtime/syscall: Direct syscall interface
+// - runtime/cbgr: CBGR memory safety
+// - runtime/time: High-resolution timing
+// - runtime/sync: Synchronization primitives
+// - runtime/text: Text/string operations
+// - runtime/tier: VBC tier management
+//
+// ## Low-Level Intrinsics (@llvm_only)
+// - lowlevel/x86_64: x86_64-specific (SSE, AVX, privileged)
+// - lowlevel/aarch64: ARM64-specific (NEON, SVE, system regs)
+// - lowlevel/kernel: Kernel entry points, naked functions
+//
+// # @llvm_only Attribute
+//
+// Functions marked @llvm_only cannot execute in the VBC interpreter.
+// They require AOT compilation:
+// - Inline assembly (`asm { }`)
+// - Privileged CPU instructions (ring 0)
+// - Platform-specific hardware access
+//
+// ```verum
+// @llvm_only(reason = "inline assembly")
+// pub unsafe fn rdmsr(msr: UInt32) -> UInt64;
+// ```
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics;
+
+// =============================================================================
+// CORE INTRINSICS (VBC-compatible)
+// =============================================================================
+
+/// Arithmetic intrinsics: add, sub, mul, div, checked_*, wrapping_*, saturating_*
+public mount arithmetic.*;
+
+/// Bitwise intrinsics: and, or, xor, shift, rotate, clz, ctz, popcnt
+public mount bitwise.*;
+
+/// Floating-point intrinsics: sqrt, sin, cos, exp, log, fma, classification
+public mount float.*;
+
+/// Memory intrinsics: memcpy, memmove, memset, ptr_read, ptr_write
+public mount memory.*;
+
+/// Atomic intrinsics: atomic_load, atomic_store, atomic_cmpxchg, fence
+public mount atomic.*;
+
+/// Type information intrinsics: size_of, align_of, type_id, type_name
+public mount type_info.*;
+
+/// Conversion intrinsics: int_to_float, bitcast, transmute, byte conversions
+public mount conversion.*;
+
+/// Control flow intrinsics: trap, unreachable, assume, likely, prefetch
+public mount control.*;
+
+/// Platform intrinsics: target detection, CPU features
+public mount platform.*;
+
+/// SIMD intrinsics: simd_extract, simd_insert, simd_shuffle, simd_reduce_*
+public mount simd.*;
+
+/// Tensor intrinsics: tensor_new, tensor_matmul, tensor_reduce, etc.
+public mount tensor.*;
+
+/// GPU intrinsics: gpu_malloc, gpu_memcpy, gpu_stream_create, etc.
+public mount gpu.*;
+
+// =============================================================================
+// RUNTIME INTRINSICS (requires runtime support)
+// =============================================================================
+
+/// Runtime-dependent intrinsics (async, TLS, syscall, CBGR, etc.)
+public mount runtime.*;
+public mount runtime;
+
+// =============================================================================
+// LOW-LEVEL INTRINSICS (@llvm_only)
+// =============================================================================
+
+/// Low-level, architecture-specific intrinsics (x86_64, aarch64, kernel)
+/// Most functions in this module are @llvm_only and cannot run in interpreter.
+public mount lowlevel.*;
+public mount lowlevel;
+
+// =============================================================================
+// EXPLICIT RE-EXPORTS
+// =============================================================================
+// The wildcard re-exports above (public mount X.*;) re-export direct children
+// of each submodule. Items in nested submodules (e.g., runtime/time, runtime/tls)
+// need explicit re-export here so that `mount core.intrinsics.{item}` resolves.
+// =============================================================================
+
+// --- From runtime/time ---
+public mount runtime.time.{
+    monotonic_nanos,
+    realtime_secs,
+    realtime_nanos,
+    num_cpus,
+    sleep_ms,
+    sleep_ns,
+};
+
+// --- From runtime/async_ops ---
+public mount runtime.async_ops.{
+    JoinHandleOpaque,
+    ExecutorHandle,
+    FutureHandle,
+    SupervisorHandleOpaque,
+    ChildSpecOpaque,
+    ExecutionEnvOpaque,
+    RecoveryContextOpaque,
+    CircuitBreakerOpaque,
+    AllocHandle,
+    IODriverHandle,
+    SharedRegistryOpaque,
+    MiddlewareChainOpaque,
+    SingleThreadExecutorOpaque,
+    spawn_with_env,
+    executor_spawn,
+    executor_block_on,
+    future_poll_sync,
+    default_executor,
+    async_sleep_ms,
+    async_sleep_ns,
+    RecoveryError,
+    spawn_supervised,
+    supervisor_log_escalation,
+    supervisor_set_parent,
+    exec_with_recovery,
+    inline_cb_as_ref,
+    global_allocator,
+    default_io_driver,
+    shared_registry_global,
+    middleware_chain_empty,
+    single_thread_block_on,
+};
+
+// --- From runtime/tls ---
+public mount runtime.tls.{
+    tls_get_base,
+    tls_slot_get,
+    tls_slot_set,
+    tls_slot_clear,
+    tls_slot_has,
+    tls_frame_push,
+    tls_frame_pop,
+    tls_read_ptr,
+    tls_write_ptr,
+    tls_read_i32,
+    tls_write_i32,
+    tls_read_usize,
+    tls_write_usize,
+};
+
+// --- From runtime/text ---
+public mount runtime.text.{
+    text_from_static,
+    utf8_decode_char,
+    utf8_decode_char_len,
+    text_parse_int,
+    text_parse_float,
+    int_to_text,
+    float_to_text,
+    char_is_alphabetic,
+    char_is_numeric,
+    char_is_whitespace,
+    char_is_control,
+    char_is_uppercase,
+    char_is_lowercase,
+    char_to_uppercase,
+    char_to_lowercase,
+    char_encode_utf8,
+    char_escape_debug,
+    char_general_category,
+};
+
+// --- From runtime/sync ---
+public mount runtime.sync.{
+    spin_loop_hint,
+};
+
+// --- From runtime/syscall ---
+public mount runtime.syscall.{
+    syscall6,
+};
+
+// --- From runtime/cbgr ---
+public mount runtime.cbgr.*;

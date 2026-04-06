@@ -1,0 +1,542 @@
+// Test: Comprehensive - Complete language feature validation
+// Priority: Critical
+// Expected output: Success/failure for each feature tested
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+// Record types
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text
+};
+
+type Point2D is {
+    x: Int,
+    y: Int
+};
+
+type Rectangle is {
+    top_left: Point2D,
+    bottom_right: Point2D
+};
+
+// Variant types
+type Color is
+    | Red
+    | Green
+    | Blue
+    | CustomColor { r: Int, g: Int, b: Int };
+
+type Shape is
+    | Circle { radius: Int }
+    | Rect { width: Int, height: Int };
+
+// Generic types
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Box<T> is {
+    value: T
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+fn print_test(name: Text, passed: Bool) {
+    if passed {
+        print(f"✓ {name}");
+    } else {
+        print(f"✗ {name}");
+    }
+}
+
+fn print_section(name: Text) {
+    print(f"\n=== {name} ===");
+}
+
+// ============================================================================
+// Feature Test Functions
+// ============================================================================
+
+// Test 1: Record types with field access
+fn test_records() -> Bool {
+    print_section("Record Types");
+
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com"
+    };
+
+    let test1 = person.name == "Alice" && person.age == 30;
+    print_test("Record creation and field access", test1);
+
+    let point = Point2D { x: 10, y: 20 };
+    let test2 = point.x == 10 && point.y == 20;
+    print_test("Simple record", test2);
+
+    let rect = Rectangle {
+        top_left: Point2D { x: 0, y: 0 },
+        bottom_right: Point2D { x: 10, y: 10 }
+    };
+    let test3 = rect.top_left.x == 0 && rect.bottom_right.x == 10;
+    print_test("Nested records", test3);
+
+    test1 && test2 && test3
+}
+
+// Test 2: Variant types and pattern matching
+fn test_variants() -> Bool {
+    print_section("Variant Types & Pattern Matching");
+
+    // Simple variants
+    let color1 = Color.Red;
+    let test1 = match color1 {
+        Color.Red => true,
+        _ => false,
+    };
+    print_test("Simple variant match", test1);
+
+    // Struct variants with fields
+    let color2 = Color.CustomColor { r: 255, g: 128, b: 0 };
+    let test2 = match color2 {
+        Color.CustomColor { r, g, b } => r == 255 && g == 128 && b == 0,
+        _ => false,
+    };
+    print_test("Struct variant with fields", test2);
+
+    // Shape matching
+    let shape = Shape.Circle { radius: 10 };
+    let test3 = match shape {
+        Shape.Circle { radius } => radius == 10,
+        _ => false,
+    };
+    print_test("Complex variant matching", test3);
+
+    test1 && test2 && test3
+}
+
+// Test 3: Generic types (List, Maybe, Result)
+fn test_generics() -> Bool {
+    print_section("Generic Types");
+
+    // Maybe type
+    let some_val: Maybe<Int> = Maybe.Some(42);
+    let test1 = match some_val {
+        Maybe.Some(v) => v == 42,
+        Maybe.None => false,
+    };
+    print_test("Maybe.Some", test1);
+
+    let none_val: Maybe<Int> = Maybe.None;
+    let test2 = match none_val {
+        Maybe.Some(_) => false,
+        Maybe.None => true,
+    };
+    print_test("Maybe.None", test2);
+
+    // Result type
+    let ok_result: Result<Int, Text> = Result.Ok(100);
+    let test3 = match ok_result {
+        Result.Ok(v) => v == 100,
+        Result.Err(_) => false,
+    };
+    print_test("Result.Ok", test3);
+
+    let err_result: Result<Int, Text> = Result.Err("error message");
+    let test4 = match err_result {
+        Result.Ok(_) => false,
+        Result.Err(e) => e == "error message",
+    };
+    print_test("Result.Err", test4);
+
+    // Generic Box
+    let boxed = Box { value: 42 };
+    let test5 = boxed.value == 42;
+    print_test("Generic Box", test5);
+
+    // Generic Pair
+    let pair = Pair { first: 10, second: "hello" };
+    let test6 = pair.first == 10 && pair.second == "hello";
+    print_test("Generic Pair", test6);
+
+    // Array/List
+    let arr = [1, 2, 3, 4, 5];
+    let first = arr[0];
+    let last = arr[4];
+    let test7 = first == 1 && last == 5;
+    print_test("Array indexing", test7);
+
+    test1 && test2 && test3 && test4 && test5 && test6 && test7
+}
+
+// Test 4: Closures and higher-order functions
+fn test_closures() -> Bool {
+    print_section("Closures & Higher-Order Functions");
+
+    // Simple closure
+    let double = |x: Int| -> Int { x * 2 };
+    let test1 = double(21) == 42;
+    print_test("Simple closure", test1);
+
+    // Closure with capture
+    let base = 10;
+    let add_base = |x: Int| -> Int { x + base };
+    let test2 = add_base(5) == 15;
+    print_test("Closure with capture", test2);
+
+    // Higher-order function
+    fn apply(f: fn(Int) -> Int, value: Int) -> Int {
+        f(value)
+    }
+    let triple = |x: Int| -> Int { x * 3 };
+    let test3 = apply(triple, 5) == 15;
+    print_test("Higher-order function", test3);
+
+    // Closure returning closure
+    let make_multiplier = |n: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { x * n }
+    };
+    let times5 = make_multiplier(5);
+    let test4 = times5(3) == 15;
+    print_test("Closure returning closure", test4);
+
+    // Closure composition
+    let add_one = |x: Int| -> Int { x + 1 };
+    let double_it = |x: Int| -> Int { x * 2 };
+    let composed = |x: Int| -> Int { double_it(add_one(x)) };
+    let test5 = composed(5) == 12;
+    print_test("Closure composition", test5);
+
+    test1 && test2 && test3 && test4 && test5
+}
+
+// Test 5: Control flow (if/else, match, for, while)
+fn test_control_flow() -> Bool {
+    print_section("Control Flow");
+
+    // If/else
+    let x = 10;
+    let result1 = if x > 5 {
+        "greater"
+    } else {
+        "not greater"
+    };
+    let test1 = result1 == "greater";
+    print_test("If expression", test1);
+
+    // If-else-if chain
+    let score = 85;
+    let grade = if score >= 90 {
+        "A"
+    } else if score >= 80 {
+        "B"
+    } else if score >= 70 {
+        "C"
+    } else {
+        "F"
+    };
+    let test2 = grade == "B";
+    print_test("If-else-if chain", test2);
+
+    // Match with literals
+    let value = 2;
+    let result2 = match value {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "other",
+    };
+    let test3 = result2 == "two";
+    print_test("Match literals", test3);
+
+    // Match with ranges
+    let num = 75;
+    let result3 = match num {
+        0..=49 => "F",
+        50..=64 => "D",
+        65..=74 => "C",
+        75..=84 => "B",
+        85..=100 => "A",
+        _ => "Invalid",
+    };
+    let test4 = result3 == "B";
+    print_test("Match ranges", test4);
+
+    // Match with guards
+    let n = 15;
+    let result4 = match n {
+        x if x < 0 => "negative",
+        x if x == 0 => "zero",
+        x if x < 10 => "small",
+        x if x >= 10 => "large",
+        _ => "unreachable",
+    };
+    let test5 = result4 == "large";
+    print_test("Match with guards", test5);
+
+    // While loop
+    let mut counter = 0;
+    while counter < 5 {
+        counter = counter + 1;
+    }
+    let test6 = counter == 5;
+    print_test("While loop", test6);
+
+    // For loop over range
+    let mut sum = 0;
+    for i in 1..=5 {
+        sum = sum + i;
+    }
+    let test7 = sum == 15;
+    print_test("For loop range", test7);
+
+    // For loop over array
+    let numbers = [1, 2, 3, 4, 5];
+    let mut total = 0;
+    for num in numbers {
+        total = total + num;
+    }
+    let test8 = total == 15;
+    print_test("For loop array", test8);
+
+    // Break in loop
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count >= 3 {
+            break;
+        }
+    }
+    let test9 = count == 3;
+    print_test("Loop with break", test9);
+
+    // Continue in loop
+    let mut odd_sum = 0;
+    for i in 1..=10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        odd_sum = odd_sum + i;
+    }
+    let test10 = odd_sum == 25;
+    print_test("Loop with continue", test10);
+
+    test1 && test2 && test3 && test4 && test5 && test6 && test7 && test8 && test9 && test10
+}
+
+// Test 6: Error handling with Result
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("Division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+fn safe_sqrt(n: Int) -> Result<Int, Text> {
+    if n < 0 {
+        Result.Err("Cannot sqrt negative number")
+    } else {
+        // Simplified: just return the number for testing
+        Result.Ok(n)
+    }
+}
+
+fn chained_operation(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+    match safe_divide(a, b) {
+        Result.Ok(div_result) => {
+            match safe_sqrt(div_result) {
+                Result.Ok(sqrt_result) => {
+                    match safe_divide(sqrt_result, c) {
+                        Result.Ok(final_result) => Result.Ok(final_result),
+                        Result.Err(e) => Result.Err(e),
+                    }
+                },
+                Result.Err(e) => Result.Err(e),
+            }
+        },
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+fn test_error_handling() -> Bool {
+    print_section("Error Handling");
+
+    // Basic Result handling
+    let ok = safe_divide(10, 2);
+    let test1 = match ok {
+        Result.Ok(v) => v == 5,
+        Result.Err(_) => false,
+    };
+    print_test("Result.Ok case", test1);
+
+    let err = safe_divide(10, 0);
+    let test2 = match err {
+        Result.Ok(_) => false,
+        Result.Err(e) => e == "Division by zero",
+    };
+    print_test("Result.Err case", test2);
+
+    // Chained Result operations
+    let success = chained_operation(20, 2, 2);
+    let test3 = match success {
+        Result.Ok(v) => v == 5,
+        Result.Err(_) => false,
+    };
+    print_test("Chained Result success", test3);
+
+    let failure = chained_operation(20, 0, 2);
+    let test4 = match failure {
+        Result.Ok(_) => false,
+        Result.Err(_) => true,
+    };
+    print_test("Chained Result error propagation", test4);
+
+    // If-let pattern for Result
+    let mut test5 = false;
+    if let Result.Ok(v) = safe_divide(15, 3) {
+        test5 = v == 5;
+    }
+    print_test("If-let with Result", test5);
+
+    // Map over Result
+    let mapped = match safe_divide(20, 4) {
+        Result.Ok(v) => Result.Ok(v * 2),
+        Result.Err(e) => Result.Err(e),
+    };
+    let test6 = match mapped {
+        Result.Ok(v) => v == 10,
+        Result.Err(_) => false,
+    };
+    print_test("Result mapping", test6);
+
+    test1 && test2 && test3 && test4 && test5 && test6
+}
+
+// Test 7: Advanced pattern matching
+fn test_advanced_patterns() -> Bool {
+    print_section("Advanced Pattern Matching");
+
+    // Tuple destructuring
+    let tuple = (1, "hello", true);
+    let (a, b, c) = tuple;
+    let test1 = a == 1 && b == "hello" && c == true;
+    print_test("Tuple destructuring", test1);
+
+    // Record field access
+    let point = Point2D { x: 10, y: 20 };
+    let test2 = point.x == 10 && point.y == 20;
+    print_test("Record field access", test2);
+
+    // Or patterns
+    let digit = 5;
+    let test3 = match digit {
+        1 | 2 | 3 => false,
+        4 | 5 | 6 => true,
+        _ => false,
+    };
+    print_test("Or patterns", test3);
+
+    // Range patterns
+    let num = 7;
+    let test4 = match num {
+        1..=5 => false,
+        6..=10 => true,
+        _ => false,
+    };
+    print_test("Range pattern", test4);
+
+    // Match with nested Maybe
+    let maybe_int = Maybe.Some(42);
+    let test5 = match maybe_int {
+        Maybe.Some(v) => v == 42,
+        Maybe.None => false,
+    };
+    print_test("Maybe pattern match", test5);
+
+    test1 && test2 && test3 && test4 && test5
+}
+
+// Test 8: Type inference and composition
+fn test_type_features() -> Bool {
+    print_section("Type System Features");
+
+    // Type inference for closures
+    let inferred = |x| x + 1;
+    let test1 = inferred(41) == 42;
+    print_test("Closure type inference", test1);
+
+    // Generic function instantiation
+    fn identity<T>(x: T) -> T {
+        x
+    }
+    let int_id = identity(42);
+    let text_id = identity("hello");
+    let test2 = int_id == 42 && text_id == "hello";
+    print_test("Generic function inference", test2);
+
+    // Nested generics - simplified
+    let ok_result: Result<Int, Text> = Result.Ok(42);
+    let nested: Maybe<Result<Int, Text>> = Maybe.Some(ok_result);
+    let test3 = match nested {
+        Maybe.Some(_) => true,
+        Maybe.None => false,
+    };
+    print_test("Nested generics", test3);
+
+    // Generic Box direct access
+    let b = Box { value: 10 };
+    let test4 = b.value == 10;
+    print_test("Generic Box field access", test4);
+
+    test1 && test2 && test3 && test4
+}
+
+// ============================================================================
+// Main Test Runner
+// ============================================================================
+
+fn main() {
+    print(f"");
+    print(f"╔══════════════════════════════════════════════════════════════╗");
+    print(f"║  Verum Comprehensive Language Feature Test Suite            ║");
+    print(f"╚══════════════════════════════════════════════════════════════╝");
+
+    let mut all_passed = true;
+
+    // Run all test suites
+    all_passed = test_records() && all_passed;
+    all_passed = test_variants() && all_passed;
+    all_passed = test_generics() && all_passed;
+    all_passed = test_closures() && all_passed;
+    all_passed = test_control_flow() && all_passed;
+    all_passed = test_error_handling() && all_passed;
+    all_passed = test_advanced_patterns() && all_passed;
+    all_passed = test_type_features() && all_passed;
+
+    // Print summary
+    print(f"");
+    print(f"════════════════════════════════════════════════════════════════");
+    if all_passed {
+        print(f"✓ ALL TESTS PASSED");
+    } else {
+        print(f"✗ SOME TESTS FAILED");
+    }
+    print(f"════════════════════════════════════════════════════════════════");
+}

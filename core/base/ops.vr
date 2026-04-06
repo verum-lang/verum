@@ -1,0 +1,231 @@
+// =============================================================================
+// ops.vr - Operator protocols for language constructs
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: none (foundational)
+// =============================================================================
+//
+// This module defines protocols that enable language constructs to work with
+// user-defined types. These are "carrier" protocols - they carry semantics
+// for operators like ?, for loops, await, etc.
+//
+// Key protocols:
+// - Try: Enables the ? operator for error/option propagation
+// - FromResidual: Enables error type conversion in ? chains
+// - ControlFlow: Result of Try::branch() for control flow decisions
+//
+// =============================================================================
+
+// =============================================================================
+// ControlFlow - Result of branching in Try
+// =============================================================================
+
+/// Result of a control flow decision.
+///
+/// Used by the `?` operator to determine whether to continue execution
+/// or break early with an error/none value.
+///
+/// - `Continue(C)`: Continue execution with the success value
+/// - `Break(B)`: Break early with the residual value
+
+module core.base.ops;
+public type ControlFlow<B, C> is
+    | Continue(C)
+    | Break(B);
+
+implement<B, C> ControlFlow<B, C> {
+    /// Returns true if this is Continue.
+    public fn is_continue(&self) -> Bool {
+        match self {
+            Continue(_) => true,
+            Break(_) => false,
+        }
+    }
+
+    /// Returns true if this is Break.
+    public fn is_break(&self) -> Bool {
+        match self {
+            Continue(_) => false,
+            Break(_) => true,
+        }
+    }
+
+    /// Extract the continue value, panicking if Break.
+    public fn continue_value(self) -> C {
+        match self {
+            Continue(c) => c,
+            Break(_) => panic("called continue_value() on Break"),
+        }
+    }
+
+    /// Extract the break value, panicking if Continue.
+    public fn break_value(self) -> B {
+        match self {
+            Continue(_) => panic("called break_value() on Continue"),
+            Break(b) => b,
+        }
+    }
+
+    /// Map the continue value.
+    public fn map_continue<T, F: fn(C) -> T>(self, f: F) -> ControlFlow<B, T> {
+        match self {
+            Continue(c) => Continue(f(c)),
+            Break(b) => Break(b),
+        }
+    }
+
+    /// Map the break value.
+    public fn map_break<T, F: fn(B) -> T>(self, f: F) -> ControlFlow<T, C> {
+        match self {
+            Continue(c) => Continue(c),
+            Break(b) => Break(f(b)),
+        }
+    }
+}
+
+implement<B: Clone, C: Clone> Clone for ControlFlow<B, C> {
+    fn clone(&self) -> ControlFlow<B, C> {
+        match self {
+            Continue(c) => Continue(c.clone()),
+            Break(b) => Break(b.clone()),
+        }
+    }
+}
+
+implement<B: Eq, C: Eq> Eq for ControlFlow<B, C> {
+    fn eq(&self, other: &ControlFlow<B, C>) -> Bool {
+        match (self, other) {
+            (Continue(a), Continue(b)) => a == b,
+            (Break(a), Break(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement<B: Debug, C: Debug> Debug for ControlFlow<B, C> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Continue(c) => {
+                f.write_str("Continue(")?;
+                c.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Break(b) => {
+                f.write_str("Break(")?;
+                b.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Try Protocol - Enables the ? operator
+// =============================================================================
+
+/// Protocol for types that support the `?` operator.
+///
+/// The `?` operator provides early return on failure. When applied to a value
+/// of type `T: Try`, it:
+/// 1. Calls `T::branch()` to check success/failure
+/// 2. On `Continue(output)`: extracts the output value
+/// 3. On `Break(residual)`: converts residual and returns early
+///
+/// # Associated Types
+///
+/// - `Output`: The success value type extracted by `?`
+/// - `Residual`: The type used for early return conversion
+///
+/// # Example Implementation
+///
+/// ```verum
+/// implement Try for Maybe<T> {
+///     type Output = T;
+///     type Residual = Maybe<Never>;
+///
+///     fn from_output(output: T) -> Maybe<T> { Some(output) }
+///     fn branch(self) -> ControlFlow<Maybe<Never>, T> {
+///         match self {
+///             Some(v) => Continue(v),
+///             None => Break(None),
+///         }
+///     }
+/// }
+/// ```
+public type Try is protocol {
+    /// The type of the value produced on success.
+    type Output;
+
+    /// The type used for early return (error propagation).
+    type Residual;
+
+    /// Construct a Try value from a success output.
+    fn from_output(output: Self.Output) -> Self;
+
+    /// Decide whether to continue or break early.
+    ///
+    /// - Returns `Continue(output)` for success cases
+    /// - Returns `Break(residual)` for failure cases
+    fn branch(self) -> ControlFlow<Self.Residual, Self.Output>;
+};
+
+// =============================================================================
+// FromResidual Protocol - Error type conversion in ?
+// =============================================================================
+
+/// Protocol for converting residual types in `?` chains.
+///
+/// When the `?` operator encounters a `Break(residual)`, it needs to convert
+/// that residual into the return type of the enclosing function. This protocol
+/// enables that conversion.
+///
+/// # Type Parameter
+///
+/// - `R`: The residual type being converted from
+///
+/// # Example
+///
+/// ```verum
+/// // Allows: fn foo() -> Result<T, OuterError> { inner()?; ... }
+/// // where inner() returns Result<U, InnerError>
+/// implement FromResidual<Result<Never, InnerError>> for Result<T, OuterError>
+/// where OuterError: From<InnerError> {
+///     fn from_residual(residual: Result<Never, InnerError>) -> Result<T, OuterError> {
+///         match residual {
+///             Err(e) => Err(OuterError.from(e)),
+///             Ok(_) => unreachable(),
+///         }
+///     }
+/// }
+/// ```
+public type FromResidual<R> is protocol {
+    /// Convert a residual value into Self.
+    fn from_residual(residual: R) -> Self;
+};
+
+// =============================================================================
+// Never type (bottom type)
+// =============================================================================
+
+/// The never type - a type with no values.
+///
+/// Used in residual types to indicate "this branch is impossible".
+/// For example, `Maybe<Never>` can only be `None` (since `Some(Never)` is impossible).
+/// Similarly, `Result<Never, E>` can only be `Err(e)`.
+public type Never is {};
+
+// Note: Never is uninhabited - you cannot create a value of type Never.
+// This is enforced by having no constructors.
+
+// =============================================================================
+// Residual Protocol (optional, for advanced use)
+// =============================================================================
+
+/// Protocol for residual types to specify their "output" carrier type.
+///
+/// This is used for type inference in complex `?` chains where the
+/// return type needs to be inferred from the residual.
+public type Residual is protocol {
+    /// The Try type that this residual came from.
+    type TryType;
+};

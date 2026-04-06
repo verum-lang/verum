@@ -1,0 +1,214 @@
+// =============================================================================
+// constants.vr - Mathematical Constants and Type Aliases
+// =============================================================================
+// Layer: 0 (Foundation)
+//
+// Provides fundamental mathematical constants and refinement type aliases
+// for common mathematical domains.
+//
+// # Constants Precision
+//
+// All constants are defined to full Float64 precision (53 significant bits).
+// Constants are computed at compile-time where possible.
+//
+// # Refinement Types
+//
+// Type aliases like NonNegative, Positive, UnitInterval provide semantic
+// clarity and enable compile-time verification of mathematical preconditions.
+//
+// Spec: docs/architecture/math-spec.md Section 1
+// =============================================================================
+
+module core.math.constants;
+
+// =============================================================================
+// Fundamental Constants
+// =============================================================================
+
+// Pi (π) - ratio of circumference to diameter
+// 3.14159265358979323846...
+public const PI: Float = 3.141592653589793;
+
+// Tau (τ = 2π) - ratio of circumference to radius
+// 6.28318530717958647692...
+public const TAU: Float = 6.283185307179586;
+
+// Euler's number (e) - base of natural logarithm
+// 2.71828182845904523536...
+public const E: Float = 2.718281828459045;
+
+// Golden ratio (φ) = (1 + √5) / 2
+// 1.61803398874989484820...
+public const PHI: Float = 1.618033988749895;
+
+// =============================================================================
+// Square Roots
+// =============================================================================
+
+// Square root of 2 (√2)
+// 1.41421356237309504880...
+public const SQRT2: Float = 1.4142135623730951;
+
+// Square root of 3 (√3)
+// 1.73205080756887729352...
+public const SQRT3: Float = 1.7320508075688772;
+
+// Square root of 5 (√5)
+// 2.23606797749978969640...
+public const SQRT5: Float = 2.23606797749979;
+
+// 1 / √2 = √2 / 2
+// 0.70710678118654752440...
+public const FRAC_1_SQRT2: Float = 0.7071067811865476;
+
+// 1 / √π
+// 0.56418958354775628694...
+public const FRAC_1_SQRT_PI: Float = 0.5641895835477563;
+
+// 2 / √π
+// 1.12837916709551257390...
+public const FRAC_2_SQRT_PI: Float = 1.1283791670955126;
+
+// =============================================================================
+// Logarithms
+// =============================================================================
+
+// Natural logarithm of 2 (ln 2)
+// 0.69314718055994530941...
+public const LN2: Float = 0.6931471805599453;
+
+// Natural logarithm of 10 (ln 10)
+// 2.30258509299404568401...
+public const LN10: Float = 2.302585092994046;
+
+// Log base 2 of e (log₂ e) = 1 / ln 2
+// 1.44269504088896340735...
+public const LOG2_E: Float = 1.4426950408889634;
+
+// Log base 10 of e (log₁₀ e) = 1 / ln 10
+// 0.43429448190325182765...
+public const LOG10_E: Float = 0.4342944819032518;
+
+// Log base 2 of 10 (log₂ 10)
+// 3.32192809488736234787...
+public const LOG2_10: Float = 3.321928094887362;
+
+// Log base 10 of 2 (log₁₀ 2)
+// 0.30102999566398119521...
+public const LOG10_2: Float = 0.30102999566398114;
+
+// =============================================================================
+// Pi Fractions
+// =============================================================================
+
+// π / 2
+public const FRAC_PI_2: Float = 1.5707963267948966;
+
+// π / 3
+public const FRAC_PI_3: Float = 1.0471975511965976;
+
+// π / 4
+public const FRAC_PI_4: Float = 0.7853981633974483;
+
+// π / 6
+public const FRAC_PI_6: Float = 0.5235987755982988;
+
+// π / 8
+public const FRAC_PI_8: Float = 0.39269908169872414;
+
+// 1 / π
+public const FRAC_1_PI: Float = 0.3183098861837907;
+
+// 2 / π
+public const FRAC_2_PI: Float = 0.6366197723675814;
+
+// =============================================================================
+// Special IEEE 754 Values
+// =============================================================================
+
+// Machine epsilon: smallest Float such that 1.0 + EPSILON != 1.0
+// For Float64: 2^(-52) ≈ 2.22e-16
+public const EPSILON: Float = 2.2204460492503131e-16;
+
+// Positive infinity (∞)
+public const INFINITY: Float = 1.0 / 0.0;
+
+// Negative infinity (-∞)
+public const NEG_INFINITY: Float = -1.0 / 0.0;
+
+// Not-a-Number (quiet NaN)
+public const NAN: Float = 0.0 / 0.0;
+
+// Maximum finite Float64 value
+// ≈ 1.7976931348623157e+308
+public const MAX_FLOAT: Float = 1.7976931348623157e+308;
+
+// Minimum positive normal Float64 value
+// ≈ 2.2250738585072014e-308
+public const MIN_POSITIVE: Float = 2.2250738585072014e-308;
+
+// Minimum positive subnormal Float64 value
+// ≈ 4.9406564584124654e-324
+public const MIN_SUBNORMAL: Float = 4.9406564584124654e-324;
+
+// =============================================================================
+// Float32 Constants
+// =============================================================================
+
+// Machine epsilon for Float32: 2^(-23) ≈ 1.19e-7
+public const EPSILON_F32: Float32 = 1.1920929e-7;
+
+// Maximum finite Float32 value ≈ 3.4028235e+38
+public const MAX_F32: Float32 = 3.4028235e+38;
+
+// Minimum positive normal Float32 value ≈ 1.17549435e-38
+public const MIN_POSITIVE_F32: Float32 = 1.17549435e-38;
+
+// =============================================================================
+// Refinement Type Aliases for Mathematical Domains
+// =============================================================================
+
+// Non-negative real: [0, ∞)
+// Used for: lengths, magnitudes, variances, absolute values
+public type NonNegative is Float{>= 0.0};
+
+// Positive real: (0, ∞)
+// Used for: divisors, bases for logarithms, scale parameters
+public type Positive is Float{> 0.0};
+
+// Unit interval: [0, 1]
+// Used for: ratios, normalized values, interpolation parameters
+public type UnitInterval is Float{it >= 0.0 && it <= 1.0};
+
+// Open unit interval: (0, 1)
+// Used for: probabilities (excluding certainties)
+public type Probability is Float{it > 0.0 && it < 1.0};
+
+// Closed probability: [0, 1]
+// Used for: general probabilities including 0 and 1
+public type ClosedProbability is Float{it >= 0.0 && it <= 1.0};
+
+// Principal angle: [-π, π)
+// Used for: normalized angles, complex argument
+public type Angle is Float{it >= -PI && it < PI};
+
+// Non-negative angle: [0, 2π)
+// Used for: positive rotation angles
+public type PositiveAngle is Float{it >= 0.0 && it < TAU};
+
+// Correlation coefficient: [-1, 1]
+// Used for: Pearson correlation, cosine similarity
+public type Correlation is Float{it >= -1.0 && it <= 1.0};
+
+// =============================================================================
+// Integer Range Types
+// =============================================================================
+
+// Non-negative integer: {0, 1, 2, ...}
+public type NatInt is Int{>= 0};
+
+// Positive integer: {1, 2, 3, ...}
+public type PosInt is Int{> 0};
+
+// Matrix dimension (positive size)
+public type Dim is USize{> 0};

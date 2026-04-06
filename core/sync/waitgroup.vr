@@ -1,0 +1,83 @@
+// =============================================================================
+// sync/waitgroup.vr - WaitGroup for Task Synchronization
+// =============================================================================
+// Layer: 2 (Sync)
+// Dependencies: core
+// =============================================================================
+//
+// A WaitGroup waits for a collection of tasks to finish.
+// The main thread calls add() to set the number of tasks to wait for.
+// Each task calls done() when finished.
+// wait() blocks until all tasks have called done().
+//
+// Usage:
+//   let wg = WaitGroup.new();
+//   wg.add(3);
+//   for i in 0..3 {
+//       spawn {
+//           do_work(i);
+//           wg.done();
+//       };
+//   }
+//   wg.wait();  // Blocks until all 3 tasks are done
+//
+// =============================================================================
+
+module waitgroup;
+
+mount core.*;
+
+// Raw intrinsics
+@intrinsic("waitgroup_new")
+fn __waitgroup_new_raw() -> Int;
+
+@intrinsic("waitgroup_add")
+fn __waitgroup_add_raw(wg: Int, delta: Int) -> Int;
+
+@intrinsic("waitgroup_done")
+fn __waitgroup_done_raw(wg: Int) -> Int;
+
+@intrinsic("waitgroup_wait")
+fn __waitgroup_wait_raw(wg: Int) -> Int;
+
+@intrinsic("waitgroup_destroy")
+fn __waitgroup_destroy_raw(wg: Int) -> Int;
+
+/// A synchronization barrier that waits for a group of tasks.
+///
+/// Based on Go's `sync.WaitGroup`. Counter-based: add(N) increments,
+/// done() decrements, wait() blocks until counter reaches zero.
+///
+/// Performance: ~50ns for add/done (single atomic op), wait uses
+/// futex-based condition variable (no spin-wait).
+public type WaitGroup is {
+    handle: Int,
+};
+
+implement WaitGroup {
+    /// Create a new WaitGroup with counter = 0.
+    public fn new() -> WaitGroup {
+        WaitGroup { handle: __waitgroup_new_raw() }
+    }
+
+    /// Add delta to the counter. Must be called before spawning tasks.
+    public fn add(&self, delta: Int) {
+        __waitgroup_add_raw(self.handle, delta);
+    }
+
+    /// Decrement the counter by 1. Called by each task when done.
+    /// When counter reaches 0, all wait() callers are woken.
+    public fn done(&self) {
+        __waitgroup_done_raw(self.handle);
+    }
+
+    /// Block until the counter reaches 0.
+    public fn wait(&self) {
+        __waitgroup_wait_raw(self.handle);
+    }
+
+    /// Destroy the WaitGroup, freeing resources.
+    public fn destroy(&self) {
+        __waitgroup_destroy_raw(self.handle);
+    }
+}

@@ -1,0 +1,176 @@
+// Test: Pattern Matching - Core pattern matching features
+// Priority: Critical
+// Expected output: Pattern matching results
+
+// Types for testing
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int)
+    | Rgba { r: Int, g: Int, b: Int, a: Int };
+
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Triangle(Int, Int, Int);
+
+type Point is { x: Int, y: Int };
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+fn main() {
+    // 1. Literal patterns
+    let x = 5;
+    match x {
+        0 => print(f"zero"),
+        1 => print(f"one"),
+        5 => print(f"five"),
+        _ => print(f"other"),
+    }
+
+    // 2. Wildcard pattern
+    match x {
+        _ => print(f"anything"),
+    }
+
+    // 3. Or patterns
+    let digit = 7;
+    match digit {
+        1 | 2 | 3 => print(f"small"),
+        4 | 5 | 6 => print(f"medium"),
+        7 | 8 | 9 => print(f"large"),
+        _ => print(f"other"),
+    }
+
+    // 4. Range patterns
+    let score = 75;
+    match score {
+        0..=49 => print(f"F"),
+        50..=64 => print(f"D"),
+        65..=74 => print(f"C"),
+        75..=84 => print(f"B"),
+        85..=100 => print(f"A"),
+        _ => print(f"Invalid"),
+    }
+
+    // 5. Variant patterns - simple
+    let color = Color.Red;
+    match color {
+        Color.Red => print(f"Red color"),
+        Color.Green => print(f"Green color"),
+        Color.Blue => print(f"Blue color"),
+        _ => print(f"Other color"),
+    }
+
+    // 6. Variant patterns with tuple data
+    let rgb = Color.Rgb(255, 128, 0);
+    match rgb {
+        Color.Rgb(r, g, b) => print(f"RGB: {r}, {g}, {b}"),
+        _ => print(f"Not RGB"),
+    }
+
+    // 7. Variant patterns with named fields
+    let rgba = Color.Rgba { r: 100, g: 150, b: 200, a: 255 };
+    match rgba {
+        Color.Rgba { r, g, b, a } => print(f"RGBA: {r}, {g}, {b}, {a}"),
+        _ => print(f"Not RGBA"),
+    }
+
+    // 8. Record patterns
+    let point = Point { x: 10, y: 20 };
+    match point {
+        Point { x: 0, y: 0 } => print(f"Origin"),
+        Point { x, y: 0 } => print(f"On x-axis: {x}"),
+        Point { x: 0, y } => print(f"On y-axis: {y}"),
+        Point { x, y } => print(f"Point: ({x}, {y})"),
+    }
+
+    // 9. Tuple patterns
+    let pair = (1, 2);
+    match pair {
+        (0, 0) => print(f"Both zero"),
+        (0, _) => print(f"First zero"),
+        (_, 0) => print(f"Second zero"),
+        (a, b) => print(f"Pair: {a}, {b}"),
+    }
+
+    // 10. Maybe patterns
+    let maybe_val = Maybe.Some(42);
+    match maybe_val {
+        Maybe.Some(v) => print(f"Some: {v}"),
+        Maybe.None => print(f"None"),
+    }
+
+    // 11. Nested tuple patterns
+    let nested_tuple = ((1, 2), (3, 4));
+    match nested_tuple {
+        ((a, b), (c, d)) => print(f"Nested: {a}, {b}, {c}, {d}"),
+    }
+
+    // 12. Guards with if
+    let num = 15;
+    match num {
+        n if n < 0 => print(f"Negative"),
+        n if n == 0 => print(f"Zero"),
+        n if n < 10 => print(f"Single digit"),
+        n if n < 100 => print(f"Double digit: {n}"),
+        _ => print(f"Large"),
+    }
+
+    // 13. @ binding patterns
+    let arr = [1, 2, 3];
+    match arr {
+        [first, rest @ ..] => print(f"First: {first}"),
+    }
+
+    // 14. Triangle variant with tuple data
+    let triangle = Shape.Triangle(3, 4, 5);
+    match triangle {
+        Shape.Triangle(a, b, c) => print(f"Triangle: {a}, {b}, {c}"),
+        _ => print(f"Not a triangle"),
+    }
+
+    // 15. Result patterns
+    let result: Result<Int, Text> = Result.Ok(100);
+    match result {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // 16. If-let patterns
+    if let Maybe.Some(v) = maybe_val {
+        print(f"If-let some: {v}");
+    }
+
+    // 17. If-let with else
+    if let Result.Ok(v) = result {
+        print(f"If-let ok: {v}");
+    } else {
+        print(f"If-let error");
+    }
+
+    // 18. Let destructuring - tuple
+    let (a, b, c) = (1, 2, 3);
+    print(f"Tuple let: {a}, {b}, {c}");
+
+    // 19. Let destructuring - record
+    let Point { x: px, y: py } = point;
+    print(f"Record let: {px}, {py}");
+
+    // 20. String patterns
+    let text = "hello";
+    match text {
+        "hello" => print(f"Greeting"),
+        "bye" => print(f"Farewell"),
+        _ => print(f"Unknown"),
+    }
+
+    print(f"Pattern matching tests complete!");
+}

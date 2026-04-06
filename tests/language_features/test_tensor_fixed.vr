@@ -1,0 +1,228 @@
+// Test: Tensor Operations - Fixed working version
+// Priority: Advanced
+// Expected output: Tensor creation and manipulation
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// ========== Tensor Creation ==========
+
+fn test_tensor_literals() {
+    print(f"=== Tensor Literals ===");
+
+    // 1D tensor literal
+    let vec: [Int; 5] = [1, 2, 3, 4, 5];
+    print(f"1D tensor: {vec}");
+
+    // 2D tensor literal (matrix)
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+    print(f"2D tensor: {matrix}");
+
+    // 3D tensor literal (cube)
+    let cube: [[[Int; 2]; 2]; 2] = [
+        [[1, 2], [3, 4]],
+        [[5, 6], [7, 8]],
+    ];
+    print(f"3D tensor: {cube}");
+}
+
+fn test_tensor_initialization() {
+    print(f"=== Tensor Initialization ===");
+
+    // Fill with value
+    let zeros: [Int; 5] = [0; 5];
+    print(f"Zeros: {zeros}");
+
+    // Range initialization
+    let range = [for i in 0..10 yield i];
+    print(f"Range: {range}");
+
+    // Comprehension initialization
+    let squares = [for i in 0..5 yield i * i];
+    print(f"Squares: {squares}");
+
+    // 2D initialization
+    let matrix2d = [for i in 0..3 yield [for j in 0..4 yield i * 4 + j]];
+    print(f"2D init: {matrix2d}");
+}
+
+// ========== Tensor Indexing ==========
+
+fn test_tensor_indexing() {
+    print(f"=== Tensor Indexing ===");
+
+    // 1D indexing
+    let vec = [10, 20, 30, 40, 50];
+    print(f"vec[2] = {vec[2]}");
+
+    // 2D indexing
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    print(f"matrix[1][2] = {matrix[1][2]}");
+
+    // Multi-dimensional slicing
+    let row = matrix[0];
+    print(f"First row: {row}");
+
+    let col = [for row in matrix yield row[1]];
+    print(f"Second column: {col}");
+}
+
+// ========== Tensor Operations ==========
+
+fn test_tensor_arithmetic() {
+    print(f"=== Tensor Arithmetic ===");
+
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30, 40, 50];
+
+    // Element-wise addition
+    let mut sum = [0; 5];
+    let mut i = 0;
+    while i < 5 {
+        sum[i] = a[i] + b[i];
+        i = i + 1;
+    }
+    print(f"Addition: {sum}");
+
+    // Element-wise multiplication
+    let product = [for i in 0..5 yield a[i] * b[i]];
+    print(f"Product: {product}");
+
+    // Scalar multiplication
+    let scaled = [for x in a yield x * 10];
+    print(f"Scaled: {scaled}");
+}
+
+fn test_matrix_operations() {
+    print(f"=== Matrix Operations ===");
+
+    let m1 = [[1, 2], [3, 4]];
+    let m2 = [[5, 6], [7, 8]];
+
+    // Matrix addition
+    let m_sum = [
+        for i in 0..2 yield [
+            for j in 0..2 yield m1[i][j] + m2[i][j]
+        ]
+    ];
+    print(f"Matrix sum: {m_sum}");
+
+    // Transpose
+    let transpose = [for j in 0..2 yield [for i in 0..2 yield m1[i][j]]];
+    print(f"Transpose: {transpose}");
+
+    // Matrix multiplication (2x2)
+    let m_prod = [
+        for i in 0..2 yield [
+            for j in 0..2 yield
+                m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j]
+        ]
+    ];
+    print(f"Matrix product: {m_prod}");
+}
+
+// ========== Tensor Reshaping ==========
+
+fn test_tensor_reshaping() {
+    print(f"=== Tensor Reshaping ===");
+
+    // Flatten
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    let flat = [for row in matrix for x in row yield x];
+    print(f"Flattened: {flat}");
+
+    // Reshape 1D to 2D
+    let vec = [1, 2, 3, 4, 5, 6];
+    let reshaped = [
+        [vec[0], vec[1], vec[2]],
+        [vec[3], vec[4], vec[5]],
+    ];
+    print(f"Reshaped to 2x3: {reshaped}");
+
+    // Batch dimension
+    let batched = [
+        [[1, 2], [3, 4]],
+        [[5, 6], [7, 8]],
+    ];
+    print(f"Batched: {batched}");
+}
+
+// ========== Tensor Comparison ==========
+
+fn test_tensor_comparison() {
+    print(f"=== Tensor Comparison ===");
+
+    let a = [1, 5, 3, 8, 2];
+    let threshold = 4;
+
+    // Element-wise comparison
+    let mask = [for x in a yield x > threshold];
+    print(f"Greater than {threshold}: {mask}");
+
+    // Filter based on mask
+    let filtered = [for i in 0..5 if mask[i] yield a[i]];
+    print(f"Filtered values: {filtered}");
+}
+
+// ========== Broadcasting ==========
+
+fn test_broadcasting() {
+    print(f"=== Broadcasting ===");
+
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    let scalar = 10;
+
+    // Broadcast scalar to matrix
+    let broadcasted = [for row in matrix yield [for x in row yield x + scalar]];
+    print(f"Broadcasted scalar: {broadcasted}");
+
+    // Broadcast vector to matrix (row-wise)
+    let vec = [10, 20, 30];
+    let row_broadcast = [for row in matrix yield [for i in 0..3 yield row[i] + vec[i]]];
+    print(f"Row broadcast: {row_broadcast}");
+}
+
+// ========== Tensor Views ==========
+
+fn test_tensor_views() {
+    print(f"=== Tensor Views ===");
+
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    // View as 3x4 matrix
+    let view_3x4 = [
+        [data[0], data[1], data[2], data[3]],
+        [data[4], data[5], data[6], data[7]],
+        [data[8], data[9], data[10], data[11]],
+    ];
+    print(f"View as 3x4: {view_3x4}");
+
+    // Strided access (every 2nd element)
+    let strided = [for i in 0..6 yield data[i * 2]];
+    print(f"Strided (step=2): {strided}");
+
+    // Diagonal
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let diagonal = [for i in 0..3 yield matrix[i][i]];
+    print(f"Diagonal: {diagonal}");
+}
+
+fn main() {
+    print(f"Starting tensor tests...");
+
+    test_tensor_literals();
+    test_tensor_initialization();
+    test_tensor_indexing();
+    test_tensor_arithmetic();
+    test_matrix_operations();
+    test_tensor_reshaping();
+    test_tensor_comparison();
+    test_broadcasting();
+    test_tensor_views();
+
+    print(f"All tensor tests complete");
+}

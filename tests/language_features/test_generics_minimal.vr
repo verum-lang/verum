@@ -1,0 +1,7 @@
+// Minimal generics test
+type Pair<T, U> is { first: T, second: U };
+
+fn main() {
+    let pair1 = Pair { first: 42, second: "hello" };
+    print(f"Pair: {pair1.first}, {pair1.second}");
+}

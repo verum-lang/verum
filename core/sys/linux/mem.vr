@@ -1,0 +1,493 @@
+module sys.linux.mem;
+
+// =============================================================================
+// sys/linux/mem.vr - Linux Memory Management Operations
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/linux/syscall, sys/common
+// Platform: Linux x86_64
+// =============================================================================
+//
+// This module provides comprehensive memory management operations beyond
+// basic mmap/munmap available in syscall.vr.
+//
+// Memory operations:
+// - mprotect: Change memory protection
+// - madvise: Advise kernel about memory usage patterns
+// - mremap: Resize/relocate memory mappings
+// - mlock/munlock: Lock pages in memory (no swap)
+// - msync: Synchronize mapped memory with file
+// - memfd_create: Create anonymous file for memory
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.{OSError, MemProt, MapFlags};
+mount sys.linux.syscall.{
+    syscall_raw,
+    SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT, SYS_MREMAP, SYS_MADVISE,
+    SYS_MSYNC, SYS_MINCORE, SYS_MEMFD_CREATE,
+};
+
+// Re-export mmap/munmap from syscall for convenience
+public mount sys.linux.syscall.{mmap, munmap};
+
+// =============================================================================
+// Memory Protection Constants
+// =============================================================================
+
+/// No access allowed
+public const PROT_NONE: Int = 0x0;
+
+/// Read access
+public const PROT_READ: Int = 0x1;
+
+/// Write access
+public const PROT_WRITE: Int = 0x2;
+
+/// Execute access
+public const PROT_EXEC: Int = 0x4;
+
+/// Pages may grow downward (for stacks)
+public const PROT_GROWSDOWN: Int = 0x01000000;
+
+/// Pages may grow upward
+public const PROT_GROWSUP: Int = 0x02000000;
+
+// =============================================================================
+// Mmap Flags
+// =============================================================================
+
+/// Share mapping with other processes
+public const MAP_SHARED: Int = 0x01;
+
+/// Create private copy-on-write mapping
+public const MAP_PRIVATE: Int = 0x02;
+
+/// Place mapping at exactly the specified address
+public const MAP_FIXED: Int = 0x10;
+
+/// Map is not backed by any file (anonymous)
+public const MAP_ANONYMOUS: Int = 0x20;
+public const MAP_ANON: Int = 0x20;
+
+/// Stack-like mapping (grows down)
+public const MAP_GROWSDOWN: Int = 0x00100;
+
+/// Do not reserve swap space
+public const MAP_NORESERVE: Int = 0x04000;
+
+/// Populate (prefault) page tables
+public const MAP_POPULATE: Int = 0x08000;
+
+/// Do not block on I/O
+public const MAP_NONBLOCK: Int = 0x10000;
+
+/// Give out 32-bit addresses
+public const MAP_32BIT: Int = 0x40;
+
+/// Allocation is for stack
+public const MAP_STACK: Int = 0x20000;
+
+/// Create huge page mapping
+public const MAP_HUGETLB: Int = 0x40000;
+
+/// Lock the mapped region
+public const MAP_LOCKED: Int = 0x02000;
+
+/// Synchronous I/O
+public const MAP_SYNC: Int = 0x80000;
+
+/// Replace existing mapping
+public const MAP_FIXED_NOREPLACE: Int = 0x100000;
+
+// =============================================================================
+// Madvise Advice Constants
+// =============================================================================
+
+/// No special treatment (default)
+public const MADV_NORMAL: Int = 0;
+
+/// Expect random page references
+public const MADV_RANDOM: Int = 1;
+
+/// Expect sequential page references
+public const MADV_SEQUENTIAL: Int = 2;
+
+/// Will need these pages soon
+public const MADV_WILLNEED: Int = 3;
+
+/// Don't need these pages right now
+public const MADV_DONTNEED: Int = 4;
+
+/// Free pages (zero-fill on next access)
+public const MADV_FREE: Int = 8;
+
+/// Remove these pages and resources
+public const MADV_REMOVE: Int = 9;
+
+/// Don't inherit across fork
+public const MADV_DONTFORK: Int = 10;
+
+/// Inherit across fork (default)
+public const MADV_DOFORK: Int = 11;
+
+/// Poison pages (for testing)
+public const MADV_HWPOISON: Int = 100;
+
+/// Soft offline pages (for testing)
+public const MADV_SOFT_OFFLINE: Int = 101;
+
+/// Pages can be merged (KSM)
+public const MADV_MERGEABLE: Int = 12;
+
+/// Pages cannot be merged
+public const MADV_UNMERGEABLE: Int = 13;
+
+/// Huge page advice
+public const MADV_HUGEPAGE: Int = 14;
+
+/// No huge pages
+public const MADV_NOHUGEPAGE: Int = 15;
+
+/// Don't include in core dump
+public const MADV_DONTDUMP: Int = 16;
+
+/// Include in core dump (default)
+public const MADV_DODUMP: Int = 17;
+
+/// Wipe on fork
+public const MADV_WIPEONFORK: Int = 18;
+
+/// Keep on fork
+public const MADV_KEEPONFORK: Int = 19;
+
+/// Advise application does not need pages soon
+public const MADV_COLD: Int = 20;
+
+/// Advise pages are candidates for reclaim
+public const MADV_PAGEOUT: Int = 21;
+
+/// Populate (prefault) page tables readable
+public const MADV_POPULATE_READ: Int = 22;
+
+/// Populate (prefault) page tables writable
+public const MADV_POPULATE_WRITE: Int = 23;
+
+// =============================================================================
+// Mremap Flags
+// =============================================================================
+
+/// May move the mapping
+public const MREMAP_MAYMOVE: Int = 1;
+
+/// Move to fixed address
+public const MREMAP_FIXED: Int = 2;
+
+/// Don't unmap the old mapping
+public const MREMAP_DONTUNMAP: Int = 4;
+
+// =============================================================================
+// Msync Flags
+// =============================================================================
+
+/// Synchronous I/O
+public const MS_ASYNC: Int = 1;
+
+/// Invalidate caches
+public const MS_INVALIDATE: Int = 2;
+
+/// Synchronous I/O
+public const MS_SYNC: Int = 4;
+
+// =============================================================================
+// Memfd Flags
+// =============================================================================
+
+/// Set close-on-exec flag
+public const MFD_CLOEXEC: UInt32 = 0x0001;
+
+/// Allow sealing operations
+public const MFD_ALLOW_SEALING: UInt32 = 0x0002;
+
+/// Create huge page mapping
+public const MFD_HUGETLB: UInt32 = 0x0004;
+
+/// No execute permission
+public const MFD_NOEXEC_SEAL: UInt32 = 0x0008;
+
+/// Exec permission allowed
+public const MFD_EXEC: UInt32 = 0x0010;
+
+// =============================================================================
+// Memory Operations
+// =============================================================================
+
+/// Change protection on a region of memory.
+///
+/// # Arguments
+/// * `addr` - Start address (must be page-aligned)
+/// * `len` - Length of region
+/// * `prot` - New protection (PROT_* flags)
+public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MPROTECT,
+            addr as Int,
+            len as Int,
+            prot,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Give advice about memory usage patterns.
+///
+/// # Arguments
+/// * `addr` - Start address
+/// * `len` - Length of region
+/// * `advice` - Advice (MADV_* constant)
+public fn madvise(addr: &unsafe Byte, len: USize, advice: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MADVISE,
+            addr as Int,
+            len as Int,
+            advice,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Resize or relocate a memory mapping.
+///
+/// # Arguments
+/// * `old_addr` - Current address
+/// * `old_size` - Current size
+/// * `new_size` - Desired new size
+/// * `flags` - MREMAP_* flags
+/// * `new_addr` - New address (if MREMAP_FIXED)
+public fn mremap(
+    old_addr: &unsafe Byte,
+    old_size: USize,
+    new_size: USize,
+    flags: Int,
+    new_addr: Maybe<&unsafe Byte>
+) -> Result<&unsafe Byte, OSError> {
+    let new_addr_val = match new_addr {
+        Some(addr) => addr as Int,
+        None => 0,
+    };
+
+    let result = unsafe {
+        syscall_raw(
+            SYS_MREMAP,
+            old_addr as Int,
+            old_size as Int,
+            new_size as Int,
+            flags,
+            new_addr_val,
+            0
+        )
+    };
+
+    if result < 0 && result > -4096 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result as &unsafe Byte)
+    }
+}
+
+/// Synchronize a file mapping with the underlying file.
+///
+/// # Arguments
+/// * `addr` - Start address
+/// * `len` - Length
+/// * `flags` - MS_* flags
+public fn msync(addr: &unsafe Byte, len: USize, flags: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MSYNC,
+            addr as Int,
+            len as Int,
+            flags,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Determine if pages are resident in memory.
+///
+/// # Arguments
+/// * `addr` - Start address (must be page-aligned)
+/// * `len` - Length
+/// * `vec` - Output vector (one byte per page, LSB = resident)
+public fn mincore(addr: &unsafe Byte, len: USize, vec: &mut [Byte]) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MINCORE,
+            addr as Int,
+            len as Int,
+            vec.as_ptr() as Int,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Create an anonymous file.
+///
+/// Returns a file descriptor that can be used with mmap.
+/// The file has no name in the filesystem.
+///
+/// # Arguments
+/// * `name` - Name for debugging (shown in /proc/pid/fd/)
+/// * `flags` - MFD_* flags
+public fn memfd_create(name: &[Byte], flags: UInt32) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MEMFD_CREATE,
+            name.as_ptr() as Int,
+            flags as Int,
+            0, 0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Make memory region read-only.
+public fn make_readonly(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    mprotect(addr, len, PROT_READ)
+}
+
+/// Make memory region read-write.
+public fn make_readwrite(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    mprotect(addr, len, PROT_READ | PROT_WRITE)
+}
+
+/// Make memory region executable (read + execute).
+public fn make_executable(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    mprotect(addr, len, PROT_READ | PROT_EXEC)
+}
+
+/// Make memory region fully accessible (read + write + execute).
+/// WARNING: This is a security risk on modern systems (W^X violation).
+public fn make_rwx(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    mprotect(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC)
+}
+
+/// Remove all access to a memory region (guard page).
+public fn make_guard(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    mprotect(addr, len, PROT_NONE)
+}
+
+/// Prefetch pages (hint that they will be needed).
+public fn prefetch(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    madvise(addr, len, MADV_WILLNEED)
+}
+
+/// Release pages (hint that they won't be needed).
+public fn release(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    madvise(addr, len, MADV_DONTNEED)
+}
+
+/// Free pages (zero-fill on next access, more aggressive than release).
+public fn free_pages(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    madvise(addr, len, MADV_FREE)
+}
+
+/// Enable huge pages for a region.
+public fn enable_huge_pages(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    madvise(addr, len, MADV_HUGEPAGE)
+}
+
+/// Disable huge pages for a region.
+public fn disable_huge_pages(addr: &unsafe Byte, len: USize) -> Result<(), OSError> {
+    madvise(addr, len, MADV_NOHUGEPAGE)
+}
+
+/// Grow a mapping (convenience wrapper for mremap).
+public fn grow_mapping(addr: &unsafe Byte, old_size: USize, new_size: USize) -> Result<&unsafe Byte, OSError> {
+    mremap(addr, old_size, new_size, MREMAP_MAYMOVE, None)
+}
+
+/// Shrink a mapping (convenience wrapper for mremap).
+public fn shrink_mapping(addr: &unsafe Byte, old_size: USize, new_size: USize) -> Result<&unsafe Byte, OSError> {
+    // shrink in place (no move needed)
+    mremap(addr, old_size, new_size, 0, None)
+}
+
+// =============================================================================
+// Page Size Utilities
+// =============================================================================
+
+/// Standard page size on x86_64
+public const PAGE_SIZE: USize = 4096;
+
+/// Huge page size (2 MB)
+public const HUGE_PAGE_SIZE: USize = 2 * 1024 * 1024;
+
+/// Giant page size (1 GB)
+public const GIANT_PAGE_SIZE: USize = 1024 * 1024 * 1024;
+
+/// Round up to page boundary.
+@inline
+public fn page_align_up(size: USize) -> USize {
+    (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
+}
+
+/// Round down to page boundary.
+@inline
+public fn page_align_down(size: USize) -> USize {
+    size & !(PAGE_SIZE - 1)
+}
+
+/// Check if address is page-aligned.
+@inline
+public fn is_page_aligned(addr: USize) -> Bool {
+    (addr & (PAGE_SIZE - 1)) == 0
+}
+
+/// Round up to huge page boundary.
+@inline
+public fn huge_page_align_up(size: USize) -> USize {
+    (size + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1)
+}
+
+/// Calculate number of pages needed for size.
+@inline
+public fn pages_for(size: USize) -> USize {
+    page_align_up(size) / PAGE_SIZE
+}

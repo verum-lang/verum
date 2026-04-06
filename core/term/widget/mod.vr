@@ -1,0 +1,48 @@
+// =============================================================================
+// widget/mod.vr - Layer 5: Widget Library
+// =============================================================================
+// Composable, stateful/stateless terminal widgets.
+// =============================================================================
+module widget;
+
+// Sub-modules
+public module protocol;
+public module block;
+public module paragraph;
+public module list;
+public module table;
+public module input;
+public module gauge;
+public module tabs;
+public module scrollbar;
+
+// Extended widgets (Phase 9)
+public module canvas;
+public module sparkline;
+public module barchart;
+public module tree;
+public module menu;
+public module dialog;
+public module spinner;
+public module notification;
+
+// Re-exports
+public mount .protocol.{Widget, StatefulWidget, Styled};
+public mount .block.{Block, BorderType, BorderChars, Borders, Alignment};
+public mount .paragraph.{Paragraph, Line, Span, Wrap};
+public mount .list.{SelectableList, ListState};
+public mount .table.{Table, Row, TableState};
+public mount .input.{TextInput, TextInputState};
+public mount .gauge.Gauge;
+public mount .tabs.Tabs;
+public mount .scrollbar.{Scrollbar, ScrollbarOrientation};
+
+// Extended widget re-exports
+public mount .canvas.{Canvas, CanvasMode, Marker, Painter, PixelCanvas, Shape, LineShape, RectShape, CircleShape, LineSeries, ScatterPlot};
+public mount .sparkline.Sparkline;
+public mount .barchart.{BarChart, BarDirection};
+public mount .tree.{Tree, TreeItem, TreeState};
+public mount .menu.{Menu, MenuItem};
+public mount .dialog.{Dialog, DialogButton};
+public mount .spinner.{Spinner, SpinnerStyle};
+public mount .notification.{Notification, NotificationLevel};

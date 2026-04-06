@@ -1,0 +1,66 @@
+[package]
+name = "verum_llvm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LLVM code generation backend for Verum with fine-grained optimization control"
+
+[features]
+default = ["target-all"]
+
+# Target architectures (only those available in verum_llvm_sys)
+target-x86 = ["verum_llvm_sys/target-x86"]
+target-aarch64 = ["verum_llvm_sys/target-aarch64"]
+target-arm = ["verum_llvm_sys/target-arm"]
+target-riscv = ["verum_llvm_sys/target-riscv"]
+target-wasm = ["verum_llvm_sys/target-wasm"]
+target-all = ["verum_llvm_sys/targets-all"]
+
+# LTO support
+lto = []
+thin-lto = ["lto"]
+
+# Debug features
+debug-ir = []
+debug-asm = []
+
+[dependencies]
+# Our local LLVM bindings (static, from llvm/install/)
+verum_llvm_sys = { workspace = true }
+
+# Proc-macro crate for LLVM enum conversions
+verum_llvm_derive = { workspace = true }
+
+# C interop
+libc = { workspace = true }
+
+# Core dependencies
+verum_common = { workspace = true }
+verum_error = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Thread safety
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+
+# Data structures
+indexmap = { workspace = true }
+
+# Bitflags for FastMathFlags
+bitflags = { workspace = true }
+
+# Serialization (for config)
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }

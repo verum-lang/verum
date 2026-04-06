@@ -1,0 +1,39 @@
+[package]
+name = "verum_verification"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal crates
+verum_ast = { workspace = true }
+verum_types = { workspace = true }
+verum_smt = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_common = { workspace = true }
+
+# External dependencies
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+smallvec = { workspace = true }
+indexmap = { workspace = true }
+z3 = { workspace = true }
+blake3 = { workspace = true }    # For content hashing (unified with compiler)
+
+[dev-dependencies]
+proptest = { workspace = true }
+quickcheck = { workspace = true }
+criterion = { workspace = true }
+
+[features]
+default = []
+# Enable experimental features
+experimental = []

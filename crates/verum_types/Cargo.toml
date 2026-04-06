@@ -1,0 +1,45 @@
+[package]
+name = "verum_types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Enable verbose debug output for type inference and protocol resolution
+debug-output = []
+
+[dependencies]
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_error = { workspace = true }
+verum_protocol_types = { workspace = true }
+verum_smt = { workspace = true }
+verum_modules = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+indexmap = { workspace = true }
+thiserror = { workspace = true }
+smallvec = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+once_cell = { workspace = true }
+z3 = { workspace = true }
+# NEVER add stacker here — user explicitly prohibits stack-growing libraries
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+tempfile = { workspace = true }
+verum_parser = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+
+[[bench]]
+name = "production_targets"
+harness = false
+

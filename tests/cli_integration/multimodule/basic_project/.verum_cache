@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/tests/cli_integration/multimodule/basic_project/src/lib.vr": {
+      "hash": "0bb719c26941cd159904b0c3d158e0d43db9271168697a4f8c3a4f11586f62dd",
+      "timestamp": {
+        "secs_since_epoch": 1764499977,
+        "nanos_since_epoch": 120666256
+      },
+      "size": 59
+    },
+    "/Users/taaliman/projects/luxquant/axiom/tests/cli_integration/multimodule/basic_project/src/math.vr": {
+      "hash": "801df185d50ad554c6a1fbe543043b55c6c9f013ce0b93aadbcd22f490e444ba",
+      "timestamp": {
+        "secs_since_epoch": 1764499977,
+        "nanos_since_epoch": 192195680
+      },
+      "size": 431
+    },
+    "/Users/taaliman/projects/luxquant/axiom/tests/cli_integration/multimodule/basic_project/src/types.vr": {
+      "hash": "70a196628a491716bbda7970629b17e645029a9750569e6969b1ebaaa822f231",
+      "timestamp": {
+        "secs_since_epoch": 1764499977,
+        "nanos_since_epoch": 267831196
+      },
+      "size": 1125
+    },
+    "/Users/taaliman/projects/luxquant/axiom/tests/cli_integration/multimodule/basic_project/src/main.vr": {
+      "hash": "e7d06b1b605eee1212bd4d38aedd6c4e6564baf1232bc7abe848ea43e15ce808",
+      "timestamp": {
+        "secs_since_epoch": 1765018659,
+        "nanos_since_epoch": 738912021
+      },
+      "size": 473
+    }
+  },
+  "artifacts": {}
+}

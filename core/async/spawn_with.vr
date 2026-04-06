@@ -1,0 +1,141 @@
+// =============================================================================
+// async/spawn_with.vr - Enhanced spawn with retry and circuit breaker
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, spawn_config
+// =============================================================================
+//
+// Provides execute_with_retry for fault-tolerant task execution with
+// configurable retry counts and backoff delays.
+//
+// =============================================================================
+
+module spawn_with;
+
+mount super.spawn_config.{SpawnConfig, RecoveryStrategy, RetryConfig, CircuitBreakerConfig, RestartPolicy};
+
+// =============================================================================
+// Retry Execution
+// =============================================================================
+
+/// Execute a function with retry policy.
+///
+/// Calls `f` up to `max_attempts` times. On failure, sleeps for
+/// `backoff_ms * attempt_number` milliseconds before retrying.
+/// Returns the first successful result or the last error.
+///
+/// Example:
+///   let result = execute_with_retry(|| fetch_data(), 3, 100);
+public fn execute_with_retry<T>(
+    f: fn() -> Result<T, Text>,
+    max_attempts: Int,
+    backoff_ms: Int
+) -> Result<T, Text> {
+    let mut attempts = 0;
+    let mut last_error = "";
+    while attempts < max_attempts {
+        match f() {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                last_error = e;
+                attempts = attempts + 1;
+                if attempts < max_attempts {
+                    sleep_ms(backoff_ms * attempts);
+                }
+            }
+        }
+    }
+    Err(last_error)
+}
+
+/// Execute with retry using a RetryConfig.
+///
+/// Uses exponential backoff as configured in the RetryConfig:
+/// delay = min(initial_delay_ms * backoff_factor^attempt, max_delay_ms)
+public fn execute_with_retry_config<T>(
+    f: fn() -> Result<T, Text>,
+    config: RetryConfig
+) -> Result<T, Text> {
+    let mut attempts = 0;
+    let mut delay = config.initial_delay_ms;
+    let mut last_error = "";
+    while attempts < config.max_retries {
+        match f() {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                last_error = e;
+                attempts = attempts + 1;
+                if attempts < config.max_retries {
+                    sleep_ms(delay);
+                    delay = delay * config.backoff_factor;
+                    if delay > config.max_delay_ms {
+                        delay = config.max_delay_ms;
+                    }
+                }
+            }
+        }
+    }
+    Err(last_error)
+}
+
+// =============================================================================
+// Circuit Breaker
+// =============================================================================
+
+/// State of a circuit breaker.
+public type CircuitState is
+    Closed
+    | Open
+    | HalfOpen;
+
+/// A circuit breaker that prevents repeated calls to a failing service.
+///
+/// - Closed: normal operation, failures counted
+/// - Open: calls rejected immediately after failure_threshold reached
+/// - HalfOpen: after reset_timeout, allow limited trial calls
+public type CircuitBreaker is {
+    config: CircuitBreakerConfig,
+    state: CircuitState,
+    failure_count: Int,
+    last_failure_time_ms: Int,
+};
+
+implement CircuitBreaker {
+    /// Create a new circuit breaker with the given config.
+    public fn new(config: CircuitBreakerConfig) -> CircuitBreaker {
+        CircuitBreaker {
+            config: config,
+            state: Closed,
+            failure_count: 0,
+            last_failure_time_ms: 0,
+        }
+    }
+
+    /// Create a circuit breaker with default settings.
+    public fn with_defaults() -> CircuitBreaker {
+        CircuitBreaker.new(CircuitBreakerConfig.default())
+    }
+
+    /// Record a successful call — resets failure count and closes circuit.
+    public fn record_success(&mut self) {
+        self.failure_count = 0;
+        self.state = Closed;
+    }
+
+    /// Record a failed call — increments failure count, may open circuit.
+    public fn record_failure(&mut self) {
+        self.failure_count = self.failure_count + 1;
+        if self.failure_count >= self.config.failure_threshold {
+            self.state = Open;
+        }
+    }
+
+    /// Check whether a call is currently allowed.
+    public fn is_call_allowed(&self) -> Bool {
+        match self.state {
+            Closed => true,
+            HalfOpen => true,
+            Open => false,
+        }
+    }
+}

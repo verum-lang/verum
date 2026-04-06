@@ -1,0 +1,215 @@
+// =============================================================================
+// term/mod.vr - Terminal I/O and TUI Framework
+// =============================================================================
+// Layer: 3.5 (between I/O and Async)
+// Dependencies: core.sys, core.io, core.text, core.collections, core.sync, core.time
+// =============================================================================
+//
+// 7-layer architecture from raw termios to full TUI application framework:
+//
+// Layer 6: Application Framework (App, Screen, Router, CommandPalette)
+// Layer 5: Widget Library (Paragraph, Table, List, Tabs, Input, etc.)
+// Layer 4: Layout Engine (Rect, Constraint, Flex, Grid)
+// Layer 3: Rendering Engine (Cell, Buffer, Frame, Viewport)
+// Layer 2: Style & Color (Color, Rgb, Hsl, Style, Theme)
+// Layer 1: Event System (Event, KeyEvent, MouseEvent, EventStream)
+// Layer 0: Terminal I/O (RawTerminal, Termios, EscapeWriter, Capabilities)
+//
+// Each layer exports protocols consumed by the layer above.
+// Each layer is fully self-contained — use Layer 0 without Layer 6.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md
+// =============================================================================
+
+module term;
+
+// =============================================================================
+// Layer 0: Terminal I/O (raw platform abstraction)
+// =============================================================================
+
+/// Raw terminal control: termios, alternate screen, escape sequences,
+/// cursor control, clipboard, capability detection.
+public module raw;
+
+// =============================================================================
+// Layer 1: Event System (async, structured, cross-platform)
+// =============================================================================
+
+/// Terminal events: keyboard, mouse, resize, paste, focus.
+/// ANSI parser FSM, platform event sources, async event stream.
+public module event;
+
+// =============================================================================
+// Layer 2: Style & Color (adaptive, perceptual)
+// =============================================================================
+
+/// Styles, colors (CIELAB perceptual), modifiers, themes,
+/// text builder DSL, hyperlinks, color utilities.
+public module style;
+
+// =============================================================================
+// Layer 3: Rendering Engine (double-buffered, diff-based)
+// =============================================================================
+
+/// Cell buffer, double buffering, differential rendering,
+/// viewport modes, graphics protocol (Kitty/Sixel).
+public module render;
+
+// =============================================================================
+// Layer 4: Layout Engine (constraint + flexbox + grid)
+// =============================================================================
+
+/// Rect, constraint solver, flexbox, CSS grid, responsive breakpoints,
+/// layout shortcuts.
+public module layout;
+
+// =============================================================================
+// Layer 5: Widget Library (composable, stateful/stateless)
+// =============================================================================
+
+/// Reusable terminal widgets: blocks, paragraphs, lists, tables,
+/// canvas, charts, tree, menu, dialog, spinner, notifications.
+public module widget;
+
+// =============================================================================
+// Layer 6: Application Framework (Elm Architecture)
+// =============================================================================
+
+/// TUI application lifecycle: Model → Update → View cycle.
+/// Interactive prompts, accessibility zones.
+public module app;
+
+// =============================================================================
+// Re-exports — commonly used types from each layer
+// =============================================================================
+
+// Layer 0: Raw terminal
+public mount .raw.{
+    TerminalMode, TerminalSize, TermiosState, CursorShape,
+    RawTerminal, EscapeWriter, ClearMode,
+    PosixTerminal, TermCapabilities,
+};
+
+// Layer 1: Events
+public mount .event.{
+    Event, KeyEvent, KeyCode, KeyEventKind,
+    MouseEvent, MouseEventKind, MouseButton,
+    ResizeEvent, Modifiers,
+    InputParser, EventStream,
+};
+
+// Layer 2: Style
+public mount .style.{
+    Color, Rgb, Hsl, Style, Modifier, Theme,
+    ColorProfile, adapt_color,
+};
+
+// Layer 3: Rendering
+public mount .render.{
+    Cell, Buffer, Frame, Terminal, Viewport,
+};
+
+// Layer 4: Layout
+public mount .layout.{
+    Rect, Margin, Position, Constraint, Direction, Flex, Layout,
+    FlexLayout, FlexDirection, FlexItem,
+    GridLayout, GridTrack,
+};
+
+// Layer 5: Widgets
+public mount .widget.{
+    Widget, StatefulWidget, Styled,
+    Block, BorderType, Borders, Alignment,
+    Paragraph, Line, Span, Wrap,
+    SelectableList, ListState,
+    Table, TableCell, Row, TableState, HighlightSpacing,
+    TextInput, TextInputState,
+    Gauge, Tabs, Scrollbar, ScrollbarState,
+    Canvas, Sparkline, BarChart, BarGroup, Bar,
+    Tree, TreeItem, TreeState,
+    Menu, MenuItem, MenuState,
+    Dialog, DialogButton, DialogState,
+    Spinner, SpinnerFrames, SpinnerState,
+    Notification, NotificationLevel,
+};
+
+// Layer 6: App
+public mount .app.{
+    Model, Command, AppMessage, run,
+    confirm, select, input, multi_select, password,
+    SemanticZone, write_semantic_zone,
+};
+
+// =============================================================================
+// Convenience re-exports
+// =============================================================================
+
+// Layout shortcuts
+public mount .layout.shortcuts.{
+    header_body_footer, sidebar_main, centered,
+    equal_columns, equal_rows,
+};
+
+// Text builder DSL
+public mount .style.text_builder.{
+    bold, italic, dim, underlined, reversed,
+    red, green, blue, yellow, cyan, magenta, white,
+};
+
+// Color utilities
+public mount .style.color_utils.hex;
+
+// =============================================================================
+// Prelude — most commonly used items
+// =============================================================================
+
+public module prelude {
+    // Core types
+    public mount super.Terminal;
+    public mount super.Frame;
+    public mount super.Event;
+    public mount super.KeyEvent;
+    public mount super.KeyCode;
+    public mount super.Modifiers;
+
+    // Styling
+    public mount super.Color;
+    public mount super.Rgb;
+    public mount super.Style;
+    public mount super.Modifier;
+    public mount super.Theme;
+
+    // Layout
+    public mount super.Rect;
+    public mount super.Margin;
+    public mount super.Layout;
+    public mount super.Constraint;
+    public mount super.Direction;
+    public mount super.Flex;
+
+    // Widgets
+    public mount super.Widget;
+    public mount super.StatefulWidget;
+    public mount super.Block;
+    public mount super.Borders;
+    public mount super.BorderType;
+    public mount super.Alignment;
+    public mount super.Paragraph;
+    public mount super.Line;
+    public mount super.Span;
+    public mount super.Wrap;
+
+    // App
+    public mount super.Model;
+    public mount super.Command;
+    public mount super.run;
+
+    // Convenience
+    public mount super.bold;
+    public mount super.italic;
+    public mount super.dim;
+    public mount super.header_body_footer;
+    public mount super.sidebar_main;
+    public mount super.centered;
+    public mount super.hex;
+}

@@ -1,0 +1,1135 @@
+module sys.common;
+
+// =============================================================================
+// common.vr - Common low-level system types
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// This module defines platform-independent types used by the V-LLSI
+// (Verum Low-Level System Interface) bootstrap kernel.
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// =============================================================================
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// Operating system error with code and message.
+public type OSError is {
+    /// Error code (errno on Unix, GetLastError on Windows).
+    code: Int,
+    /// Human-readable error message.
+    message: Text,
+};
+
+implement OSError {
+    /// Create a new OS error with code and message.
+    fn new(code: Int, message: Text) -> OSError {
+        OSError { code: code, message: message }
+    }
+
+    /// Create an OS error from just an error code.
+    fn from_code(code: Int) -> OSError {
+        OSError {
+            code: code,
+            message: errno_to_message(code),
+        }
+    }
+
+    /// Check if this represents success (code == 0).
+    fn is_success(&self) -> Bool {
+        self.code == 0
+    }
+
+    /// Check if this is EAGAIN/EWOULDBLOCK.
+    fn would_block(&self) -> Bool {
+        // EAGAIN = 11 on Linux, EWOULDBLOCK = 35 on macOS
+        self.code == 11 || self.code == 35
+    }
+
+    /// Check if this is EINTR (interrupted system call).
+    fn interrupted(&self) -> Bool {
+        self.code == 4 // EINTR is 4 on most Unix systems
+    }
+}
+
+implement Debug for OSError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("OSError { code: ")?;
+        f.write_int(self.code)?;
+        f.write_str(", message: \"")?;
+        f.write_str(&self.message)?;
+        f.write_str("\" }")
+    }
+}
+
+implement Display for OSError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)?;
+        f.write_str(" (errno ")?;
+        f.write_int(self.code)?;
+        f.write_str(")")
+    }
+}
+
+implement Eq for OSError {
+    fn eq(&self, other: &OSError) -> Bool {
+        self.code == other.code
+    }
+}
+
+// =============================================================================
+// File Descriptor
+// =============================================================================
+
+/// Newtype wrapper for file descriptors.
+/// On Unix: int (fd >= 0 valid, -1 invalid)
+/// On Windows: HANDLE (pointer-sized)
+public type FileDesc is (Int);
+
+implement FileDesc {
+    /// Invalid file descriptor constant.
+    const INVALID: FileDesc = FileDesc(-1);
+
+    /// Standard input (fd 0).
+    const STDIN: FileDesc = FileDesc(0);
+
+    /// Standard output (fd 1).
+    const STDOUT: FileDesc = FileDesc(1);
+
+    /// Standard error (fd 2).
+    const STDERR: FileDesc = FileDesc(2);
+
+    /// Create a file descriptor from raw value.
+    fn from_raw(fd: Int) -> FileDesc {
+        FileDesc(fd)
+    }
+
+    /// Get the raw file descriptor value.
+    fn as_raw(&self) -> Int {
+        self.0
+    }
+
+    /// Check if this is a valid file descriptor.
+    fn is_valid(&self) -> Bool {
+        self.0 >= 0
+    }
+}
+
+implement Debug for FileDesc {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("FileDesc(")?;
+        f.write_int(self.0)?;
+        f.write_str(")")
+    }
+}
+
+implement Eq for FileDesc {
+    fn eq(&self, other: &FileDesc) -> Bool {
+        self.0 == other.0
+    }
+}
+
+// =============================================================================
+// I/O Vector (for scatter/gather I/O)
+// =============================================================================
+
+/// I/O vector for scatter/gather operations (readv, writev).
+public type IOVec is {
+    /// Base address of the buffer.
+    base: &unsafe Byte,
+    /// Length of the buffer in bytes.
+    len: Int,
+};
+
+implement IOVec {
+    /// Create an I/O vector from a byte slice.
+    fn from_slice(slice: &[Byte]) -> IOVec {
+        IOVec {
+            base: slice.as_ptr() as &unsafe Byte,
+            len: slice.len(),
+        }
+    }
+
+    /// Create an I/O vector from raw parts.
+    fn from_raw_parts(base: &unsafe Byte, len: Int) -> IOVec {
+        IOVec { base: base, len: len }
+    }
+}
+
+// =============================================================================
+// Memory Protection Flags
+// =============================================================================
+
+/// Memory protection flags for mmap.
+public type MemProt is {
+    read: Bool,
+    write: Bool,
+    exec: Bool,
+};
+
+implement MemProt {
+    /// No access.
+    const NONE: MemProt = MemProt { read: false, write: false, exec: false };
+
+    /// Read-only.
+    const READ: MemProt = MemProt { read: true, write: false, exec: false };
+
+    /// Read-write.
+    const READ_WRITE: MemProt = MemProt { read: true, write: true, exec: false };
+
+    /// Read-execute.
+    const READ_EXEC: MemProt = MemProt { read: true, write: false, exec: true };
+
+    /// Read-write-execute.
+    const READ_WRITE_EXEC: MemProt = MemProt { read: true, write: true, exec: true };
+
+    /// Convert to Unix PROT_* flags.
+    fn to_unix_flags(&self) -> Int {
+        let mut flags = 0;
+        if self.read { flags = flags | 1; }   // PROT_READ
+        if self.write { flags = flags | 2; }  // PROT_WRITE
+        if self.exec { flags = flags | 4; }   // PROT_EXEC
+        flags
+    }
+}
+
+// =============================================================================
+// Page Size Constants
+// =============================================================================
+
+/// Standard memory page size (4KB on most platforms).
+/// This is used for memory alignment and allocation.
+public const PAGE_SIZE: USize = 4096;
+
+/// Page size type alias for explicit page-related operations.
+public type PageSize is USize;
+
+/// Align size up to page boundary.
+@inline
+public pure fn page_align_up(size: USize) -> USize {
+    (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
+}
+
+/// Align size down to page boundary.
+@inline
+public pure fn page_align_down(size: USize) -> USize {
+    size & ~(PAGE_SIZE - 1)
+}
+
+/// Check if size is page-aligned.
+@inline
+public pure fn is_page_aligned(size: USize) -> Bool {
+    (size & (PAGE_SIZE - 1)) == 0
+}
+
+// =============================================================================
+// Memory Mapping Flags
+// =============================================================================
+
+/// Memory mapping flags for mmap.
+public type MapFlags is {
+    shared: Bool,
+    is_private: Bool,
+    anonymous: Bool,
+    fixed: Bool,
+};
+
+implement MapFlags {
+    /// Private anonymous mapping (typical for allocations).
+    const PRIVATE_ANON: MapFlags = MapFlags {
+        shared: false,
+        is_private: true,
+        anonymous: true,
+        fixed: false,
+    };
+
+    /// Shared mapping (for IPC).
+    const SHARED: MapFlags = MapFlags {
+        shared: true,
+        is_private: false,
+        anonymous: false,
+        fixed: false,
+    };
+
+    /// Convert to Unix MAP_* flags.
+    fn to_unix_flags(&self) -> Int {
+        let mut flags = 0;
+        if self.shared { flags = flags | 0x01; }        // MAP_SHARED
+        if self.is_private { flags = flags | 0x02; }    // MAP_PRIVATE
+        if self.fixed { flags = flags | 0x10; }         // MAP_FIXED
+        // MAP_ANONYMOUS value differs by platform
+        if self.anonymous {
+            @cfg(target_os = "linux")
+            { flags = flags | 0x20; }    // MAP_ANONYMOUS (Linux)
+            @cfg(target_os = "macos")
+            { flags = flags | 0x1000; }  // MAP_ANON (macOS)
+        }
+        flags
+    }
+}
+
+// =============================================================================
+// Memory Ordering for Atomics
+// =============================================================================
+
+/// Memory ordering for atomic operations.
+public type MemoryOrdering is Relaxed | Acquire | Release | AcqRel | SeqCst;
+
+implement MemoryOrdering {
+    /// Convert to VBC opcode encoding.
+    fn to_opcode(&self) -> Int {
+        match self {
+            MemoryMemoryOrdering.Relaxed => 0,
+            MemoryMemoryOrdering.Acquire => 1,
+            MemoryMemoryOrdering.Release => 2,
+            MemoryMemoryOrdering.AcqRel => 3,
+            MemoryMemoryOrdering.SeqCst => 4,
+        }
+    }
+}
+
+// =============================================================================
+// Cross-Platform Memory Allocation
+// =============================================================================
+
+/// Allocate memory from the operating system.
+///
+/// This is the lowest-level allocation function, directly calling OS APIs:
+/// - Linux: mmap(MAP_PRIVATE | MAP_ANONYMOUS)
+/// - macOS: mmap(MAP_PRIVATE | MAP_ANON) via libSystem
+/// - Windows: VirtualAlloc(MEM_COMMIT | MEM_RESERVE)
+///
+/// # Arguments
+///
+/// * `size` - Number of bytes to allocate
+/// * `alignment` - Required alignment (must be power of 2, at least page size for best perf)
+///
+/// # Returns
+///
+/// Pointer to allocated memory, or None on failure.
+///
+/// # Safety
+///
+/// The returned memory is uninitialized. Caller must initialize before use.
+public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
+    if size <= 0 {
+        return None;
+    }
+
+    // Round up size to include alignment padding
+    let aligned_size = if alignment > page_size() {
+        // For large alignments, allocate extra and align manually
+        size + alignment
+    } else {
+        // For page-aligned or smaller, OS alignment is sufficient
+        size
+    };
+
+    @cfg(target_os = "linux")
+    {
+        let ptr = super.linux.syscall.mmap(
+            0 as &unsafe Byte,  // Let OS choose address
+            aligned_size,
+            3,   // PROT_READ | PROT_WRITE
+            0x22, // MAP_PRIVATE | MAP_ANONYMOUS
+            -1,  // No file
+            0,   // No offset
+        );
+
+        if ptr as Int == -1 {
+            return None;
+        }
+
+        // Align pointer if needed
+        let aligned_ptr = align_pointer(ptr, alignment);
+        Some(aligned_ptr)
+    }
+
+    @cfg(target_os = "macos")
+    {
+        // Use local intrinsic wrapper to ensure the intrinsic is invoked
+        let result = mmap_intrinsic(
+            0,                       // Let OS choose address
+            aligned_size,
+            MemProt.READ_WRITE,      // PROT_READ | PROT_WRITE
+            MapFlags.PRIVATE_ANON,   // MAP_PRIVATE | MAP_ANON
+            FileDesc(-1),            // No file
+            0,                       // No offset
+        );
+
+        // Use match to extract the value directly
+        match result {
+            Result.Ok(ptr) => {
+                let aligned_ptr = align_pointer(ptr, alignment);
+                Some(aligned_ptr)
+            }
+            Result.Err(_) => None,
+        }
+    }
+
+    @cfg(target_os = "windows")
+    {
+        let ptr = super.windows.kernel32.VirtualAlloc(
+            0 as &unsafe Byte,  // Let OS choose address
+            aligned_size,
+            0x3000, // MEM_COMMIT | MEM_RESERVE
+            0x04,   // PAGE_READWRITE
+        );
+
+        if ptr as Int == 0 {
+            return None;
+        }
+
+        let aligned_ptr = align_pointer(ptr, alignment);
+        Some(aligned_ptr)
+    }
+}
+
+/// Free memory back to the operating system.
+///
+/// # Arguments
+///
+/// * `ptr` - Pointer to memory allocated with os_alloc
+/// * `size` - Size of the allocation (used for munmap on Unix)
+///
+/// # Safety
+///
+/// - `ptr` must have been allocated with os_alloc
+/// - `size` must match the original allocation size
+/// - Memory must not be accessed after this call
+public unsafe fn os_free(ptr: &unsafe Byte, size: Int) {
+    if ptr as Int == 0 || size <= 0 {
+        return;
+    }
+
+    @cfg(target_os = "linux")
+    {
+        super.linux.syscall.munmap(ptr, size);
+    }
+
+    @cfg(target_os = "macos")
+    {
+        // Use local intrinsic wrapper
+        let _ = munmap_intrinsic(ptr as Int, size);
+    }
+
+    @cfg(target_os = "windows")
+    {
+        super.windows.kernel32.VirtualFree(ptr, 0, 0x8000); // MEM_RELEASE
+    }
+}
+
+/// Get page size for the current platform.
+fn page_size() -> Int {
+    // Default page size - all supported platforms use 4096
+    4096
+}
+
+/// Align a pointer to the given alignment.
+@inline
+fn align_pointer(ptr: &unsafe Byte, alignment: Int) -> &unsafe Byte {
+    let addr = ptr as Int;
+    let mask = alignment - 1;
+    let aligned = (addr + mask) & ~mask;  // Use ~ for bitwise NOT
+    aligned as &unsafe Byte
+}
+
+/// Internal: Direct mmap intrinsic wrapper for macOS.
+/// This is defined in common.vr to ensure the intrinsic is recognized.
+@cfg(target_os = "macos")
+@intrinsic("sys_mmap")
+fn mmap_intrinsic(
+    addr: Int,
+    len: Int,
+    prot: MemProt,
+    flags: MapFlags,
+    fd: FileDesc,
+    offset: Int,
+) -> Result<&unsafe Byte, OSError>;
+
+/// Internal: Direct munmap intrinsic wrapper for macOS.
+@cfg(target_os = "macos")
+@intrinsic("sys_munmap")
+fn munmap_intrinsic(addr: Int, len: Int) -> Result<(), OSError>;
+
+/// Internal: Direct gettid intrinsic wrapper for macOS.
+@cfg(target_os = "macos")
+@intrinsic("sys_gettid")
+fn gettid_intrinsic() -> UInt64;
+
+/// Get current thread ID (platform-independent).
+public fn get_thread_id() -> UInt64 {
+    @cfg(target_os = "macos")
+    { return gettid_intrinsic(); }
+
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.gettid() as UInt64; }
+
+    @cfg(target_os = "windows")
+    { return super.windows.kernel32.GetCurrentThreadId() as UInt64; }
+
+    // Fallback
+    0 as UInt64
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// =============================================================================
+// Cross-Platform Context System
+// =============================================================================
+// V-LLSI Context System provides unified access to thread-local context slots
+// across all platforms. This replaces tokio::task_local! with native TLS.
+//
+// Performance comparison (from new-arch-spec.md Appendix F.3):
+// - tokio HashMap lookup: ~20ns
+// - V-LLSI array index: ~2ns (10x faster)
+//
+// Spec: docs/architecture/new-arch-spec.md Appendix F.3
+// =============================================================================
+
+/// Maximum number of context slots per thread.
+/// 256 slots = 2KB per thread, sufficient for most applications.
+public const MAX_CONTEXT_SLOTS: Int = 256;
+
+/// Alias for MAX_CONTEXT_SLOTS for capability context usage.
+public const CONTEXT_SLOT_COUNT: Int = 256;
+
+/// Context stack depth for nested provide blocks.
+public const CONTEXT_STACK_DEPTH: Int = 8;
+
+// =============================================================================
+// Context Slots Type
+// =============================================================================
+
+/// Fixed-size array of context slots for capability contexts.
+/// This provides a high-level interface over the raw TLS context API.
+public type ContextSlots is {
+    /// Bitmap tracking which slots are occupied (256 bits = 4 u64s).
+    active: [UInt64; 4],
+    /// Context entries indexed by slot (platform-specific representation).
+    slots: [ContextEntry; 256],
+};
+
+implement ContextSlots {
+    /// Create a new empty context slots.
+    public fn new() -> Self {
+        Self {
+            active: [0_u64; 4],
+        }
+    }
+
+    /// Get a value from a slot.
+    /// Returns None if slot is not active.
+    @inline
+    public fn get<T>(&self, slot: Int) -> Maybe<&T> {
+        if slot < 0 || slot >= CONTEXT_SLOT_COUNT {
+            return None;
+        }
+        let word = (slot / 64) as Int;
+        let bit = (slot % 64) as UInt64;
+        if (self.active[word] & (1_u64 << bit)) == 0_u64 {
+            return None;
+        }
+        ctx_get(slot as UInt8).map(|ptr| unsafe { &*(ptr as *const T) })
+    }
+
+    /// Set a value in a slot.
+    @inline
+    public fn set<T>(&mut self, slot: Int, value: &T) {
+        if slot < 0 || slot >= CONTEXT_SLOT_COUNT {
+            return;
+        }
+        let word = (slot / 64) as Int;
+        let bit = (slot % 64) as UInt64;
+        self.active[word] |= 1_u64 << bit;
+        ctx_set(slot as UInt8, unsafe { value as &unsafe Byte });
+    }
+
+    /// Clear a slot.
+    @inline
+    public fn clear(&mut self, slot: Int) {
+        if slot < 0 || slot >= CONTEXT_SLOT_COUNT {
+            return;
+        }
+        let word = (slot / 64) as Int;
+        let bit = (slot % 64) as UInt64;
+        self.active[word] &= !(1_u64 << bit);
+        ctx_clear(slot as UInt8);
+    }
+
+    /// Clone the context slots (shallow copy of active bitmap).
+    public fn clone(&self) -> Self {
+        Self {
+            active: self.active,
+        }
+    }
+}
+
+/// Context system error types.
+public type ContextError is
+    | SlotNotFound { slot: UInt8 }
+    | SlotOverflow { slot: UInt8 }
+    | StackOverflow { depth: Int }
+    | TlsNotInitialized
+    | InvalidSlot { slot: Int }
+    ;
+
+implement ContextError {
+    /// Get error message.
+    public fn message(&self) -> Text {
+        match self {
+            ContextError.SlotNotFound { slot } => f"Context slot {slot} not found",
+            ContextError.SlotOverflow { slot } => f"Context slot {slot} overflow",
+            ContextError.StackOverflow { depth } => f"Context stack overflow at depth {depth}",
+            ContextError.TlsNotInitialized => "TLS not initialized",
+            ContextError.InvalidSlot { slot } => f"Invalid context slot: {slot}",
+        }
+    }
+}
+
+// =============================================================================
+// Cross-Platform Context API
+// =============================================================================
+
+/// Get a value from a context slot.
+///
+/// Returns None if the slot is not set or TLS is not initialized.
+/// This is the hot path - optimized for ~2ns access.
+///
+/// # Arguments
+///
+/// * `slot` - Slot index (0-255)
+///
+/// # Example
+///
+/// ```verum
+/// if let Some(db) = ctx_get(SLOT_DATABASE) {
+///     let conn = db as &DatabaseConnection;
+///     // use connection...
+/// }
+/// ```
+@inline
+public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
+    @cfg(target_os = "linux")
+    { super.linux.tls.ctx_get(slot) }
+
+    @cfg(target_os = "macos")
+    { super.darwin.tls.ctx_get(slot) }
+
+    @cfg(target_os = "windows")
+    { super.windows.tls.ctx_get(slot) }
+
+    @cfg(runtime = "embedded")
+    { embedded_ctx_get(slot) }
+}
+
+/// Get a mutable value from a context slot.
+///
+/// Returns the same raw pointer as ctx_get - the caller is responsible
+/// for ensuring exclusive access when modifying the value.
+///
+/// # Arguments
+///
+/// * `slot` - Slot index (0-255)
+@inline
+public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
+    ctx_get(slot)
+}
+
+/// Set a value in a context slot.
+///
+/// # Arguments
+///
+/// * `slot` - Slot index (0-255)
+/// * `value` - Pointer to context value
+///
+/// # Safety
+///
+/// The value must remain valid for the lifetime of the context scope.
+@inline
+public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
+    @cfg(target_os = "linux")
+    { super.linux.tls.ctx_set(slot, value) }
+
+    @cfg(target_os = "macos")
+    { super.darwin.tls.ctx_set(slot, value) }
+
+    @cfg(target_os = "windows")
+    { super.windows.tls.ctx_set(slot, value) }
+
+    @cfg(runtime = "embedded")
+    { embedded_ctx_set(slot, value) }
+}
+
+/// Check if a context slot is set.
+///
+/// Uses bitmask for O(1) check (~1ns).
+@inline
+public fn ctx_has(slot: UInt8) -> Bool {
+    ctx_get(slot).is_some()
+}
+
+/// Clear a context slot.
+@inline
+public fn ctx_clear(slot: UInt8) {
+    @cfg(target_os = "linux")
+    { super.linux.tls.ctx_clear(slot) }
+
+    @cfg(target_os = "macos")
+    { super.darwin.tls.ctx_clear(slot) }
+
+    @cfg(target_os = "windows")
+    { super.windows.tls.ctx_clear(slot) }
+
+    @cfg(runtime = "embedded")
+    { embedded_ctx_clear(slot) }
+}
+
+/// Push a new context frame (for nested provide blocks).
+///
+/// The new frame inherits from the current frame but allows overrides.
+/// Returns the previous frame for restoration.
+public fn ctx_push_frame() -> Result<&unsafe Byte, ContextError> {
+    @cfg(target_os = "linux")
+    {
+        let current = super.linux.tls.get_context_slots();
+        let new_frame = super.linux.tls.ctx_push(current);
+        super.linux.tls.set_context_slots(&new_frame);
+        Ok(current as &unsafe Byte)
+    }
+
+    @cfg(target_os = "macos")
+    {
+        // Darwin uses stack-based context with ctx_push/ctx_pop
+        super.darwin.tls.ctx_push_frame()
+    }
+
+    @cfg(target_os = "windows")
+    {
+        let current = super.windows.tls.get_context_slots();
+        let new_frame = super.windows.tls.ctx_push(current);
+        super.windows.tls.set_context_slots(&new_frame);
+        Ok(current as &unsafe Byte)
+    }
+
+    @cfg(runtime = "embedded")
+    { embedded_ctx_push_frame() }
+}
+
+/// Pop a context frame (restore previous provide scope).
+public fn ctx_pop_frame() {
+    @cfg(target_os = "linux")
+    { super.linux.tls.ctx_pop() }
+
+    @cfg(target_os = "macos")
+    { super.darwin.tls.ctx_pop() }
+
+    @cfg(target_os = "windows")
+    { super.windows.tls.ctx_pop() }
+
+    @cfg(runtime = "embedded")
+    { embedded_ctx_pop_frame() }
+}
+
+// =============================================================================
+// Embedded Runtime Support (Single-Threaded, No TLS)
+// =============================================================================
+
+@cfg(runtime = "embedded")
+module embedded_context {
+    /// Global context slots for embedded (single-threaded) runtime.
+    static mut EMBEDDED_CONTEXT: EmbeddedContextSlots = EmbeddedContextSlots {
+        slots: [0 as &unsafe Byte; MAX_CONTEXT_SLOTS],
+        active: [0_u64; 4],
+        stack_depth: 0,
+        stack: [[0 as &unsafe Byte; MAX_CONTEXT_SLOTS]; CONTEXT_STACK_DEPTH],
+    };
+
+    type EmbeddedContextSlots is {
+        slots: [&unsafe Byte; 256],
+        active: [UInt64; 4],
+        stack_depth: Int,
+        stack: [[&unsafe Byte; 256]; 8],
+    };
+
+    public fn embedded_ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
+        unsafe {
+            let word = slot / 64;
+            let bit = slot % 64;
+            if (EMBEDDED_CONTEXT.active[word] & (1 << bit)) != 0 {
+                Some(EMBEDDED_CONTEXT.slots[slot])
+            } else {
+                None
+            }
+        }
+    }
+
+    public fn embedded_ctx_set(slot: UInt8, value: &unsafe Byte) {
+        unsafe {
+            let word = slot / 64;
+            let bit = slot % 64;
+            EMBEDDED_CONTEXT.slots[slot] = value;
+            EMBEDDED_CONTEXT.active[word] |= 1 << bit;
+        }
+    }
+
+    public fn embedded_ctx_clear(slot: UInt8) {
+        unsafe {
+            let word = slot / 64;
+            let bit = slot % 64;
+            EMBEDDED_CONTEXT.slots[slot] = 0 as &unsafe Byte;
+            EMBEDDED_CONTEXT.active[word] &= !(1 << bit);
+        }
+    }
+
+    public fn embedded_ctx_push_frame() -> Result<&unsafe Byte, ContextError> {
+        unsafe {
+            if EMBEDDED_CONTEXT.stack_depth >= CONTEXT_STACK_DEPTH {
+                return Err(ContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
+            }
+            // Save current slots to stack
+            EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth] = EMBEDDED_CONTEXT.slots;
+            EMBEDDED_CONTEXT.stack_depth += 1;
+            Ok(0 as &unsafe Byte)  // No actual pointer for embedded
+        }
+    }
+
+    public fn embedded_ctx_pop_frame() {
+        unsafe {
+            if EMBEDDED_CONTEXT.stack_depth > 0 {
+                EMBEDDED_CONTEXT.stack_depth -= 1;
+                EMBEDDED_CONTEXT.slots = EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth];
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Runtime Initialization Status
+// =============================================================================
+
+/// Check if the V-LLSI runtime is initialized.
+///
+/// Returns true if TLS is set up and context system is ready.
+public fn is_runtime_initialized() -> Bool {
+    @cfg(target_os = "linux")
+    { super.linux.tls.get_current_tcb().is_ok() }
+
+    @cfg(target_os = "macos")
+    { super.darwin.tls.is_tls_initialized() }
+
+    @cfg(target_os = "windows")
+    { super.windows.tls.is_tls_initialized() }
+
+    @cfg(runtime = "embedded")
+    { true }  // Embedded always ready (no TLS needed)
+}
+
+/// Initialize the V-LLSI runtime for the main thread.
+///
+/// This MUST be called before any context operations or memory allocation.
+/// Called automatically by the Verum entry point.
+///
+/// # Returns
+///
+/// * `Ok(())` - Runtime initialized successfully
+/// * `Err(OSError)` - Initialization failed (TLS setup error)
+public fn init_runtime() -> Result<(), OSError> {
+    @cfg(target_os = "linux")
+    {
+        match sys.linux.tls.init_main_thread_tls() {
+            Ok(_) => return Ok(()),
+            Err(e) => return Err(OSError.new(-1, f"TLS init failed: {e}")),
+        }
+    }
+
+    @cfg(target_os = "macos")
+    {
+        match sys.darwin.tls.init_main_thread_tls() {
+            Ok(_) => return Ok(()),
+            Err(e) => return Err(OSError.new(-1, f"TLS init failed: {e}")),
+        }
+    }
+
+    // Fallback for other platforms
+    Ok(())
+}
+
+/// Clean up the V-LLSI runtime for the current thread.
+///
+/// Called automatically when a thread exits.
+public fn cleanup_runtime() {
+    @cfg(target_os = "linux")
+    { sys.linux.tls.cleanup_thread_tls(); }
+
+    @cfg(target_os = "macos")
+    { sys.darwin.tls.cleanup_thread_tls(); }
+
+    // Other platforms: no cleanup needed
+}
+
+// =============================================================================
+// Process Arguments Storage
+// =============================================================================
+// These globals store argc/argv/environ pointers set during initialization.
+// They are used by core/env.vr to provide access to command-line arguments
+// and environment variables without FFI to verum_runtime.
+// =============================================================================
+
+/// Global storage for command line arguments count.
+static mut PROCESS_ARGC: Int = 0;
+
+/// Global storage for command line arguments array.
+static mut PROCESS_ARGV: &&Byte = unsafe { 0 as &&Byte };
+
+/// Global storage for environment variables array.
+static mut PROCESS_ENVIRON: &&Byte = unsafe { 0 as &&Byte };
+
+/// Initialize process arguments storage.
+///
+/// Called by the platform-specific entry point (_start on Linux, main on macOS)
+/// with the argc/argv values received from the OS.
+///
+/// On Linux, environ is the pointer after the null-terminated argv array.
+/// On macOS, environ is obtained via _NSGetEnviron().
+public fn init_process_args(argc: Int, argv: &&Byte) {
+    unsafe {
+        PROCESS_ARGC = argc;
+        PROCESS_ARGV = argv;
+
+        // Find environ: it's after argv[argc] (which is null)
+        @cfg(target_os = "linux")
+        {
+            // On Linux, environ follows argv after the null terminator
+            PROCESS_ENVIRON = argv.offset(argc + 1);
+        }
+
+        @cfg(target_os = "macos")
+        {
+            // On macOS, use _NSGetEnviron()
+            PROCESS_ENVIRON = *sys.darwin.libsystem._NSGetEnviron();
+        }
+
+        // Default: leave PROCESS_ENVIRON as initialized (null)
+    };
+}
+
+/// Get the number of command line arguments.
+@inline
+public fn get_argc() -> Int {
+    unsafe { PROCESS_ARGC }
+}
+
+/// Get the command line arguments array.
+@inline
+public fn get_argv() -> &&Byte {
+    unsafe { PROCESS_ARGV }
+}
+
+/// Get environment variables array (null-terminated array of "KEY=VALUE" strings).
+@inline
+public fn get_environ() -> &&Byte {
+    unsafe { PROCESS_ENVIRON }
+}
+
+/// Get a command line argument by index.
+///
+/// Returns None if index is out of bounds.
+public fn get_arg(index: Int) -> Maybe<Text> {
+    let argc = get_argc();
+    if index < 0 || index >= argc {
+        return None;
+    }
+
+    unsafe {
+        let argv = get_argv();
+        let arg_ptr = *argv.offset(index);
+        if arg_ptr.is_null() {
+            return None;
+        }
+
+        // Find length of null-terminated string
+        let mut len = 0;
+        while *(arg_ptr as &UInt8).offset(len) != 0 {
+            len = len + 1;
+        }
+        let arg_bytes = core.slice.from_raw_parts(arg_ptr as &Byte, len);
+        Some(Text.from_utf8_lossy(arg_bytes))
+    }
+}
+
+/// Get an environment variable by name.
+///
+/// Returns None if the variable is not set.
+public fn get_env(name: &[Byte]) -> Maybe<Text> {
+    @cfg(target_os = "macos")
+    {
+        // On macOS, use the optimized getenv from libSystem
+        return super.darwin.libsystem.safe_getenv(name);
+    }
+
+    @cfg(not(target_os = "macos"))
+    {
+        // On Linux/Windows, search environ manually
+        unsafe {
+            let environ = get_environ();
+            if environ.is_null() {
+                return None;
+            }
+
+            let name_len = name.len();
+            let mut i = 0;
+            loop {
+                let entry = *environ.offset(i);
+                if entry.is_null() {
+                    break;
+                }
+
+                // Check if this entry starts with "name="
+                let mut matches = true;
+                for j in 0..name_len {
+                    if *(entry as &UInt8).offset(j) != name[j] {
+                        matches = false;
+                        break;
+                    }
+                }
+
+                if matches && *(entry as &UInt8).offset(name_len) == '=' as UInt8 {
+                    // Found it! Extract the value after '='
+                    let value_ptr = (entry as &UInt8).offset(name_len + 1);
+                    let mut value_len = 0;
+                    while *value_ptr.offset(value_len) != 0 {
+                        value_len = value_len + 1;
+                    }
+                    let value_bytes = core.slice.from_raw_parts(value_ptr as &Byte, value_len);
+                    return Some(Text.from_utf8_lossy(value_bytes));
+                }
+
+                i = i + 1;
+            }
+
+            None
+        }
+    }
+}
+
+/// Set an environment variable.
+///
+/// Note: On Linux without libc, this is not supported as environ is immutable.
+/// On macOS, uses setenv from libSystem.
+public fn set_env(name: &[Byte], value: &[Byte]) -> Result<(), OSError> {
+    @cfg(target_os = "macos")
+    {
+        return super.darwin.libsystem.safe_setenv(name, value, true);
+    }
+
+    @cfg(target_os = "linux")
+    {
+        // Without libc, we cannot modify environ safely
+        // This would require maintaining our own environment block
+        return Err(OSError.new(-1, "setenv not supported without libc"));
+    }
+
+    @cfg(target_os = "windows")
+    {
+        mount super.windows.kernel32.{SetEnvironmentVariableA};
+        // Create null-terminated copies on the stack
+        let name_len = name.len();
+        let name_buf = @stack_alloc(Byte, name_len + 1);
+        for i in 0..name_len {
+            unsafe { *(name_buf as &unsafe Byte).offset(i) = name[i]; }
+        }
+        unsafe { *(name_buf as &unsafe Byte).offset(name_len) = 0; }
+
+        let value_len = value.len();
+        let value_buf = @stack_alloc(Byte, value_len + 1);
+        for i in 0..value_len {
+            unsafe { *(value_buf as &unsafe Byte).offset(i) = value[i]; }
+        }
+        unsafe { *(value_buf as &unsafe Byte).offset(value_len) = 0; }
+
+        let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, value_buf as &unsafe Byte);
+        if result {
+            return Ok(());
+        } else {
+            return Err(OSError.new(-1, "SetEnvironmentVariableA failed"));
+        }
+    }
+}
+
+/// Remove an environment variable.
+public fn unset_env(name: &[Byte]) -> Result<(), OSError> {
+    @cfg(target_os = "macos")
+    {
+        return super.darwin.libsystem.safe_unsetenv(name);
+    }
+
+    @cfg(target_os = "linux")
+    {
+        return Err(OSError.new(-1, "unsetenv not supported without libc"));
+    }
+
+    @cfg(target_os = "windows")
+    {
+        mount super.windows.kernel32.{SetEnvironmentVariableA};
+        // SetEnvironmentVariableA with null value deletes the variable
+        let name_len = name.len();
+        let name_buf = @stack_alloc(Byte, name_len + 1);
+        for i in 0..name_len {
+            unsafe { *(name_buf as &unsafe Byte).offset(i) = name[i]; }
+        }
+        unsafe { *(name_buf as &unsafe Byte).offset(name_len) = 0; }
+
+        let result = SetEnvironmentVariableA(name_buf as &unsafe Byte, 0 as &unsafe Byte);
+        if result {
+            return Ok(());
+        } else {
+            return Err(OSError.new(-1, "SetEnvironmentVariableA(null) failed"));
+        }
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Convert errno code to human-readable message.
+fn errno_to_message(code: Int) -> Text {
+    // Common errno values
+    match code {
+        0 => "Success",
+        1 => "Operation not permitted",
+        2 => "No such file or directory",
+        3 => "No such process",
+        4 => "Interrupted system call",
+        5 => "Input/output error",
+        6 => "No such device or address",
+        7 => "Argument list too long",
+        8 => "Exec format error",
+        9 => "Bad file descriptor",
+        10 => "No child processes",
+        11 => "Resource temporarily unavailable",
+        12 => "Cannot allocate memory",
+        13 => "Permission denied",
+        14 => "Bad address",
+        17 => "File exists",
+        19 => "No such device",
+        20 => "Not a directory",
+        21 => "Is a directory",
+        22 => "Invalid argument",
+        23 => "Too many open files in system",
+        24 => "Too many open files",
+        28 => "No space left on device",
+        32 => "Broken pipe",
+        38 => "Function not implemented",
+        110 => "Connection timed out",
+        111 => "Connection refused",
+        _ => "Unknown error",
+    }
+}

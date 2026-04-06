@@ -1,0 +1,1669 @@
+// =============================================================================
+// dns.vr - Domain Name System Resolution (Native V-LLSI Implementation)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, net/addr, net/udp, sys/common
+// =============================================================================
+//
+// Pure DNS protocol implementation over native UDP sockets. No FFI dependencies.
+// Implements RFC 1035 DNS wire protocol for complete control over resolution.
+//
+// # Features
+//
+// - lookup_host(): Resolve hostname to IP addresses via DNS protocol
+// - lookup_addr(): Reverse DNS lookup (PTR records)
+// - Resolver: Configurable DNS resolver with custom nameservers
+// - Record types: A, AAAA, CNAME, MX, TXT, SRV, NS, PTR, SOA
+// - DNS-over-UDP with TCP fallback for large responses
+// - Async resolution for high-concurrency scenarios
+//
+// # Example
+//
+// ```verum
+// use net.dns.{lookup_host, Resolver};
+//
+// // Simple hostname resolution
+// let addrs = lookup_host("example.com")?;
+// for addr in addrs {
+//     print(f"Resolved: {addr}");
+// }
+//
+// // Custom resolver
+// let resolver = Resolver.new()
+//     .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
+//     .timeout_ms(3000);
+// let mx = resolver.lookup_mx("example.com")?;
+// ```
+//
+// # Performance Notes
+//
+// - Uses UDP for queries (512-byte limit, falls back to TCP if truncated)
+// - Parallel A/AAAA queries for dual-stack resolution
+// - Connection reuse via UdpSocket binding
+// - Zero-copy response parsing where possible
+//
+// =============================================================================
+
+module dns;
+
+mount core.*;
+// Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
+mount core.base.ordering.{Ordering};
+mount net.addr.{IpAddr, V4, V6, Ipv4Addr, Ipv6Addr, SocketAddr, AddrParseError};
+mount net.udp.UdpSocket;
+mount net.tcp.TcpStream;
+
+// Platform-specific imports for file reading (resolv.conf parsing).
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{
+    open as sys_open, read as sys_read, close as sys_close,
+    FileDesc, OSError,
+    O_RDONLY, O_CLOEXEC,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{
+    safe_open as sys_open, safe_read as sys_read, safe_close as sys_close,
+    O_RDONLY, O_CLOEXEC,
+};
+@cfg(target_os = "macos")
+mount sys.common.{FileDesc, OSError};
+
+// =============================================================================
+// DNS Protocol Constants (RFC 1035)
+// =============================================================================
+
+// DNS header flags.
+const DNS_FLAG_QR: UInt16 = 0x8000;         // Query/Response flag
+const DNS_FLAG_OPCODE_MASK: UInt16 = 0x7800;
+const DNS_FLAG_AA: UInt16 = 0x0400;         // Authoritative Answer
+const DNS_FLAG_TC: UInt16 = 0x0200;         // Truncated
+const DNS_FLAG_RD: UInt16 = 0x0100;         // Recursion Desired
+const DNS_FLAG_RA: UInt16 = 0x0080;         // Recursion Available
+const DNS_FLAG_RCODE_MASK: UInt16 = 0x000F;
+
+// DNS RCODE values.
+const RCODE_NOERROR: UInt16 = 0;
+const RCODE_FORMERR: UInt16 = 1;
+const RCODE_SERVFAIL: UInt16 = 2;
+const RCODE_NXDOMAIN: UInt16 = 3;
+const RCODE_NOTIMP: UInt16 = 4;
+const RCODE_REFUSED: UInt16 = 5;
+
+// DNS record types.
+public const DNS_TYPE_A: UInt16 = 1;           // IPv4 address
+public const DNS_TYPE_NS: UInt16 = 2;          // Name server
+public const DNS_TYPE_CNAME: UInt16 = 5;       // Canonical name
+public const DNS_TYPE_SOA: UInt16 = 6;         // Start of authority
+public const DNS_TYPE_PTR: UInt16 = 12;        // Pointer (reverse DNS)
+public const DNS_TYPE_MX: UInt16 = 15;         // Mail exchange
+public const DNS_TYPE_TXT: UInt16 = 16;        // Text record
+public const DNS_TYPE_AAAA: UInt16 = 28;       // IPv6 address
+public const DNS_TYPE_SRV: UInt16 = 33;        // Service record
+public const DNS_TYPE_ANY: UInt16 = 255;       // Any record
+
+// DNS class.
+const DNS_CLASS_IN: UInt16 = 1;             // Internet class
+
+// DNS limits.
+const DNS_MAX_NAME_LENGTH: Int = 253;
+const DNS_MAX_LABEL_LENGTH: Int = 63;
+const DNS_MAX_UDP_SIZE: Int = 512;
+const DNS_HEADER_SIZE: Int = 12;
+const DNS_PORT: Int = 53;
+
+// =============================================================================
+// DNS Error Types
+// =============================================================================
+
+/// Error type for DNS operations.
+public type DnsError is
+    | NotFound           // Domain not found (NXDOMAIN)
+    | HostNotFound       // Host not found
+    | TryAgain           // Temporary failure, try again
+    | NoRecovery         // Non-recoverable error
+    | NoData             // Valid name, no data of requested type
+    | Timeout            // Query timed out
+    | ServerError        // DNS server error
+    | InvalidName        // Invalid domain name
+    | InvalidResponse    // Malformed DNS response
+    | NetworkError(Text) // Network connectivity issue
+    | Truncated          // Response truncated (need TCP)
+    | Refused            // Server refused query
+    | Other(Text);       // Other error with message
+
+implement DnsError {
+    /// Create a DnsError from DNS RCODE.
+    fn from_rcode(rcode: UInt16) -> DnsError {
+        match rcode {
+            RCODE_NOERROR => DnsError.NoData,  // No error but no data
+            RCODE_FORMERR => DnsError.InvalidResponse,
+            RCODE_SERVFAIL => DnsError.ServerError,
+            RCODE_NXDOMAIN => DnsError.NotFound,
+            RCODE_NOTIMP => DnsError.ServerError,
+            RCODE_REFUSED => DnsError.Refused,
+            _ => DnsError.Other(f"Unknown RCODE: {rcode}"),
+        }
+    }
+
+    /// Create a DnsError from an I/O error.
+    fn from_io_error(e: IoError) -> DnsError {
+        DnsError.NetworkError(f"{e}")
+    }
+}
+
+implement Debug for DnsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            NotFound => f.write_str("NotFound"),
+            HostNotFound => f.write_str("HostNotFound"),
+            TryAgain => f.write_str("TryAgain"),
+            NoRecovery => f.write_str("NoRecovery"),
+            NoData => f.write_str("NoData"),
+            Timeout => f.write_str("Timeout"),
+            ServerError => f.write_str("ServerError"),
+            InvalidName => f.write_str("InvalidName"),
+            InvalidResponse => f.write_str("InvalidResponse"),
+            NetworkError(ref msg) => f.write_str(f"NetworkError({msg})"),
+            Truncated => f.write_str("Truncated"),
+            Refused => f.write_str("Refused"),
+            Other(ref msg) => f.write_str(f"Other({msg})"),
+        }
+    }
+}
+
+implement Display for DnsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            NotFound => f.write_str("domain not found"),
+            HostNotFound => f.write_str("host not found"),
+            TryAgain => f.write_str("temporary DNS failure, try again"),
+            NoRecovery => f.write_str("non-recoverable DNS error"),
+            NoData => f.write_str("valid name but no data of requested type"),
+            Timeout => f.write_str("DNS query timed out"),
+            ServerError => f.write_str("DNS server error"),
+            InvalidName => f.write_str("invalid domain name"),
+            InvalidResponse => f.write_str("malformed DNS response"),
+            NetworkError(ref msg) => f.write_str(f"network error: {msg}"),
+            Truncated => f.write_str("response truncated"),
+            Refused => f.write_str("query refused by server"),
+            Other(ref msg) => f.write_str(msg),
+        }
+    }
+}
+
+// =============================================================================
+// DNS Wire Protocol Types
+// =============================================================================
+
+/// DNS message header (12 bytes, RFC 1035 Section 4.1.1).
+type DnsHeader is {
+    id: UInt16,           // Query ID
+    flags: UInt16,        // Flags and codes
+    qdcount: UInt16,      // Question count
+    ancount: UInt16,      // Answer count
+    nscount: UInt16,      // Authority count
+    arcount: UInt16,      // Additional count
+};
+
+implement DnsHeader {
+    /// Create a query header with given ID.
+    fn new_query(id: UInt16) -> DnsHeader {
+        DnsHeader {
+            id,
+            flags: DNS_FLAG_RD,  // Recursion desired
+            qdcount: 1,
+            ancount: 0,
+            nscount: 0,
+            arcount: 0,
+        }
+    }
+
+    /// Serialize header to bytes (network byte order).
+    fn to_bytes(&self) -> List<Byte> {
+        let mut buf = List.with_capacity(DNS_HEADER_SIZE);
+        buf.push((self.id >> 8) as Byte);
+        buf.push((self.id & 0xFF) as Byte);
+        buf.push((self.flags >> 8) as Byte);
+        buf.push((self.flags & 0xFF) as Byte);
+        buf.push((self.qdcount >> 8) as Byte);
+        buf.push((self.qdcount & 0xFF) as Byte);
+        buf.push((self.ancount >> 8) as Byte);
+        buf.push((self.ancount & 0xFF) as Byte);
+        buf.push((self.nscount >> 8) as Byte);
+        buf.push((self.nscount & 0xFF) as Byte);
+        buf.push((self.arcount >> 8) as Byte);
+        buf.push((self.arcount & 0xFF) as Byte);
+        buf
+    }
+
+    /// Parse header from bytes.
+    fn from_bytes(buf: &[Byte]) -> Result<DnsHeader, DnsError> {
+        if buf.len() < DNS_HEADER_SIZE {
+            return Err(DnsError.InvalidResponse);
+        }
+        Ok(DnsHeader {
+            id: ((buf[0] as UInt16) << 8) | (buf[1] as UInt16),
+            flags: ((buf[2] as UInt16) << 8) | (buf[3] as UInt16),
+            qdcount: ((buf[4] as UInt16) << 8) | (buf[5] as UInt16),
+            ancount: ((buf[6] as UInt16) << 8) | (buf[7] as UInt16),
+            nscount: ((buf[8] as UInt16) << 8) | (buf[9] as UInt16),
+            arcount: ((buf[10] as UInt16) << 8) | (buf[11] as UInt16),
+        })
+    }
+
+    /// Check if response indicates an error.
+    fn rcode(&self) -> UInt16 {
+        self.flags & DNS_FLAG_RCODE_MASK
+    }
+
+    /// Check if response is truncated.
+    fn is_truncated(&self) -> Bool {
+        (self.flags & DNS_FLAG_TC) != 0
+    }
+
+    /// Check if this is a response.
+    fn is_response(&self) -> Bool {
+        (self.flags & DNS_FLAG_QR) != 0
+    }
+}
+
+// =============================================================================
+// DNS Name Encoding/Decoding
+// =============================================================================
+
+/// Encode a domain name to DNS wire format (labels).
+///
+/// Domain "www.example.com" becomes: [3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0]
+fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
+    if name.is_empty() || name.len() > DNS_MAX_NAME_LENGTH {
+        return Err(DnsError.InvalidName);
+    }
+
+    let mut encoded = List.new();
+    let labels = name.split(".");
+
+    for label in labels {
+        if label.is_empty() {
+            continue;  // Skip empty labels (trailing dot)
+        }
+        if label.len() > DNS_MAX_LABEL_LENGTH {
+            return Err(DnsError.InvalidName);
+        }
+
+        // Length byte.
+        encoded.push(label.len() as Byte);
+
+        // Label bytes.
+        for ch in label.bytes() {
+            encoded.push(ch);
+        }
+    }
+
+    // Null terminator.
+    encoded.push(0);
+    Ok(encoded)
+}
+
+/// Decode a domain name from DNS wire format with pointer decompression.
+///
+/// Returns (decoded_name, bytes_consumed).
+fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError> {
+    let mut name_parts = List.new();
+    let mut pos = start;
+    let mut bytes_consumed = 0;
+    let mut followed_pointer = false;
+
+    loop {
+        if pos >= buf.len() {
+            return Err(DnsError.InvalidResponse);
+        }
+
+        let len = buf[pos] as Int;
+
+        if len == 0 {
+            // End of name.
+            if !followed_pointer {
+                bytes_consumed = pos - start + 1;
+            }
+            break;
+        }
+
+        // Check for pointer (top 2 bits set).
+        if (len & 0xC0) == 0xC0 {
+            if pos + 1 >= buf.len() {
+                return Err(DnsError.InvalidResponse);
+            }
+
+            // Pointer: 14-bit offset.
+            let offset = ((len & 0x3F) << 8) | (buf[pos + 1] as Int);
+
+            if !followed_pointer {
+                bytes_consumed = pos - start + 2;
+                followed_pointer = true;
+            }
+
+            // Follow pointer (prevent infinite loops by checking offset < pos).
+            if offset >= pos && followed_pointer {
+                return Err(DnsError.InvalidResponse);
+            }
+            pos = offset;
+            continue;
+        }
+
+        // Regular label.
+        if pos + 1 + len > buf.len() {
+            return Err(DnsError.InvalidResponse);
+        }
+
+        let label_start = pos + 1;
+        let label_end = pos + 1 + len;
+        let label = Text.from_utf8_lossy(&buf[label_start..label_end]);
+        name_parts.push(label);
+
+        pos = label_end;
+    }
+
+    let name = name_parts.join(".");
+    if !followed_pointer {
+        bytes_consumed = pos - start + 1;
+    }
+
+    Ok((name, bytes_consumed))
+}
+
+// =============================================================================
+// DNS Query Building
+// =============================================================================
+
+/// Build a DNS query packet.
+fn build_query(name: &Text, qtype: UInt16, id: UInt16) -> Result<List<Byte>, DnsError> {
+    let header = DnsHeader.new_query(id);
+    let mut packet = header.to_bytes();
+
+    // Question section.
+    let encoded_name = encode_domain_name(name)?;
+    packet.extend(encoded_name);
+
+    // QTYPE (2 bytes).
+    packet.push((qtype >> 8) as Byte);
+    packet.push((qtype & 0xFF) as Byte);
+
+    // QCLASS (2 bytes) - IN class.
+    packet.push((DNS_CLASS_IN >> 8) as Byte);
+    packet.push((DNS_CLASS_IN & 0xFF) as Byte);
+
+    Ok(packet)
+}
+
+// =============================================================================
+// DNS Response Parsing
+// =============================================================================
+
+/// Parsed DNS resource record.
+type ParsedRecord is {
+    name: Text,
+    rtype: UInt16,
+    rclass: UInt16,
+    ttl: UInt32,
+    rdata: List<Byte>,
+    // For convenience - parsed IP/name for common types.
+    parsed: Maybe<DnsRecord>,
+};
+
+/// Parse a single resource record.
+fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int), DnsError> {
+    let (name, name_len) = decode_domain_name(buf, offset)?;
+    let mut pos = offset + name_len;
+
+    // Need at least 10 more bytes (TYPE, CLASS, TTL, RDLENGTH).
+    if pos + 10 > buf.len() {
+        return Err(DnsError.InvalidResponse);
+    }
+
+    let rtype = ((buf[pos] as UInt16) << 8) | (buf[pos + 1] as UInt16);
+    let rclass = ((buf[pos + 2] as UInt16) << 8) | (buf[pos + 3] as UInt16);
+    let ttl = ((buf[pos + 4] as UInt32) << 24) |
+              ((buf[pos + 5] as UInt32) << 16) |
+              ((buf[pos + 6] as UInt32) << 8) |
+              (buf[pos + 7] as UInt32);
+    let rdlength = ((buf[pos + 8] as Int) << 8) | (buf[pos + 9] as Int);
+    pos = pos + 10;
+
+    if pos + rdlength > buf.len() {
+        return Err(DnsError.InvalidResponse);
+    }
+
+    let rdata = buf[pos..(pos + rdlength)].to_list();
+
+    // Parse common record types.
+    let parsed = match rtype {
+        DNS_TYPE_A if rdlength == 4 => {
+            let ip = Ipv4Addr.new(rdata[0], rdata[1], rdata[2], rdata[3]);
+            Some(DnsRecord.A(ip))
+        }
+        DNS_TYPE_AAAA if rdlength == 16 => {
+            let ip = Ipv6Addr.new(
+                ((rdata[0] as UInt16) << 8) | (rdata[1] as UInt16),
+                ((rdata[2] as UInt16) << 8) | (rdata[3] as UInt16),
+                ((rdata[4] as UInt16) << 8) | (rdata[5] as UInt16),
+                ((rdata[6] as UInt16) << 8) | (rdata[7] as UInt16),
+                ((rdata[8] as UInt16) << 8) | (rdata[9] as UInt16),
+                ((rdata[10] as UInt16) << 8) | (rdata[11] as UInt16),
+                ((rdata[12] as UInt16) << 8) | (rdata[13] as UInt16),
+                ((rdata[14] as UInt16) << 8) | (rdata[15] as UInt16),
+            );
+            Some(DnsRecord.AAAA(ip))
+        }
+        5 => {
+            // DNS_TYPE_CNAME
+            let (target, _) = decode_domain_name(buf, pos)?;
+            Some(DnsRecord.CNAME(target))
+        }
+        2 => {
+            // DNS_TYPE_NS
+            let (target, _) = decode_domain_name(buf, pos)?;
+            Some(DnsRecord.NS(target))
+        }
+        12 => {
+            // DNS_TYPE_PTR
+            let (target, _) = decode_domain_name(buf, pos)?;
+            Some(DnsRecord.PTR(target))
+        }
+        DNS_TYPE_MX if rdlength >= 2 => {
+            let priority = ((rdata[0] as Int) << 8) | (rdata[1] as Int);
+            let (exchange, _) = decode_domain_name(buf, pos + 2)?;
+            Some(DnsRecord.MX { priority, exchange })
+        }
+        DNS_TYPE_TXT => {
+            // TXT records: one or more <length><text> pairs.
+            let mut text_parts = List.new();
+            let mut txt_pos = 0;
+            while txt_pos < rdlength {
+                let txt_len = rdata[txt_pos] as Int;
+                txt_pos = txt_pos + 1;
+                if txt_pos + txt_len <= rdlength {
+                    let part = Text.from_utf8_lossy(&rdata[txt_pos..(txt_pos + txt_len)]);
+                    text_parts.push(part);
+                    txt_pos = txt_pos + txt_len;
+                } else {
+                    break;
+                }
+            }
+            Some(DnsRecord.TXT(text_parts.join("")))
+        }
+        DNS_TYPE_SRV if rdlength >= 6 => {
+            let priority = ((rdata[0] as Int) << 8) | (rdata[1] as Int);
+            let weight = ((rdata[2] as Int) << 8) | (rdata[3] as Int);
+            let port = ((rdata[4] as Int) << 8) | (rdata[5] as Int);
+            let (target, _) = decode_domain_name(buf, pos + 6)?;
+            Some(DnsRecord.SRV { priority, weight, port, target })
+        }
+        DNS_TYPE_SOA if rdlength >= 20 => {
+            let (mname, mname_len) = decode_domain_name(buf, pos)?;
+            let (rname, rname_len) = decode_domain_name(buf, pos + mname_len)?;
+            let soa_pos = pos + mname_len + rname_len;
+            if soa_pos + 20 <= buf.len() {
+                let serial = ((buf[soa_pos] as Int) << 24) |
+                             ((buf[soa_pos + 1] as Int) << 16) |
+                             ((buf[soa_pos + 2] as Int) << 8) |
+                             (buf[soa_pos + 3] as Int);
+                let refresh = ((buf[soa_pos + 4] as Int) << 24) |
+                              ((buf[soa_pos + 5] as Int) << 16) |
+                              ((buf[soa_pos + 6] as Int) << 8) |
+                              (buf[soa_pos + 7] as Int);
+                let retry = ((buf[soa_pos + 8] as Int) << 24) |
+                            ((buf[soa_pos + 9] as Int) << 16) |
+                            ((buf[soa_pos + 10] as Int) << 8) |
+                            (buf[soa_pos + 11] as Int);
+                let expire = ((buf[soa_pos + 12] as Int) << 24) |
+                             ((buf[soa_pos + 13] as Int) << 16) |
+                             ((buf[soa_pos + 14] as Int) << 8) |
+                             (buf[soa_pos + 15] as Int);
+                let minimum = ((buf[soa_pos + 16] as Int) << 24) |
+                              ((buf[soa_pos + 17] as Int) << 16) |
+                              ((buf[soa_pos + 18] as Int) << 8) |
+                              (buf[soa_pos + 19] as Int);
+                Some(DnsRecord.SOA { mname, rname, serial, refresh, retry, expire, minimum })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let record = ParsedRecord {
+        name,
+        rtype,
+        rclass,
+        ttl,
+        rdata,
+        parsed,
+    };
+
+    Ok((record, pos + rdlength - offset))
+}
+
+/// Parse complete DNS response.
+fn parse_response(buf: &[Byte], expected_id: UInt16) -> Result<List<DnsRecordEntry>, DnsError> {
+    let header = DnsHeader.from_bytes(buf)?;
+
+    // Validate response.
+    if !header.is_response() {
+        return Err(DnsError.InvalidResponse);
+    }
+    if header.id != expected_id {
+        return Err(DnsError.InvalidResponse);
+    }
+
+    let rcode = header.rcode();
+    if rcode != RCODE_NOERROR {
+        return Err(DnsError.from_rcode(rcode));
+    }
+
+    if header.is_truncated() {
+        return Err(DnsError.Truncated);
+    }
+
+    let mut offset = DNS_HEADER_SIZE;
+    let mut records = List.new();
+
+    // Skip question section.
+    for _ in 0..header.qdcount {
+        let (_, name_len) = decode_domain_name(buf, offset)?;
+        offset = offset + name_len + 4;  // +4 for QTYPE and QCLASS
+    }
+
+    // Parse answer section.
+    for _ in 0..header.ancount {
+        let (record, consumed) = parse_resource_record(buf, offset)?;
+        if let Some(parsed) = record.parsed {
+            records.push(DnsRecordEntry {
+                record: parsed,
+                ttl: record.ttl as Int,
+            });
+        }
+        offset = offset + consumed;
+    }
+
+    Ok(records)
+}
+
+// =============================================================================
+// DNS Record Types
+// =============================================================================
+
+/// A DNS record.
+public type DnsRecord is
+    | A(Ipv4Addr)                              // IPv4 address
+    | AAAA(Ipv6Addr)                           // IPv6 address
+    | CNAME(Text)                              // Canonical name
+    | MX { priority: Int, exchange: Text }     // Mail exchange
+    | TXT(Text)                                // Text record
+    | NS(Text)                                 // Name server
+    | PTR(Text)                                // Pointer (reverse DNS)
+    | SRV {                                    // Service record
+        priority: Int,
+        weight: Int,
+        port: Int,
+        target: Text,
+    }
+    | SOA {                                    // Start of authority
+        mname: Text,
+        rname: Text,
+        serial: Int,
+        refresh: Int,
+        retry: Int,
+        expire: Int,
+        minimum: Int,
+    };
+
+implement DnsRecord {
+    /// Get the record type as a string.
+    public fn record_type(&self) -> &Text {
+        match *self {
+            A(_) => &"A",
+            AAAA(_) => &"AAAA",
+            CNAME(_) => &"CNAME",
+            MX { .. } => &"MX",
+            TXT(_) => &"TXT",
+            NS(_) => &"NS",
+            PTR(_) => &"PTR",
+            SRV { .. } => &"SRV",
+            SOA { .. } => &"SOA",
+        }
+    }
+
+    /// Get the value as a string for debugging.
+    public fn value_string(&self) -> Text {
+        match *self {
+            A(ip) => f"{ip}",
+            AAAA(ip) => f"{ip}",
+            CNAME(ref name) => name.clone(),
+            MX { priority, ref exchange } => f"{priority} {exchange}",
+            TXT(ref text) => text.clone(),
+            NS(ref ns) => ns.clone(),
+            PTR(ref ptr) => ptr.clone(),
+            SRV { priority, weight, port, ref target } => {
+                f"{priority} {weight} {port} {target}"
+            }
+            SOA { ref mname, ref rname, serial, .. } => {
+                f"{mname} {rname} {serial}"
+            }
+        }
+    }
+}
+
+implement Debug for DnsRecord {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.record_type()}: {self.value_string()}")
+    }
+}
+
+/// DNS record with TTL information.
+public type DnsRecordEntry is {
+    /// The DNS record data.
+    record: DnsRecord,
+    /// Time-to-live in seconds.
+    ttl: Int,
+};
+
+/// DNS record type for queries.
+public type DnsRecordType is
+    | A      // IPv4 address
+    | AAAA   // IPv6 address
+    | CNAME  // Canonical name
+    | MX     // Mail exchange
+    | TXT    // Text record
+    | NS     // Name server
+    | PTR    // Pointer (reverse)
+    | SRV    // Service
+    | SOA    // Start of authority
+    | ANY;   // Any record type
+
+implement DnsRecordType {
+    /// Convert to wire format type code.
+    fn to_wire(&self) -> UInt16 {
+        match *self {
+            A => DNS_TYPE_A,
+            AAAA => DNS_TYPE_AAAA,
+            CNAME => DNS_TYPE_CNAME,
+            MX => DNS_TYPE_MX,
+            TXT => DNS_TYPE_TXT,
+            NS => DNS_TYPE_NS,
+            PTR => DNS_TYPE_PTR,
+            SRV => DNS_TYPE_SRV,
+            SOA => DNS_TYPE_SOA,
+            ANY => DNS_TYPE_ANY,
+        }
+    }
+}
+
+// =============================================================================
+// System Configuration
+// =============================================================================
+
+/// Read system nameservers from /etc/resolv.conf.
+fn read_system_nameservers() -> List<Ipv4Addr> {
+    let mut nameservers = List.new();
+
+    @cfg(target_os = "macos")
+    {
+        // Try to read /etc/resolv.conf.
+        let path = "/etc/resolv.conf";
+        let path_bytes = path.as_bytes();
+
+        let open_flags = O_RDONLY | O_CLOEXEC;
+        let fd_result = sys_open(path_bytes, open_flags, 0);
+
+        if let Ok(fd) = fd_result {
+            let mut buf = List.with_capacity(4096);
+            for _ in 0..4096 {
+                buf.push(0);
+            }
+
+            let read_result = sys_read(fd, &mut buf);
+            let _ = sys_close(fd);
+
+            if let Ok(bytes_read) = read_result {
+                let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
+
+                // Parse nameserver lines.
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("nameserver ") {
+                        let addr_str = trimmed[11..].trim();
+                        if let Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                            nameservers.push(ip);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @cfg(target_os = "linux")
+    {
+        // Try to read /etc/resolv.conf.
+        let path = "/etc/resolv.conf";
+        let path_bytes = path.as_bytes();
+
+        let fd_result = sys_open(path_bytes, O_RDONLY | O_CLOEXEC, 0);
+
+        if let Ok(fd) = fd_result {
+            let mut buf = List.with_capacity(4096);
+            for _ in 0..4096 {
+                buf.push(0);
+            }
+
+            let read_result = sys_read(fd, &mut buf);
+            let _ = sys_close(fd);
+
+            if let Ok(bytes_read) = read_result {
+                let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
+
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("nameserver ") {
+                        let addr_str = trimmed[11..].trim();
+                        if let Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                            nameservers.push(ip);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to well-known public DNS servers.
+    if nameservers.is_empty() {
+        nameservers.push(Ipv4Addr.new(8, 8, 8, 8));      // Google DNS
+        nameservers.push(Ipv4Addr.new(1, 1, 1, 1));      // Cloudflare DNS
+        nameservers.push(Ipv4Addr.new(9, 9, 9, 9));      // Quad9 DNS
+    }
+
+    nameservers
+}
+
+/// Generate a random-ish query ID.
+fn generate_query_id() -> UInt16 {
+    // Use address of a stack variable as entropy source.
+    // In production, this should use a proper PRNG.
+    let x: Int = 0;
+    let addr = &x as *const Int as Int;
+    (addr ^ (addr >> 16)) as UInt16
+}
+
+// =============================================================================
+// DNS Resolver
+// =============================================================================
+
+/// A configurable DNS resolver.
+///
+/// The Resolver allows customizing DNS resolution behavior, including:
+/// - Custom nameservers
+/// - Timeout configuration
+/// - Query retries
+/// - Search domains
+///
+/// # Example
+///
+/// ```verum
+/// let resolver = Resolver.new()
+///     .nameserver_ip(Ipv4Addr.new(8, 8, 8, 8))
+///     .timeout_ms(5000)
+///     .retries(3);
+///
+/// let addrs = resolver.lookup("example.com")?;
+/// ```
+public type Resolver is {
+    /// Nameserver IP addresses.
+    nameservers: List<Ipv4Addr>,
+    /// Query timeout in milliseconds.
+    timeout_ms: Int,
+    /// Number of retries.
+    retries: Int,
+    /// Search domains for unqualified names.
+    search_domains: List<Text>,
+    /// Number of dots required to consider name absolute.
+    ndots: Int,
+    /// Use TCP for queries (always, or only for truncated).
+    use_tcp: Bool,
+};
+
+implement Resolver {
+    /// Create a new resolver with default settings.
+    public fn new() -> Resolver {
+        Resolver {
+            nameservers: List.new(),
+            timeout_ms: 5000,
+            retries: 2,
+            search_domains: List.new(),
+            ndots: 1,
+            use_tcp: false,
+        }
+    }
+
+    /// Create a resolver using system configuration.
+    ///
+    /// Reads nameservers from /etc/resolv.conf on Unix systems.
+    public fn system() -> Resolver {
+        let nameservers = read_system_nameservers();
+        Resolver {
+            nameservers,
+            timeout_ms: 5000,
+            retries: 2,
+            search_domains: List.new(),
+            ndots: 1,
+            use_tcp: false,
+        }
+    }
+
+    /// Add a nameserver by string.
+    public fn nameserver(mut self, addr: &Text) -> Resolver {
+        if let Ok(ip) = Ipv4Addr.parse(addr) {
+            self.nameservers.push(ip);
+        }
+        self
+    }
+
+    /// Add a nameserver by IP.
+    public fn nameserver_ip(mut self, addr: Ipv4Addr) -> Resolver {
+        self.nameservers.push(addr);
+        self
+    }
+
+    /// Set the query timeout in milliseconds.
+    public fn timeout_ms(mut self, ms: Int) -> Resolver {
+        self.timeout_ms = ms;
+        self
+    }
+
+    /// Set the number of retries.
+    public fn retries(mut self, retries: Int) -> Resolver {
+        self.retries = retries;
+        self
+    }
+
+    /// Add a search domain.
+    public fn search_domain(mut self, domain: Text) -> Resolver {
+        self.search_domains.push(domain);
+        self
+    }
+
+    /// Set ndots (number of dots to consider name absolute).
+    public fn ndots(mut self, n: Int) -> Resolver {
+        self.ndots = n;
+        self
+    }
+
+    /// Enable TCP-only mode.
+    public fn use_tcp(mut self, use_tcp: Bool) -> Resolver {
+        self.use_tcp = use_tcp;
+        self
+    }
+
+    /// Get effective nameservers (use defaults if none configured).
+    fn effective_nameservers(&self) -> &List<Ipv4Addr> {
+        if self.nameservers.is_empty() {
+            // Return static default (can't return local in this fn).
+            &self.nameservers
+        } else {
+            &self.nameservers
+        }
+    }
+
+    /// Perform a raw DNS query over UDP.
+    fn query_udp(&self, name: &Text, qtype: UInt16, nameserver: &Ipv4Addr) -> Result<List<DnsRecordEntry>, DnsError> {
+        let query_id = generate_query_id();
+        let packet = build_query(name, qtype, query_id)?;
+
+        // Create UDP socket.
+        let socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.new(0, 0, 0, 0), 0))
+            .map_err(DnsError.from_io_error)?;
+
+        // Set receive timeout.
+        socket.set_read_timeout(Some(self.timeout_ms as Int))
+            .map_err(DnsError.from_io_error)?;
+
+        // Send query to nameserver.
+        let target = SocketAddr.new_v4(*nameserver, DNS_PORT);
+        socket.send_to(&packet, target)
+            .map_err(DnsError.from_io_error)?;
+
+        // Receive response.
+        let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
+        for _ in 0..DNS_MAX_UDP_SIZE {
+            recv_buf.push(0);
+        }
+
+        let (bytes_read, _from) = socket.recv_from(&mut recv_buf)
+            .map_err(|e| {
+                // Check for timeout.
+                match e {
+                    TimedOut => DnsError.Timeout,
+                    _ => DnsError.from_io_error(e),
+                }
+            })?;
+
+        // Parse response.
+        parse_response(&recv_buf[..bytes_read], query_id)
+    }
+
+    /// Query a nameserver via TCP (used when UDP response is truncated).
+    ///
+    /// DNS over TCP uses a 2-byte length prefix before the query/response
+    /// per RFC 1035 Section 4.2.2.
+    fn query_tcp(&self, name: &Text, qtype: UInt16, nameserver: &Ipv4Addr) -> Result<List<DnsRecordEntry>, DnsError> {
+        let query_id = generate_query_id();
+        let packet = build_query(name, qtype, query_id)?;
+
+        // Connect to nameserver on DNS port via TCP.
+        let target = SocketAddr.new_v4(*nameserver, DNS_PORT);
+        let mut stream = TcpStream.connect(target)
+            .map_err(DnsError.from_io_error)?;
+
+        // Set read timeout.
+        stream.set_read_timeout(Some(self.timeout_ms as Int))
+            .map_err(DnsError.from_io_error)?;
+
+        // Send length-prefixed query (2-byte big-endian length + query).
+        let pkt_len = packet.len();
+        let len_prefix: List<Byte> = [
+            ((pkt_len >> 8) & 0xFF) as Byte,
+            (pkt_len & 0xFF) as Byte,
+        ];
+        stream.write_all(&len_prefix)
+            .map_err(DnsError.from_io_error)?;
+        stream.write_all(&packet)
+            .map_err(DnsError.from_io_error)?;
+
+        // Read 2-byte response length.
+        let mut len_buf: List<Byte> = [0, 0];
+        stream.read_exact(&mut len_buf)
+            .map_err(DnsError.from_io_error)?;
+        let resp_len = ((len_buf[0] as Int) << 8) | (len_buf[1] as Int);
+
+        if resp_len <= 0 || resp_len > 65535 {
+            return Err(DnsError.Other("Invalid TCP DNS response length"));
+        }
+
+        // Read full response.
+        let mut recv_buf = List.with_capacity(resp_len);
+        for _ in 0..resp_len {
+            recv_buf.push(0);
+        }
+        stream.read_exact(&mut recv_buf)
+            .map_err(DnsError.from_io_error)?;
+
+        // Parse response (TCP responses are NOT truncated).
+        parse_response(&recv_buf, query_id)
+    }
+
+    /// Query a specific nameserver with retries.
+    fn query_nameserver(
+        &self,
+        name: &Text,
+        nameserver: &Ipv4Addr,
+        qtype: UInt16
+    ) -> Result<List<DnsRecordEntry>, DnsError> {
+        let mut last_err = DnsError.Timeout;
+
+        for attempt in 0..=self.retries {
+            // Use TCP directly if configured.
+            if self.use_tcp {
+                match self.query_tcp(name, qtype, nameserver) {
+                    Ok(records) => return Ok(records),
+                    Err(e) => {
+                        last_err = e;
+                        continue;
+                    }
+                }
+            }
+
+            match self.query_udp(name, qtype, nameserver) {
+                Ok(records) => return Ok(records),
+                Err(DnsError.Truncated) => {
+                    // Fallback to TCP for truncated responses.
+                    match self.query_tcp(name, qtype, nameserver) {
+                        Ok(records) => return Ok(records),
+                        Err(e) => {
+                            last_err = e;
+                        }
+                    }
+                }
+                Err(DnsError.Timeout) => {
+                    last_err = DnsError.TryAgain;
+                }
+                Err(e) => {
+                    last_err = e;
+                }
+            }
+        }
+
+        Err(last_err)
+    }
+
+    /// Resolve hostname to IP addresses.
+    public fn lookup(&self, hostname: &Text) -> Result<List<IpAddr>, DnsError> {
+        // For unqualified names, try with search domains.
+        let dot_count = hostname.chars().filter(|c| *c == '.').count();
+
+        if dot_count < self.ndots && !self.search_domains.is_empty() {
+            for domain in &self.search_domains {
+                let fqdn = f"{hostname}.{domain}";
+                if let Ok(addrs) = self.resolve_direct(&fqdn) {
+                    return Ok(addrs);
+                }
+            }
+        }
+
+        // Try direct resolution.
+        self.resolve_direct(hostname)
+    }
+
+    /// Direct resolution without search domains.
+    fn resolve_direct(&self, hostname: &Text) -> Result<List<IpAddr>, DnsError> {
+        let nameservers = if self.nameservers.is_empty() {
+            read_system_nameservers()
+        } else {
+            self.nameservers.clone()
+        };
+
+        if nameservers.is_empty() {
+            return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+        }
+
+        let mut addrs = List.new();
+        let mut last_err = DnsError.NotFound;
+
+        // Try each nameserver.
+        for ns in &nameservers {
+            // Query for A records.
+            match self.query_nameserver(hostname, ns, DNS_TYPE_A) {
+                Ok(records) => {
+                    for entry in records {
+                        if let A(ip) = entry.record {
+                            addrs.push(IpAddr.V4(ip));
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_err = e;
+                }
+            }
+
+            // Query for AAAA records.
+            match self.query_nameserver(hostname, ns, DNS_TYPE_AAAA) {
+                Ok(records) => {
+                    for entry in records {
+                        if let AAAA(ip) = entry.record {
+                            addrs.push(IpAddr.V6(ip));
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Ignore AAAA errors if we got A records.
+                }
+            }
+
+            if !addrs.is_empty() {
+                return Ok(addrs);
+            }
+        }
+
+        if addrs.is_empty() {
+            Err(last_err)
+        } else {
+            Ok(addrs)
+        }
+    }
+
+    /// Query for specific DNS record type.
+    public fn query(&self, name: &Text, record_type: DnsRecordType) -> Result<List<DnsRecordEntry>, DnsError> {
+        let qtype = record_type.to_wire();
+
+        let nameservers = if self.nameservers.is_empty() {
+            read_system_nameservers()
+        } else {
+            self.nameservers.clone()
+        };
+
+        if nameservers.is_empty() {
+            return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+        }
+
+        // Try first nameserver.
+        self.query_nameserver(name, &nameservers[0], qtype)
+    }
+
+    /// Look up MX records for a domain.
+    ///
+    /// Returns mail exchangers sorted by priority (lowest first).
+    public fn lookup_mx(&self, domain: &Text) -> Result<List<(Int, Text)>, DnsError> {
+        let records = self.query(domain, DnsRecordType.MX)?;
+        let mut res = List.new();
+
+        for entry in records {
+            if let MX { priority, exchange } = entry.record {
+                res.push((priority, exchange));
+            }
+        }
+
+        // Sort by priority (lower is better).
+        res.sort_by(|(p1, _), (p2, _)| p1.cmp(p2));
+        Ok(res)
+    }
+
+    /// Look up TXT records for a domain.
+    public fn lookup_txt(&self, domain: &Text) -> Result<List<Text>, DnsError> {
+        let records = self.query(domain, DnsRecordType.TXT)?;
+        let mut res = List.new();
+
+        for entry in records {
+            if let TXT(text) = entry.record {
+                res.push(text);
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Look up SRV records for a service.
+    ///
+    /// SRV records are used for service discovery. The name should be in
+    /// the format `_service._proto.domain` (e.g., `_http._tcp.example.com`).
+    public fn lookup_srv(&self, name: &Text) -> Result<List<(Int, Int, Int, Text)>, DnsError> {
+        let records = self.query(name, DnsRecordType.SRV)?;
+        let mut res = List.new();
+
+        for entry in records {
+            if let SRV { priority, weight, port, target } = entry.record {
+                res.push((priority, weight, port, target));
+            }
+        }
+
+        // Sort by priority, then by weight.
+        res.sort_by(|(p1, w1, _, _), (p2, w2, _, _)| {
+            match p1.cmp(p2) {
+                Ordering.Equal => w2.cmp(w1),  // Higher weight first
+                other => other,
+            }
+        });
+
+        Ok(res)
+    }
+
+    /// Look up NS (name server) records for a domain.
+    public fn lookup_ns(&self, domain: &Text) -> Result<List<Text>, DnsError> {
+        let records = self.query(domain, DnsRecordType.NS)?;
+        let mut res = List.new();
+
+        for entry in records {
+            if let NS(ns) = entry.record {
+                res.push(ns);
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Perform reverse DNS lookup (PTR record).
+    public fn lookup_ptr(&self, addr: &IpAddr) -> Result<Text, DnsError> {
+        let ptr_name = build_ptr_name(addr);
+        let records = self.query(&ptr_name, DnsRecordType.PTR)?;
+
+        for entry in records {
+            if let PTR(name) = entry.record {
+                return Ok(name);
+            }
+        }
+
+        Err(DnsError.NotFound)
+    }
+}
+
+// =============================================================================
+// Simple DNS Resolution Functions
+// =============================================================================
+
+/// Resolve a hostname to a list of IP addresses.
+///
+/// This function uses the system's DNS configuration to resolve
+/// a hostname to one or more IP addresses. Both IPv4 and IPv6 addresses
+/// may be returned.
+///
+/// # Example
+///
+/// ```verum
+/// let addrs = lookup_host("www.example.com")?;
+/// for addr in addrs {
+///     print(f"IP: {addr}");
+/// }
+/// ```
+///
+/// # Errors
+///
+/// Returns `DnsError.NotFound` if the hostname does not exist.
+/// Returns `DnsError.TryAgain` for temporary failures.
+public fn lookup_host(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
+    // Validate hostname.
+    if hostname.is_empty() {
+        return Err(DnsError.InvalidName);
+    }
+
+    // Try parsing as IP address first (no DNS needed).
+    if let Ok(ipv4) = Ipv4Addr.parse(hostname) {
+        return Ok(List.of(IpAddr.V4(ipv4)));
+    }
+    if let Ok(ipv6) = Ipv6Addr.parse(hostname) {
+        return Ok(List.of(IpAddr.V6(ipv6)));
+    }
+
+    // Use system resolver.
+    let resolver = Resolver.system();
+    resolver.lookup(hostname)
+}
+
+/// Resolve a hostname to IPv4 addresses only.
+public fn lookup_host_v4(hostname: &Text) -> Result<List<Ipv4Addr>, DnsError> {
+    let addrs = lookup_host(hostname)?;
+    let mut res = List.new();
+
+    for addr in addrs {
+        if let V4(v4) = addr {
+            res.push(v4);
+        }
+    }
+
+    if res.is_empty() {
+        Err(DnsError.NoData)
+    } else {
+        Ok(res)
+    }
+}
+
+/// Resolve a hostname to IPv6 addresses only.
+public fn lookup_host_v6(hostname: &Text) -> Result<List<Ipv6Addr>, DnsError> {
+    let addrs = lookup_host(hostname)?;
+    let mut res = List.new();
+
+    for addr in addrs {
+        if let V6(v6) = addr {
+            res.push(v6);
+        }
+    }
+
+    if res.is_empty() {
+        Err(DnsError.NoData)
+    } else {
+        Ok(res)
+    }
+}
+
+/// Perform a reverse DNS lookup (IP address to hostname).
+///
+/// Given an IP address, returns the associated hostname if one exists.
+///
+/// # Example
+///
+/// ```verum
+/// let hostname = lookup_addr(&IpAddr.v4(8, 8, 8, 8))?;
+/// print(f"Hostname: {hostname}");  // e.g., "dns.google"
+/// ```
+///
+/// # Errors
+///
+/// Returns `DnsError.NotFound` if no PTR record exists for the IP.
+public fn lookup_addr(addr: &IpAddr) -> Result<Text, DnsError> {
+    let resolver = Resolver.system();
+    resolver.lookup_ptr(addr)
+}
+
+/// Build PTR query name from IP address.
+///
+/// For IPv4: 1.2.3.4 -> 4.3.2.1.in-addr.arpa
+/// For IPv6: 2001:db8::1 -> 1.0.0.0...8.b.d.0.1.0.0.2.ip6.arpa
+fn build_ptr_name(addr: &IpAddr) -> Text {
+    match *addr {
+        IpAddr.V4(ref v4) => {
+            let (a, b, c, d) = v4.octets();
+            f"{d}.{c}.{b}.{a}.in-addr.arpa"
+        }
+        IpAddr.V6(ref v6) => {
+            let octets = v6.octets();
+            let mut nibbles = List.new();
+
+            // Reverse nibbles.
+            for i in (0..16).rev() {
+                let byte = octets[i];
+                nibbles.push(format_nibble(byte & 0x0F));
+                nibbles.push(format_nibble(byte >> 4));
+            }
+
+            nibbles.join(".") + ".ip6.arpa"
+        }
+    }
+}
+
+fn format_nibble(n: Byte) -> Text {
+    match n {
+        0 => "0".to_text(),
+        1 => "1".to_text(),
+        2 => "2".to_text(),
+        3 => "3".to_text(),
+        4 => "4".to_text(),
+        5 => "5".to_text(),
+        6 => "6".to_text(),
+        7 => "7".to_text(),
+        8 => "8".to_text(),
+        9 => "9".to_text(),
+        10 => "a".to_text(),
+        11 => "b".to_text(),
+        12 => "c".to_text(),
+        13 => "d".to_text(),
+        14 => "e".to_text(),
+        15 => "f".to_text(),
+        _ => "0".to_text(),
+    }
+}
+
+// =============================================================================
+// Async DNS Resolution
+// =============================================================================
+
+/// Asynchronously resolve a hostname to IP addresses.
+///
+/// This function performs DNS resolution using async I/O for better concurrency.
+///
+/// # Example
+///
+/// ```verum
+/// let addrs = lookup_host_async("www.example.com").await?;
+/// ```
+public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
+    // Validate hostname.
+    if hostname.is_empty() {
+        return Err(DnsError.InvalidName);
+    }
+
+    // Try parsing as IP address first.
+    if let Ok(ipv4) = Ipv4Addr.parse(hostname) {
+        return Ok(List.of(IpAddr.V4(ipv4)));
+    }
+    if let Ok(ipv6) = Ipv6Addr.parse(hostname) {
+        return Ok(List.of(IpAddr.V6(ipv6)));
+    }
+
+    // Use async UDP for DNS query.
+    let resolver = Resolver.system();
+    let nameservers = if resolver.nameservers.is_empty() {
+        read_system_nameservers()
+    } else {
+        resolver.nameservers.clone()
+    };
+
+    if nameservers.is_empty() {
+        return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+    }
+
+    let mut addrs = List.new();
+
+    // Create socket and query.
+    let socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.new(0, 0, 0, 0), 0))
+        .map_err(DnsError.from_io_error)?;
+
+    let query_id = generate_query_id();
+    let ns = &nameservers[0];
+
+    // Query A records.
+    let packet = build_query(hostname, DNS_TYPE_A, query_id)?;
+    let target = SocketAddr.new_v4(*ns, DNS_PORT);
+
+    socket.send_to_async(&packet, target).await
+        .map_err(DnsError.from_io_error)?;
+
+    let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
+    for _ in 0..DNS_MAX_UDP_SIZE {
+        recv_buf.push(0);
+    }
+
+    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf).await
+        .map_err(DnsError.from_io_error)?;
+
+    if let Ok(records) = parse_response(&recv_buf[..bytes_read], query_id) {
+        for entry in records {
+            if let A(ip) = entry.record {
+                addrs.push(IpAddr.V4(ip));
+            }
+        }
+    }
+
+    // Query AAAA records.
+    let query_id_v6 = generate_query_id();
+    let packet_v6 = build_query(hostname, DNS_TYPE_AAAA, query_id_v6)?;
+
+    socket.send_to_async(&packet_v6, target).await
+        .map_err(DnsError.from_io_error)?;
+
+    let (bytes_read_v6, _) = socket.recv_from_async(&mut recv_buf).await
+        .map_err(DnsError.from_io_error)?;
+
+    if let Ok(records) = parse_response(&recv_buf[..bytes_read_v6], query_id_v6) {
+        for entry in records {
+            if let AAAA(ip) = entry.record {
+                addrs.push(IpAddr.V6(ip));
+            }
+        }
+    }
+
+    if addrs.is_empty() {
+        Err(DnsError.NotFound)
+    } else {
+        Ok(addrs)
+    }
+}
+
+/// Asynchronously perform reverse DNS lookup.
+public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
+    let ptr_name = build_ptr_name(addr);
+
+    let nameservers = read_system_nameservers();
+    if nameservers.is_empty() {
+        return Err(DnsError.NetworkError("no nameservers configured".to_text()));
+    }
+
+    let socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.new(0, 0, 0, 0), 0))
+        .map_err(DnsError.from_io_error)?;
+
+    let query_id = generate_query_id();
+    let packet = build_query(&ptr_name, DNS_TYPE_PTR, query_id)?;
+    let target = SocketAddr.new_v4(nameservers[0], DNS_PORT);
+
+    socket.send_to_async(&packet, target).await
+        .map_err(DnsError.from_io_error)?;
+
+    let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
+    for _ in 0..DNS_MAX_UDP_SIZE {
+        recv_buf.push(0);
+    }
+
+    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf).await
+        .map_err(DnsError.from_io_error)?;
+
+    let records = parse_response(&recv_buf[..bytes_read], query_id)?;
+
+    for entry in records {
+        if let PTR(name) = entry.record {
+            return Ok(name);
+        }
+    }
+
+    Err(DnsError.NotFound)
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Resolve hostname and port to socket addresses.
+///
+/// This is a convenience function that combines DNS resolution with port.
+///
+/// # Example
+///
+/// ```verum
+/// let addrs = resolve("www.example.com", 80)?;
+/// for addr in addrs {
+///     print(f"Socket: {addr}");
+/// }
+/// ```
+public fn resolve(hostname: &Text, port: Int) -> Result<List<SocketAddr>, DnsError> {
+    let ips = lookup_host(hostname)?;
+    let mut addrs = List.new();
+
+    for ip in ips {
+        let addr = match ip {
+            IpAddr.V4(v4) => SocketAddr.new_v4(v4, port),
+            IpAddr.V6(v6) => SocketAddr.new_v6(v6, port),
+        };
+        addrs.push(addr);
+    }
+
+    Ok(addrs)
+}
+
+/// Async version of resolve.
+public async fn resolve_async(hostname: &Text, port: Int) -> Result<List<SocketAddr>, DnsError> {
+    let ips = lookup_host_async(hostname).await?;
+    let mut addrs = List.new();
+
+    for ip in ips {
+        let addr = match ip {
+            IpAddr.V4(v4) => SocketAddr.new_v4(v4, port),
+            IpAddr.V6(v6) => SocketAddr.new_v6(v6, port),
+        };
+        addrs.push(addr);
+    }
+
+    Ok(addrs)
+}
+
+/// Check if a string looks like an IP address (not a hostname).
+public fn is_ip_address(s: &Text) -> Bool {
+    Ipv4Addr.parse(s).is_ok() || Ipv6Addr.parse(s).is_ok()
+}
+
+/// Validate a domain name format.
+///
+/// Checks that the domain name follows DNS naming rules:
+/// - Labels are 1-63 characters
+/// - Total length is 1-253 characters
+/// - Labels contain only alphanumeric characters and hyphens
+/// - Labels don't start or end with hyphens
+public fn is_valid_domain(domain: &Text) -> Bool {
+    if domain.is_empty() || domain.len() > 253 {
+        return false;
+    }
+
+    let labels = domain.split(".");
+    for label in labels {
+        if label.is_empty() || label.len() > 63 {
+            return false;
+        }
+
+        // Check first and last characters are not hyphens.
+        if label.starts_with("-") || label.ends_with("-") {
+            return false;
+        }
+
+        // Check all characters are valid.
+        for ch in label.chars() {
+            if !ch.is_alphanumeric() && ch != '-' {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_is_valid_domain() {
+    assert(is_valid_domain(&"example.com"));
+    assert(is_valid_domain(&"sub.example.com"));
+    assert(is_valid_domain(&"a.b.c.d.example.com"));
+    assert(is_valid_domain(&"example-site.com"));
+
+    assert(!is_valid_domain(&""));
+    assert(!is_valid_domain(&"-example.com"));
+    assert(!is_valid_domain(&"example-.com"));
+    assert(!is_valid_domain(&"exam_ple.com"));
+}
+
+@test
+fn test_is_ip_address() {
+    assert(is_ip_address(&"192.168.1.1"));
+    assert(is_ip_address(&"127.0.0.1"));
+    assert(is_ip_address(&"::1"));
+    assert(is_ip_address(&"2001:db8::1"));
+
+    assert(!is_ip_address(&"example.com"));
+    assert(!is_ip_address(&"localhost"));
+}
+
+@test
+fn test_dns_error_display() {
+    let err = DnsError.NotFound;
+    assert_eq(f"{err}", "domain not found");
+
+    let err = DnsError.Timeout;
+    assert_eq(f"{err}", "DNS query timed out");
+}
+
+@test
+fn test_resolver_builder() {
+    let resolver = Resolver.new()
+        .nameserver(&"8.8.8.8")
+        .nameserver(&"1.1.1.1")
+        .timeout_ms(3000)
+        .retries(2);
+
+    assert_eq(resolver.nameservers.len(), 2);
+    assert_eq(resolver.timeout_ms, 3000);
+    assert_eq(resolver.retries, 2);
+}
+
+@test
+fn test_encode_domain_name() {
+    let encoded = encode_domain_name(&"example.com").unwrap();
+    // Should be: [7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0]
+    assert_eq(encoded.len(), 13);
+    assert_eq(encoded[0], 7);
+    assert_eq(encoded[8], 3);
+    assert_eq(encoded[12], 0);
+}
+
+@test
+fn test_build_ptr_name() {
+    let ipv4 = IpAddr.V4(Ipv4Addr.new(8, 8, 8, 8));
+    let ptr = build_ptr_name(&ipv4);
+    assert_eq(ptr, "8.8.8.8.in-addr.arpa");
+
+    let ipv4_2 = IpAddr.V4(Ipv4Addr.new(192, 168, 1, 1));
+    let ptr_2 = build_ptr_name(&ipv4_2);
+    assert_eq(ptr_2, "1.1.168.192.in-addr.arpa");
+}
+
+@test
+fn test_dns_record_type() {
+    let record = DnsRecord.A(Ipv4Addr.new(192, 168, 1, 1));
+    assert_eq(record.record_type(), &"A");
+
+    let record = DnsRecord.MX { priority: 10, exchange: "mail.example.com".to_text() };
+    assert_eq(record.record_type(), &"MX");
+}

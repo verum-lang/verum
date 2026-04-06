@@ -1,0 +1,174 @@
+// =============================================================================
+// builder.vr - TextBuilder for efficient string construction
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core
+// =============================================================================
+//
+// TextBuilder provides an efficient way to construct Text values incrementally.
+// Instead of repeated string concatenation (which copies on each append),
+// TextBuilder collects chunks and joins them in a single allocation.
+//
+// # Usage
+//
+// ```verum
+// let mut builder = TextBuilder.new();
+// builder.push("Hello");
+// builder.push_char(' ');
+// builder.push("World");
+// let result = builder.build();  // "Hello World"
+// ```
+//
+// =============================================================================
+
+module core.text.builder;
+
+mount core.base.protocols.{
+    Debug, Display, Clone, Default,
+    Formatter, FormatError,
+};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// TextBuilder
+// =============================================================================
+
+/// An efficient builder for constructing Text values incrementally.
+///
+/// TextBuilder collects text chunks and tracks the total length, then
+/// produces the final Text in a single operation. This avoids the O(n^2)
+/// cost of repeated string concatenation.
+///
+/// # Examples
+///
+/// ```verum
+/// let mut b = TextBuilder.new();
+/// b.push("name");
+/// b.push("=");
+/// b.push("value");
+/// assert_eq(b.build(), "name=value");
+/// ```
+///
+/// ```verum
+/// let mut b = TextBuilder.with_capacity(1024);
+/// for item in items {
+///     b.push_line(&item.to_string());
+/// }
+/// let output = b.build();
+/// ```
+public type TextBuilder is {
+    /// The collected text chunks.
+    chunks: List<Text>,
+    /// The total length in bytes of all chunks.
+    total_len: Int,
+};
+
+implement TextBuilder {
+    /// Create a new empty TextBuilder.
+    public fn new() -> TextBuilder {
+        TextBuilder {
+            chunks: List.new(),
+            total_len: 0,
+        }
+    }
+
+    /// Create a new TextBuilder with a capacity hint.
+    ///
+    /// The capacity is a hint for the number of chunks expected.
+    /// This does not limit the builder's capacity.
+    public fn with_capacity(cap: Int) -> TextBuilder {
+        TextBuilder {
+            chunks: List.with_capacity(cap),
+            total_len: 0,
+        }
+    }
+
+    /// Append a text string to the builder.
+    public fn push(&mut self, text: &Text) {
+        if !text.is_empty() {
+            self.total_len = self.total_len + text.len();
+            self.chunks.push(text.clone());
+        }
+    }
+
+    /// Append a single character to the builder.
+    public fn push_char(&mut self, ch: Char) {
+        let s = Text.from_char(ch);
+        self.total_len = self.total_len + s.len();
+        self.chunks.push(s);
+    }
+
+    /// Append a text string followed by a newline.
+    public fn push_line(&mut self, text: &Text) {
+        self.push(text);
+        self.push("\n");
+    }
+
+    /// Build the final Text value from all appended chunks.
+    ///
+    /// Joins all chunks into a single contiguous Text allocation.
+    public fn build(&self) -> Text {
+        if self.chunks.is_empty() {
+            return Text.new();
+        }
+        if self.chunks.len() == 1 {
+            return self.chunks[0].clone();
+        }
+        // Join all chunks
+        let mut result = Text.with_capacity(self.total_len);
+        for chunk in &self.chunks {
+            result.push_str(chunk);
+        }
+        result
+    }
+
+    /// Returns the total length in bytes of all appended text.
+    public fn len(&self) -> Int {
+        self.total_len
+    }
+
+    /// Returns true if nothing has been appended.
+    public fn is_empty(&self) -> Bool {
+        self.total_len == 0
+    }
+
+    /// Clear the builder, removing all appended text.
+    public fn clear(&mut self) {
+        self.chunks.clear();
+        self.total_len = 0;
+    }
+}
+
+implement Debug for TextBuilder {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TextBuilder { len: ")?;
+        // Total length display
+        f.write_str(", chunks: ")?;
+        f.write_str(" }")
+    }
+}
+
+implement Display for TextBuilder {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        for chunk in &self.chunks {
+            f.write_str(chunk)?;
+        }
+        Ok(())
+    }
+}
+
+implement Clone for TextBuilder {
+    fn clone(&self) -> TextBuilder {
+        TextBuilder {
+            chunks: self.chunks.clone(),
+            total_len: self.total_len,
+        }
+    }
+}
+
+implement Default for TextBuilder {
+    fn default() -> TextBuilder {
+        TextBuilder.new()
+    }
+}

@@ -1,0 +1,80 @@
+// =============================================================================
+// context/mod.vr — Context System Standard Library
+// =============================================================================
+// Layer: 3 (depends on: base, collections, runtime)
+// Spec: docs/detailed/16-context-system.md
+// Grammar: verum.ebnf lines 869-921 (context_def, context_clause, etc.)
+// =============================================================================
+//
+// # Context System Overview
+//
+// The Verum context system provides dependency injection through two levels:
+//
+// ## Level 1: Static DI (@injectable/@inject)
+// - Compile-time resolution, 0ns overhead
+// - Scopes: Singleton, Request, Transient
+// - Syntax: @injectable(Scope.Singleton), inject TypeName
+//
+// ## Level 2: Dynamic Contexts (provide/using)
+// - Runtime DI via task-local storage, ~5-30ns overhead
+// - Syntax: context Name { ... }, provide Name = value, fn f() using [Name]
+//
+// # Key Types
+//
+// - Scope: DI scope for @injectable types (Singleton, Request, Transient)
+// - ContextError: Error type for context resolution failures
+// - Provider<T>: Wrapper for lazy context provider initialization
+//
+// # Grammar Reference (verum.ebnf)
+//
+// context_def         = visibility ('context' ['async'] | 'async' 'context')
+//                       identifier [generics] '{' { context_item } '}'
+// context_clause      = 'using' context_spec
+// context_group_def   = 'using' identifier '=' context_list_def ';'
+// provide_stmt        = 'provide' context_path ['as' identifier] '=' expression
+//                       (';' | 'in' block_expr)
+// inject_expr         = 'inject' type_path
+// injectable_attribute = 'injectable' '(' injection_scope ')'
+// injection_scope     = 'Scope' '.' ('Singleton' | 'Request' | 'Transient')
+// negative_context    = '!' context_path
+// conditional_context = context_path [context_alias] 'if' compile_time_condition
+// transformed_context = context_path context_transform { context_transform }
+// context_transform   = '.' identifier ['(' [transform_args] ')']
+//
+// # Async Context Propagation Rules (P2-9)
+//
+// Contexts are propagated across async boundaries as follows:
+//
+// 1. **spawn**: Parent's entire context stack is snapshotted at spawn time
+//    and restored into the child task before execution. The child inherits
+//    ALL contexts active at the spawn point.
+//
+// 2. **await**: Context stack is preserved across await points. The awaiting
+//    function retains its full context stack when resumed.
+//
+// 3. **Generators (yield/resume)**: Generator's saved_contexts is cloned
+//    at yield and restored at resume. Full context preservation.
+//
+// 4. **Channel send/recv**: Contexts are NOT sent through channels.
+//    Only values are transmitted. The receiving task uses its own contexts.
+//
+// 5. **Nursery**: Each nursery-spawned task inherits the nursery's parent
+//    context stack at spawn time.
+//
+// These rules ensure that context-dependent code (Logger, Database, Auth)
+// works correctly in concurrent programs without explicit propagation.
+//
+// =============================================================================
+
+module context;
+
+// Re-export scope types
+public mount super.context.scope.*;
+public mount super.context.error.*;
+public mount super.context.provider.*;
+public mount super.context.layer.*;
+
+// Re-export key types for convenience
+public mount super.context.provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
+public mount super.context.scope.{Scope, ContextScope};
+public mount super.context.error.ContextError;

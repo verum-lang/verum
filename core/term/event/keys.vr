@@ -1,0 +1,177 @@
+// =============================================================================
+// event/keys.vr - Key Codes and Modifiers
+// =============================================================================
+// Layer: 1 (Event System)
+// =============================================================================
+//
+// Complete key code sum type and modifier bitfield for keyboard events.
+// Covers all standard keys, function keys F1-F35, and modifier combinations.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
+// =============================================================================
+
+module keys;
+
+// =============================================================================
+// KeyCode — complete key code sum type
+// =============================================================================
+
+/// Key code for a keyboard event.
+/// Covers printable characters, function keys, navigation, and special keys.
+public type KeyCode is
+    | Char(Char)           // Printable Unicode character
+    | Fn(Int)              // Function key F1-F35
+    | Backspace
+    | Enter
+    | Tab
+    | BackTab              // Shift+Tab (CSI Z)
+    | Escape
+    | Space
+    | Delete
+    | Insert
+    | Left
+    | Right
+    | Up
+    | Down
+    | Home
+    | End
+    | PageUp
+    | PageDown
+    | CapsLock
+    | NumLock
+    | ScrollLock
+    | PrintScreen
+    | Pause
+    | Menu
+    | KeypadBegin          // Keypad 5 (no numlock)
+    | Null;                // Ctrl+Space or NUL byte
+
+implement KeyCode {
+    /// Check if this is a printable character key.
+    public fn is_char(&self) -> Bool {
+        match self {
+            KeyCode.Char(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Extract the character, if this is a Char variant.
+    public fn as_char(&self) -> Maybe<Char> {
+        match self {
+            KeyCode.Char(ch) => Some(ch),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a function key.
+    public fn is_function_key(&self) -> Bool {
+        match self {
+            KeyCode.Fn(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a navigation key (arrows, home, end, page).
+    public fn is_navigation(&self) -> Bool {
+        match self {
+            KeyCode.Left | KeyCode.Right | KeyCode.Up | KeyCode.Down
+            | KeyCode.Home | KeyCode.End | KeyCode.PageUp | KeyCode.PageDown => true,
+            _ => false,
+        }
+    }
+
+    /// Get a human-readable name for this key code.
+    public fn name(&self) -> Text {
+        match self {
+            KeyCode.Char(ch) => ch.to_text(),
+            KeyCode.Fn(n) => f"F{n}",
+            KeyCode.Backspace => "Backspace",
+            KeyCode.Enter => "Enter",
+            KeyCode.Tab => "Tab",
+            KeyCode.BackTab => "BackTab",
+            KeyCode.Escape => "Escape",
+            KeyCode.Space => "Space",
+            KeyCode.Delete => "Delete",
+            KeyCode.Insert => "Insert",
+            KeyCode.Left => "Left",
+            KeyCode.Right => "Right",
+            KeyCode.Up => "Up",
+            KeyCode.Down => "Down",
+            KeyCode.Home => "Home",
+            KeyCode.End => "End",
+            KeyCode.PageUp => "PageUp",
+            KeyCode.PageDown => "PageDown",
+            KeyCode.CapsLock => "CapsLock",
+            KeyCode.NumLock => "NumLock",
+            KeyCode.ScrollLock => "ScrollLock",
+            KeyCode.PrintScreen => "PrintScreen",
+            KeyCode.Pause => "Pause",
+            KeyCode.Menu => "Menu",
+            KeyCode.KeypadBegin => "KeypadBegin",
+            KeyCode.Null => "Null",
+        }
+    }
+}
+
+// =============================================================================
+// Modifiers — bitfield for keyboard modifiers
+// =============================================================================
+
+/// Keyboard modifiers as a bitfield.
+/// Can be combined with union() and tested with contains().
+public type Modifiers is {
+    bits: UInt8,
+};
+
+implement Modifiers {
+    /// No modifiers pressed.
+    public const NONE:  Modifiers = Modifiers { bits: 0 };
+    /// Shift modifier.
+    public const SHIFT: Modifiers = Modifiers { bits: 0b0000_0001 };
+    /// Control modifier.
+    public const CTRL:  Modifiers = Modifiers { bits: 0b0000_0010 };
+    /// Alt/Option modifier.
+    public const ALT:   Modifiers = Modifiers { bits: 0b0000_0100 };
+    /// Super/Windows/Command modifier.
+    public const SUPER: Modifiers = Modifiers { bits: 0b0000_1000 };
+    /// Hyper modifier.
+    public const HYPER: Modifiers = Modifiers { bits: 0b0001_0000 };
+    /// Meta modifier.
+    public const META:  Modifiers = Modifiers { bits: 0b0010_0000 };
+
+    /// Check if all bits of `flag` are set in this modifier.
+    public fn contains(&self, flag: Modifiers) -> Bool {
+        (self.bits & flag.bits) == flag.bits
+    }
+
+    /// Combine two modifier sets (bitwise OR).
+    public fn union(self, other: Modifiers) -> Modifiers {
+        Modifiers { bits: self.bits | other.bits }
+    }
+
+    /// Remove modifiers (bitwise AND NOT).
+    public fn difference(self, other: Modifiers) -> Modifiers {
+        Modifiers { bits: self.bits & !other.bits }
+    }
+
+    /// Check if no modifiers are set.
+    public fn is_empty(&self) -> Bool {
+        self.bits == 0
+    }
+
+    /// Get a human-readable representation.
+    public fn to_text(&self) -> Text {
+        let mut parts = List.new();
+        if self.contains(Modifiers.CTRL)  { parts.push("Ctrl"); }
+        if self.contains(Modifiers.ALT)   { parts.push("Alt"); }
+        if self.contains(Modifiers.SHIFT) { parts.push("Shift"); }
+        if self.contains(Modifiers.SUPER) { parts.push("Super"); }
+        if self.contains(Modifiers.HYPER) { parts.push("Hyper"); }
+        if self.contains(Modifiers.META)  { parts.push("Meta"); }
+        if parts.len() == 0 {
+            "None"
+        } else {
+            parts.join("+")
+        }
+    }
+}

@@ -1,0 +1,487 @@
+module sys.linux.errno;
+
+// =============================================================================
+// errno.vr - Linux error number constants
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// Platform: Linux
+// =============================================================================
+//
+// This module defines Linux errno constants. These are the error codes
+// returned by system calls (as negative values) and stored in errno.
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// Reference: /usr/include/asm-generic/errno-base.h, errno.h
+// =============================================================================
+
+// =============================================================================
+// Base Errno Constants (1-34)
+// =============================================================================
+
+/// Operation not permitted
+public const EPERM: Int = 1;
+
+/// No such file or directory
+public const ENOENT: Int = 2;
+
+/// No such process
+public const ESRCH: Int = 3;
+
+/// Interrupted system call
+public const EINTR: Int = 4;
+
+/// I/O error
+public const EIO: Int = 5;
+
+/// No such device or address
+public const ENXIO: Int = 6;
+
+/// Argument list too long
+public const E2BIG: Int = 7;
+
+/// Exec format error
+public const ENOEXEC: Int = 8;
+
+/// Bad file number
+public const EBADF: Int = 9;
+
+/// No child processes
+public const ECHILD: Int = 10;
+
+/// Try again / Resource temporarily unavailable
+public const EAGAIN: Int = 11;
+
+/// Out of memory
+public const ENOMEM: Int = 12;
+
+/// Permission denied
+public const EACCES: Int = 13;
+
+/// Bad address
+public const EFAULT: Int = 14;
+
+/// Block device required
+public const ENOTBLK: Int = 15;
+
+/// Device or resource busy
+public const EBUSY: Int = 16;
+
+/// File exists
+public const EEXIST: Int = 17;
+
+/// Cross-device link
+public const EXDEV: Int = 18;
+
+/// No such device
+public const ENODEV: Int = 19;
+
+/// Not a directory
+public const ENOTDIR: Int = 20;
+
+/// Is a directory
+public const EISDIR: Int = 21;
+
+/// Invalid argument
+public const EINVAL: Int = 22;
+
+/// File table overflow
+public const ENFILE: Int = 23;
+
+/// Too many open files
+public const EMFILE: Int = 24;
+
+/// Not a typewriter
+public const ENOTTY: Int = 25;
+
+/// Text file busy
+public const ETXTBSY: Int = 26;
+
+/// File too large
+public const EFBIG: Int = 27;
+
+/// No space left on device
+public const ENOSPC: Int = 28;
+
+/// Illegal seek
+public const ESPIPE: Int = 29;
+
+/// Read-only file system
+public const EROFS: Int = 30;
+
+/// Too many links
+public const EMLINK: Int = 31;
+
+/// Broken pipe
+public const EPIPE: Int = 32;
+
+/// Math argument out of domain of func
+public const EDOM: Int = 33;
+
+/// Math result not representable
+public const ERANGE: Int = 34;
+
+// =============================================================================
+// Extended Errno Constants (35-133)
+// =============================================================================
+
+/// Resource deadlock would occur
+public const EDEADLK: Int = 35;
+
+/// File name too long
+public const ENAMETOOLONG: Int = 36;
+
+/// No record locks available
+public const ENOLCK: Int = 37;
+
+/// Function not implemented
+public const ENOSYS: Int = 38;
+
+/// Directory not empty
+public const ENOTEMPTY: Int = 39;
+
+/// Too many symbolic links encountered
+public const ELOOP: Int = 40;
+
+/// Operation would block (same as EAGAIN)
+public const EWOULDBLOCK: Int = 11;
+
+/// No message of desired type
+public const ENOMSG: Int = 42;
+
+/// Identifier removed
+public const EIDRM: Int = 43;
+
+/// Channel number out of range
+public const ECHRNG: Int = 44;
+
+/// Level 2 not synchronized
+public const EL2NSYNC: Int = 45;
+
+/// Level 3 halted
+public const EL3HLT: Int = 46;
+
+/// Level 3 reset
+public const EL3RST: Int = 47;
+
+/// Link number out of range
+public const ELNRNG: Int = 48;
+
+/// Protocol driver not attached
+public const EUNATCH: Int = 49;
+
+/// No CSI structure available
+public const ENOCSI: Int = 50;
+
+/// Level 2 halted
+public const EL2HLT: Int = 51;
+
+/// Invalid exchange
+public const EBADE: Int = 52;
+
+/// Invalid request descriptor
+public const EBADR: Int = 53;
+
+/// Exchange full
+public const EXFULL: Int = 54;
+
+/// No anode
+public const ENOANO: Int = 55;
+
+/// Invalid request code
+public const EBADRQC: Int = 56;
+
+/// Invalid slot
+public const EBADSLT: Int = 57;
+
+/// Bad font file format
+public const EBFONT: Int = 59;
+
+/// Device not a stream
+public const ENOSTR: Int = 60;
+
+/// No data available
+public const ENODATA: Int = 61;
+
+/// Timer expired
+public const ETIME: Int = 62;
+
+/// Out of streams resources
+public const ENOSR: Int = 63;
+
+/// Machine is not on the network
+public const ENONET: Int = 64;
+
+/// Package not installed
+public const ENOPKG: Int = 65;
+
+/// Object is remote
+public const EREMOTE: Int = 66;
+
+/// Link has been severed
+public const ENOLINK: Int = 67;
+
+/// Advertise error
+public const EADV: Int = 68;
+
+/// Srmount error
+public const ESRMNT: Int = 69;
+
+/// Communication error on send
+public const ECOMM: Int = 70;
+
+/// Protocol error
+public const EPROTO: Int = 71;
+
+/// Multihop attempted
+public const EMULTIHOP: Int = 72;
+
+/// RFS specific error
+public const EDOTDOT: Int = 73;
+
+/// Not a data message
+public const EBADMSG: Int = 74;
+
+/// Value too large for defined data type
+public const EOVERFLOW: Int = 75;
+
+/// Name not unique on network
+public const ENOTUNIQ: Int = 76;
+
+/// File descriptor in bad state
+public const EBADFD: Int = 77;
+
+/// Remote address changed
+public const EREMCHG: Int = 78;
+
+/// Can not access a needed shared library
+public const ELIBACC: Int = 79;
+
+/// Accessing a corrupted shared library
+public const ELIBBAD: Int = 80;
+
+/// .lib section in a.out corrupted
+public const ELIBSCN: Int = 81;
+
+/// Attempting to link in too many shared libraries
+public const ELIBMAX: Int = 82;
+
+/// Cannot exec a shared library directly
+public const ELIBEXEC: Int = 83;
+
+/// Illegal byte sequence
+public const EILSEQ: Int = 84;
+
+/// Interrupted system call should be restarted
+public const ERESTART: Int = 85;
+
+/// Streams pipe error
+public const ESTRPIPE: Int = 86;
+
+/// Too many users
+public const EUSERS: Int = 87;
+
+/// Socket operation on non-socket
+public const ENOTSOCK: Int = 88;
+
+/// Destination address required
+public const EDESTADDRREQ: Int = 89;
+
+/// Message too long
+public const EMSGSIZE: Int = 90;
+
+/// Protocol wrong type for socket
+public const EPROTOTYPE: Int = 91;
+
+/// Protocol not available
+public const ENOPROTOOPT: Int = 92;
+
+/// Protocol not supported
+public const EPROTONOSUPPORT: Int = 93;
+
+/// Socket type not supported
+public const ESOCKTNOSUPPORT: Int = 94;
+
+/// Operation not supported on transport endpoint
+public const EOPNOTSUPP: Int = 95;
+
+/// Protocol family not supported
+public const EPFNOSUPPORT: Int = 96;
+
+/// Address family not supported by protocol
+public const EAFNOSUPPORT: Int = 97;
+
+/// Address already in use
+public const EADDRINUSE: Int = 98;
+
+/// Cannot assign requested address
+public const EADDRNOTAVAIL: Int = 99;
+
+/// Network is down
+public const ENETDOWN: Int = 100;
+
+/// Network is unreachable
+public const ENETUNREACH: Int = 101;
+
+/// Network dropped connection because of reset
+public const ENETRESET: Int = 102;
+
+/// Software caused connection abort
+public const ECONNABORTED: Int = 103;
+
+/// Connection reset by peer
+public const ECONNRESET: Int = 104;
+
+/// No buffer space available
+public const ENOBUFS: Int = 105;
+
+/// Transport endpoint is already connected
+public const EISCONN: Int = 106;
+
+/// Transport endpoint is not connected
+public const ENOTCONN: Int = 107;
+
+/// Cannot send after transport endpoint shutdown
+public const ESHUTDOWN: Int = 108;
+
+/// Too many references: cannot splice
+public const ETOOMANYREFS: Int = 109;
+
+/// Connection timed out
+public const ETIMEDOUT: Int = 110;
+
+/// Connection refused
+public const ECONNREFUSED: Int = 111;
+
+/// Host is down
+public const EHOSTDOWN: Int = 112;
+
+/// No route to host
+public const EHOSTUNREACH: Int = 113;
+
+/// Operation already in progress
+public const EALREADY: Int = 114;
+
+/// Operation now in progress
+public const EINPROGRESS: Int = 115;
+
+/// Stale file handle
+public const ESTALE: Int = 116;
+
+/// Structure needs cleaning
+public const EUCLEAN: Int = 117;
+
+/// Not a XENIX named type file
+public const ENOTNAM: Int = 118;
+
+/// No XENIX semaphores available
+public const ENAVAIL: Int = 119;
+
+/// Is a named type file
+public const EISNAM: Int = 120;
+
+/// Remote I/O error
+public const EREMOTEIO: Int = 121;
+
+/// Quota exceeded
+public const EDQUOT: Int = 122;
+
+/// No medium found
+public const ENOMEDIUM: Int = 123;
+
+/// Wrong medium type
+public const EMEDIUMTYPE: Int = 124;
+
+/// Operation Canceled
+public const ECANCELED: Int = 125;
+
+/// Required key not available
+public const ENOKEY: Int = 126;
+
+/// Key has expired
+public const EKEYEXPIRED: Int = 127;
+
+/// Key has been revoked
+public const EKEYREVOKED: Int = 128;
+
+/// Key was rejected by service
+public const EKEYREJECTED: Int = 129;
+
+/// Owner died
+public const EOWNERDEAD: Int = 130;
+
+/// State not recoverable
+public const ENOTRECOVERABLE: Int = 131;
+
+/// Operation not possible due to RF-kill
+public const ERFKILL: Int = 132;
+
+/// Memory page has hardware error
+public const EHWPOISON: Int = 133;
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Check if an errno indicates a temporary/retryable condition.
+public fn is_retryable(errno: Int) -> Bool {
+    errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR
+}
+
+/// Check if an errno indicates a connection-related error.
+public fn is_connection_error(errno: Int) -> Bool {
+    errno == ECONNREFUSED ||
+    errno == ECONNRESET ||
+    errno == ECONNABORTED ||
+    errno == ENETUNREACH ||
+    errno == EHOSTUNREACH ||
+    errno == ETIMEDOUT
+}
+
+/// Check if an errno indicates a permission/access error.
+public fn is_permission_error(errno: Int) -> Bool {
+    errno == EPERM || errno == EACCES
+}
+
+/// Check if an errno indicates a "not found" condition.
+public fn is_not_found(errno: Int) -> Bool {
+    errno == ENOENT || errno == ESRCH || errno == ENODEV
+}
+
+/// Get a human-readable name for an errno.
+public fn errno_name(errno: Int) -> Text {
+    match errno {
+        EPERM => "EPERM",
+        ENOENT => "ENOENT",
+        ESRCH => "ESRCH",
+        EINTR => "EINTR",
+        EIO => "EIO",
+        ENXIO => "ENXIO",
+        E2BIG => "E2BIG",
+        ENOEXEC => "ENOEXEC",
+        EBADF => "EBADF",
+        ECHILD => "ECHILD",
+        EAGAIN => "EAGAIN",
+        ENOMEM => "ENOMEM",
+        EACCES => "EACCES",
+        EFAULT => "EFAULT",
+        EBUSY => "EBUSY",
+        EEXIST => "EEXIST",
+        ENODEV => "ENODEV",
+        ENOTDIR => "ENOTDIR",
+        EISDIR => "EISDIR",
+        EINVAL => "EINVAL",
+        ENFILE => "ENFILE",
+        EMFILE => "EMFILE",
+        ENOSPC => "ENOSPC",
+        EPIPE => "EPIPE",
+        ENOSYS => "ENOSYS",
+        ENOTEMPTY => "ENOTEMPTY",
+        ELOOP => "ELOOP",
+        ENOTSOCK => "ENOTSOCK",
+        ECONNREFUSED => "ECONNREFUSED",
+        ECONNRESET => "ECONNRESET",
+        ETIMEDOUT => "ETIMEDOUT",
+        _ => "UNKNOWN",
+    }
+}

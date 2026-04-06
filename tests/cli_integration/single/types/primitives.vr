@@ -1,0 +1,33 @@
+// Test: PT-001 through PT-008 - Primitive type operations
+// Priority: Critical
+// Expected output: Various primitive operations
+
+fn main() {
+    // Integer arithmetic
+    let a = 10;
+    let b = 3;
+    print(f"{a + b} {a - b} {a * b} {a / b} {a % b}");
+
+    // Float arithmetic
+    let x = 10.0;
+    let y = 3.0;
+    print(f"{x + y} {x - y} {x * y} {x / y}");
+
+    // Boolean operations
+    let p = true;
+    let q = false;
+    print(f"{p && q} {p || q} {!p} {!q}");
+
+    // Text operations
+    let s = "Hello";
+    let t = " World";
+    print(f"{s + t}");
+
+    // Character
+    let c = 'A';
+    print(f"{c}");
+
+    // Unit type
+    let _: () = ();
+    print("Done");
+}

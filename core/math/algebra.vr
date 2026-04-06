@@ -1,0 +1,367 @@
+// =============================================================================
+// algebra.vr - Abstract Algebra Foundations
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// Defines the algebraic hierarchy from magmas to fields, modules to algebras,
+// and lattices to Boolean algebras. Each structure is specified as a protocol
+// with required operations and axiom statements verified by the proof engine.
+//
+// Hierarchy:
+//   Magma -> Semigroup -> Monoid -> Group -> AbelianGroup
+//   Ring -> CommutativeRing -> IntegralDomain -> Field
+//   Module -> VectorSpace -> Algebra
+//   Lattice -> DistributiveLattice -> BooleanAlgebra
+// =============================================================================
+
+module core.math.algebra;
+
+// =============================================================================
+// 1. Groupoid Hierarchy
+// =============================================================================
+
+/// A magma is a set equipped with a single binary operation.
+/// No axioms are required beyond closure (enforced by the type system).
+public type Magma is protocol {
+    /// The binary operation (often written as multiplication or addition).
+    fn op(&self, other: &Self) -> Self;
+};
+
+/// A semigroup is a magma whose operation is associative.
+public type Semigroup is protocol extends Magma {
+    /// Associativity: op(op(a, b), c) = op(a, op(b, c))
+    @verify(formal)
+    fn associativity_axiom(&self, b: &Self, c: &Self) -> Bool;
+};
+
+/// A monoid is a semigroup with an identity element.
+public type Monoid is protocol extends Semigroup {
+    /// The identity element for the binary operation.
+    fn identity() -> Self;
+
+    /// Left identity: op(identity(), a) = a
+    @verify(formal)
+    fn left_identity_axiom(&self) -> Bool;
+
+    /// Right identity: op(a, identity()) = a
+    @verify(formal)
+    fn right_identity_axiom(&self) -> Bool;
+};
+
+/// A group is a monoid where every element has an inverse.
+public type Group is protocol extends Monoid {
+    /// The inverse of an element under the group operation.
+    fn inverse(&self) -> Self;
+
+    /// Left inverse: op(inverse(a), a) = identity()
+    @verify(formal)
+    fn left_inverse_axiom(&self) -> Bool;
+
+    /// Right inverse: op(a, inverse(a)) = identity()
+    @verify(formal)
+    fn right_inverse_axiom(&self) -> Bool;
+};
+
+/// An abelian (commutative) group satisfies commutativity of the operation.
+public type AbelianGroup is protocol extends Group {
+    /// Commutativity: op(a, b) = op(b, a)
+    @verify(formal)
+    fn commutativity_axiom(&self, other: &Self) -> Bool;
+};
+
+// =============================================================================
+// 2. Ring Hierarchy
+// =============================================================================
+
+/// A ring is an abelian group under addition with an associative multiplication
+/// that distributes over addition.
+public type Ring is protocol {
+    /// Additive operation.
+    fn add(&self, other: &Self) -> Self;
+
+    /// Multiplicative operation.
+    fn mul(&self, other: &Self) -> Self;
+
+    /// Additive identity (zero).
+    fn zero() -> Self;
+
+    /// Multiplicative identity (one).
+    fn one() -> Self;
+
+    /// Additive inverse (negation).
+    fn negate(&self) -> Self;
+
+    /// Addition is associative: (a + b) + c = a + (b + c)
+    @verify(formal)
+    fn add_associativity(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Addition is commutative: a + b = b + a
+    @verify(formal)
+    fn add_commutativity(&self, other: &Self) -> Bool;
+
+    /// Additive identity: a + 0 = a
+    @verify(formal)
+    fn add_identity(&self) -> Bool;
+
+    /// Additive inverse: a + (-a) = 0
+    @verify(formal)
+    fn add_inverse(&self) -> Bool;
+
+    /// Multiplication is associative: (a * b) * c = a * (b * c)
+    @verify(formal)
+    fn mul_associativity(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Multiplicative identity: a * 1 = a and 1 * a = a
+    @verify(formal)
+    fn mul_identity(&self) -> Bool;
+
+    /// Left distributivity: a * (b + c) = a*b + a*c
+    @verify(formal)
+    fn left_distributivity(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Right distributivity: (a + b) * c = a*c + b*c
+    @verify(formal)
+    fn right_distributivity(&self, b: &Self, c: &Self) -> Bool;
+};
+
+/// A commutative ring has commutative multiplication.
+public type CommutativeRing is protocol extends Ring {
+    /// Commutativity of multiplication: a * b = b * a
+    @verify(formal)
+    fn mul_commutativity(&self, other: &Self) -> Bool;
+};
+
+/// An integral domain is a commutative ring with no zero divisors.
+public type IntegralDomain is protocol extends CommutativeRing {
+    /// No zero divisors: if a * b = 0, then a = 0 or b = 0
+    @verify(formal)
+    fn no_zero_divisors(&self, other: &Self) -> Bool;
+};
+
+/// A field is a commutative ring in which every nonzero element has a
+/// multiplicative inverse.
+public type Field is protocol extends IntegralDomain {
+    /// Multiplicative inverse for nonzero elements.
+    fn mul_inverse(&self) -> Self;
+
+    /// Multiplicative inverse law: a * a^{-1} = 1 for a != 0
+    @verify(formal)
+    fn mul_inverse_axiom(&self) -> Bool;
+};
+
+// =============================================================================
+// 3. Module and Vector Space Hierarchy
+// =============================================================================
+
+/// A left module over a ring R. Generalizes vector spaces to arbitrary rings.
+public type Module<R: Ring> is protocol extends AbelianGroup {
+    /// Scalar multiplication from the left.
+    fn scalar_mul(&self, scalar: &R) -> Self;
+
+    /// Compatibility: r * (s * m) = (r * s) * m
+    @verify(formal)
+    fn scalar_associativity(&self, r: &R, s: &R) -> Bool;
+
+    /// Scalar identity: 1 * m = m
+    @verify(formal)
+    fn scalar_identity(&self) -> Bool;
+
+    /// Distributivity over module addition: r * (m + n) = r*m + r*n
+    @verify(formal)
+    fn scalar_distributivity_module(&self, other: &Self, r: &R) -> Bool;
+
+    /// Distributivity over ring addition: (r + s) * m = r*m + s*m
+    @verify(formal)
+    fn scalar_distributivity_ring(&self, r: &R, s: &R) -> Bool;
+};
+
+/// A vector space is a module over a field.
+public type VectorSpace<F: Field> is protocol extends Module<F> {
+    /// Dimension of the vector space (may be infinite).
+    fn dimension() -> Int;
+};
+
+/// An algebra over a ring R is a module that is also a ring,
+/// with scalar multiplication compatible with the ring structure.
+public type Algebra<R: Ring> is protocol extends Module<R> + Ring {
+    /// Bilinearity: r * (a * b) = (r * a) * b = a * (r * b)
+    @verify(formal)
+    fn bilinearity(&self, other: &Self, r: &R) -> Bool;
+};
+
+// =============================================================================
+// 4. Lattice Hierarchy
+// =============================================================================
+
+/// A lattice is a partially ordered set in which every two elements have a
+/// unique least upper bound (join) and greatest lower bound (meet).
+public type Lattice is protocol {
+    /// Meet (greatest lower bound / infimum).
+    fn meet(&self, other: &Self) -> Self;
+
+    /// Join (least upper bound / supremum).
+    fn join(&self, other: &Self) -> Self;
+
+    /// Meet is associative
+    @verify(formal)
+    fn meet_associativity(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Join is associative
+    @verify(formal)
+    fn join_associativity(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Meet is commutative
+    @verify(formal)
+    fn meet_commutativity(&self, other: &Self) -> Bool;
+
+    /// Join is commutative
+    @verify(formal)
+    fn join_commutativity(&self, other: &Self) -> Bool;
+
+    /// Absorption: a meet (a join b) = a
+    @verify(formal)
+    fn absorption_meet_join(&self, other: &Self) -> Bool;
+
+    /// Absorption: a join (a meet b) = a
+    @verify(formal)
+    fn absorption_join_meet(&self, other: &Self) -> Bool;
+
+    /// Idempotence: a meet a = a
+    @verify(formal)
+    fn meet_idempotent(&self) -> Bool;
+
+    /// Idempotence: a join a = a
+    @verify(formal)
+    fn join_idempotent(&self) -> Bool;
+};
+
+/// A bounded lattice has top and bottom elements.
+public type BoundedLattice is protocol extends Lattice {
+    /// The top element (greatest element).
+    fn top() -> Self;
+
+    /// The bottom element (least element).
+    fn bottom() -> Self;
+
+    /// a meet top = a
+    @verify(formal)
+    fn meet_top(&self) -> Bool;
+
+    /// a join bottom = a
+    @verify(formal)
+    fn join_bottom(&self) -> Bool;
+};
+
+/// A distributive lattice satisfies the distributive law.
+public type DistributiveLattice is protocol extends Lattice {
+    /// Distributivity: a meet (b join c) = (a meet b) join (a meet c)
+    @verify(formal)
+    fn meet_distributes_over_join(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Distributivity: a join (b meet c) = (a join b) meet (a join c)
+    @verify(formal)
+    fn join_distributes_over_meet(&self, b: &Self, c: &Self) -> Bool;
+};
+
+/// A complemented lattice is a bounded lattice where every element has a
+/// complement.
+public type ComplementedLattice is protocol extends BoundedLattice {
+    /// The complement of an element.
+    fn complement(&self) -> Self;
+
+    /// a meet complement(a) = bottom
+    @verify(formal)
+    fn complement_meet(&self) -> Bool;
+
+    /// a join complement(a) = top
+    @verify(formal)
+    fn complement_join(&self) -> Bool;
+};
+
+/// A Boolean algebra is a complemented distributive lattice.
+/// Equivalent to a ring where a*a = a (idempotent ring).
+public type BooleanAlgebra is protocol extends ComplementedLattice + DistributiveLattice {
+    /// De Morgan: complement(a meet b) = complement(a) join complement(b)
+    @verify(formal)
+    fn de_morgan_meet(&self, other: &Self) -> Bool;
+
+    /// De Morgan: complement(a join b) = complement(a) meet complement(b)
+    @verify(formal)
+    fn de_morgan_join(&self, other: &Self) -> Bool;
+
+    /// Double complementation: complement(complement(a)) = a
+    @verify(formal)
+    fn double_complement(&self) -> Bool;
+};
+
+// =============================================================================
+// 5. Morphisms
+// =============================================================================
+
+/// A homomorphism between two groups preserves the group operation.
+public type GroupHomomorphism<G: Group, H: Group> is {
+    /// The underlying function.
+    f: fn(&G) -> H,
+};
+
+/// A ring homomorphism preserves both addition and multiplication.
+public type RingHomomorphism<R: Ring, S: Ring> is {
+    /// The underlying function.
+    f: fn(&R) -> S,
+};
+
+/// An isomorphism is a bijective homomorphism.
+public type Isomorphism<G: Group, H: Group> is {
+    /// Forward map.
+    forward: fn(&G) -> H,
+    /// Inverse map.
+    backward: fn(&H) -> G,
+};
+
+// =============================================================================
+// 6. Substructures
+// =============================================================================
+
+/// A subgroup is a subset of a group that is itself a group.
+public type Subgroup<G: Group> is {
+    /// Membership test.
+    contains: fn(&G) -> Bool,
+};
+
+/// An ideal is a special subring of a ring closed under ring multiplication.
+public type Ideal<R: Ring> is {
+    /// Membership test.
+    contains: fn(&R) -> Bool,
+};
+
+// =============================================================================
+// 7. Quotient Structures
+// =============================================================================
+
+/// An equivalence relation on a type.
+public type EquivalenceRelation<T> is protocol {
+    /// Test if two elements are equivalent.
+    fn equivalent(&self, a: &T, b: &T) -> Bool;
+
+    /// Reflexivity: equivalent(a, a) = true
+    @verify(formal)
+    fn reflexivity(&self, a: &T) -> Bool;
+
+    /// Symmetry: equivalent(a, b) implies equivalent(b, a)
+    @verify(formal)
+    fn symmetry(&self, a: &T, b: &T) -> Bool;
+
+    /// Transitivity: equivalent(a, b) and equivalent(b, c) implies equivalent(a, c)
+    @verify(formal)
+    fn transitivity(&self, a: &T, b: &T, c: &T) -> Bool;
+};
+
+/// A congruence relation on a group is an equivalence relation compatible
+/// with the group operation.
+public type Congruence<G: Group> is protocol extends EquivalenceRelation<G> {
+    /// Compatibility: equivalent(a, b) and equivalent(c, d) implies
+    /// equivalent(op(a, c), op(b, d))
+    @verify(formal)
+    fn compatibility(&self, a: &G, b: &G, c: &G, d: &G) -> Bool;
+};

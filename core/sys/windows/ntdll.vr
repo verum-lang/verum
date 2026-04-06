@@ -1,0 +1,785 @@
+module sys.windows.ntdll;
+
+// =============================================================================
+// sys/windows/ntdll.vr - NT Native API (ntdll.dll) FFI
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/ntstatus
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides direct access to NT Native API functions from
+// ntdll.dll. These are the lowest-level userspace APIs on Windows.
+//
+// IMPORTANT: Uses IAT imports (@extern) not PEB walking, as specified
+// in the architecture spec. This avoids AV heuristics and is the
+// correct approach for non-malware code.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// Reference: experiments/ntapi
+// =============================================================================
+
+mount super.ntstatus.{NtStatus, STATUS_SUCCESS};
+
+// =============================================================================
+// Basic Types
+// =============================================================================
+
+/// Windows HANDLE type (opaque pointer)
+public type Handle is (Int);
+
+implement Handle {
+    /// Invalid handle value
+    public const INVALID: Handle = Handle(-1);
+
+    /// Null handle
+    public const NULL: Handle = Handle(0);
+
+    /// Check if handle is valid
+    @inline
+    public fn is_valid(&self) -> Bool {
+        self.0 != -1 && self.0 != 0
+    }
+
+    /// Get raw handle value
+    @inline
+    public fn raw(&self) -> Int {
+        self.0
+    }
+}
+
+/// Large integer (64-bit signed)
+public type LargeInteger is (Int64);
+
+/// Unsigned large integer (64-bit unsigned)
+public type ULargeInteger is (UInt64);
+
+/// Unicode string (Windows native)
+public type UnicodeString is {
+    length: UInt16,
+    maximum_length: UInt16,
+    buffer: &unsafe UInt16,
+};
+
+/// Object attributes for NT object creation
+public type ObjectAttributes is {
+    length: UInt32,
+    root_directory: Handle,
+    object_name: &UnicodeString,
+    attributes: UInt32,
+    security_descriptor: &unsafe Byte,
+    security_quality_of_service: &unsafe Byte,
+};
+
+implement ObjectAttributes {
+    /// Create null/empty object attributes
+    public fn null() -> ObjectAttributes {
+        ObjectAttributes {
+            length: 48,  // sizeof(OBJECT_ATTRIBUTES) on x64
+            root_directory: Handle.NULL,
+            object_name: 0 as &UnicodeString,
+            attributes: 0,
+            security_descriptor: 0 as &unsafe Byte,
+            security_quality_of_service: 0 as &unsafe Byte,
+        }
+    }
+
+    /// Create with object name
+    public fn with_name(name: &UnicodeString) -> ObjectAttributes {
+        ObjectAttributes {
+            length: 48,
+            root_directory: Handle.NULL,
+            object_name: name,
+            attributes: OBJ_CASE_INSENSITIVE,
+            security_descriptor: 0 as &unsafe Byte,
+            security_quality_of_service: 0 as &unsafe Byte,
+        }
+    }
+}
+
+/// I/O status block for async I/O
+public type IoStatusBlock is {
+    /// Union: Status (NTSTATUS) or Pointer (PVOID)
+    status_or_pointer: Int,
+    /// Bytes transferred or file information
+    information: Int,
+};
+
+implement IoStatusBlock {
+    /// Create a zeroed I/O status block
+    public fn new() -> IoStatusBlock {
+        IoStatusBlock {
+            status_or_pointer: 0,
+            information: 0,
+        }
+    }
+
+    /// Get the status code
+    @inline
+    public fn status(&self) -> NtStatus {
+        NtStatus(self.status_or_pointer as Int32)
+    }
+
+    /// Get bytes transferred
+    @inline
+    public fn bytes_transferred(&self) -> Int {
+        self.information
+    }
+}
+
+/// Client ID (process + thread ID)
+public type ClientId is {
+    unique_process: Handle,
+    unique_thread: Handle,
+};
+
+// =============================================================================
+// Object Attributes Flags
+// =============================================================================
+
+/// Object attributes flags
+public const OBJ_INHERIT: UInt32 = 0x00000002;
+public const OBJ_PERMANENT: UInt32 = 0x00000010;
+public const OBJ_EXCLUSIVE: UInt32 = 0x00000020;
+public const OBJ_CASE_INSENSITIVE: UInt32 = 0x00000040;
+public const OBJ_OPENIF: UInt32 = 0x00000080;
+public const OBJ_OPENLINK: UInt32 = 0x00000100;
+public const OBJ_KERNEL_HANDLE: UInt32 = 0x00000200;
+public const OBJ_FORCE_ACCESS_CHECK: UInt32 = 0x00000400;
+public const OBJ_VALID_ATTRIBUTES: UInt32 = 0x000007F2;
+
+// =============================================================================
+// Access Masks
+// =============================================================================
+
+/// Generic access rights
+public const GENERIC_READ: UInt32 = 0x80000000;
+public const GENERIC_WRITE: UInt32 = 0x40000000;
+public const GENERIC_EXECUTE: UInt32 = 0x20000000;
+public const GENERIC_ALL: UInt32 = 0x10000000;
+
+/// Standard access rights
+public const DELETE: UInt32 = 0x00010000;
+public const READ_CONTROL: UInt32 = 0x00020000;
+public const WRITE_DAC: UInt32 = 0x00040000;
+public const WRITE_OWNER: UInt32 = 0x00080000;
+public const SYNCHRONIZE: UInt32 = 0x00100000;
+
+/// File access rights
+public const FILE_READ_DATA: UInt32 = 0x0001;
+public const FILE_LIST_DIRECTORY: UInt32 = 0x0001;
+public const FILE_WRITE_DATA: UInt32 = 0x0002;
+public const FILE_ADD_FILE: UInt32 = 0x0002;
+public const FILE_APPEND_DATA: UInt32 = 0x0004;
+public const FILE_ADD_SUBDIRECTORY: UInt32 = 0x0004;
+public const FILE_CREATE_PIPE_INSTANCE: UInt32 = 0x0004;
+public const FILE_READ_EA: UInt32 = 0x0008;
+public const FILE_WRITE_EA: UInt32 = 0x0010;
+public const FILE_EXECUTE: UInt32 = 0x0020;
+public const FILE_TRAVERSE: UInt32 = 0x0020;
+public const FILE_DELETE_CHILD: UInt32 = 0x0040;
+public const FILE_READ_ATTRIBUTES: UInt32 = 0x0080;
+public const FILE_WRITE_ATTRIBUTES: UInt32 = 0x0100;
+
+public const FILE_ALL_ACCESS: UInt32 = 0x001F01FF;
+public const FILE_GENERIC_READ: UInt32 = 0x00120089;
+public const FILE_GENERIC_WRITE: UInt32 = 0x00120116;
+public const FILE_GENERIC_EXECUTE: UInt32 = 0x001200A0;
+
+// =============================================================================
+// File Creation/Open Flags
+// =============================================================================
+
+/// File creation disposition
+public const FILE_SUPERSEDE: UInt32 = 0x00000000;
+public const FILE_OPEN: UInt32 = 0x00000001;
+public const FILE_CREATE: UInt32 = 0x00000002;
+public const FILE_OPEN_IF: UInt32 = 0x00000003;
+public const FILE_OVERWRITE: UInt32 = 0x00000004;
+public const FILE_OVERWRITE_IF: UInt32 = 0x00000005;
+
+/// File create options
+public const FILE_DIRECTORY_FILE: UInt32 = 0x00000001;
+public const FILE_WRITE_THROUGH: UInt32 = 0x00000002;
+public const FILE_SEQUENTIAL_ONLY: UInt32 = 0x00000004;
+public const FILE_NO_INTERMEDIATE_BUFFERING: UInt32 = 0x00000008;
+public const FILE_SYNCHRONOUS_IO_ALERT: UInt32 = 0x00000010;
+public const FILE_SYNCHRONOUS_IO_NONALERT: UInt32 = 0x00000020;
+public const FILE_NON_DIRECTORY_FILE: UInt32 = 0x00000040;
+public const FILE_CREATE_TREE_CONNECTION: UInt32 = 0x00000080;
+public const FILE_COMPLETE_IF_OPLOCKED: UInt32 = 0x00000100;
+public const FILE_NO_EA_KNOWLEDGE: UInt32 = 0x00000200;
+public const FILE_OPEN_FOR_RECOVERY: UInt32 = 0x00000400;
+public const FILE_RANDOM_ACCESS: UInt32 = 0x00000800;
+public const FILE_DELETE_ON_CLOSE: UInt32 = 0x00001000;
+public const FILE_OPEN_BY_FILE_ID: UInt32 = 0x00002000;
+public const FILE_OPEN_FOR_BACKUP_INTENT: UInt32 = 0x00004000;
+public const FILE_NO_COMPRESSION: UInt32 = 0x00008000;
+public const FILE_OPEN_REQUIRING_OPLOCK: UInt32 = 0x00010000;
+public const FILE_DISALLOW_EXCLUSIVE: UInt32 = 0x00020000;
+
+/// File share access
+public const FILE_SHARE_READ: UInt32 = 0x00000001;
+public const FILE_SHARE_WRITE: UInt32 = 0x00000002;
+public const FILE_SHARE_DELETE: UInt32 = 0x00000004;
+
+// =============================================================================
+// Memory Protection Flags
+// =============================================================================
+
+public const PAGE_NOACCESS: UInt32 = 0x01;
+public const PAGE_READONLY: UInt32 = 0x02;
+public const PAGE_READWRITE: UInt32 = 0x04;
+public const PAGE_WRITECOPY: UInt32 = 0x08;
+public const PAGE_EXECUTE: UInt32 = 0x10;
+public const PAGE_EXECUTE_READ: UInt32 = 0x20;
+public const PAGE_EXECUTE_READWRITE: UInt32 = 0x40;
+public const PAGE_EXECUTE_WRITECOPY: UInt32 = 0x80;
+public const PAGE_GUARD: UInt32 = 0x100;
+public const PAGE_NOCACHE: UInt32 = 0x200;
+public const PAGE_WRITECOMBINE: UInt32 = 0x400;
+
+// =============================================================================
+// Memory Allocation Types
+// =============================================================================
+
+public const MEM_COMMIT: UInt32 = 0x00001000;
+public const MEM_RESERVE: UInt32 = 0x00002000;
+public const MEM_DECOMMIT: UInt32 = 0x00004000;
+public const MEM_RELEASE: UInt32 = 0x00008000;
+public const MEM_FREE: UInt32 = 0x00010000;
+public const MEM_PRIVATE: UInt32 = 0x00020000;
+public const MEM_MAPPED: UInt32 = 0x00040000;
+public const MEM_RESET: UInt32 = 0x00080000;
+public const MEM_TOP_DOWN: UInt32 = 0x00100000;
+public const MEM_WRITE_WATCH: UInt32 = 0x00200000;
+public const MEM_PHYSICAL: UInt32 = 0x00400000;
+public const MEM_ROTATE: UInt32 = 0x00800000;
+public const MEM_LARGE_PAGES: UInt32 = 0x20000000;
+public const MEM_4MB_PAGES: UInt32 = 0x80000000;
+
+// =============================================================================
+// NT Native API Functions (ntdll.dll)
+// =============================================================================
+
+/// Close an object handle
+@extern("ntdll.dll")
+public fn NtClose(handle: Handle) -> NtStatus;
+
+/// Create or open a file
+@extern("ntdll.dll")
+public fn NtCreateFile(
+    file_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    io_status_block: &mut IoStatusBlock,
+    allocation_size: &LargeInteger,
+    file_attributes: UInt32,
+    share_access: UInt32,
+    create_disposition: UInt32,
+    create_options: UInt32,
+    ea_buffer: &unsafe Byte,
+    ea_length: UInt32,
+) -> NtStatus;
+
+/// Open an existing file
+@extern("ntdll.dll")
+public fn NtOpenFile(
+    file_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    io_status_block: &mut IoStatusBlock,
+    share_access: UInt32,
+    open_options: UInt32,
+) -> NtStatus;
+
+/// Read from a file
+@extern("ntdll.dll")
+public fn NtReadFile(
+    file_handle: Handle,
+    event: Handle,
+    apc_routine: &unsafe Byte,
+    apc_context: &unsafe Byte,
+    io_status_block: &mut IoStatusBlock,
+    buffer: &unsafe mut Byte,
+    length: UInt32,
+    byte_offset: &LargeInteger,
+    key: &UInt32,
+) -> NtStatus;
+
+/// Write to a file
+@extern("ntdll.dll")
+public fn NtWriteFile(
+    file_handle: Handle,
+    event: Handle,
+    apc_routine: &unsafe Byte,
+    apc_context: &unsafe Byte,
+    io_status_block: &mut IoStatusBlock,
+    buffer: &unsafe Byte,
+    length: UInt32,
+    byte_offset: &LargeInteger,
+    key: &UInt32,
+) -> NtStatus;
+
+/// Query file information
+@extern("ntdll.dll")
+public fn NtQueryInformationFile(
+    file_handle: Handle,
+    io_status_block: &mut IoStatusBlock,
+    file_information: &unsafe mut Byte,
+    length: UInt32,
+    file_information_class: UInt32,
+) -> NtStatus;
+
+/// Set file information
+@extern("ntdll.dll")
+public fn NtSetInformationFile(
+    file_handle: Handle,
+    io_status_block: &mut IoStatusBlock,
+    file_information: &unsafe Byte,
+    length: UInt32,
+    file_information_class: UInt32,
+) -> NtStatus;
+
+// =============================================================================
+// Memory Management
+// =============================================================================
+
+/// Allocate virtual memory
+@extern("ntdll.dll")
+public fn NtAllocateVirtualMemory(
+    process_handle: Handle,
+    base_address: &mut &unsafe Byte,
+    zero_bits: Int,
+    region_size: &mut Int,
+    allocation_type: UInt32,
+    protect: UInt32,
+) -> NtStatus;
+
+/// Free virtual memory
+@extern("ntdll.dll")
+public fn NtFreeVirtualMemory(
+    process_handle: Handle,
+    base_address: &mut &unsafe Byte,
+    region_size: &mut Int,
+    free_type: UInt32,
+) -> NtStatus;
+
+/// Protect virtual memory
+@extern("ntdll.dll")
+public fn NtProtectVirtualMemory(
+    process_handle: Handle,
+    base_address: &mut &unsafe Byte,
+    region_size: &mut Int,
+    new_protect: UInt32,
+    old_protect: &mut UInt32,
+) -> NtStatus;
+
+/// Query virtual memory
+@extern("ntdll.dll")
+public fn NtQueryVirtualMemory(
+    process_handle: Handle,
+    base_address: &unsafe Byte,
+    memory_information_class: UInt32,
+    memory_information: &unsafe mut Byte,
+    memory_information_length: Int,
+    return_length: &mut Int,
+) -> NtStatus;
+
+// =============================================================================
+// Process and Thread
+// =============================================================================
+
+/// Get current process handle (-1)
+@inline
+public fn nt_current_process() -> Handle {
+    Handle(-1)
+}
+
+/// Get current thread handle (-2)
+@inline
+public fn nt_current_thread() -> Handle {
+    Handle(-2)
+}
+
+/// Get current process ID
+@extern("ntdll.dll")
+public fn NtCurrentProcessId() -> Int;
+
+/// Get current thread ID
+@extern("ntdll.dll")
+public fn NtCurrentThreadId() -> Int;
+
+/// Create a new thread
+@extern("ntdll.dll")
+public fn NtCreateThreadEx(
+    thread_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    process_handle: Handle,
+    start_routine: &unsafe Byte,
+    argument: &unsafe Byte,
+    create_flags: UInt32,
+    zero_bits: Int,
+    stack_size: Int,
+    maximum_stack_size: Int,
+    attribute_list: &unsafe Byte,
+) -> NtStatus;
+
+/// Terminate a thread
+@extern("ntdll.dll")
+public fn NtTerminateThread(
+    thread_handle: Handle,
+    exit_status: NtStatus,
+) -> NtStatus;
+
+/// Suspend a thread
+@extern("ntdll.dll")
+public fn NtSuspendThread(
+    thread_handle: Handle,
+    previous_suspend_count: &mut UInt32,
+) -> NtStatus;
+
+/// Resume a thread
+@extern("ntdll.dll")
+public fn NtResumeThread(
+    thread_handle: Handle,
+    previous_suspend_count: &mut UInt32,
+) -> NtStatus;
+
+/// Wait for single object
+@extern("ntdll.dll")
+public fn NtWaitForSingleObject(
+    handle: Handle,
+    alertable: Bool,
+    timeout: &LargeInteger,
+) -> NtStatus;
+
+/// Wait for multiple objects
+@extern("ntdll.dll")
+public fn NtWaitForMultipleObjects(
+    count: UInt32,
+    handles: &Handle,
+    wait_type: UInt32,
+    alertable: Bool,
+    timeout: &LargeInteger,
+) -> NtStatus;
+
+/// Signal object and wait
+@extern("ntdll.dll")
+public fn NtSignalAndWaitForSingleObject(
+    signal_handle: Handle,
+    wait_handle: Handle,
+    alertable: Bool,
+    timeout: &LargeInteger,
+) -> NtStatus;
+
+/// Terminate current process
+@extern("ntdll.dll")
+public fn NtTerminateProcess(
+    process_handle: Handle,
+    exit_status: NtStatus,
+) -> NtStatus;
+
+// =============================================================================
+// Synchronization Objects
+// =============================================================================
+
+/// Create an event object
+@extern("ntdll.dll")
+public fn NtCreateEvent(
+    event_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    event_type: UInt32,
+    initial_state: Bool,
+) -> NtStatus;
+
+/// Set an event
+@extern("ntdll.dll")
+public fn NtSetEvent(
+    event_handle: Handle,
+    previous_state: &mut Int32,
+) -> NtStatus;
+
+/// Reset an event
+@extern("ntdll.dll")
+public fn NtResetEvent(
+    event_handle: Handle,
+    previous_state: &mut Int32,
+) -> NtStatus;
+
+/// Pulse an event
+@extern("ntdll.dll")
+public fn NtPulseEvent(
+    event_handle: Handle,
+    previous_state: &mut Int32,
+) -> NtStatus;
+
+/// Clear an event
+@extern("ntdll.dll")
+public fn NtClearEvent(
+    event_handle: Handle,
+) -> NtStatus;
+
+/// Create a semaphore
+@extern("ntdll.dll")
+public fn NtCreateSemaphore(
+    semaphore_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    initial_count: Int32,
+    maximum_count: Int32,
+) -> NtStatus;
+
+/// Release a semaphore
+@extern("ntdll.dll")
+public fn NtReleaseSemaphore(
+    semaphore_handle: Handle,
+    release_count: Int32,
+    previous_count: &mut Int32,
+) -> NtStatus;
+
+/// Create a mutex
+@extern("ntdll.dll")
+public fn NtCreateMutant(
+    mutant_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    initial_owner: Bool,
+) -> NtStatus;
+
+/// Release a mutex
+@extern("ntdll.dll")
+public fn NtReleaseMutant(
+    mutant_handle: Handle,
+    previous_count: &mut Int32,
+) -> NtStatus;
+
+// =============================================================================
+// Time Functions
+// =============================================================================
+
+/// Query system time (100ns intervals since Jan 1, 1601)
+@extern("ntdll.dll")
+public fn NtQuerySystemTime(
+    system_time: &mut LargeInteger,
+) -> NtStatus;
+
+/// Query performance counter
+@extern("ntdll.dll")
+public fn NtQueryPerformanceCounter(
+    performance_counter: &mut LargeInteger,
+    performance_frequency: &mut LargeInteger,
+) -> NtStatus;
+
+/// Delay execution (sleep)
+@extern("ntdll.dll")
+public fn NtDelayExecution(
+    alertable: Bool,
+    delay_interval: &LargeInteger,
+) -> NtStatus;
+
+/// Set timer resolution
+@extern("ntdll.dll")
+public fn NtSetTimerResolution(
+    desired_resolution: UInt32,
+    set_resolution: Bool,
+    current_resolution: &mut UInt32,
+) -> NtStatus;
+
+// =============================================================================
+// System Information
+// =============================================================================
+
+/// Query system information
+@extern("ntdll.dll")
+public fn NtQuerySystemInformation(
+    system_information_class: UInt32,
+    system_information: &unsafe mut Byte,
+    system_information_length: UInt32,
+    return_length: &mut UInt32,
+) -> NtStatus;
+
+/// Query process information
+@extern("ntdll.dll")
+public fn NtQueryInformationProcess(
+    process_handle: Handle,
+    process_information_class: UInt32,
+    process_information: &unsafe mut Byte,
+    process_information_length: UInt32,
+    return_length: &mut UInt32,
+) -> NtStatus;
+
+/// System information classes
+public const SystemBasicInformation: UInt32 = 0;
+public const SystemProcessorInformation: UInt32 = 1;
+public const SystemPerformanceInformation: UInt32 = 2;
+public const SystemTimeOfDayInformation: UInt32 = 3;
+public const SystemProcessInformation: UInt32 = 5;
+
+// =============================================================================
+// I/O Completion Ports
+// =============================================================================
+
+/// Create an I/O completion port
+@extern("ntdll.dll")
+public fn NtCreateIoCompletion(
+    io_completion_handle: &mut Handle,
+    desired_access: UInt32,
+    object_attributes: &ObjectAttributes,
+    count: UInt32,
+) -> NtStatus;
+
+/// Set I/O completion (queue a completion packet)
+@extern("ntdll.dll")
+public fn NtSetIoCompletion(
+    io_completion_handle: Handle,
+    key_context: &unsafe Byte,
+    apc_context: &unsafe Byte,
+    io_status: NtStatus,
+    io_status_information: Int,
+) -> NtStatus;
+
+/// Remove I/O completion (dequeue a completion packet)
+@extern("ntdll.dll")
+public fn NtRemoveIoCompletion(
+    io_completion_handle: Handle,
+    key_context: &mut &unsafe Byte,
+    apc_context: &mut &unsafe Byte,
+    io_status_block: &mut IoStatusBlock,
+    timeout: &LargeInteger,
+) -> NtStatus;
+
+/// Remove multiple I/O completions
+@extern("ntdll.dll")
+public fn NtRemoveIoCompletionEx(
+    io_completion_handle: Handle,
+    io_completion_information: &unsafe mut Byte,
+    count: UInt32,
+    num_entries_removed: &mut UInt32,
+    timeout: &LargeInteger,
+    alertable: Bool,
+) -> NtStatus;
+
+/// Associate file handle with completion port
+@extern("ntdll.dll")
+public fn NtSetInformationFile(
+    file_handle: Handle,
+    io_status_block: &mut IoStatusBlock,
+    file_information: &unsafe Byte,
+    length: UInt32,
+    file_information_class: UInt32,
+) -> NtStatus;
+
+// File information class for IOCP association
+public const FileCompletionInformation: UInt32 = 30;
+
+/// File completion information structure
+public type FileCompletionInfo is {
+    port: Handle,
+    key: &unsafe Byte,
+};
+
+// =============================================================================
+// Event Types
+// =============================================================================
+
+/// Notification event (auto-reset)
+public const NotificationEvent: UInt32 = 0;
+
+/// Synchronization event (manual-reset)
+public const SynchronizationEvent: UInt32 = 1;
+
+// =============================================================================
+// Wait Types
+// =============================================================================
+
+/// Wait for all objects
+public const WaitAll: UInt32 = 0;
+
+/// Wait for any object
+public const WaitAny: UInt32 = 1;
+
+// =============================================================================
+// Thread Creation Flags
+// =============================================================================
+
+public const THREAD_CREATE_FLAGS_CREATE_SUSPENDED: UInt32 = 0x00000001;
+public const THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH: UInt32 = 0x00000002;
+public const THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER: UInt32 = 0x00000004;
+public const THREAD_CREATE_FLAGS_HAS_SECURITY_DESCRIPTOR: UInt32 = 0x00000010;
+public const THREAD_CREATE_FLAGS_ACCESS_CHECK_IN_TARGET: UInt32 = 0x00000020;
+public const THREAD_CREATE_FLAGS_INITIAL_THREAD: UInt32 = 0x00000080;
+
+// =============================================================================
+// Safe Wrappers
+// =============================================================================
+
+/// Close a handle safely
+public fn safe_close(handle: Handle) -> Result<(), NtStatus> {
+    if !handle.is_valid() {
+        return Ok(());
+    }
+    let status = NtClose(handle);
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
+/// Allocate virtual memory safely
+public fn safe_allocate(
+    size: Int,
+    protect: UInt32,
+) -> Result<&unsafe Byte, NtStatus> {
+    let mut base: &unsafe Byte = 0 as &unsafe Byte;
+    let mut region_size = size;
+
+    let status = NtAllocateVirtualMemory(
+        nt_current_process(),
+        &mut base,
+        0,
+        &mut region_size,
+        MEM_COMMIT | MEM_RESERVE,
+        protect,
+    );
+
+    if status.is_success() {
+        Ok(base)
+    } else {
+        Err(status)
+    }
+}
+
+/// Free virtual memory safely
+public fn safe_free(base: &unsafe Byte) -> Result<(), NtStatus> {
+    let mut base_mut = base;
+    let mut region_size = 0;
+
+    let status = NtFreeVirtualMemory(
+        nt_current_process(),
+        &mut base_mut,
+        &mut region_size,
+        MEM_RELEASE,
+    );
+
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
+/// Sleep for specified nanoseconds (negative = relative time)
+public fn safe_delay(nanoseconds: Int64) -> Result<(), NtStatus> {
+    // Convert to 100ns intervals (negative for relative time)
+    let interval = LargeInteger(-(nanoseconds / 100));
+    let status = NtDelayExecution(false, &interval);
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}

@@ -1,0 +1,16 @@
+// Test spawn expressions
+async fn compute(x: Int) -> Int {
+    x * 2
+}
+
+fn main() {
+    // Test spawn
+    let handle1 = spawn compute(5);
+    let handle2 = spawn compute(10);
+
+    let result1 = handle1.await;
+    let result2 = handle2.await;
+
+    print(f"Spawn result 1: {result1}");
+    print(f"Spawn result 2: {result2}");
+}

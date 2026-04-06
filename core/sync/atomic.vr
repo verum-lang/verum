@@ -1,0 +1,1255 @@
+// =============================================================================
+// atomic.vr - Atomic types and operations
+// =============================================================================
+// Layer: 2.5 (Sync)
+// Dependencies: core, sys/{linux,darwin,windows}/thread, core/intrinsics
+// =============================================================================
+//
+// # Industrial-Grade Intrinsic System
+//
+// This module uses typed atomic intrinsics from core/intrinsics:
+// - atomic_load_u8/UInt16/UInt32/UInt64(ptr, ordering) - Typed atomic loads
+// - atomic_store_u8/UInt16/UInt32/UInt64(ptr, value, ordering) - Typed atomic stores
+// - atomic_cas_u32/UInt64(ptr, expected, desired, success, failure) - Typed CAS
+// - atomic_fetch_add_u32/UInt64(ptr, value, ordering) - Typed fetch-add
+// - atomic_fetch_sub_u32/UInt64(ptr, value, ordering) - Typed fetch-sub
+//
+// The @intrinsic("name") attribute establishes intrinsic identity at declaration
+// time. When these functions are called through imports, the codegen recognizes
+// them via FunctionInfo.intrinsic_name and routes to the intrinsic codegen path.
+//
+// Futex operations use platform-specific implementations:
+// - Linux: SYS_FUTEX syscall via sys/linux/thread.vr
+// - macOS: pthread_cond via sys/darwin/thread.vr
+// - Windows: WaitForSingleObject via sys/windows/thread.vr
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+module core.sync.atomic;
+mount core.*;
+
+// Import typed atomic intrinsics from stdlib.intrinsics
+mount core.intrinsics.{
+    // Memory/sync intrinsics
+    compiler_fence, spin_hint,
+    // Typed atomic load intrinsics
+    atomic_load_u8, atomic_load_u16, atomic_load_u32, atomic_load_u64,
+    // Typed atomic store intrinsics
+    atomic_store_u8, atomic_store_u16, atomic_store_u32, atomic_store_u64,
+    // Typed atomic CAS intrinsics
+    atomic_cas_u32, atomic_cas_u64,
+    // Typed atomic fetch operations
+    atomic_fetch_add_u32, atomic_fetch_add_u64,
+    atomic_fetch_sub_u32, atomic_fetch_sub_u64,
+    atomic_fetch_and_u64, atomic_fetch_or_u64,
+};
+
+// Memory ordering constants for atomic operations.
+// These match the encoding used in VBC opcodes and LLVM.
+// Note: Defined locally because VBC codegen doesn't fully support constant imports yet.
+const ORDERING_RELAXED: UInt8 = 0;
+const ORDERING_ACQUIRE: UInt8 = 1;
+const ORDERING_RELEASE: UInt8 = 2;
+const ORDERING_ACQ_REL: UInt8 = 3;
+const ORDERING_SEQ_CST: UInt8 = 4;
+
+// =============================================================================
+// V-LLSI Native Futex Imports (cross-platform)
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+// =============================================================================
+// Memory Ordering
+// =============================================================================
+
+// Memory ordering specifies how atomic operations synchronize memory.
+// These map directly to LLVM/hardware memory ordering semantics.
+public type MemoryOrdering is
+    | Relaxed      // No synchronization
+    | Acquire      // Prevents loads from being reordered before
+    | Release      // Prevents stores from being reordered after
+    | AcqRel       // Both Acquire && Release
+    | SeqCst;      // Sequential consistency (strongest)
+
+// AtomicOrdering alias for convenience in atomic contexts.
+// For comparison ordering (Less|Equal|Greater), use core.base.ordering.Ordering.
+// NOTE: Do NOT alias plain "Ordering" here — it conflicts with core.base.ordering.Ordering
+// which defines Less|Equal|Greater and is expected by most user code.
+public type AtomicOrdering is MemoryOrdering;
+
+// Convert Ordering enum to UInt8 for intrinsic calls.
+// This maps to the ordering constants from stdlib.intrinsics.
+fn ordering_to_u8(order: MemoryOrdering) -> UInt8 {
+    match order {
+        Relaxed => ORDERING_RELAXED,
+        Acquire => ORDERING_ACQUIRE,
+        Release => ORDERING_RELEASE,
+        AcqRel => ORDERING_ACQ_REL,
+        SeqCst => ORDERING_SEQ_CST,
+    }
+}
+
+// Memory fence with specified ordering.
+//
+// Uses native CPU fence instructions:
+// - x86_64: mfence (SeqCst), lfence (Acquire), sfence (Release)
+// - ARM64: dmb ish variants
+public fn fence(order: MemoryOrdering) {
+    match order {
+        Relaxed => {}  // No fence needed
+        Acquire => {
+            @cfg(target_arch = "x86_64")
+            @asm("lfence");
+            @cfg(target_arch = "aarch64")
+            @asm("dmb ishld");
+        }
+        Release => {
+            @cfg(target_arch = "x86_64")
+            @asm("sfence");
+            @cfg(target_arch = "aarch64")
+            @asm("dmb ishst");
+        }
+        AcqRel | SeqCst => {
+            @cfg(target_arch = "x86_64")
+            @asm("mfence");
+            @cfg(target_arch = "aarch64")
+            @asm("dmb ish");
+        }
+    }
+}
+
+// NOTE: compiler_fence is available via stdlib.intrinsics.compiler_fence
+// Import it directly where needed for explicit dependency tracking.
+
+// =============================================================================
+// AtomicInt
+// =============================================================================
+
+// Atomic integer for lock-free concurrent access.
+public type AtomicInt is {
+    value: Int,  // Uses 64-bit storage
+};
+
+implement AtomicInt {
+    // Create new atomic with initial value.
+    public fn new(val: Int) -> AtomicInt {
+        AtomicInt { value: val }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u64 intrinsic (Int is 64-bit).
+    public fn load(&self, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *const UInt64;
+        atomic_load_u64(ptr, ordering_to_u8(order)) as Int
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u64 intrinsic.
+    public fn store(&self, val: Int, order: MemoryOrdering) {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        atomic_store_u64(ptr, val as UInt64, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Implemented using CAS loop with typed intrinsic.
+    public fn swap(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u64(ptr as *const UInt64, order_u8);
+            let (old, success) = atomic_cas_u64(ptr, current, val as UInt64, order_u8, ORDERING_RELAXED);
+            if success {
+                return old as Int;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses typed atomic_cas_u64 intrinsic.
+    public fn compare_exchange(
+        &self,
+        current: Int,
+        new: Int,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Int, Int> {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        let (actual, did_swap) = atomic_cas_u64(
+            ptr,
+            current as UInt64,
+            new as UInt64,
+            ordering_to_u8(success),
+            ordering_to_u8(failure)
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual as Int)
+        }
+    }
+
+    // Atomic fetch-add, returns old value.
+    // Uses typed atomic_fetch_add_u64 intrinsic.
+    public fn fetch_add(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        atomic_fetch_add_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
+    }
+
+    // Atomic fetch-sub, returns old value.
+    // Uses typed atomic_fetch_sub_u64 intrinsic.
+    public fn fetch_sub(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        atomic_fetch_sub_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
+    }
+
+    // Increment && return new value.
+    public fn increment(&self, order: MemoryOrdering) -> Int {
+        self.fetch_add(1, order) + 1
+    }
+
+    // Decrement && return new value.
+    public fn decrement(&self, order: MemoryOrdering) -> Int {
+        self.fetch_sub(1, order) - 1
+    }
+
+    // Atomic fetch-and (bitwise AND), returns old value.
+    // Uses typed atomic_fetch_and_u64 intrinsic.
+    public fn fetch_and(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        atomic_fetch_and_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
+    }
+
+    // Atomic fetch-or (bitwise OR), returns old value.
+    // Uses typed atomic_fetch_or_u64 intrinsic.
+    public fn fetch_or(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        atomic_fetch_or_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
+    }
+
+    // Atomic fetch-max, returns old value.
+    // Stores the maximum of the current value and `val`.
+    public fn fetch_max(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u64(ptr as *const UInt64, order_u8);
+            let current_int = current as Int;
+            if current_int >= val {
+                return current_int;
+            }
+            let (_, success) = atomic_cas_u64(ptr, current, val as UInt64, order_u8, ORDERING_RELAXED);
+            if success {
+                return current_int;
+            }
+        }
+    }
+
+    // Atomic fetch-min, returns old value.
+    // Stores the minimum of the current value and `val`.
+    public fn fetch_min(&self, val: Int, order: MemoryOrdering) -> Int {
+        let ptr = &self.value as *const Int as *mut UInt64;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u64(ptr as *const UInt64, order_u8);
+            let current_int = current as Int;
+            if current_int <= val {
+                return current_int;
+            }
+            let (_, success) = atomic_cas_u64(ptr, current, val as UInt64, order_u8, ORDERING_RELAXED);
+            if success {
+                return current_int;
+            }
+        }
+    }
+
+    // Get mutable reference to underlying value.
+    // SAFETY: Caller must ensure exclusive access.
+    public fn get_mut(&mut self) -> &mut Int {
+        &mut self.value
+    }
+}
+
+implement Default for AtomicInt {
+    fn default() -> AtomicInt {
+        AtomicInt.new(0)
+    }
+}
+
+implement Debug for AtomicInt {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicInt(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicU8
+// =============================================================================
+
+// Atomic unsigned 8-bit integer for lock-free concurrent access.
+public type AtomicU8 is {
+    value: Byte,  // 8-bit storage
+};
+
+implement AtomicU8 {
+    // Create new atomic with initial value.
+    public fn new(val: Byte) -> AtomicU8 {
+        AtomicU8 { value: val }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u8 intrinsic.
+    public fn load(&self, order: MemoryOrdering) -> Byte {
+        let ptr = &self.value as *const Byte as *const UInt8;
+        atomic_load_u8(ptr, ordering_to_u8(order)) as Byte
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u8 intrinsic.
+    public fn store(&self, val: Byte, order: MemoryOrdering) {
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_store_u8(ptr, val as UInt8, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Uses u32-aligned CAS loop for true atomicity on sub-word types.
+    public fn swap(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let order_u8 = ordering_to_u8(order);
+        // Align down to 4-byte boundary for u32 CAS
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let new_word = (word & !mask) | (((val as UInt32) & 0xFF) << shift);
+            let (old_word, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return ((old_word >> shift) & 0xFF) as Byte;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses u32-aligned word-level CAS with byte masking for true atomicity.
+    public fn compare_exchange(
+        &self,
+        current: Byte,
+        new: Byte,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Byte, Byte> {
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let success_u8 = ordering_to_u8(success);
+        let failure_u8 = ordering_to_u8(failure);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
+            let actual_byte = ((word >> shift) & 0xFF) as Byte;
+            if actual_byte != current {
+                return Err(actual_byte);
+            }
+            let new_word = (word & !mask) | (((new as UInt32) & 0xFF) << shift);
+            let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
+            if did_swap {
+                return Ok(current);
+            }
+            // Word changed by another thread on a different byte — retry
+        }
+    }
+
+    // Atomic fetch-add, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_add(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_byte = ((word >> shift) & 0xFF) as Byte;
+            let new_byte = ((old_byte as UInt32 + val as UInt32) & 0xFF) as UInt32;
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_byte;
+            }
+        }
+    }
+
+    // Atomic fetch-sub, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_sub(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_byte = ((word >> shift) & 0xFF) as Byte;
+            let new_byte = ((old_byte as UInt32 - val as UInt32) & 0xFF) as UInt32;
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_byte;
+            }
+        }
+    }
+
+    // Atomic fetch-or, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_or(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_byte = ((word >> shift) & 0xFF) as Byte;
+            let new_byte = ((old_byte as UInt32 | val as UInt32) & 0xFF) as UInt32;
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_byte;
+            }
+        }
+    }
+
+    // Atomic fetch-and, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_and(&self, val: Byte, order: MemoryOrdering) -> Byte {
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_byte = ((word >> shift) & 0xFF) as Byte;
+            let new_byte = ((old_byte as UInt32 & val as UInt32) & 0xFF) as UInt32;
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_byte;
+            }
+        }
+    }
+
+    // Get mutable reference to underlying value.
+    public fn get_mut(&mut self) -> &mut Byte {
+        &mut self.value
+    }
+}
+
+implement Default for AtomicU8 {
+    fn default() -> AtomicU8 {
+        AtomicU8.new(0)
+    }
+}
+
+implement Debug for AtomicU8 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicU8(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicU16
+// =============================================================================
+
+// Atomic unsigned 16-bit integer for lock-free concurrent access.
+public type AtomicU16 is {
+    value: UInt16,  // 16-bit storage
+};
+
+implement AtomicU16 {
+    // Create new atomic with initial value.
+    public fn new(val: UInt16) -> AtomicU16 {
+        AtomicU16 { value: val }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u16 intrinsic.
+    public fn load(&self, order: MemoryOrdering) -> UInt16 {
+        let ptr = &self.value as *const UInt16;
+        atomic_load_u16(ptr, ordering_to_u8(order))
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u16 intrinsic.
+    public fn store(&self, val: UInt16, order: MemoryOrdering) {
+        let ptr = &self.value as *const UInt16 as *mut UInt16;
+        atomic_store_u16(ptr, val, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Uses u32-aligned CAS loop for true atomicity on sub-word types.
+    public fn swap(&self, val: UInt16, order: MemoryOrdering) -> UInt16 {
+        let order_u8 = ordering_to_u8(order);
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let new_word = (word & !mask) | (((val as UInt32) & 0xFFFF) << shift);
+            let (old_word, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return ((old_word >> shift) & 0xFFFF) as UInt16;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses u32-aligned word-level CAS with halfword masking for true atomicity.
+    public fn compare_exchange(
+        &self,
+        current: UInt16,
+        new: UInt16,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt16, UInt16> {
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        let success_u8 = ordering_to_u8(success);
+        let failure_u8 = ordering_to_u8(failure);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
+            let actual_half = ((word >> shift) & 0xFFFF) as UInt16;
+            if actual_half != current {
+                return Err(actual_half);
+            }
+            let new_word = (word & !mask) | (((new as UInt32) & 0xFFFF) << shift);
+            let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
+            if did_swap {
+                return Ok(current);
+            }
+        }
+    }
+
+    // Atomic fetch-add, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_add(&self, val: UInt16, order: MemoryOrdering) -> UInt16 {
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_half = ((word >> shift) & 0xFFFF) as UInt16;
+            let new_half = ((old_half as UInt32 + val as UInt32) & 0xFFFF) as UInt32;
+            let new_word = (word & !mask) | (new_half << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_half;
+            }
+        }
+    }
+
+    // Atomic fetch-sub, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_sub(&self, val: UInt16, order: MemoryOrdering) -> UInt16 {
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_half = ((word >> shift) & 0xFFFF) as UInt16;
+            let new_half = ((old_half as UInt32 - val as UInt32) & 0xFFFF) as UInt32;
+            let new_word = (word & !mask) | (new_half << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_half;
+            }
+        }
+    }
+
+    // Atomic fetch-or, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_or(&self, val: UInt16, order: MemoryOrdering) -> UInt16 {
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_half = ((word >> shift) & 0xFFFF) as UInt16;
+            let new_half = ((old_half as UInt32 | val as UInt32) & 0xFFFF) as UInt32;
+            let new_word = (word & !mask) | (new_half << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_half;
+            }
+        }
+    }
+
+    // Atomic fetch-and, returns old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn fetch_and(&self, val: UInt16, order: MemoryOrdering) -> UInt16 {
+        let half_ptr = &self.value as *const UInt16 as Int;
+        let aligned_ptr = (half_ptr & !3) as *mut UInt32;
+        let half_offset = ((half_ptr & 2) >> 1) as UInt32;
+        let shift = half_offset * 16;
+        let mask: UInt32 = 0xFFFF << shift;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let old_half = ((word >> shift) & 0xFFFF) as UInt16;
+            let new_half = ((old_half as UInt32 & val as UInt32) & 0xFFFF) as UInt32;
+            let new_word = (word & !mask) | (new_half << shift);
+            let (_, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return old_half;
+            }
+        }
+    }
+
+    // Get mutable reference to underlying value.
+    public fn get_mut(&mut self) -> &mut UInt16 {
+        &mut self.value
+    }
+}
+
+implement Default for AtomicU16 {
+    fn default() -> AtomicU16 {
+        AtomicU16.new(0)
+    }
+}
+
+implement Debug for AtomicU16 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicU16(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicU32
+// =============================================================================
+
+// Atomic unsigned 32-bit integer for lock-free concurrent access.
+public type AtomicU32 is {
+    value: UInt32,  // 32-bit storage
+};
+
+implement AtomicU32 {
+    // Create new atomic with initial value.
+    public fn new(val: UInt32) -> AtomicU32 {
+        AtomicU32 { value: val }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u32 intrinsic.
+    public fn load(&self, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32;
+        atomic_load_u32(ptr, ordering_to_u8(order))
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u32 intrinsic.
+    public fn store(&self, val: UInt32, order: MemoryOrdering) {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        atomic_store_u32(ptr, val, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Implemented using CAS loop with typed atomic_cas_u32 intrinsic.
+    public fn swap(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u32(ptr as *const UInt32, order_u8);
+            let (old, success) = atomic_cas_u32(ptr, current, val, order_u8, ORDERING_RELAXED);
+            if success {
+                return old;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses typed atomic_cas_u32 intrinsic.
+    public fn compare_exchange(
+        &self,
+        current: UInt32,
+        new: UInt32,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt32, UInt32> {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        let (actual, did_swap) = atomic_cas_u32(
+            ptr,
+            current,
+            new,
+            ordering_to_u8(success),
+            ordering_to_u8(failure)
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual)
+        }
+    }
+
+    // Atomic fetch-add, returns old value.
+    // Uses typed atomic_fetch_add_u32 intrinsic.
+    public fn fetch_add(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        atomic_fetch_add_u32(ptr, val, ordering_to_u8(order))
+    }
+
+    // Atomic fetch-sub, returns old value.
+    // Uses typed atomic_fetch_sub_u32 intrinsic.
+    public fn fetch_sub(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        atomic_fetch_sub_u32(ptr, val, ordering_to_u8(order))
+    }
+
+    // Atomic fetch-or, returns old value.
+    // Emulated via CAS loop (no UInt32 fetch-or intrinsic).
+    public fn fetch_or(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u32(ptr as *const UInt32, order_u8);
+            let new_val = current | val;
+            let (old, success) = atomic_cas_u32(ptr, current, new_val, order_u8, ORDERING_RELAXED);
+            if success {
+                return old;
+            }
+        }
+    }
+
+    // Atomic fetch-and, returns old value.
+    // Emulated via CAS loop (no UInt32 fetch-and intrinsic).
+    public fn fetch_and(&self, val: UInt32, order: MemoryOrdering) -> UInt32 {
+        let ptr = &self.value as *const UInt32 as *mut UInt32;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u32(ptr as *const UInt32, order_u8);
+            let new_val = current & val;
+            let (old, success) = atomic_cas_u32(ptr, current, new_val, order_u8, ORDERING_RELAXED);
+            if success {
+                return old;
+            }
+        }
+    }
+
+    // Get mutable reference to underlying value.
+    public fn get_mut(&mut self) -> &mut UInt32 {
+        &mut self.value
+    }
+}
+
+implement Default for AtomicU32 {
+    fn default() -> AtomicU32 {
+        AtomicU32.new(0)
+    }
+}
+
+implement Debug for AtomicU32 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicU32(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicU64
+// =============================================================================
+
+// Atomic unsigned 64-bit integer for lock-free concurrent access.
+public type AtomicU64 is {
+    value: UInt64,  // 64-bit storage
+};
+
+implement AtomicU64 {
+    // Create new atomic with initial value.
+    public fn new(val: UInt64) -> AtomicU64 {
+        AtomicU64 { value: val }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u64 intrinsic.
+    public fn load(&self, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64;
+        atomic_load_u64(ptr, ordering_to_u8(order))
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u64 intrinsic.
+    public fn store(&self, val: UInt64, order: MemoryOrdering) {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        atomic_store_u64(ptr, val, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Implemented using CAS loop with typed atomic_cas_u64 intrinsic.
+    public fn swap(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u64(ptr as *const UInt64, order_u8);
+            let (old, success) = atomic_cas_u64(ptr, current, val, order_u8, ORDERING_RELAXED);
+            if success {
+                return old;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses typed atomic_cas_u64 intrinsic.
+    public fn compare_exchange(
+        &self,
+        current: UInt64,
+        new: UInt64,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<UInt64, UInt64> {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        let (actual, did_swap) = atomic_cas_u64(
+            ptr,
+            current,
+            new,
+            ordering_to_u8(success),
+            ordering_to_u8(failure)
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual)
+        }
+    }
+
+    // Atomic fetch-add, returns old value.
+    // Uses typed atomic_fetch_add_u64 intrinsic.
+    public fn fetch_add(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        atomic_fetch_add_u64(ptr, val, ordering_to_u8(order))
+    }
+
+    // Atomic fetch-sub, returns old value.
+    // Uses typed atomic_fetch_sub_u64 intrinsic.
+    public fn fetch_sub(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        atomic_fetch_sub_u64(ptr, val, ordering_to_u8(order))
+    }
+
+    // Atomic fetch-or, returns old value.
+    // Uses typed atomic_fetch_or_u64 intrinsic.
+    public fn fetch_or(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        atomic_fetch_or_u64(ptr, val, ordering_to_u8(order))
+    }
+
+    // Atomic fetch-and, returns old value.
+    // Uses typed atomic_fetch_and_u64 intrinsic.
+    public fn fetch_and(&self, val: UInt64, order: MemoryOrdering) -> UInt64 {
+        let ptr = &self.value as *const UInt64 as *mut UInt64;
+        atomic_fetch_and_u64(ptr, val, ordering_to_u8(order))
+    }
+
+    // Get mutable reference to underlying value.
+    public fn get_mut(&mut self) -> &mut UInt64 {
+        &mut self.value
+    }
+}
+
+implement Default for AtomicU64 {
+    fn default() -> AtomicU64 {
+        AtomicU64.new(0)
+    }
+}
+
+implement Debug for AtomicU64 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicU64(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicBool
+// =============================================================================
+
+// Atomic boolean for lock-free concurrent access.
+public type AtomicBool is {
+    value: Byte,  // 0 = false, 1 = true
+};
+
+implement AtomicBool {
+    // Create new atomic with initial value.
+    public fn new(val: Bool) -> AtomicBool {
+        AtomicBool { value: if val { 1 } else { 0 } }
+    }
+
+    // Load value with ordering.
+    // Uses typed atomic_load_u8 intrinsic (Bool stored as Byte).
+    public fn load(&self, order: MemoryOrdering) -> Bool {
+        let ptr = &self.value as *const Byte as *const UInt8;
+        atomic_load_u8(ptr, ordering_to_u8(order)) != 0
+    }
+
+    // Store value with ordering.
+    // Uses typed atomic_store_u8 intrinsic.
+    public fn store(&self, val: Bool, order: MemoryOrdering) {
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        atomic_store_u8(ptr, if val { 1 } else { 0 }, ordering_to_u8(order));
+    }
+
+    // Swap value, returning old value.
+    // Uses u32-aligned CAS loop for true atomicity.
+    public fn swap(&self, val: Bool, order: MemoryOrdering) -> Bool {
+        let order_u8 = ordering_to_u8(order);
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let new_byte: UInt32 = if val { 1 } else { 0 };
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (old_word, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
+            if success {
+                return ((old_word >> shift) & 0xFF) != 0;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses u32-aligned word-level CAS for true atomicity.
+    public fn compare_exchange(
+        &self,
+        current: Bool,
+        new: Bool,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<Bool, Bool> {
+        let current_byte: UInt32 = if current { 1 } else { 0 };
+        let new_byte: UInt32 = if new { 1 } else { 0 };
+        let byte_ptr = &self.value as *const Byte as Int;
+        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
+        let byte_offset = (byte_ptr & 3) as UInt32;
+        let shift = byte_offset * 8;
+        let mask: UInt32 = 0xFF << shift;
+        let success_u8 = ordering_to_u8(success);
+        let failure_u8 = ordering_to_u8(failure);
+        loop {
+            let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
+            let actual_byte = (word >> shift) & 0xFF;
+            if actual_byte != current_byte {
+                return Err(actual_byte != 0);
+            }
+            let new_word = (word & !mask) | (new_byte << shift);
+            let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
+            if did_swap {
+                return Ok(current);
+            }
+        }
+    }
+
+    // Get mutable reference to underlying value.
+    public fn get_mut(&mut self) -> &mut Bool {
+        // Safe because we have exclusive access
+        unsafe { &mut *(&mut self.value as *mut Byte as *mut Bool) }
+    }
+}
+
+implement Default for AtomicBool {
+    fn default() -> AtomicBool {
+        AtomicBool.new(false)
+    }
+}
+
+implement Debug for AtomicBool {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("AtomicBool(")?;
+        self.load(MemoryOrdering.SeqCst).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// AtomicPtr<T>
+// =============================================================================
+
+// Atomic pointer for lock-free concurrent access.
+public type AtomicPtr<T> is {
+    ptr: Int,  // Pointer stored as integer
+};
+
+implement<T> AtomicPtr<T> {
+    // Create new atomic pointer.
+    public fn new(ptr: &unsafe T) -> AtomicPtr<T> {
+        AtomicPtr { ptr: ptr as Int }
+    }
+
+    // Create null atomic pointer.
+    public fn null() -> AtomicPtr<T> {
+        AtomicPtr { ptr: 0 }
+    }
+
+    // Load pointer with ordering.
+    // Uses typed atomic_load_u64 intrinsic (pointers are 64-bit).
+    public fn load(&self, order: MemoryOrdering) -> &unsafe T {
+        let ptr = &self.ptr as *const Int as *const UInt64;
+        atomic_load_u64(ptr, ordering_to_u8(order)) as &unsafe T
+    }
+
+    // Store pointer with ordering.
+    // Uses typed atomic_store_u64 intrinsic.
+    public fn store(&self, ptr: &unsafe T, order: MemoryOrdering) {
+        let storage_ptr = &self.ptr as *const Int as *mut UInt64;
+        atomic_store_u64(storage_ptr, ptr as Int as UInt64, ordering_to_u8(order));
+    }
+
+    // Swap pointer, returning old value.
+    // Implemented using CAS loop with typed atomic_cas_u64 intrinsic.
+    public fn swap(&self, ptr: &unsafe T, order: MemoryOrdering) -> &unsafe T {
+        let storage_ptr = &self.ptr as *const Int as *mut UInt64;
+        let order_u8 = ordering_to_u8(order);
+        loop {
+            let current = atomic_load_u64(storage_ptr as *const UInt64, order_u8);
+            let (old, success) = atomic_cas_u64(storage_ptr, current, ptr as Int as UInt64, order_u8, ORDERING_RELAXED);
+            if success {
+                return old as &unsafe T;
+            }
+        }
+    }
+
+    // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
+    // Uses typed atomic_cas_u64 intrinsic.
+    public fn compare_exchange(
+        &self,
+        current: &unsafe T,
+        new: &unsafe T,
+        success: MemoryOrdering,
+        failure: MemoryOrdering
+    ) -> Result<&unsafe T, &unsafe T> {
+        let storage_ptr = &self.ptr as *const Int as *mut UInt64;
+        let (actual, did_swap) = atomic_cas_u64(
+            storage_ptr,
+            current as Int as UInt64,
+            new as Int as UInt64,
+            ordering_to_u8(success),
+            ordering_to_u8(failure)
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual as &unsafe T)
+        }
+    }
+
+    // Check if pointer is null.
+    public fn is_null(&self) -> Bool {
+        self.load(MemoryOrdering.Relaxed) as Int == 0
+    }
+}
+
+implement<T> Default for AtomicPtr<T> {
+    fn default() -> AtomicPtr<T> {
+        AtomicPtr.null()
+    }
+}
+
+// =============================================================================
+// SpinLock (low-level)
+// =============================================================================
+
+// Simple spinlock for bootstrap synchronization.
+public type SpinLock is {
+    locked: AtomicBool,
+};
+
+implement SpinLock {
+    // Create new unlocked spinlock.
+    public fn new() -> SpinLock {
+        SpinLock { locked: AtomicBool.new(false) }
+    }
+
+    // Try to acquire lock without blocking.
+    public fn try_lock(&self) -> Bool {
+        self.locked.compare_exchange(false, true, MemoryOrdering.Acquire, MemoryOrdering.Relaxed).is_ok()
+    }
+
+    // Acquire lock, spinning until available.
+    public fn lock(&self) {
+        while !self.try_lock() {
+            // Spin - in real code, use CPU pause instruction
+            compiler_fence(MemoryOrdering.SeqCst);
+        }
+    }
+
+    // Release lock.
+    public fn unlock(&self) {
+        self.locked.store(false, MemoryOrdering.Release);
+    }
+
+    // Check if locked.
+    public fn is_locked(&self) -> Bool {
+        self.locked.load(MemoryOrdering.Relaxed)
+    }
+}
+
+implement Default for SpinLock {
+    fn default() -> SpinLock {
+        SpinLock.new()
+    }
+}
+
+// =============================================================================
+// FutexLock (OS-backed, doesn't busy-wait)
+// =============================================================================
+
+// Lock states for futex-based mutex
+const FUTEX_UNLOCKED: Int = 0;
+const FUTEX_LOCKED: Int = 1;
+const FUTEX_LOCKED_CONTENDED: Int = 2;
+
+// Futex-based lock that uses OS-level waiting instead of busy-waiting.
+// This is more efficient than SpinLock under contention because threads
+// sleep instead of consuming CPU cycles.
+//
+// Performance:
+// - Uncontended: ~25ns (slightly slower than spinlock's ~10ns)
+// - Contended: ~1-10μs (much better than spinlock's CPU waste)
+//
+// Spec: docs/audit1.md Section 11.5
+public type FutexLock is {
+    state: AtomicInt,
+};
+
+implement FutexLock {
+    // Create new unlocked futex lock.
+    public fn new() -> FutexLock {
+        FutexLock { state: AtomicInt.new(FUTEX_UNLOCKED) }
+    }
+
+    // Try to acquire lock without blocking.
+    public fn try_lock(&self) -> Bool {
+        self.state.compare_exchange(FUTEX_UNLOCKED, FUTEX_LOCKED, MemoryOrdering.Acquire, MemoryOrdering.Relaxed).is_ok()
+    }
+
+    // Acquire lock, blocking if necessary using OS futex.
+    // Does NOT busy-wait - threads sleep until woken.
+    public fn lock(&self) {
+        // Fast path: uncontended lock
+        if self.try_lock() {
+            return;
+        }
+
+        // Slow path: need to wait
+        self.lock_slow();
+    }
+
+    // Slow path for lock acquisition - uses futex to sleep.
+    fn lock_slow(&self) {
+        loop {
+            let mut state = self.state.load(MemoryOrdering.Relaxed);
+
+            // If unlocked, try to lock
+            if state == FUTEX_UNLOCKED {
+                match self.state.compare_exchange(FUTEX_UNLOCKED, FUTEX_LOCKED, MemoryOrdering.Acquire, MemoryOrdering.Relaxed) {
+                    Ok(_) => { return; },
+                    Err(s) => { state = s; },
+                }
+            }
+
+            // If locked (not contended), set to contended
+            if state == FUTEX_LOCKED {
+                state = self.state.swap(FUTEX_LOCKED_CONTENDED, MemoryOrdering.Acquire);
+                if state == FUTEX_UNLOCKED {
+                    // Got the lock while setting contended flag
+                    return;
+                }
+            }
+
+            // Wait on futex - this sleeps the thread (no CPU waste)
+            // Linux: SYS_futex syscall, macOS: __ulock_wait
+            @cfg(target_os = "linux")
+            {
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
+            }
+
+            @cfg(target_os = "macos")
+            {
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
+            }
+
+            // Windows: use spin-wait with yield as fallback (TODO: WaitOnAddress)
+            @cfg(target_os = "windows")
+            {
+                spin_hint();
+            }
+        }
+    }
+
+    // Release lock.
+    public fn unlock(&self) {
+        // Swap to unlocked and check if there were waiters
+        let old = self.state.swap(FUTEX_UNLOCKED, MemoryOrdering.Release);
+
+        if old == FUTEX_LOCKED_CONTENDED {
+            // There were waiters, wake one
+            // Linux: SYS_futex syscall, macOS: __ulock_wake
+            @cfg(target_os = "linux") {
+                let _ = sys_futex_wake(&self.state.value, 1);
+            };
+            @cfg(target_os = "macos") {
+                let _ = sys_futex_wake(&self.state.value, 1);
+            };
+        }
+    }
+
+    // Check if locked.
+    public fn is_locked(&self) -> Bool {
+        self.state.load(MemoryOrdering.Relaxed) != FUTEX_UNLOCKED
+    }
+}
+
+implement Default for FutexLock {
+    fn default() -> FutexLock {
+        FutexLock.new()
+    }
+}

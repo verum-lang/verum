@@ -1,0 +1,98 @@
+// =============================================================================
+// style/modifier.vr - Text modifier bitfield
+// =============================================================================
+// Represents SGR (Select Graphic Rendition) text attributes as a compact
+// bitfield. Supports composition via set operations (union, intersection,
+// difference).
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
+// =============================================================================
+
+module modifier;
+
+// =============================================================================
+// Modifier — bitfield for SGR text attributes
+// =============================================================================
+
+/// Modifier is a compact bitfield representing text rendering attributes.
+/// Multiple modifiers can be combined via union: `Modifier.BOLD.union(Modifier.ITALIC)`.
+///
+/// Each constant corresponds to an SGR escape code:
+///   BOLD       -> SGR 1     DIM          -> SGR 2
+///   ITALIC     -> SGR 3     UNDERLINED   -> SGR 4
+///   SLOW_BLINK -> SGR 5     RAPID_BLINK  -> SGR 6
+///   REVERSED   -> SGR 7     HIDDEN       -> SGR 8
+///   CROSSED_OUT -> SGR 9    OVERLINED    -> SGR 53
+///   DOUBLE_UNDERLINED -> SGR 21          CURLY_UNDERLINED -> SGR 4:3
+public type Modifier is {
+    bits: UInt16,
+};
+
+implement Modifier {
+    // Predefined modifier constants
+    public const NONE:               Modifier = Modifier { bits: 0 };
+    public const BOLD:               Modifier = Modifier { bits: 1 << 0 };
+    public const DIM:                Modifier = Modifier { bits: 1 << 1 };
+    public const ITALIC:             Modifier = Modifier { bits: 1 << 2 };
+    public const UNDERLINED:         Modifier = Modifier { bits: 1 << 3 };
+    public const SLOW_BLINK:         Modifier = Modifier { bits: 1 << 4 };
+    public const RAPID_BLINK:        Modifier = Modifier { bits: 1 << 5 };
+    public const REVERSED:           Modifier = Modifier { bits: 1 << 6 };
+    public const HIDDEN:             Modifier = Modifier { bits: 1 << 7 };
+    public const CROSSED_OUT:        Modifier = Modifier { bits: 1 << 8 };
+    public const OVERLINED:          Modifier = Modifier { bits: 1 << 9 };
+    public const DOUBLE_UNDERLINED:  Modifier = Modifier { bits: 1 << 10 };
+    public const CURLY_UNDERLINED:   Modifier = Modifier { bits: 1 << 11 };
+
+    /// Create an empty modifier set.
+    public fn new() -> Modifier {
+        Modifier.NONE
+    }
+
+    /// Return the union of two modifier sets (bitwise OR).
+    /// Example: `Modifier.BOLD.union(Modifier.ITALIC)` -> bold + italic
+    public fn union(self, other: Modifier) -> Modifier {
+        Modifier { bits: self.bits | other.bits }
+    }
+
+    /// Return the intersection of two modifier sets (bitwise AND).
+    /// Only modifiers present in both sets are retained.
+    public fn intersection(self, other: Modifier) -> Modifier {
+        Modifier { bits: self.bits & other.bits }
+    }
+
+    /// Return the difference of two modifier sets.
+    /// Removes all modifiers in `other` from `self`.
+    public fn difference(self, other: Modifier) -> Modifier {
+        Modifier { bits: self.bits & (other.bits ^ 0xFFFF) }
+    }
+
+    /// Check whether this modifier set contains all bits in `flag`.
+    /// Example: `mods.contains(Modifier.BOLD)` -> true if bold is set
+    public fn contains(&self, flag: Modifier) -> Bool {
+        (self.bits & flag.bits) == flag.bits
+    }
+
+    /// Check whether this modifier set is empty (no attributes set).
+    public fn is_empty(&self) -> Bool {
+        self.bits == 0
+    }
+
+    /// Return the symmetric difference of two modifier sets (bitwise XOR).
+    /// Modifiers present in exactly one of the two sets are retained.
+    public fn symmetric_difference(self, other: Modifier) -> Modifier {
+        Modifier { bits: self.bits ^ other.bits }
+    }
+
+    /// Insert all modifiers from `other` into this set.
+    /// Equivalent to union, but named for clarity in imperative contexts.
+    public fn insert(self, other: Modifier) -> Modifier {
+        self.union(other)
+    }
+
+    /// Remove all modifiers in `other` from this set.
+    /// Equivalent to difference, but named for clarity.
+    public fn remove(self, other: Modifier) -> Modifier {
+        self.difference(other)
+    }
+}

@@ -1,0 +1,15 @@
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Point;
+
+fn main() {
+    // Test 5: Variant patterns
+    let shape = Shape.Circle { radius: 10 };
+    match shape {
+        Shape.Circle { radius } => print(f"Circle r={radius}"),
+        Shape.Rectangle { width, height } => print(f"Rect {width}x{height}"),
+        Shape.Point => print(f"Point"),
+    }
+    print(f"Variant pattern test complete!");
+}

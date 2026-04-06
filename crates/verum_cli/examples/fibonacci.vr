@@ -1,0 +1,90 @@
+// Fibonacci sequence calculator in Verum
+// Demonstrates functions, recursion, and iteration with correct syntax
+
+// Import standard library functions using dots (not slashes)
+link std.io.stdio.println;
+link std.collections.map.Map;
+
+// Recursive implementation
+fn fibonacci_recursive(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci_recursive(n - 1) + fibonacci_recursive(n - 2)
+    }
+}
+
+// Iterative implementation (more efficient)
+fn fibonacci_iterative(n: Int) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    let mut prev = 0;
+    let mut curr = 1;
+
+    // Range syntax in Verum: 2..=n means from 2 to n inclusive
+    for i in 2..=n {
+        let next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+
+    curr
+}
+
+// Memoized implementation using a cache
+// Note: In Verum, nested functions are defined locally
+fn fibonacci_memoized(n: Int) -> Int {
+    let mut cache = Map<Int, Int>.new();
+
+    // Local helper function
+    fn fib_helper(n: Int, cache: &mut Map<Int, Int>) -> Int {
+        if n <= 1 {
+            return n;
+        }
+
+        // Check cache using match pattern
+        match cache.get(&n) {
+            Some(cached) => *cached,
+            None => {
+                // Calculate and cache
+                let result = fib_helper(n - 1, cache) + fib_helper(n - 2, cache);
+                cache.insert(n, result);
+                result
+            }
+        }
+    }
+
+    fib_helper(n, &mut cache)
+}
+
+// Generate Fibonacci sequence as a list
+fn fibonacci_sequence(count: Int) -> List<Int> {
+    let mut sequence = List.new();
+
+    for i in 0..count {
+        sequence.push(fibonacci_iterative(i));
+    }
+
+    sequence
+}
+
+fn main() {
+    let n = 10;
+
+    // Calculate using different methods
+    print(f"Fibonacci({n}) using recursion: {fibonacci_recursive(n)}");
+    print(f"Fibonacci({n}) using iteration: {fibonacci_iterative(n)}");
+    print(f"Fibonacci({n}) using memoization: {fibonacci_memoized(n)}");
+
+    // Print first 20 Fibonacci numbers
+    print(f"\nFirst 20 Fibonacci numbers:");
+    for i in 0..20 {
+        print(f"F({i}) = {fibonacci_iterative(i)}");
+    }
+
+    // Generate and display sequence
+    let sequence = fibonacci_sequence(15);
+    print(f"\nFibonacci sequence (first 15): {sequence:?}");
+}

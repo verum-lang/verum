@@ -1,0 +1,168 @@
+// =============================================================================
+// buffer.vr - 2D cell buffer for terminal rendering
+// =============================================================================
+module buffer;
+
+mount super.cell.{Cell, char_display_width};
+mount super.super.style.Style;
+mount super.super.layout.Rect;
+
+/// 2D buffer of terminal cells — the basis of rendering.
+/// Stored as a flat List<Cell> with y*width+x indexing.
+public type Buffer is {
+    cells: List<Cell>,
+    width: Int,
+    height: Int,
+};
+
+implement Buffer {
+    /// Create a new buffer filled with empty cells.
+    public fn new(width: Int, height: Int) -> Buffer {
+        let w = width.max(0);
+        let h = height.max(0);
+        let size = w * h;
+        let mut cells = List.with_capacity(size);
+        for _ in 0..size {
+            cells.push(Cell.EMPTY);
+        }
+        Buffer { cells: cells, width: w, height: h }
+    }
+
+    /// Create a buffer for a specific Rect area.
+    public fn from_rect(area: Rect) -> Buffer {
+        Buffer.new(area.width, area.height)
+    }
+
+    /// Access a cell by coordinates.
+    public fn get(&self, x: Int, y: Int) -> &Cell {
+        &self.cells[y * self.width + x]
+    }
+
+    /// Access a mutable cell by coordinates.
+    public fn get_mut(&mut self, x: Int, y: Int) -> &mut Cell {
+        &mut self.cells[y * self.width + x]
+    }
+
+    /// Check if coordinates are within bounds.
+    public fn in_bounds(&self, x: Int, y: Int) -> Bool {
+        x >= 0 && x < self.width && y >= 0 && y < self.height
+    }
+
+    /// Write a string into the buffer starting at (x, y).
+    /// Returns the column position after the written text.
+    public fn set_string(&mut self, x: Int, y: Int, text: &Text, style: Style) -> Int {
+        if y < 0 || y >= self.height { return x; }
+
+        let mut col = x;
+        let bytes = text.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if col >= self.width { break; }
+            if col < 0 {
+                // Skip characters before visible area
+                if bytes[i] < 0x80 {
+                    col = col + 1;
+                    i = i + 1;
+                } else {
+                    // Skip multi-byte UTF-8
+                    let skip = utf8_char_len(bytes[i]);
+                    i = i + skip;
+                    col = col + 1; // Approximate
+                }
+                continue;
+            }
+
+            // Extract one grapheme (simplified: one UTF-8 character)
+            let char_start = i;
+            let char_len = utf8_char_len(bytes[i]);
+            i = i + char_len;
+            let grapheme = text.slice(char_start, i);
+
+            let w = char_display_width(&grapheme);
+            if col + w > self.width { break; }
+
+            self.get_mut(col, y).set_char(&grapheme, style);
+
+            // If wide char, mark next cell as skip
+            if w == 2 && col + 1 < self.width {
+                self.get_mut(col + 1, y).skip = true;
+            }
+            col = col + w;
+        }
+
+        col
+    }
+
+    /// Fill a rectangular area with a style (background).
+    public fn set_style(&mut self, area: Rect, style: Style) {
+        let x_start = area.x.max(0);
+        let y_start = area.y.max(0);
+        let x_end = area.right().min(self.width);
+        let y_end = area.bottom().min(self.height);
+
+        for y in y_start..y_end {
+            for x in x_start..x_end {
+                self.get_mut(x, y).style = self.get_mut(x, y).style.patch(style);
+            }
+        }
+    }
+
+    /// Merge another buffer on top of this one at the given area.
+    public fn merge(&mut self, other: &Buffer, area: Rect) {
+        for y in 0..other.height.min(area.height) {
+            for x in 0..other.width.min(area.width) {
+                let src = other.get(x, y);
+                if !src.skip && src.grapheme != " " {
+                    let dx = area.x + x;
+                    let dy = area.y + y;
+                    if dx >= 0 && dx < self.width && dy >= 0 && dy < self.height {
+                        let dst = self.get_mut(dx, dy);
+                        dst.grapheme = src.grapheme.clone();
+                        dst.style = src.style;
+                        dst.skip = src.skip;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reset all cells to empty.
+    public fn reset(&mut self) {
+        for i in 0..self.cells.len() {
+            self.cells[i].reset();
+        }
+    }
+
+    /// Fill the entire buffer with a single character and style.
+    public fn fill(&mut self, ch: &Text, style: Style) {
+        for i in 0..self.cells.len() {
+            self.cells[i].set_char(ch, style);
+        }
+    }
+
+    /// Get buffer content as a list of strings (for debugging).
+    public fn to_lines(&self) -> List<Text> {
+        let mut lines = List.with_capacity(self.height);
+        for y in 0..self.height {
+            let mut line = "";
+            for x in 0..self.width {
+                let cell = self.get(x, y);
+                if !cell.skip {
+                    line = line + &cell.grapheme;
+                }
+            }
+            lines.push(line);
+        }
+        lines
+    }
+}
+
+/// Determine the byte length of a UTF-8 character from its first byte.
+fn utf8_char_len(first_byte: Byte) -> Int {
+    if first_byte < 0x80 { 1 }
+    else if first_byte < 0xC0 { 1 }  // Invalid, treat as 1
+    else if first_byte < 0xE0 { 2 }
+    else if first_byte < 0xF0 { 3 }
+    else { 4 }
+}

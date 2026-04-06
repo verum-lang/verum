@@ -1,0 +1,73 @@
+// Test: EH-003 through EH-006 - Error handling
+// Priority: Critical/High
+// Expected output: Error handling patterns
+
+// Custom error type
+type MyError is
+    | NotFound
+    | InvalidInput(Text)
+    | Timeout;
+
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("Division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+fn inner() -> Result<Int, Text> {
+    Result.Err("Inner error")
+}
+
+fn outer() -> Result<Int, Text> {
+    let x = inner()?;
+    Result.Ok(x + 1)
+}
+
+fn do_work() -> Result<Int, MyError> {
+    Result.Err(MyError.InvalidInput("Bad data"))
+}
+
+fn main() {
+    // Result Ok
+    match divide(10, 2) {
+        Result.Ok(r) => print(f"Result: {r}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Result Err
+    match divide(10, 0) {
+        Result.Ok(r) => print(f"Result: {r}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Error propagation
+    match outer() {
+        Result.Ok(v) => print(f"Value: {v}"),
+        Result.Err(e) => print(f"Propagated: {e}"),
+    }
+
+    // Custom error type
+    match do_work() {
+        Result.Ok(v) => print(f"{v}"),
+        Result.Err(MyError.NotFound) => print(f"Not found"),
+        Result.Err(MyError.InvalidInput(msg)) => print(f"Invalid: {msg}"),
+        Result.Err(MyError.Timeout) => print(f"Timeout"),
+    }
+
+    // try-recover block
+    try {
+        let x = divide(10, 0)?;
+        print(f"{x}");
+    } recover |e| {
+        print(f"Recovered: {e}");
+    }
+
+    // try-finally block
+    try {
+        print(f"Doing work");
+    } finally {
+        print(f"Cleanup");
+    }
+}

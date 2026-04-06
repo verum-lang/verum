@@ -1,0 +1,210 @@
+// =============================================================================
+// async/intrinsics.vr - Async Runtime Intrinsics
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/future, async/poll, async/waker
+// =============================================================================
+//
+// Low-level async runtime intrinsics that bridge the gap between
+// Verum async constructs and the underlying runtime.
+//
+// These functions are used by the executor and the compiler to implement
+// async/await, spawn, and other concurrency primitives.
+//
+// =============================================================================
+
+module intrinsics;
+
+mount core.*;
+mount super.poll.Poll;
+mount super.waker.{Waker, Context, RawWaker, RawWakerVTable};
+mount super.future.Future;
+mount super.task.{Task, JoinHandle};
+
+// =============================================================================
+// Executor Intrinsic Type
+// =============================================================================
+
+/// Low-level executor handle for direct task management.
+///
+/// This provides the intrinsic API used by the compiler when
+/// lowering async/await expressions. User code should prefer
+/// the higher-level `Runtime` from async/executor.vr.
+public type Executor is {
+    /// Opaque pointer to the runtime implementation.
+    /// May be a C runtime handle or a native Verum executor.
+    handle: Int,
+};
+
+implement Executor {
+    /// Get the current thread's executor, or None if not in async context.
+    public fn current() -> Maybe<Executor> {
+        // The executor handle is stored in TLS context slot 0
+        // by the Runtime.block_on() method.
+        @cfg(target_os = "linux")
+        {
+            match sys.linux.tls.ctx_get(0) {
+                Some(ptr) => Some(Executor { handle: ptr as Int }),
+                None => None,
+            }
+        }
+
+        @cfg(target_os = "macos")
+        {
+            match sys.darwin.tls.ctx_get(0) {
+                Some(ptr) => Some(Executor { handle: ptr as Int }),
+                None => None,
+            }
+        }
+
+        @cfg(target_os = "windows")
+        {
+            match sys.windows.tls.ctx_get(0) {
+                Some(ptr) => Some(Executor { handle: ptr as Int }),
+                None => None,
+            }
+        }
+    }
+
+    /// Check if we're currently inside an async execution context.
+    public fn in_async_context() -> Bool {
+        Executor.current().is_some()
+    }
+}
+
+// =============================================================================
+// Spawn Intrinsics
+// =============================================================================
+
+/// Spawn a future with inherited execution environment.
+///
+/// This is the low-level spawn used by the compiler when translating
+/// `spawn expr` syntax. The spawned task inherits the current
+/// execution context (TLS context slots).
+///
+/// For user-facing API, prefer `async.task.spawn()`.
+@intrinsic("async_spawn")
+public fn spawn_with_env<F: Future>(future: F) -> JoinHandle<F.Output>;
+
+/// Spawn a future on a specific executor.
+///
+/// Used when the target executor is known at compile time
+/// (e.g., spawning on main thread's executor).
+@intrinsic("async_executor_spawn")
+public fn executor_spawn<F: Future>(executor: &Executor, future: F) -> JoinHandle<F.Output>;
+
+/// Block on a future using an executor.
+///
+/// Drives the future to completion on the current thread.
+/// This is the intrinsic backing `block_on()`.
+@intrinsic("async_block_on")
+public fn executor_block_on<F: Future>(future: F) -> F.Output;
+
+// =============================================================================
+// Polling Intrinsics
+// =============================================================================
+
+/// Synchronously poll a future once.
+///
+/// Returns Some(result) if the future completed, None if it's pending.
+/// Does NOT register a waker — the future won't make progress unless
+/// polled again.
+///
+/// Use cases:
+/// - Checking if a future has completed
+/// - Driving futures in a manual event loop
+/// - Testing
+public fn future_poll_sync<F: Future>(future: &mut F) -> Maybe<F.Output> {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    match future.poll(&mut cx) {
+        Poll.Ready(val) => Some(val),
+        Poll.Pending => None,
+    }
+}
+
+// =============================================================================
+// Sleep Intrinsics
+// =============================================================================
+
+/// Low-level async sleep in milliseconds.
+///
+/// The intrinsic version uses the C runtime's sleep mechanism.
+/// For Verum-native sleep, use `async.timer.sleep_ms()`.
+@intrinsic("async_sleep_ms")
+public fn async_sleep_ms(ms: Int);
+
+/// Low-level async sleep in nanoseconds.
+@intrinsic("async_sleep_ns")
+public fn async_sleep_ns(ns: Int);
+
+// =============================================================================
+// Waker Utilities
+// =============================================================================
+
+/// Create a no-op waker that does nothing when woken.
+///
+/// Useful for:
+/// - Synchronous polling (future_poll_sync)
+/// - Testing
+/// - Simple executors that poll all tasks each tick
+public fn noop_waker() -> Waker {
+    let vtable = RawWakerVTable {
+        clone: noop_clone,
+        wake: noop_wake,
+        wake_by_ref: noop_wake_by_ref,
+        drop: noop_drop,
+    };
+    let raw = RawWaker.new(0 as &unsafe Byte, &vtable);
+    unsafe { Waker.from_raw(raw) }
+}
+
+fn noop_clone(data: &unsafe Byte) -> RawWaker {
+    RawWaker.new(data, &RawWakerVTable {
+        clone: noop_clone,
+        wake: noop_wake,
+        wake_by_ref: noop_wake_by_ref,
+        drop: noop_drop,
+    })
+}
+
+fn noop_wake(_data: &unsafe Byte) {}
+fn noop_wake_by_ref(_data: &unsafe Byte) {}
+fn noop_drop(_data: &unsafe Byte) {}
+
+// =============================================================================
+// Yield Intrinsic
+// =============================================================================
+
+/// Yield execution back to the executor.
+///
+/// The current task will be re-queued and other tasks get a chance to run.
+/// This is the intrinsic backing `yield_now()`.
+public type YieldNow is {
+    yielded: Bool,
+};
+
+implement YieldNow {
+    public fn new() -> YieldNow {
+        YieldNow { yielded: false }
+    }
+}
+
+implement Future for YieldNow {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.yielded {
+            Poll.Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+/// Yield execution to other tasks once, then resume.
+public fn yield_now() -> YieldNow {
+    YieldNow.new()
+}

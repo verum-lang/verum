@@ -1,0 +1,28 @@
+type Point is { x: Float, y: Float };
+
+type Option<T> is None | Some(T);
+
+type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type UserId is (Int);
+
+type Marker is ();
+
+type Pair<A, B> is { first: A, second: B };
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type List<T> is Nil | Cons { head: T, tail: Heap<List<T>> };
+
+type Color is Red | Green | Blue;
+
+type Callback<T> is fn(T) -> Bool;
+
+type Transducer<A, B> is {
+    transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R,
+};

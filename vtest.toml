@@ -1,0 +1,47 @@
+# VCS (Verum Compliance Suite) Test Configuration
+# This file configures the verum_vtest test runner
+
+[paths]
+specs = "vcs/specs"
+fuzz = "vcs/fuzz"
+benchmarks = "vcs/benchmarks"
+
+[discovery]
+paths = ["vcs/specs"]
+pattern = "**/*.vr"
+exclude = ["**/skip/**", "**/wip/**"]
+
+[execution]
+parallel_workers = 8
+default_timeout = 30000
+tier_default = "all"
+
+[tiers]
+tier0 = { mode = "interpret" }
+tier1 = { mode = "jit", optimization = "none" }
+tier2 = { mode = "jit", optimization = "basic" }
+tier3 = { mode = "aot", optimization = "full" }
+
+[report]
+console = true
+json = "target/vcs-reports/results.json"
+junit = "target/vcs-reports/junit.xml"
+html = "target/vcs-reports/report.html"
+
+[levels]
+L0 = { pass_rate = 1.0, description = "Critical - Memory safety, core semantics" }
+L1 = { pass_rate = 1.0, description = "Core - Type system, basic constructs" }
+L2 = { pass_rate = 0.95, description = "Standard - Stdlib, contexts, async" }
+L3 = { pass_rate = 0.90, description = "Extended - GPU, dependent types, meta" }
+L4 = { pass_rate = 0.0, description = "Performance - Benchmarks (advisory)" }
+
+[benchmarks]
+warmup_iterations = 3
+measure_iterations = 10
+baseline_file = "target/vcs-reports/baseline.json"
+
+[fuzzing]
+generator = "grammar-aware"
+max_depth = 10
+seed_corpus = "vcs/fuzz/seeds"
+artifacts = "target/vcs-fuzz"

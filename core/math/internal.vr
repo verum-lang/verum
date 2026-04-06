@@ -1,0 +1,431 @@
+// =============================================================================
+// internal.vr - Math Library Internals
+// =============================================================================
+// Layer: API (Progressive Disclosure Level 4)
+//
+// This module exposes low-level primitives for library development.
+// NOT intended for application code - requires @allow(internal_api).
+//
+// # Warning
+//
+// These APIs are:
+// - Unstable: May change without notice
+// - Unsafe: Can violate memory safety if misused
+// - Expert-only: Require deep understanding of VBC internals
+//
+// # Usage
+//
+// ```verum
+// @allow(internal_api)
+// mount core.math.internal.*;
+//
+// fn custom_kernel_impl(input: &TensorHandle) -> TensorHandle {
+//     let ptr = tensor_ptr(input);
+//     // ... low-level manipulation
+// }
+// ```
+//
+// Spec: docs/architecture/math-spec.md Section 6.4 - Internal API
+// =============================================================================
+
+module core.math.internal;
+
+mount super.tensor.{DynTensor, TensorHandle, DType, Device};
+mount super.linalg.Numeric;
+
+// =============================================================================
+// Raw VBC Opcode Emission
+// =============================================================================
+
+//Emit a raw VBC opcode with operands
+//
+//# Safety
+//- Opcode must be valid
+//- Operand count and types must match opcode specification
+//- Incorrect usage can corrupt interpreter state
+//
+//# Example
+//```verum
+//@allow(internal_api)
+//fn custom_add(a: Value, b: Value) -> Value {
+//    emit_raw_opcode(0x30, &[a, b])  // 0x30 = AddF opcode
+//}
+//```
+@intrinsic("verum.vbc.emit_raw")
+public fn emit_raw_opcode(opcode: U8, operands: &[Value]) -> Value;
+
+//Emit a TensorExtended sub-opcode
+//
+//TensorExtended (0xFF) uses sub-opcodes for specialized operations.
+@intrinsic("verum.vbc.emit_tensor_extended")
+public fn emit_tensor_extended(sub_opcode: U8, operands: &[Value]) -> Value;
+
+//Emit an ArithExtended sub-opcode
+@intrinsic("verum.vbc.emit_arith_extended")
+public fn emit_arith_extended(sub_opcode: U8, operands: &[Value]) -> Value;
+
+// =============================================================================
+// Direct MLIR Dialect Access
+// =============================================================================
+
+//Emit a direct MLIR operation
+//
+//Bypasses VBC and emits directly to MLIR for AOT compilation.
+//No-op in interpreter mode.
+//
+//# Parameters
+//- `dialect`: MLIR dialect name (e.g., "linalg", "tensor", "gpu")
+//- `operation`: Operation name (e.g., "matmul", "fill")
+//- `operands`: Operation operands
+//
+//# Example
+//```verum
+//@allow(internal_api)
+//fn linalg_fill(tensor: &TensorHandle, value: Float) -> TensorHandle {
+//    emit_mlir("linalg", "fill", &[Value.from(tensor), Value.from(value)])
+//}
+//```
+@intrinsic("verum.mlir.emit")
+public fn emit_mlir(dialect: Text, operation: Text, operands: &[Value]) -> Value;
+
+//Emit MLIR with explicit types
+@intrinsic("verum.mlir.emit_typed")
+public fn emit_mlir_typed(
+    dialect: Text,
+    operation: Text,
+    operands: &[Value],
+    result_type: &MLIRType,
+) -> Value;
+
+//MLIR type representation
+public type MLIRType is
+    | TensorType { element: ElementType, shape: List<ISize> }
+    | MemRefType { element: ElementType, shape: List<ISize>, layout: MemRefLayout }
+    | ScalarType(ElementType);
+
+//MLIR element types
+public type ElementType is
+    | F64 | F32 | F16 | BF16
+    | I64 | I32 | I16 | I8
+    | Index
+    | Bool;
+
+//MemRef layout
+public type MemRefLayout is
+    | Contiguous
+    | Strided(List<ISize>)
+    | AffineMap(Text);
+
+// =============================================================================
+// Raw Tensor Data Access
+// =============================================================================
+
+// Get raw pointer to tensor data (unsafe: pointer validity not guaranteed)
+public fn tensor_ptr<T>(t: &DynTensor<T>) -> USize {
+    @vbc(TENSOR_DATA_PTR, t)
+}
+
+// Get raw pointer to tensor data with const qualifier
+public fn tensor_ptr_const<T>(t: &DynTensor<T>) -> USize {
+    @vbc(TENSOR_DATA_PTR_CONST, t)
+}
+
+//Get raw TensorHandle from DynTensor
+public fn tensor_handle<T>(t: &DynTensor<T>) -> &TensorHandle {
+    @vbc(TENSOR_GET_HANDLE, t)
+}
+
+//Create DynTensor from TensorHandle (takes ownership)
+public fn tensor_from_handle<T>(handle: TensorHandle) -> DynTensor<T> {
+    @vbc(TENSOR_FROM_HANDLE, handle)
+}
+
+// =============================================================================
+// Memory Intrinsics
+// =============================================================================
+
+// Direct memory copy (no bounds checking)
+public fn memcpy_raw(dst: USize, src: USize, size: USize) {
+    @vbc(MEM_COPY_RAW, dst, src, size)
+}
+
+// Direct memory set
+public fn memset_raw(dst: USize, value: U8, size: USize) {
+    @vbc(MEM_SET_RAW, dst, value, size)
+}
+
+// Direct memory compare
+public fn memcmp_raw(a: USize, b: USize, size: USize) -> ISize {
+    @vbc(MEM_CMP_RAW, a, b, size)
+}
+
+// Get memory alignment of a pointer
+public fn ptr_alignment(ptr: USize) -> USize {
+    @vbc(PTR_ALIGNMENT, ptr)
+}
+
+// =============================================================================
+// CBGR Internals
+// =============================================================================
+
+//Get raw generation counter from tensor
+public fn cbgr_generation<T>(t: &DynTensor<T>) -> U32 {
+    @vbc(CBGR_GET_GENERATION, t)
+}
+
+// Manually advance generation (DANGEROUS)
+// Safety: Advancing generation invalidates all existing references.
+public fn cbgr_advance_generation<T>(t: &mut DynTensor<T>) {
+    @vbc(CBGR_ADVANCE_GENERATION, t)
+}
+
+//Get epoch capabilities
+public fn cbgr_epoch_caps<T>(t: &DynTensor<T>) -> U16 {
+    @vbc(CBGR_GET_EPOCH_CAPS, t)
+}
+
+// Bypass CBGR checks (EXTREMELY DANGEROUS)
+// Safety: All safety guarantees are void. Use only for benchmarking.
+public fn cbgr_bypass<T, F: Fn() -> T>(f: F) -> T {
+    @vbc(CBGR_BYPASS_BEGIN);
+    let result = f();
+    @vbc(CBGR_BYPASS_END);
+    result
+}
+
+// =============================================================================
+// Autodiff Internals
+// =============================================================================
+
+//Access gradient tape directly
+public fn tape_push_op(op: TapeOp, inputs: &[TensorId], output: TensorId) {
+    @vbc(TAPE_PUSH_OP, op, inputs, output)
+}
+
+//Tensor ID for gradient tracking
+public type TensorId is U64;
+
+//Tape operation for autodiff
+public type TapeOp is
+    | Add
+    | Sub
+    | Mul
+    | Div
+    | MatMul
+    | Transpose
+    | Reshape
+    | Sum { axis: Maybe<ISize>, keepdim: Bool }
+    | Mean { axis: Maybe<ISize>, keepdim: Bool }
+    | Softmax { axis: ISize }
+    | Relu
+    | Sigmoid
+    | Tanh
+    | Exp
+    | Log
+    | Sqrt
+    | Pow { exponent: Float }
+    | Conv2d { stride: (USize, USize), padding: (USize, USize) }
+    | MaxPool2d { kernel_size: (USize, USize), stride: (USize, USize) }
+    | LayerNorm { normalized_shape: List<USize> }
+    | BatchNorm { running_mean: TensorId, running_var: TensorId }
+    | Custom { name: Text, saved_tensors: List<TensorId> };
+
+//Get tensor ID for gradient tracking
+public fn tensor_id<T>(t: &DynTensor<T>) -> TensorId {
+    @vbc(TENSOR_GET_ID, t)
+}
+
+//Get accumulated gradient for a tensor
+public fn get_grad<T>(tensor_id: TensorId) -> Maybe<DynTensor<T>> {
+    @vbc(GRAD_GET, tensor_id)
+}
+
+//Set gradient for a tensor
+public fn set_grad<T>(tensor_id: TensorId, grad: DynTensor<T>) {
+    @vbc(GRAD_SET, tensor_id, grad)
+}
+
+// =============================================================================
+// Kernel Dispatch Internals
+// =============================================================================
+
+// Direct kernel invocation (bypasses dispatch layer)
+public fn invoke_kernel_direct(
+    kernel_ptr: USize,
+    args: &[USize],
+    arg_sizes: &[USize],
+) -> Value {
+    @vbc(KERNEL_INVOKE_DIRECT, kernel_ptr, args, arg_sizes)
+}
+
+//Get current backend capabilities
+public fn get_backend_capabilities() -> BackendCapabilities {
+    @vbc(BACKEND_GET_CAPS)
+}
+
+//Backend capability flags
+public type BackendCapabilities is {
+    has_sse42: Bool,
+    has_avx: Bool,
+    has_avx2: Bool,
+    has_fma: Bool,
+    has_avx512f: Bool,
+    has_avx512bw: Bool,
+    has_avx512vl: Bool,
+    has_neon: Bool,
+    has_sve: Bool,
+    has_cuda: Bool,
+    cuda_compute_capability: Maybe<(USize, USize)>,
+    has_metal: Bool,
+    metal_gpu_family: Maybe<USize>,
+};
+
+// =============================================================================
+// Debug and Introspection
+// =============================================================================
+
+//Print VBC bytecode for a function
+public fn disassemble_function(func_id: FunctionId) -> Text {
+    @vbc(DEBUG_DISASSEMBLE, func_id)
+}
+
+//Get interpreter instruction count
+public fn instruction_count() -> U64 {
+    @vbc(DEBUG_INSTRUCTION_COUNT)
+}
+
+//Reset interpreter instruction count
+public fn reset_instruction_count() {
+    @vbc(DEBUG_RESET_INSTRUCTION_COUNT)
+}
+
+//Dump tensor storage info
+public fn tensor_debug_info<T>(t: &DynTensor<T>) -> TensorDebugInfo {
+    @vbc(TENSOR_DEBUG_INFO, t)
+}
+
+//Debug information for a tensor
+public type TensorDebugInfo is {
+    id: U64,
+    dtype: DType,
+    shape: List<USize>,
+    strides: List<ISize>,
+    device: Device,
+    storage_ptr: U64,
+    storage_size: USize,
+    is_contiguous: Bool,
+    generation: U32,
+    epoch_caps: U16,
+    ref_count: USize,
+};
+
+// =============================================================================
+// Type-Level Intrinsics
+// =============================================================================
+
+//Get runtime type ID
+public fn type_id<T>() -> TypeId {
+    @vbc(TYPE_GET_ID, @type_name<T>())
+}
+
+// TypeId is now defined in core/base/protocols.vr
+
+//Get type size in bytes
+public fn type_size<T>() -> USize {
+    @vbc(TYPE_SIZE, @type_name<T>())
+}
+
+//Get type alignment
+public fn type_align<T>() -> USize {
+    @vbc(TYPE_ALIGN, @type_name<T>())
+}
+
+// =============================================================================
+// FFI Internals
+// =============================================================================
+
+// Get function pointer for FFI symbol
+public fn ffi_symbol(library: Text, symbol: Text) -> USize {
+    @vbc(FFI_GET_SYMBOL, library, symbol)
+}
+
+// Call FFI function with raw arguments
+public fn ffi_call_raw(
+    func_ptr: USize,
+    args: &[USize],
+    ret_ptr: USize,
+    abi: FFIAbi,
+) {
+    @vbc(FFI_CALL_RAW, func_ptr, args, ret_ptr, abi)
+}
+
+//FFI calling conventions
+public type FFIAbi is
+    | C
+    | Stdcall
+    | Fastcall
+    | Vectorcall
+    | SysV64
+    | Win64;
+
+// =============================================================================
+// Value Type (Internal Representation)
+// =============================================================================
+
+//Internal value representation (NaN-boxed)
+public type Value is U64;
+
+implement Value {
+    //Create value from integer
+        public fn from_int(i: I64) -> Self {
+        @vbc(VALUE_FROM_INT, i)
+    }
+
+    //Create value from float
+        public fn from_float(f: Float) -> Self {
+        @vbc(VALUE_FROM_FLOAT, f)
+    }
+
+    //Create value from bool
+        public fn from_bool(b: Bool) -> Self {
+        @vbc(VALUE_FROM_BOOL, b)
+    }
+
+    // Create value from pointer
+    public fn from_ptr(p: USize) -> Self {
+        @vbc(VALUE_FROM_PTR, p)
+    }
+
+    // Extract integer (unchecked)
+    public fn to_int_unchecked(self) -> I64 {
+        @vbc(VALUE_TO_INT_UNCHECKED, self)
+    }
+
+    // Extract float (unchecked)
+    public fn to_float_unchecked(self) -> Float {
+        @vbc(VALUE_TO_FLOAT_UNCHECKED, self)
+    }
+
+    //Get value tag
+        public fn tag(self) -> ValueTag {
+        @vbc(VALUE_GET_TAG, self)
+    }
+}
+
+//Value type tags (NaN-boxing)
+public type ValueTag is
+    | TagFloat    // 0x0000-0x7FF7 (normal IEEE 754 double)
+    | TagInt      // 0x7FF8
+    | TagBool     // 0x7FF9
+    | TagNull     // 0x7FFA
+    | TagUnit     // 0x7FFB
+    | TagPointer  // 0x7FFC
+    | TagString   // 0x7FFD
+    | TagObject;  // 0x7FFE
+
+// =============================================================================
+// Function ID Type
+// =============================================================================
+
+//Internal function identifier
+public type FunctionId is U32;

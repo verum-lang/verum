@@ -1,0 +1,28 @@
+// Test context system - working patterns
+
+// Define context
+context Logger {
+    fn log(message: Text);
+}
+
+// Function that doesn't directly access the context
+// Instead, we'll call it from a scope where Logger is provided
+fn greet(name: Text) {
+    print(f"Hello, {name}");
+}
+
+fn main() {
+    // Provide Logger implementation
+    provide Logger = {
+        fn log(message: Text) {
+            print(f"[LOG] {message}");
+        }
+    };
+
+    // Access Logger directly in the scope where it's provided
+    Logger.log("Starting application");
+
+    greet("World");
+
+    Logger.log("Application complete");
+}

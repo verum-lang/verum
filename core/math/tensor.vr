@@ -1,0 +1,1249 @@
+// =============================================================================
+// tensor.vr - N-Dimensional Tensor System
+// =============================================================================
+// Layer: 4 (Tensor)
+//
+// Provides N-dimensional array operations with hardware-aware dispatch:
+// - Static and dynamic shape tensors
+// - Element-wise, reduction, and shape operations
+// - VBC opcode integration for CPU/GPU dispatch
+// - CBGR-compatible memory management
+//
+// # Design Philosophy
+//
+// Two tensor variants serve different use cases:
+// - `Tensor<T, Shape>`: Compile-time shape verification (faster, safer)
+// - `DynTensor<T>`: Runtime shape flexibility (model inputs, dynamic operations)
+//
+// All operations route through VBC opcodes, enabling:
+// - Interpreter mode: SIMD-optimized kernels (AVX2/NEON)
+// - JIT/AOT mode: MLIR linalg dialect -> LLVM vectorization
+//
+// # Context System Integration
+//
+// Operations use Verum's context system for:
+// - ComputeDevice: CPU/GPU placement
+// - RandomSource: PRNG for random tensors
+//
+// Spec: docs/architecture/math-spec.md Part V (L4)
+// =============================================================================
+
+module core.math.tensor;
+
+mount super.linalg.Numeric;
+mount super.elementary.{sqrt, exp, log, sin, cos, abs};
+mount super.random.{RandomKey};
+
+// =============================================================================
+// Data Types
+// =============================================================================
+
+// Data type for tensor elements
+public type DType is
+    | F64          // 64-bit floating-point (default Float)
+    | F32          // 32-bit floating-point
+    | F16          // 16-bit floating-point (half)
+    | BF16         // Brain float 16
+    | I64          // 64-bit signed integer
+    | I32          // 32-bit signed integer
+    | I16          // 16-bit signed integer
+    | I8           // 8-bit signed integer
+    | U64          // 64-bit unsigned integer
+    | U32          // 32-bit unsigned integer
+    | U16          // 16-bit unsigned integer
+    | U8           // 8-bit unsigned integer
+    | Bool         // Boolean
+    | Complex64    // Complex with f32 components
+    | Complex128;  // Complex with f64 components
+
+implement DType {
+    // Size in bytes
+    public fn size_bytes(&self) -> USize {
+        match self {
+            DType.F64 | DType.I64 | DType.U64 | DType.Complex64 => 8,
+            DType.F32 | DType.I32 | DType.U32 => 4,
+            DType.F16 | DType.BF16 | DType.I16 | DType.U16 => 2,
+            DType.I8 | DType.U8 | DType.Bool => 1,
+            DType.Complex128 => 16,
+        }
+    }
+
+    // Check if floating-point type
+    public fn is_float(&self) -> Bool {
+        match self {
+            DType.F64 | DType.F32 | DType.F16 | DType.BF16 => true,
+            _ => false,
+        }
+    }
+
+    // Check if complex type
+    public fn is_complex(&self) -> Bool {
+        match self {
+            DType.Complex64 | DType.Complex128 => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Shape and Layout
+// =============================================================================
+
+// Memory layout for tensor storage
+public type Layout is
+    | RowMajor        // C-style contiguous (default)
+    | ColumnMajor     // Fortran-style
+    | Strided(List<ISize>);  // Custom strides
+
+implement Layout {
+    // Compute strides for given shape
+    public fn compute_strides(&self, shape: &[USize]) -> List<ISize> {
+        match self {
+            Layout.RowMajor => {
+                let n = shape.len();
+                let mut strides = List.with_capacity(n);
+                let mut stride: ISize = 1;
+                for i in (0..n).rev() {
+                    strides.insert(0, stride);
+                    stride *= shape[i] as ISize;
+                }
+                strides
+            }
+            Layout.ColumnMajor => {
+                let n = shape.len();
+                let mut strides = List.with_capacity(n);
+                let mut stride: ISize = 1;
+                for i in 0..n {
+                    strides.push(stride);
+                    stride *= shape[i] as ISize;
+                }
+                strides
+            }
+            Layout.Strided(s) => s.clone(),
+        }
+    }
+}
+
+// Device placement
+public type Device is
+    | CPU
+    | GPU(USize);  // GPU device index
+
+implement Device {
+    // Get current default device from context
+    public fn current() -> Self using [ComputeDevice] {
+        ComputeDevice.device()
+    }
+}
+
+// =============================================================================
+// Tensor Storage
+// =============================================================================
+
+// Low-level tensor data reference (internal use)
+//
+// TensorHandle separates logical identity from physical storage:
+// - Copy-on-write semantics
+// - CBGR generation tracking for safety
+// - Device-agnostic interface
+public type TensorHandle is {
+    id: U64,                    // Unique ID for CBGR tracking
+    dtype: DType,
+    shape: List<USize>,
+    strides: List<ISize>,
+    device: Device,
+    storage: TensorStorage,
+};
+
+// Storage backend
+type TensorStorage is
+    | Owned(RawPtr, USize)           // Owned memory (ptr, size)
+    | View(Heap<TensorHandle>, USize)  // View with offset
+    | External(RawPtr, USize);         // FFI memory
+
+implement TensorHandle {
+    // Allocate new handle on device
+    fn allocate(dtype: DType, shape: &[USize], device: Device) -> Self {
+        let numel: USize = shape.iter().product();
+        let size = numel * dtype.size_bytes();
+        let layout = Layout.RowMajor;
+        let strides = layout.compute_strides(shape);
+
+        TensorHandle {
+            id: @vbc(MEM_NEW_ID),
+            dtype,
+            shape: List.from(shape),
+            strides,
+            device,
+            storage: @vbc(MEM_ALLOC_TENSOR, size, device),
+        }
+    }
+
+    // Total element count
+    fn numel(&self) -> USize {
+        self.shape.iter().product()
+    }
+
+    // Number of dimensions
+    fn rank(&self) -> USize {
+        self.shape.len()
+    }
+
+    // Check if contiguous (row-major)
+    fn is_contiguous(&self) -> Bool {
+        let expected = Layout.RowMajor.compute_strides(&self.shape);
+        self.strides == expected
+    }
+}
+
+// =============================================================================
+// Binary Operations Enum
+// =============================================================================
+
+// Binary operation type
+type BinaryOp is
+    | Add | Sub | Mul | Div
+    | Pow | Max | Min
+    | Eq | Ne | Lt | Le | Gt | Ge;
+
+// Unary operation type
+type UnaryOp is
+    | Neg | Abs | Sign
+    | Exp | Exp2 | Expm1
+    | Log | Log2 | Log10 | Log1p
+    | Sqrt | Rsqrt | Square
+    | Sin | Cos | Tan
+    | Asin | Acos | Atan
+    | Sinh | Cosh | Tanh
+    | Asinh | Acosh | Atanh
+    | Ceil | Floor | Round | Trunc
+    | Erf | Erfc
+    | Relu | Sigmoid | Gelu | Silu;
+
+// Reduction operation type
+type ReduceOp is
+    | Sum | Mean | Prod
+    | Max | Min
+    | ArgMax | ArgMin
+    | All | Any;
+
+// =============================================================================
+// Static Tensor (Compile-time Shape Verification)
+// =============================================================================
+
+// Tensor with compile-time shape verification
+//
+// Shape is encoded as meta parameter, enabling:
+// - Dimension mismatch detection at compile time
+// - Automatic shape inference for operations
+// - Zero-cost shape checks (no runtime overhead)
+//
+// Example:
+// ```verum
+// let a: Tensor<Float, [2, 3]> = Tensor.zeros();
+// let b: Tensor<Float, [3, 4]> = Tensor.zeros();
+// let c: Tensor<Float, [2, 4]> = matmul_static(&a, &b);  // Shape inferred
+// ```
+// NOTE: Static Tensor<T, meta Shape> requires const generics (meta generic params)
+// which are not yet supported by the parser. Using DynTensor<T> for all tensor
+// operations until const generics are implemented.
+//
+// Future syntax:
+//   public type Tensor<T: Numeric, meta Shape: [USize]> is { data: TensorHandle };
+//   implement<T: Numeric, meta S: [USize]> Tensor<T, S> { ... }
+
+// Temporary alias: Tensor<T> is DynTensor<T> until const generics are implemented
+public type Tensor<T: Numeric> is DynTensor<T>;
+
+// =============================================================================
+// Dynamic Tensor (Runtime Shape)
+// =============================================================================
+
+// Runtime-shaped tensor
+//
+// Use when shape depends on runtime values:
+// - Variable batch sizes
+// - Data-dependent shapes (e.g., nonzero indices)
+// - Framework interop (PyTorch, ONNX import)
+//
+// For known shapes, prefer Tensor<T, Shape> for compile-time verification.
+public type DynTensor<T: Numeric> is {
+    data: TensorHandle,
+    shape: List<USize>,
+};
+
+// Semantic alias for explicit naming
+public type RuntimeShapedTensor<T: Numeric> is DynTensor<T>;
+
+implement<T: Numeric> DynTensor<T> {
+    // Get shape reference
+    public fn shape(&self) -> &[USize] {
+        &self.shape
+    }
+
+    // Total element count
+    public fn numel(&self) -> USize {
+        self.shape.iter().product()
+    }
+
+    // Number of dimensions
+    public fn rank(&self) -> USize {
+        self.shape.len()
+    }
+
+    // Dimension size at index
+    public fn dim(&self, idx: USize) -> USize {
+        self.shape[idx]
+    }
+
+    // Check if contiguous
+    public fn is_contiguous(&self) -> Bool {
+        self.data.is_contiguous()
+    }
+
+    // Get device
+    public fn device(&self) -> Device {
+        self.data.device
+    }
+
+    // Get single element (for scalars)
+    public fn item(&self) -> T {
+        assert(self.numel() == 1, "item() requires single-element tensor");
+        @vbc(TENSOR_GET_SCALAR, self.data, &[0])
+    }
+
+    // Get element at indices
+    public fn get(&self, indices: &[USize]) -> T {
+        assert(indices.len() == self.rank(), "index rank mismatch");
+        for (i, &idx) in indices.iter().enumerate() {
+            assert(idx < self.shape[i], "index out of bounds");
+        }
+        @vbc(TENSOR_GET_SCALAR, self.data, indices)
+    }
+
+    // Set element at indices
+    public fn set(&mut self, indices: &[USize], value: T) {
+        assert(indices.len() == self.rank(), "index rank mismatch");
+        for (i, &idx) in indices.iter().enumerate() {
+            assert(idx < self.shape[i], "index out of bounds");
+        }
+        @vbc(TENSOR_SET_SCALAR, self.data, indices, value);
+    }
+
+    // Clone tensor data
+    public fn clone(&self) -> Self {
+        let new_data = @vbc(TENSOR_CLONE, self.data);
+        DynTensor {
+            data: new_data,
+            shape: self.shape.clone(),
+        }
+    }
+
+    // Make contiguous copy if needed
+    public fn contiguous(&self) -> Self {
+        if self.is_contiguous() {
+            self.clone()
+        } else {
+            @vbc(TENSOR_CONTIGUOUS, self)
+        }
+    }
+
+    // Move to device
+    public fn to(&self, device: Device) -> Self {
+        if self.data.device == device {
+            self.clone()
+        } else {
+            @vbc(TENSOR_TO_DEVICE, self.data, device)
+        }
+    }
+
+    // Cast to different dtype
+    public fn cast<U: Numeric>(&self) -> DynTensor<U> {
+        @vbc(TENSOR_CAST, self.data, dtype_of<U>())
+    }
+}
+
+// =============================================================================
+// Tensor View
+// =============================================================================
+
+// View into tensor (shares storage)
+//
+// Views enable efficient slicing and reshaping without copies.
+// Modifications through a view affect the underlying tensor.
+public type TensorView<T: Numeric> is {
+    base: TensorHandle,
+    offset: USize,
+    shape: List<USize>,
+    strides: List<ISize>,
+};
+
+implement<T: Numeric> TensorView<T> {
+    // Create view with custom strides
+    public fn as_strided(
+        base: &TensorHandle,
+        shape: &[USize],
+        strides: &[ISize],
+        offset: USize,
+    ) -> Self {
+        TensorView {
+            base: base.clone(),
+            offset,
+            shape: List.from(shape),
+            strides: List.from(strides),
+        }
+    }
+
+    // Transpose (swap last two dimensions)
+    public fn transpose(&self) -> TensorView<T> {
+        let n = self.shape.len();
+        assert(n >= 2, "transpose requires rank >= 2");
+
+        let mut new_shape = self.shape.clone();
+        let mut new_strides = self.strides.clone();
+        new_shape.swap(n - 1, n - 2);
+        new_strides.swap(n - 1, n - 2);
+
+        TensorView {
+            base: self.base.clone(),
+            offset: self.offset,
+            shape: new_shape,
+            strides: new_strides,
+        }
+    }
+
+    // General permute
+    public fn permute(&self, dims: &[USize]) -> TensorView<T> {
+        assert(dims.len() == self.shape.len(), "permute dims must match rank");
+
+        let mut new_shape = List.with_capacity(dims.len());
+        let mut new_strides = List.with_capacity(dims.len());
+
+        for &d in dims {
+            new_shape.push(self.shape[d]);
+            new_strides.push(self.strides[d]);
+        }
+
+        TensorView {
+            base: self.base.clone(),
+            offset: self.offset,
+            shape: new_shape,
+            strides: new_strides,
+        }
+    }
+
+    // Check if contiguous
+    public fn is_contiguous(&self) -> Bool {
+        let expected = Layout.RowMajor.compute_strides(&self.shape);
+        self.strides == expected
+    }
+
+    // Convert to owned tensor
+    public fn to_tensor(&self) -> DynTensor<T> {
+        if self.is_contiguous() && self.offset == 0 {
+            DynTensor {
+                data: self.base.clone(),
+                shape: self.shape.clone(),
+            }
+        } else {
+            @vbc(TENSOR_CONTIGUOUS_VIEW, self)
+        }
+    }
+}
+
+// =============================================================================
+// Creation Operations
+// =============================================================================
+
+// Create tensor filled with zeros
+public fn zeros<T: Numeric>(shape: &[USize]) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+    @vbc(TENSOR_FILL, data, T.zero());
+    DynTensor { data, shape: List.from(shape) }
+}
+
+// Create tensor filled with ones
+public fn ones<T: Numeric>(shape: &[USize]) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+    @vbc(TENSOR_FILL, data, T.one());
+    DynTensor { data, shape: List.from(shape) }
+}
+
+// Create tensor filled with value
+public fn full<T: Numeric>(shape: &[USize], value: T) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+    @vbc(TENSOR_FILL, data, value);
+    DynTensor { data, shape: List.from(shape) }
+}
+
+// Create tensor like another (same shape and device)
+public fn zeros_like<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    @vbc(TENSOR_FILL, data, T.zero());
+    DynTensor { data, shape: x.shape.clone() }
+}
+
+// Create ones tensor like another
+public fn ones_like<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    @vbc(TENSOR_FILL, data, T.one());
+    DynTensor { data, shape: x.shape.clone() }
+}
+
+// Create tensor filled with value like another
+public fn full_like<T: Numeric>(x: &DynTensor<T>, value: T) -> DynTensor<T> {
+    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    @vbc(TENSOR_FILL, data, value);
+    DynTensor { data, shape: x.shape.clone() }
+}
+
+// Create range tensor [start, end) with step
+public fn arange<T: Numeric>(start: T, end: T, step: T) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    @vbc(TENSOR_ARANGE, start, end, step, ComputeDevice.device())
+}
+
+// Create linearly spaced tensor
+public fn linspace<T: Numeric>(start: T, end: T, num: USize) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    @vbc(TENSOR_LINSPACE, start, end, num, ComputeDevice.device())
+}
+
+// Create identity matrix
+public fn eye<T: Numeric>(n: USize) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    @vbc(TENSOR_EYE, n, ComputeDevice.device())
+}
+
+// Create tensor from data list
+public fn from_list<T: Numeric>(data: &[T], shape: &[USize]) -> DynTensor<T>
+    using [ComputeDevice]
+{
+    let expected_numel: USize = shape.iter().product();
+    assert(data.len() == expected_numel, "data length must match shape");
+    @vbc(TENSOR_FROM_DATA, data, shape, ComputeDevice.device())
+}
+
+// Create random tensor from N(0, 1)
+public fn randn<T: Numeric>(shape: &[USize]) -> DynTensor<T>
+    using [RandomSource, ComputeDevice]
+{
+    @vbc(TENSOR_RANDN, shape, RandomSource.key(), ComputeDevice.device())
+}
+
+// Create random tensor from U[0, 1)
+public fn rand<T: Numeric>(shape: &[USize]) -> DynTensor<T>
+    using [RandomSource, ComputeDevice]
+{
+    @vbc(TENSOR_RAND, shape, RandomSource.key(), ComputeDevice.device())
+}
+
+// Create random tensor from U[low, high)
+public fn rand_uniform<T: Numeric>(shape: &[USize], low: T, high: T) -> DynTensor<T>
+    using [RandomSource, ComputeDevice]
+    where high > low
+{
+    let r = rand<T>(shape);
+    add(&mul(&r, &full_like(&r, high - low)), &full_like(&r, low))
+}
+
+// Create random integer tensor
+public fn randint<T: Numeric>(shape: &[USize], low: T, high: T) -> DynTensor<T>
+    using [RandomSource, ComputeDevice]
+{
+    @vbc(TENSOR_RANDINT, shape, low, high, RandomSource.key(), ComputeDevice.device())
+}
+
+// =============================================================================
+// Element-wise Unary Operations
+// =============================================================================
+
+// Negation: -x
+public fn neg<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Neg)
+}
+
+// Absolute value: |x|
+public fn tensor_abs<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Abs)
+}
+
+// Sign: -1, 0, or 1
+public fn sign<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Sign)
+}
+
+// Exponential: e^x
+public fn tensor_exp<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Exp)
+}
+
+// Natural logarithm: ln(x)
+public fn tensor_log<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Log)
+}
+
+// Square root: sqrt(x)
+public fn tensor_sqrt<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Sqrt)
+}
+
+// Reciprocal square root: 1/sqrt(x)
+public fn rsqrt<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Rsqrt)
+}
+
+// Square: x^2
+public fn square<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Square)
+}
+
+// Sine
+public fn tensor_sin<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Sin)
+}
+
+// Cosine
+public fn tensor_cos<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Cos)
+}
+
+// Tangent
+public fn tensor_tan<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Tan)
+}
+
+// Hyperbolic tangent
+public fn tensor_tanh<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Tanh)
+}
+
+// Hyperbolic sine
+public fn tensor_sinh<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Sinh)
+}
+
+// Hyperbolic cosine
+public fn tensor_cosh<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Cosh)
+}
+
+// Ceiling
+public fn ceil<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Ceil)
+}
+
+// Floor
+public fn tensor_floor<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Floor)
+}
+
+// Round to nearest
+public fn tensor_round<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Round)
+}
+
+// Truncate toward zero
+public fn trunc<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Trunc)
+}
+
+// Error function
+public fn tensor_erf<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Erf)
+}
+
+// =============================================================================
+// Activation Functions
+// =============================================================================
+
+// ReLU: max(0, x)
+public fn relu<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Relu)
+}
+
+// Leaky ReLU: max(alpha*x, x)
+public fn leaky_relu<T: Numeric>(x: &DynTensor<T>, alpha: T) -> DynTensor<T> {
+    @vbc(TENSOR_LEAKY_RELU, x.data, alpha)
+}
+
+// Sigmoid: 1 / (1 + e^-x)
+public fn sigmoid<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Sigmoid)
+}
+
+// GELU: x * Phi(x) (Gaussian Error Linear Unit)
+public fn gelu<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Gelu)
+}
+
+// SiLU/Swish: x * sigmoid(x)
+public fn silu<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_UNOP, x.data, UnaryOp.Silu)
+}
+
+// Softmax along axis
+public fn softmax<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_SOFTMAX, x.data, axis)
+}
+
+// Log-softmax along axis
+public fn log_softmax<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_LOG_SOFTMAX, x.data, axis)
+}
+
+// =============================================================================
+// Element-wise Binary Operations
+// =============================================================================
+
+// Addition with broadcasting
+public fn add<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Add)
+}
+
+// Subtraction with broadcasting
+public fn sub<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Sub)
+}
+
+// Multiplication with broadcasting
+public fn mul<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Mul)
+}
+
+// Division with broadcasting
+public fn div<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Div)
+}
+
+// Power with broadcasting
+public fn tensor_pow<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Pow)
+}
+
+// Element-wise maximum
+public fn maximum<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Max)
+}
+
+// Element-wise minimum
+public fn minimum<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_BINOP, a.data, b.data, BinaryOp.Min)
+}
+
+// Scalar operations
+
+// Add scalar to tensor
+public fn add_scalar<T: Numeric>(x: &DynTensor<T>, scalar: T) -> DynTensor<T> {
+    add(x, &full_like(x, scalar))
+}
+
+// Multiply tensor by scalar
+public fn mul_scalar<T: Numeric>(x: &DynTensor<T>, scalar: T) -> DynTensor<T> {
+    mul(x, &full_like(x, scalar))
+}
+
+// Divide tensor by scalar
+public fn div_scalar<T: Numeric>(x: &DynTensor<T>, scalar: T) -> DynTensor<T> {
+    div(x, &full_like(x, scalar))
+}
+
+// Comparison operations
+
+// Element-wise equality
+public fn eq<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Eq)
+}
+
+// Element-wise inequality
+public fn ne<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Ne)
+}
+
+// Element-wise less than
+public fn lt<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Lt)
+}
+
+// Element-wise less than or equal
+public fn le<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Le)
+}
+
+// Element-wise greater than
+public fn gt<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Gt)
+}
+
+// Element-wise greater than or equal
+public fn ge<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_CMP, a.data, b.data, BinaryOp.Ge)
+}
+
+// =============================================================================
+// Reduction Operations
+// =============================================================================
+
+// Sum all elements
+public fn sum<T: Numeric>(x: &DynTensor<T>) -> T {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.Sum)
+}
+
+// Sum along axis
+public fn sum_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.Sum, axis)
+}
+
+// Sum along axis, keeping dimension
+public fn sum_keepdim<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE_KEEPDIM, x.data, ReduceOp.Sum, axis)
+}
+
+// Mean of all elements
+public fn mean<T: Numeric>(x: &DynTensor<T>) -> T {
+    sum(x) / (x.numel() as T)
+}
+
+// Mean along axis
+public fn mean_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.Mean, axis)
+}
+
+// Product of all elements
+public fn prod<T: Numeric>(x: &DynTensor<T>) -> T {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.Prod)
+}
+
+// Product along axis
+public fn prod_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.Prod, axis)
+}
+
+// Maximum of all elements
+public fn tensor_max<T: Numeric>(x: &DynTensor<T>) -> T {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.Max)
+}
+
+// Maximum along axis
+public fn max_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.Max, axis)
+}
+
+// Minimum of all elements
+public fn tensor_min<T: Numeric>(x: &DynTensor<T>) -> T {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.Min)
+}
+
+// Minimum along axis
+public fn min_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.Min, axis)
+}
+
+// Argmax of flattened tensor
+public fn argmax<T: Numeric>(x: &DynTensor<T>) -> USize {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.ArgMax)
+}
+
+// Argmax along axis
+public fn argmax_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<USize> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.ArgMax, axis)
+}
+
+// Argmin of flattened tensor
+public fn argmin<T: Numeric>(x: &DynTensor<T>) -> USize {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.ArgMin)
+}
+
+// Argmin along axis
+public fn argmin_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<USize> {
+    @vbc(TENSOR_REDUCE, x.data, ReduceOp.ArgMin, axis)
+}
+
+// Variance along axis
+public fn var_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    let mu = mean_axis(x, axis);
+    let diff = sub(x, &unsqueeze(&mu, axis));
+    mean_axis(&square(&diff), axis)
+}
+
+// Standard deviation along axis
+public fn std_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    tensor_sqrt(&var_axis(x, axis))
+}
+
+// Check if all elements are true
+public fn all(x: &DynTensor<Bool>) -> Bool {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.All)
+}
+
+// Check if any element is true
+public fn any(x: &DynTensor<Bool>) -> Bool {
+    @vbc(TENSOR_REDUCE_ALL, x.data, ReduceOp.Any)
+}
+
+// =============================================================================
+// Shape Operations
+// =============================================================================
+
+// Reshape tensor (runtime shape check)
+public fn reshape<T: Numeric>(x: &DynTensor<T>, new_shape: &[USize]) -> DynTensor<T> {
+    let new_numel: USize = new_shape.iter().product();
+    assert(new_numel == x.numel(), "reshape: element count must match");
+    @vbc(TENSOR_RESHAPE, x.data, new_shape)
+}
+
+// Flatten tensor to 1D
+public fn flatten<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    reshape(x, &[x.numel()])
+}
+
+// Transpose last two dimensions
+public fn transpose<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let n = x.rank();
+    assert(n >= 2, "transpose requires rank >= 2");
+    let mut perm: List<USize> = (0..n).collect();
+    perm.swap(n - 1, n - 2);
+    permute(x, &perm)
+}
+
+// Transpose with explicit dimensions
+public fn transpose_dims<T: Numeric>(x: &DynTensor<T>, dim0: USize, dim1: USize) -> DynTensor<T> {
+    let n = x.rank();
+    let mut perm: List<USize> = (0..n).collect();
+    perm.swap(dim0, dim1);
+    permute(x, &perm)
+}
+
+// Permute dimensions
+public fn permute<T: Numeric>(x: &DynTensor<T>, dims: &[USize]) -> DynTensor<T> {
+    assert(dims.len() == x.rank(), "permute dims must match rank");
+    @vbc(TENSOR_PERMUTE, x.data, dims)
+}
+
+// Add dimension at position
+public fn unsqueeze<T: Numeric>(x: &DynTensor<T>, dim: ISize) -> DynTensor<T> {
+    let axis = normalize_axis(dim, x.rank() + 1);
+    @vbc(TENSOR_UNSQUEEZE, x.data, axis)
+}
+
+// Remove singleton dimensions
+public fn squeeze<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let new_shape: List<USize> = x.shape.iter()
+        .filter(|&d| *d != 1)
+        .cloned()
+        .collect();
+    if new_shape.is_empty() {
+        reshape(x, &[1])
+    } else {
+        reshape(x, &new_shape)
+    }
+}
+
+// Remove dimension at position if singleton
+public fn squeeze_dim<T: Numeric>(x: &DynTensor<T>, dim: ISize) -> DynTensor<T> {
+    let axis = normalize_axis(dim, x.rank());
+    assert(x.shape[axis] == 1, "squeeze_dim: dimension must be 1");
+    @vbc(TENSOR_SQUEEZE, x.data, axis)
+}
+
+// Expand tensor to new shape (broadcasting)
+public fn expand<T: Numeric>(x: &DynTensor<T>, new_shape: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_EXPAND, x.data, new_shape)
+}
+
+// Concatenate tensors along axis
+public fn cat<T: Numeric>(tensors: &[&DynTensor<T>], axis: ISize) -> DynTensor<T> {
+    assert(!tensors.is_empty(), "cat requires at least one tensor");
+    let handles: List<&TensorHandle> = tensors.iter().map(|t| &t.data).collect();
+    @vbc(TENSOR_CAT, &handles, axis)
+}
+
+// Stack tensors along new axis
+public fn stack<T: Numeric>(tensors: &[&DynTensor<T>], axis: ISize) -> DynTensor<T> {
+    let expanded: List<DynTensor<T>> = tensors.iter()
+        .map(|t| unsqueeze(*t, axis))
+        .collect();
+    let refs: List<&DynTensor<T>> = expanded.iter().collect();
+    cat(&refs, axis)
+}
+
+// Split tensor into chunks along axis
+public fn split<T: Numeric>(x: &DynTensor<T>, chunks: USize, axis: ISize) -> List<DynTensor<T>> {
+    @vbc(TENSOR_SPLIT, x.data, chunks, axis)
+}
+
+// Split tensor at indices
+public fn split_at<T: Numeric>(x: &DynTensor<T>, indices: &[USize], axis: ISize) -> List<DynTensor<T>> {
+    @vbc(TENSOR_SPLIT_AT, x.data, indices, axis)
+}
+
+// Repeat (tile) tensor along axes
+public fn tile<T: Numeric>(x: &DynTensor<T>, repeats: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_REPEAT, x.data, repeats)
+}
+
+// =============================================================================
+// Indexing and Slicing
+// =============================================================================
+
+// Slice tensor along dimensions
+public fn slice<T: Numeric>(
+    x: &DynTensor<T>,
+    ranges: &[(Maybe<USize>, Maybe<USize>)],  // (start, end) per dim
+) -> DynTensor<T> {
+    @vbc(TENSOR_SLICE, x.data, ranges)
+}
+
+// Index select along axis
+public fn index_select<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    indices: &DynTensor<USize>,
+) -> DynTensor<T> {
+    @vbc(TENSOR_INDEX_SELECT, x.data, axis, indices.data)
+}
+
+// Gather values along axis
+public fn gather<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    indices: &DynTensor<USize>,
+) -> DynTensor<T> {
+    @vbc(TENSOR_GATHER, x.data, axis, indices.data)
+}
+
+// Scatter values along axis
+public fn scatter<T: Numeric>(
+    x: &mut DynTensor<T>,
+    axis: ISize,
+    indices: &DynTensor<USize>,
+    src: &DynTensor<T>,
+) {
+    @vbc(TENSOR_SCATTER, x.data, axis, indices.data, src.data);
+}
+
+// Select elements where mask is true
+public fn masked_select<T: Numeric>(
+    x: &DynTensor<T>,
+    mask: &DynTensor<Bool>,
+) -> DynTensor<T> {
+    @vbc(TENSOR_MASKED_SELECT, x.data, mask.data)
+}
+
+// Where: select from x where condition else y
+public fn where_tensor<T: Numeric>(
+    condition: &DynTensor<Bool>,
+    x: &DynTensor<T>,
+    y: &DynTensor<T>,
+) -> DynTensor<T> {
+    @vbc(TENSOR_WHERE, condition.data, x.data, y.data)
+}
+
+// Get indices of nonzero elements
+public fn nonzero<T: Numeric>(x: &DynTensor<T>) -> DynTensor<USize> {
+    @vbc(TENSOR_NONZERO, x.data)
+}
+
+// One-hot encoding
+public fn one_hot<T: Numeric>(indices: &DynTensor<USize>, num_classes: USize) -> DynTensor<T> {
+    @vbc(TENSOR_ONE_HOT, indices.data, num_classes, dtype_of<T>())
+}
+
+// =============================================================================
+// Linear Algebra (Tensor)
+// =============================================================================
+
+// Matrix multiply (2D tensors)
+public fn mm<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    assert(a.rank() == 2 && b.rank() == 2, "mm requires 2D tensors");
+    assert(a.dim(1) == b.dim(0), "mm: inner dimensions must match");
+    @vbc(TENSOR_MM, a.data, b.data)
+}
+
+// Batched matrix multiply (3D tensors)
+public fn bmm<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    assert(a.rank() == 3 && b.rank() == 3, "bmm requires 3D tensors");
+    assert(a.dim(0) == b.dim(0), "bmm: batch sizes must match");
+    assert(a.dim(2) == b.dim(1), "bmm: inner dimensions must match");
+    @vbc(TENSOR_BMM, a.data, b.data)
+}
+
+// General matrix multiply (handles batching and broadcasting)
+public fn matmul<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_MATMUL, a.data, b.data)
+}
+
+// Matrix-vector multiply
+public fn mv<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    assert(a.rank() == 2 && b.rank() == 1, "mv requires 2D matrix and 1D vector");
+    assert(a.dim(1) == b.dim(0), "mv: dimensions must match");
+    @vbc(TENSOR_MV, a.data, b.data)
+}
+
+// Outer product
+public fn outer<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    assert(a.rank() == 1 && b.rank() == 1, "outer requires 1D vectors");
+    @vbc(TENSOR_OUTER, a.data, b.data)
+}
+
+// Dot product (1D tensors)
+public fn tensor_dot<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> T {
+    assert(a.rank() == 1 && b.rank() == 1, "dot requires 1D tensors");
+    assert(a.dim(0) == b.dim(0), "dot: lengths must match");
+    sum(&mul(a, b))
+}
+
+// Vector norm
+public fn norm<T: Numeric>(x: &DynTensor<T>, ord: Float) -> T {
+    if ord == 2.0 {
+        sqrt(sum(&square(x)) as Float) as T
+    } else if ord == 1.0 {
+        sum(&tensor_abs(x))
+    } else if ord == Float.INFINITY {
+        tensor_max(&tensor_abs(x))
+    } else {
+        let abs_x = tensor_abs(x);
+        let powered = tensor_pow(&abs_x, &full_like(x, ord as T));
+        let total = sum(&powered) as Float;
+        exp(log(total) / ord) as T
+    }
+}
+
+// Frobenius norm of matrix
+public fn frobenius_norm<T: Numeric>(x: &DynTensor<T>) -> T {
+    tensor_sqrt(&sum(&square(x))).item()
+}
+
+// Trace of matrix
+public fn trace<T: Numeric>(x: &DynTensor<T>) -> T {
+    assert(x.rank() == 2 && x.dim(0) == x.dim(1), "trace requires square matrix");
+    @vbc(TENSOR_TRACE, x.data)
+}
+
+// Diagonal of matrix or create diagonal matrix
+public fn diag<T: Numeric>(x: &DynTensor<T>, offset: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_DIAG, x.data, offset)
+}
+
+// Triangular part of matrix
+public fn triu<T: Numeric>(x: &DynTensor<T>, diagonal: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_TRIU, x.data, diagonal)
+}
+
+// Lower triangular part of matrix
+public fn tril<T: Numeric>(x: &DynTensor<T>, diagonal: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_TRIL, x.data, diagonal)
+}
+
+// =============================================================================
+// Decompositions (Tensor)
+// =============================================================================
+
+// SVD decomposition result
+public type TensorSVD<T: Numeric> is {
+    u: DynTensor<T>,
+    s: DynTensor<T>,
+    vh: DynTensor<T>,
+};
+
+// Singular value decomposition
+public fn svd<T: Numeric>(x: &DynTensor<T>) -> TensorSVD<T> {
+    @vbc(TENSOR_SVD, x.data)
+}
+
+// QR decomposition result
+public type TensorQR<T: Numeric> is {
+    q: DynTensor<T>,
+    r: DynTensor<T>,
+};
+
+// QR decomposition
+public fn tensor_qr<T: Numeric>(x: &DynTensor<T>) -> TensorQR<T> {
+    @vbc(TENSOR_QR, x.data)
+}
+
+// Cholesky decomposition (lower triangular)
+public fn tensor_cholesky<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_CHOLESKY, x.data)
+}
+
+// Eigenvalue decomposition result
+public type TensorEig<T: Numeric> is {
+    eigenvalues: DynTensor<T>,
+    eigenvectors: DynTensor<T>,
+};
+
+// Eigenvalue decomposition
+public fn eig<T: Numeric>(x: &DynTensor<T>) -> TensorEig<T> {
+    @vbc(TENSOR_EIG, x.data)
+}
+
+// Eigenvalue decomposition for symmetric/Hermitian matrices
+public fn eigh<T: Numeric>(x: &DynTensor<T>) -> TensorEig<T> {
+    @vbc(TENSOR_EIGH, x.data)
+}
+
+// LU decomposition result
+public type TensorLU<T: Numeric> is {
+    lu: DynTensor<T>,
+    pivots: DynTensor<USize>,
+};
+
+// LU decomposition
+public fn tensor_lu<T: Numeric>(x: &DynTensor<T>) -> TensorLU<T> {
+    @vbc(TENSOR_LU, x.data)
+}
+
+// Solve linear system Ax = b
+public fn solve<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_SOLVE, a.data, b.data)
+}
+
+// Matrix inverse
+public fn tensor_inverse<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_INVERSE, x.data)
+}
+
+// Matrix determinant
+public fn det<T: Numeric>(x: &DynTensor<T>) -> T {
+    @vbc(TENSOR_DET, x.data)
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Normalize negative axis index
+fn normalize_axis(axis: ISize, rank: USize) -> USize {
+    if axis >= 0 {
+        axis as USize
+    } else {
+        (rank as ISize + axis) as USize
+    }
+}
+
+// Get dtype for type T
+fn dtype_of<T: Numeric>() -> DType {
+    // Default to F64; specialized via @const dispatch in codegen
+    DType.F64
+}
+
+// =============================================================================
+// Static Shape Operations (Compile-time Verified)
+// =============================================================================
+// NOTE: Static shape operations require const generics (meta generic params)
+// which are not yet supported by the parser. These will be enabled when
+// const generics are implemented:
+//   matmul_static<T, meta M, meta K, meta N>(...)
+//   transpose_static<T, meta M, meta N>(...)
+//   add_static<T, meta A, meta B>(...)
+//   broadcast_shape<meta A, meta B>()

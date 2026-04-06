@@ -1,0 +1,53 @@
+// Types module
+// Provides common data types
+
+pub type Point is {
+    pub x: Float,
+    pub y: Float,
+};
+
+implement Point {
+    pub fn new(x: Float, y: Float) -> Point {
+        Point { x, y }
+    }
+
+    pub fn origin() -> Point {
+        Point { x: 0.0, y: 0.0 }
+    }
+
+    pub fn distance_from_origin(&self) -> Float {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    pub fn distance_to(&self, other: &Point) -> Float {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+}
+
+pub type Rectangle is {
+    pub top_left: Point,
+    pub bottom_right: Point,
+};
+
+implement Rectangle {
+    pub fn new(x1: Float, y1: Float, x2: Float, y2: Float) -> Rectangle {
+        Rectangle {
+            top_left: Point.new(x1, y1),
+            bottom_right: Point.new(x2, y2),
+        }
+    }
+
+    pub fn width(&self) -> Float {
+        (self.bottom_right.x - self.top_left.x).abs()
+    }
+
+    pub fn height(&self) -> Float {
+        (self.bottom_right.y - self.top_left.y).abs()
+    }
+
+    pub fn area(&self) -> Float {
+        self.width() * self.height()
+    }
+}

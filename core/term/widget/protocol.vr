@@ -1,0 +1,29 @@
+// =============================================================================
+// protocol.vr - Widget and StatefulWidget protocols
+// =============================================================================
+module protocol;
+
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+/// Base protocol for all widgets (stateless, immediate mode).
+/// Renders itself into a buffer area. Consumed on render (moved, not borrowed).
+public type Widget is protocol {
+    /// Render the widget into the given area of the buffer.
+    fn render(self, area: Rect, buf: &mut Buffer);
+};
+
+/// Stateful widget — maintains state between frames.
+/// State is passed by mutable reference and persists across renders.
+public type StatefulWidget is protocol {
+    type State;
+
+    /// Render the widget with mutable state.
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self.State);
+};
+
+/// Styled protocol — widget that can have a style applied.
+public type Styled is protocol {
+    fn style(self, style: Style) -> Self;
+};

@@ -1,0 +1,11 @@
+// Test: BS-004 - Basic function with parameters and return
+// Priority: Critical
+// Expected output: 7
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    print(f"{add(3, 4)}");
+}

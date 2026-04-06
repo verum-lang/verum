@@ -1,0 +1,580 @@
+// =============================================================================
+// char.vr - Character utilities
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core (primitives, protocols)
+// =============================================================================
+//
+// This module provides utilities for working with Unicode characters (Char).
+// Char represents a single Unicode scalar value (code point).
+//
+// =============================================================================
+
+module core.text.char;
+mount core.*;
+
+// Import intrinsics as functions
+mount core.intrinsics.{
+    char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
+    char_is_uppercase, char_is_lowercase, char_to_uppercase, char_to_lowercase,
+    char_general_category,
+};
+
+// =============================================================================
+// Character Classification
+// =============================================================================
+
+implement Char {
+    // =========================================================================
+    // ASCII Classification (fast path)
+    // =========================================================================
+
+    /// Check if ASCII (< 128).
+    public fn is_ascii(self) -> Bool {
+        (self as Int) < 128
+    }
+
+    /// Check if ASCII alphabetic (a-z, A-Z).
+    public fn is_ascii_alphabetic(self) -> Bool {
+        let c = self as Int;
+        (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+    }
+
+    /// Check if ASCII uppercase (A-Z).
+    public fn is_ascii_uppercase(self) -> Bool {
+        let c = self as Int;
+        c >= 65 && c <= 90
+    }
+
+    /// Check if ASCII lowercase (a-z).
+    public fn is_ascii_lowercase(self) -> Bool {
+        let c = self as Int;
+        c >= 97 && c <= 122
+    }
+
+    /// Check if ASCII digit (0-9).
+    public fn is_ascii_digit(self) -> Bool {
+        let c = self as Int;
+        c >= 48 && c <= 57
+    }
+
+    /// Check if ASCII hexadecimal digit (0-9, a-f, A-F).
+    public fn is_ascii_hexdigit(self) -> Bool {
+        let c = self as Int;
+        (c >= 48 && c <= 57) ||
+        (c >= 65 && c <= 70) ||
+        (c >= 97 && c <= 102)
+    }
+
+    /// Check if ASCII alphanumeric.
+    public fn is_ascii_alphanumeric(self) -> Bool {
+        self.is_ascii_alphabetic() || self.is_ascii_digit()
+    }
+
+    /// Check if ASCII whitespace (space, tab, newline, etc.).
+    public fn is_ascii_whitespace(self) -> Bool {
+        let c = self as Int;
+        c == 32 || c == 9 || c == 10 || c == 12 || c == 13
+    }
+
+    /// Check if ASCII control character.
+    public fn is_ascii_control(self) -> Bool {
+        let c = self as Int;
+        c < 32 || c == 127
+    }
+
+    /// Check if ASCII punctuation.
+    public fn is_ascii_punctuation(self) -> Bool {
+        let c = self as Int;
+        (c >= 33 && c <= 47) ||  // ! " # $ % & ' ( ) * + , - . /
+        (c >= 58 && c <= 64) ||  // : ; < = > ? @
+        (c >= 91 && c <= 96) ||  // [ \ ] ^ _ `
+        (c >= 123 && c <= 126)   // { | } ~
+    }
+
+    /// Check if ASCII graphic (visible character).
+    public fn is_ascii_graphic(self) -> Bool {
+        let c = self as Int;
+        c >= 33 && c <= 126
+    }
+
+    /// Convert to ASCII uppercase.
+    public fn to_ascii_uppercase(self) -> Char {
+        if self.is_ascii_lowercase() {
+            ((self as Int) - 32) as Char
+        } else {
+            self
+        }
+    }
+
+    /// Convert to ASCII lowercase.
+    public fn to_ascii_lowercase(self) -> Char {
+        if self.is_ascii_uppercase() {
+            ((self as Int) + 32) as Char
+        } else {
+            self
+        }
+    }
+
+    /// Make ASCII uppercase in place.
+    public fn make_ascii_uppercase(&mut self) {
+        *self = self.to_ascii_uppercase();
+    }
+
+    /// Make ASCII lowercase in place.
+    public fn make_ascii_lowercase(&mut self) {
+        *self = self.to_ascii_lowercase();
+    }
+
+    /// Check if equal ignoring ASCII case.
+    public fn eq_ignore_ascii_case(&self, other: &Char) -> Bool {
+        self.to_ascii_lowercase() == other.to_ascii_lowercase()
+    }
+
+    // =========================================================================
+    // Unicode Classification (full Unicode support)
+    // =========================================================================
+
+    /// Check if alphabetic (Unicode).
+    public fn is_alphabetic(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_alphabetic();
+        }
+        char_is_alphabetic(self)
+    }
+
+    /// Check if numeric (Unicode).
+    public fn is_numeric(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_digit();
+        }
+        char_is_numeric(self)
+    }
+
+    /// Check if alphanumeric (Unicode).
+    public fn is_alphanumeric(self) -> Bool {
+        self.is_alphabetic() || self.is_numeric()
+    }
+
+    /// Check if whitespace (Unicode).
+    public fn is_whitespace(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_whitespace();
+        }
+        char_is_whitespace(self)
+    }
+
+    /// Check if control character (Unicode).
+    public fn is_control(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_control();
+        }
+        char_is_control(self)
+    }
+
+    /// Check if uppercase (Unicode).
+    public fn is_uppercase(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_uppercase();
+        }
+        char_is_uppercase(self)
+    }
+
+    /// Check if lowercase (Unicode).
+    public fn is_lowercase(self) -> Bool {
+        if self.is_ascii() {
+            return self.is_ascii_lowercase();
+        }
+        char_is_lowercase(self)
+    }
+
+    /// Convert to uppercase (Unicode).
+    public fn to_uppercase(self) -> Char {
+        if self.is_ascii() {
+            return self.to_ascii_uppercase();
+        }
+        char_to_uppercase(self)
+    }
+
+    /// Convert to lowercase (Unicode).
+    public fn to_lowercase(self) -> Char {
+        if self.is_ascii() {
+            return self.to_ascii_lowercase();
+        }
+        char_to_lowercase(self)
+    }
+
+    // =========================================================================
+    // Digit Conversion
+    // =========================================================================
+
+    /// Check if digit in given radix (2-36).
+    public fn is_digit(self, radix: Int) -> Bool {
+        self.to_digit(radix).is_some()
+    }
+
+    /// Convert character to digit value in given radix.
+    public fn to_digit(self, radix: Int) -> Maybe<Int> {
+        assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
+
+        let code = self as Int;
+
+        let digit = if code >= 48 && code <= 57 {
+            // '0'-'9' -> 0-9
+            code - 48
+        } else if code >= 65 && code <= 90 {
+            // 'A'-'Z' -> 10-35
+            code - 55
+        } else if code >= 97 && code <= 122 {
+            // 'a'-'z' -> 10-35
+            code - 87
+        } else {
+            return None;
+        };
+
+        if digit < radix {
+            Some(digit)
+        } else {
+            None
+        }
+    }
+
+    /// Create character from digit value in given radix.
+    /// Verum convention: hex digits are returned in uppercase (A-F).
+    public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
+        assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
+
+        if digit < 0 || digit >= radix {
+            return None;
+        }
+
+        if digit < 10 {
+            Some(('0' as Int + digit) as Char)
+        } else {
+            Some(('A' as Int + digit - 10) as Char)
+        }
+    }
+
+    // =========================================================================
+    // UTF-8 Encoding
+    // =========================================================================
+
+    /// Length when encoded as UTF-8.
+    public fn len_utf8(self) -> Int {
+        let code = self as Int;
+        if code < 0x80 {
+            1
+        } else if code < 0x800 {
+            2
+        } else if code < 0x10000 {
+            3
+        } else {
+            4
+        }
+    }
+
+    /// Length when encoded as UTF-16.
+    public fn len_utf16(self) -> Int {
+        let code = self as Int;
+        if code < 0x10000 { 1 } else { 2 }
+    }
+
+    /// Encode as UTF-8 bytes.
+    /// Returns the number of bytes written.
+    public fn encode_utf8(self, buf: &mut [Byte]) -> Int {
+        let code = self as Int;
+
+        if code < 0x80 {
+            assert(buf.len() >= 1, "buffer too small for UTF-8");
+            buf[0] = code as Byte;
+            1
+        } else if code < 0x800 {
+            assert(buf.len() >= 2, "buffer too small for UTF-8");
+            buf[0] = (0xC0 | (code >> 6)) as Byte;
+            buf[1] = (0x80 | (code & 0x3F)) as Byte;
+            2
+        } else if code < 0x10000 {
+            assert(buf.len() >= 3, "buffer too small for UTF-8");
+            buf[0] = (0xE0 | (code >> 12)) as Byte;
+            buf[1] = (0x80 | ((code >> 6) & 0x3F)) as Byte;
+            buf[2] = (0x80 | (code & 0x3F)) as Byte;
+            3
+        } else {
+            assert(buf.len() >= 4, "buffer too small for UTF-8");
+            buf[0] = (0xF0 | (code >> 18)) as Byte;
+            buf[1] = (0x80 | ((code >> 12) & 0x3F)) as Byte;
+            buf[2] = (0x80 | ((code >> 6) & 0x3F)) as Byte;
+            buf[3] = (0x80 | (code & 0x3F)) as Byte;
+            4
+        }
+    }
+
+    /// Encode as UTF-16.
+    /// Returns the number of code units written (1 || 2).
+    public fn encode_utf16(self, buf: &mut [Int]) -> Int {
+        let code = self as Int;
+
+        if code < 0x10000 {
+            assert(buf.len() >= 1, "buffer too small for UTF-16");
+            buf[0] = code;
+            1
+        } else {
+            // Surrogate pair
+            assert(buf.len() >= 2, "buffer too small for UTF-16");
+            let adjusted = code - 0x10000;
+            buf[0] = 0xD800 | (adjusted >> 10);
+            buf[1] = 0xDC00 | (adjusted & 0x3FF);
+            2
+        }
+    }
+
+    // =========================================================================
+    // Unicode Properties
+    // =========================================================================
+
+    /// Get Unicode general category.
+    public fn general_category(self) -> GeneralCategory {
+        char_general_category(self)
+    }
+
+    /// Check if this is a valid Unicode scalar value.
+    /// (Surrogate code points are not valid scalar values)
+    public fn is_valid_unicode(self) -> Bool {
+        let code = self as Int;
+        code <= 0x10FFFF && !(code >= 0xD800 && code <= 0xDFFF)
+    }
+
+    // =========================================================================
+    // Escaping
+    // =========================================================================
+
+    /// Get escape sequence for debug output.
+    public fn escape_debug(self) -> Text {
+        match self {
+            '\t' => "\\t",
+            '\r' => "\\r",
+            '\n' => "\\n",
+            '\\' => "\\\\",
+            '\'' => "\\'",
+            '"' => "\\\"",
+            c if c.is_control() => f"\\u{{{c as Int:04x}}}",
+            c => {
+                let mut buf = [0_u8; 4];
+                let len = c.encode_utf8(&mut buf);
+                unsafe { Text.from_utf8_unchecked(slice_from_raw_parts(&buf[0], len)) }
+            }
+        }
+    }
+
+    /// Get escape sequence for Unicode escape.
+    public fn escape_unicode(self) -> Text {
+        f"\\u{{{self as Int:04x}}}"
+    }
+
+    /// Get escape sequence for ASCII escape if needed.
+    public fn escape_default(self) -> Text {
+        if self.is_ascii_graphic() || self == ' ' {
+            let mut buf = [0_u8; 1];
+            buf[0] = self as Byte;
+            unsafe { Text.from_utf8_unchecked(&buf) }
+        } else {
+            self.escape_debug()
+        }
+    }
+}
+
+// =============================================================================
+// Unicode General Category
+// =============================================================================
+
+/// Unicode general category.
+public type GeneralCategory is
+    | Lu  // Letter, uppercase
+    | Ll  // Letter, lowercase
+    | Lt  // Letter, titlecase
+    | Lm  // Letter, modifier
+    | Lo  // Letter, other
+    | Mn  // Mark, nonspacing
+    | Mc  // Mark, spacing combining
+    | Me  // Mark, enclosing
+    | Nd  // Number, decimal digit
+    | Nl  // Number, letter
+    | No  // Number, other
+    | Pc  // Punctuation, connector
+    | Pd  // Punctuation, dash
+    | Ps  // Punctuation, open
+    | Pe  // Punctuation, close
+    | Pi  // Punctuation, initial quote
+    | Pf  // Punctuation, final quote
+    | Po  // Punctuation, other
+    | Sm  // Symbol, math
+    | Sc  // Symbol, currency
+    | Sk  // Symbol, modifier
+    | So  // Symbol, other
+    | Zs  // Separator, space
+    | Zl  // Separator, line
+    | Zp  // Separator, paragraph
+    | Cc  // Other, control
+    | Cf  // Other, format
+    | Cs  // Other, surrogate
+    | Co  // Other, private use
+    | Cn; // Other, not assigned
+
+implement GeneralCategory {
+    /// Check if this is a letter category.
+    fn is_letter(&self) -> Bool {
+        match self {
+            Lu | Ll | Lt | Lm | Lo => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a mark category.
+    fn is_mark(&self) -> Bool {
+        match self {
+            Mn | Mc | Me => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a number category.
+    fn is_number(&self) -> Bool {
+        match self {
+            Nd | Nl | No => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a punctuation category.
+    fn is_punctuation(&self) -> Bool {
+        match self {
+            Pc | Pd | Ps | Pe | Pi | Pf | Po => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a symbol category.
+    fn is_symbol(&self) -> Bool {
+        match self {
+            Sm | Sc | Sk | So => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a separator category.
+    fn is_separator(&self) -> Bool {
+        match self {
+            Zs | Zl | Zp => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is an "other" category.
+    fn is_other(&self) -> Bool {
+        match self {
+            Cc | Cf | Cs | Co | Cn => true,
+            _ => false,
+        }
+    }
+}
+
+implement Debug for GeneralCategory {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Lu => "Lu",
+            Ll => "Ll",
+            Lt => "Lt",
+            Lm => "Lm",
+            Lo => "Lo",
+            Mn => "Mn",
+            Mc => "Mc",
+            Me => "Me",
+            Nd => "Nd",
+            Nl => "Nl",
+            No => "No",
+            Pc => "Pc",
+            Pd => "Pd",
+            Ps => "Ps",
+            Pe => "Pe",
+            Pi => "Pi",
+            Pf => "Pf",
+            Po => "Po",
+            Sm => "Sm",
+            Sc => "Sc",
+            Sk => "Sk",
+            So => "So",
+            Zs => "Zs",
+            Zl => "Zl",
+            Zp => "Zp",
+            Cc => "Cc",
+            Cf => "Cf",
+            Cs => "Cs",
+            Co => "Co",
+            Cn => "Cn",
+        };
+        f.write_str(s)
+    }
+}
+
+// =============================================================================
+// Pattern Matching Helpers
+// =============================================================================
+
+/// Pattern for matching characters.
+public type CharPattern is protocol {
+    fn matches(&self, ch: Char) -> Bool;
+};
+
+implement CharPattern for Char {
+    fn matches(&self, ch: Char) -> Bool {
+        *self == ch
+    }
+}
+
+implement CharPattern for fn(Char) -> Bool {
+    fn matches(&self, ch: Char) -> Bool {
+        (*self)(ch)
+    }
+}
+
+/// Match any of the given characters.
+public type AnyChar is {
+    chars: &[Char],
+};
+
+public fn char_any_of(chars: &[Char]) -> AnyChar {
+    AnyChar { chars: chars }
+}
+
+/// Alias for char_any_of for convenience.
+public fn any_of(chars: &[Char]) -> AnyChar {
+    char_any_of(chars)
+}
+
+implement CharPattern for AnyChar {
+    fn matches(&self, ch: Char) -> Bool {
+        for c in self.chars {
+            if *c == ch {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Match characters in range.
+public type CharRange is {
+    start: Char,
+    end: Char,
+};
+
+public fn char_range(start: Char, end: Char) -> CharRange {
+    CharRange { start: start, end: end }
+}
+
+implement CharPattern for CharRange {
+    fn matches(&self, ch: Char) -> Bool {
+        (ch as Int) >= (self.start as Int) &&
+        (ch as Int) <= (self.end as Int)
+    }
+}

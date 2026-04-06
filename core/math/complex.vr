@@ -1,0 +1,319 @@
+// =============================================================================
+// math/complex.vr - Complex Number Arithmetic
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: math/elementary (sqrt, atan2, sin, cos, exp, ln)
+// =============================================================================
+//
+// Provides complex number types and arithmetic operations.
+//
+// # Example
+// ```verum
+// let z1 = Complex.new(3.0, 4.0);  // 3 + 4i
+// let z2 = Complex.new(1.0, -2.0); // 1 - 2i
+//
+// let sum = z1 + z2;           // 4 + 2i
+// let product = z1 * z2;       // 11 - 2i
+// let magnitude = z1.abs();    // 5.0
+// let angle = z1.arg();        // atan2(4, 3)
+// ```
+//
+// =============================================================================
+
+module math.complex;
+
+mount core.math.elementary.{sqrt, atan2, sin, cos, exp, ln};
+
+// =============================================================================
+// Complex<T> - Generic complex number
+// =============================================================================
+
+/// Complex number type parameterized by the scalar type.
+///
+/// Represents a complex number `re + im * i` where `i` is the imaginary unit.
+public type Complex<T> is {
+    /// Real part.
+    re: T,
+    /// Imaginary part.
+    im: T,
+};
+
+implement<T> Complex<T> {
+    /// Create a new complex number.
+    public fn new(re: T, im: T) -> Complex<T> {
+        Complex { re: re, im: im }
+    }
+}
+
+implement<T: Default> Complex<T> {
+    /// Create a complex number from just the real part (imaginary = 0).
+    public fn from_real(re: T) -> Complex<T> {
+        Complex { re: re, im: T.default() }
+    }
+
+    /// Create a complex number from just the imaginary part (real = 0).
+    public fn from_imag(im: T) -> Complex<T> {
+        Complex { re: T.default(), im: im }
+    }
+
+    /// The zero complex number (0 + 0i).
+    public fn zero() -> Complex<T> {
+        Complex { re: T.default(), im: T.default() }
+    }
+}
+
+// =============================================================================
+// Float-specific operations
+// =============================================================================
+
+implement Complex<Float> {
+    /// Create a complex number from polar coordinates (r, theta).
+    ///
+    /// Returns r * (cos(theta) + i * sin(theta)).
+    public fn from_polar(r: Float, theta: Float) -> Complex<Float> {
+        Complex {
+            re: r * cos(theta),
+            im: r * sin(theta),
+        }
+    }
+
+    /// The unit imaginary number (0 + 1i).
+    public fn i() -> Complex<Float> {
+        Complex { re: 0.0, im: 1.0 }
+    }
+
+    /// The unit real number (1 + 0i).
+    public fn one() -> Complex<Float> {
+        Complex { re: 1.0, im: 0.0 }
+    }
+
+    /// Get the magnitude (absolute value) |z| = sqrt(re^2 + im^2).
+    public fn abs(&self) -> Float {
+        sqrt(self.re * self.re + self.im * self.im)
+    }
+
+    /// Get the squared magnitude |z|^2 = re^2 + im^2.
+    ///
+    /// More efficient than `abs()` when only comparison is needed.
+    public fn abs_sq(&self) -> Float {
+        self.re * self.re + self.im * self.im
+    }
+
+    /// Get the argument (phase angle) in radians, in range (-pi, pi].
+    public fn arg(&self) -> Float {
+        atan2(self.im, self.re)
+    }
+
+    /// Convert to polar coordinates (r, theta).
+    public fn to_polar(&self) -> (Float, Float) {
+        (self.abs(), self.arg())
+    }
+
+    /// Get the complex conjugate (re - im*i).
+    public fn conj(&self) -> Complex<Float> {
+        Complex { re: self.re, im: -self.im }
+    }
+
+    /// Get the reciprocal (1/z).
+    ///
+    /// Returns None if z is zero.
+    public fn recip(&self) -> Maybe<Complex<Float>> {
+        let denom = self.abs_sq();
+        if denom == 0.0 {
+            None
+        } else {
+            Some(Complex {
+                re: self.re / denom,
+                im: -self.im / denom,
+            })
+        }
+    }
+
+    /// Complex exponential: e^z = e^re * (cos(im) + i*sin(im)).
+    public fn cexp(&self) -> Complex<Float> {
+        let r = exp(self.re);
+        Complex {
+            re: r * cos(self.im),
+            im: r * sin(self.im),
+        }
+    }
+
+    /// Complex natural logarithm: ln(z) = ln|z| + i*arg(z).
+    ///
+    /// Returns the principal value (imaginary part in (-pi, pi]).
+    public fn cln(&self) -> Complex<Float> {
+        Complex {
+            re: ln(self.abs()),
+            im: self.arg(),
+        }
+    }
+
+    /// Complex power: z^w = e^(w * ln(z)).
+    public fn cpow(&self, w: Complex<Float>) -> Complex<Float> {
+        if self.re == 0.0 && self.im == 0.0 {
+            Complex.zero()
+        } else {
+            (w * self.cln()).cexp()
+        }
+    }
+
+    /// Complex square root (principal value).
+    public fn csqrt(&self) -> Complex<Float> {
+        let r = self.abs();
+        if r == 0.0 {
+            Complex.zero()
+        } else {
+            let t = sqrt((r + self.re.abs()) / 2.0);
+            if self.re >= 0.0 {
+                Complex {
+                    re: t,
+                    im: self.im / (2.0 * t),
+                }
+            } else {
+                Complex {
+                    re: self.im.abs() / (2.0 * t),
+                    im: if self.im >= 0.0 { t } else { -t },
+                }
+            }
+        }
+    }
+
+    /// Check if the complex number is zero.
+    public fn is_zero(&self) -> Bool {
+        self.re == 0.0 && self.im == 0.0
+    }
+
+    /// Check if the complex number is finite (both parts finite).
+    public fn is_finite(&self) -> Bool {
+        self.re.is_finite() && self.im.is_finite()
+    }
+
+    /// Check if either part is NaN.
+    public fn is_nan(&self) -> Bool {
+        self.re.is_nan() || self.im.is_nan()
+    }
+
+    /// Normalize to unit magnitude (z / |z|).
+    ///
+    /// Returns None if z is zero.
+    public fn normalize(&self) -> Maybe<Complex<Float>> {
+        let mag = self.abs();
+        if mag == 0.0 {
+            None
+        } else {
+            Some(Complex {
+                re: self.re / mag,
+                im: self.im / mag,
+            })
+        }
+    }
+
+    /// Linear interpolation between two complex numbers.
+    ///
+    /// Returns self + t * (other - self).
+    public fn lerp(&self, other: &Complex<Float>, t: Float) -> Complex<Float> {
+        Complex {
+            re: self.re + t * (other.re - self.re),
+            im: self.im + t * (other.im - self.im),
+        }
+    }
+}
+
+// =============================================================================
+// Arithmetic Operations
+// =============================================================================
+
+implement<T: Add<Output = T>> Add for Complex<T> {
+    type Output = Complex<T>;
+    fn add(self, rhs: Complex<T>) -> Complex<T> {
+        Complex {
+            re: self.re + rhs.re,
+            im: self.im + rhs.im,
+        }
+    }
+}
+
+implement<T: Sub<Output = T>> Sub for Complex<T> {
+    type Output = Complex<T>;
+    fn sub(self, rhs: Complex<T>) -> Complex<T> {
+        Complex {
+            re: self.re - rhs.re,
+            im: self.im - rhs.im,
+        }
+    }
+}
+
+implement<T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Clone> Mul for Complex<T> {
+    type Output = Complex<T>;
+    fn mul(self, rhs: Complex<T>) -> Complex<T> {
+        // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+        Complex {
+            re: self.re.clone() * rhs.re.clone() - self.im.clone() * rhs.im.clone(),
+            im: self.re * rhs.im + self.im * rhs.re,
+        }
+    }
+}
+
+implement<T: Neg<Output = T>> Neg for Complex<T> {
+    type Output = Complex<T>;
+    fn neg(self) -> Complex<T> {
+        Complex { re: -self.re, im: -self.im }
+    }
+}
+
+// =============================================================================
+// Scalar multiplication
+// =============================================================================
+
+implement<T: Mul<Output = T> + Clone> Complex<T> {
+    /// Multiply by a scalar value.
+    public fn scale(&self, s: T) -> Complex<T> where T: Clone {
+        Complex {
+            re: self.re.clone() * s.clone(),
+            im: self.im.clone() * s,
+        }
+    }
+}
+
+// =============================================================================
+// Protocol Implementations
+// =============================================================================
+
+implement<T: Eq> Eq for Complex<T> {
+    fn eq(&self, other: &Complex<T>) -> Bool {
+        self.re == other.re && self.im == other.im
+    }
+}
+
+implement<T: Clone> Clone for Complex<T> {
+    fn clone(&self) -> Complex<T> {
+        Complex { re: self.re.clone(), im: self.im.clone() }
+    }
+}
+
+implement<T: Copy> Copy for Complex<T> {}
+
+implement<T: Default> Default for Complex<T> {
+    fn default() -> Complex<T> {
+        Complex.zero()
+    }
+}
+
+implement<T: Debug> Debug for Complex<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Complex(")?;
+        self.re.fmt_debug(f)?;
+        f.write_str(", ")?;
+        self.im.fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+implement<T: Display> Display for Complex<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.re.fmt(f)?;
+        f.write_str(" + ")?;
+        self.im.fmt(f)?;
+        f.write_str("i")
+    }
+}

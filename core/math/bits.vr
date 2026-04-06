@@ -1,0 +1,360 @@
+// =============================================================================
+// bits.vr - Bit Manipulation Operations
+// =============================================================================
+// Layer: 0 (Foundation)
+//
+// Provides low-level bit manipulation operations that map directly to
+// CPU instructions. All functions are marked @inline(always) for optimal
+// performance.
+//
+// # Performance
+//
+// These operations compile to single instructions on modern CPUs:
+// - clz/ctz: LZCNT/TZCNT on x86, CLZ/CTZ on ARM
+// - popcnt: POPCNT on x86, CNT on ARM
+// - bswap: BSWAP on x86, REV on ARM
+// - rotl/rotr: ROL/ROR on x86, ROR on ARM
+//
+// Spec: docs/architecture/math-spec.md Section 1.3
+// =============================================================================
+
+module core.math.bits;
+
+// =============================================================================
+// Counting Operations
+// =============================================================================
+
+// Count leading zeros (number of 0 bits before the first 1)
+// Returns 64 if x == 0.
+@inline(always)
+@intrinsic("llvm.ctlz.i64")
+public fn clz(x: UInt64) -> UInt32;
+
+// Count leading zeros for 32-bit integer
+@inline(always)
+@intrinsic("llvm.ctlz.i32")
+public fn clz32(x: UInt32) -> UInt32;
+
+// Count trailing zeros (number of 0 bits after the last 1)
+// Returns 64 if x == 0.
+@inline(always)
+@intrinsic("llvm.cttz.i64")
+public fn ctz(x: UInt64) -> UInt32;
+
+// Count trailing zeros for 32-bit integer
+@inline(always)
+@intrinsic("llvm.cttz.i32")
+public fn ctz32(x: UInt32) -> UInt32;
+
+// Population count (number of 1 bits, Hamming weight)
+@inline(always)
+@intrinsic("llvm.ctpop.i64")
+public fn popcnt(x: UInt64) -> UInt32;
+
+// Population count for 32-bit integer
+@inline(always)
+@intrinsic("llvm.ctpop.i32")
+public fn popcnt32(x: UInt32) -> UInt32;
+
+// =============================================================================
+// Bit Position Functions
+// =============================================================================
+
+// Find first set bit (1-indexed, returns 0 if x == 0)
+// Returns the position of the least significant 1 bit.
+@inline(always)
+public fn ffs(x: UInt64) -> UInt32 {
+    if x == 0 { 0 as UInt32 } else { ctz(x) + 1 as UInt32 }
+}
+
+// Find first set bit for 32-bit
+@inline(always)
+public fn ffs32(x: UInt32) -> UInt32 {
+    if x == 0 { 0 as UInt32 } else { ctz32(x) + 1 as UInt32 }
+}
+
+// Find last set bit (1-indexed, returns 0 if x == 0)
+// Returns the position of the most significant 1 bit.
+@inline(always)
+public fn fls(x: UInt64) -> UInt32 {
+    if x == 0 { 0 as UInt32 } else { 64 as UInt32 - clz(x) }
+}
+
+// Find last set bit for 32-bit
+@inline(always)
+public fn fls32(x: UInt32) -> UInt32 {
+    if x == 0 { 0 as UInt32 } else { 32 as UInt32 - clz32(x) }
+}
+
+// Get the highest set bit as a mask
+// Returns 0 if x == 0.
+@inline(always)
+public fn highest_bit(x: UInt64) -> UInt64 {
+    if x == 0 { 0 } else { 1 << (63 as UInt32 - clz(x)) }
+}
+
+// Get the lowest set bit as a mask
+// Equivalent to x & -x.
+@inline(always)
+public fn lowest_bit(x: UInt64) -> UInt64 {
+    x & (0 - x)  // Two's complement trick: -x = ~x + 1
+}
+
+// =============================================================================
+// Rotation Operations
+// =============================================================================
+
+// Rotate bits left by n positions
+@inline(always)
+@intrinsic("llvm.fshl.i64")
+public fn rotl(x: UInt64, n: UInt32) -> UInt64;
+
+// Rotate bits right by n positions
+@inline(always)
+@intrinsic("llvm.fshr.i64")
+public fn rotr(x: UInt64, n: UInt32) -> UInt64;
+
+// Rotate 32-bit left
+@inline(always)
+@intrinsic("llvm.fshl.i32")
+public fn rotl32(x: UInt32, n: UInt32) -> UInt32;
+
+// Rotate 32-bit right
+@inline(always)
+@intrinsic("llvm.fshr.i32")
+public fn rotr32(x: UInt32, n: UInt32) -> UInt32;
+
+// =============================================================================
+// Byte Order Operations
+// =============================================================================
+
+// Byte swap (reverse byte order, endianness conversion)
+@inline(always)
+@intrinsic("llvm.bswap.i64")
+public fn bswap(x: UInt64) -> UInt64;
+
+// Byte swap for 32-bit
+@inline(always)
+@intrinsic("llvm.bswap.i32")
+public fn bswap32(x: UInt32) -> UInt32;
+
+// Byte swap for 16-bit
+@inline(always)
+@intrinsic("llvm.bswap.i16")
+public fn bswap16(x: UInt16) -> UInt16;
+
+// Bit reverse (reverse bit order within value)
+@inline(always)
+@intrinsic("llvm.bitreverse.i64")
+public fn bitreverse(x: UInt64) -> UInt64;
+
+// Bit reverse for 32-bit
+@inline(always)
+@intrinsic("llvm.bitreverse.i32")
+public fn bitreverse32(x: UInt32) -> UInt32;
+
+// =============================================================================
+// Power of Two Operations
+// =============================================================================
+
+// Check if x is a power of two
+// Returns true for x ∈ {1, 2, 4, 8, 16, ...}
+// Returns false for x == 0.
+@inline(always)
+public fn is_power_of_two(x: UInt64) -> Bool {
+    x != 0 && (x & (x - 1)) == 0
+}
+
+// Check if 32-bit x is a power of two
+@inline(always)
+public fn is_power_of_two32(x: UInt32) -> Bool {
+    x != 0 && (x & (x - 1)) == 0
+}
+
+// Next power of two (smallest power of 2 >= x)
+// Returns 0 for x > 2^63 (overflow).
+@inline(always)
+public fn next_power_of_two(x: UInt64) -> UInt64 {
+    if x == 0 { return 1; }
+    if x > 0x8000000000000000 { return 0; }  // Overflow
+    let n = x - 1;
+    1 << (64 - clz(n))
+}
+
+// Next power of two for 32-bit
+@inline(always)
+public fn next_power_of_two32(x: UInt32) -> UInt32 {
+    if x == 0 { return 1; }
+    if x > 0x80000000 { return 0; }  // Overflow
+    let n = x - 1;
+    1 << (32 - clz32(n))
+}
+
+// Previous power of two (largest power of 2 <= x)
+// Returns 0 for x == 0.
+@inline(always)
+public fn prev_power_of_two(x: UInt64) -> UInt64 {
+    if x == 0 { return 0; }
+    1 << (63 - clz(x))
+}
+
+// Previous power of two for 32-bit
+@inline(always)
+public fn prev_power_of_two32(x: UInt32) -> UInt32 {
+    if x == 0 { return 0; }
+    1 << (31 - clz32(x))
+}
+
+// Log base 2 (floor), undefined for x == 0
+// Equivalent to 63 - clz(x).
+@inline(always)
+public fn log2_floor(x: UInt64{> 0}) -> UInt32 {
+    63 as UInt32 - clz(x)
+}
+
+// Log base 2 (ceiling)
+@inline(always)
+public fn log2_ceil(x: UInt64{> 0}) -> UInt32 {
+    if x == 1 { 0 as UInt32 } else { 64 as UInt32 - clz(x - 1) }
+}
+
+// =============================================================================
+// Parity and Other Operations
+// =============================================================================
+
+// Parity (1 if odd number of 1 bits, 0 if even)
+@inline(always)
+public fn parity(x: UInt64) -> UInt32 {
+    popcnt(x) & 1
+}
+
+// Parity for 32-bit
+@inline(always)
+public fn parity32(x: UInt32) -> UInt32 {
+    popcnt32(x) & 1
+}
+
+// Clear lowest set bit: x & (x - 1)
+@inline(always)
+public fn clear_lowest_bit(x: UInt64) -> UInt64 {
+    x & (x - 1)
+}
+
+// Set lowest clear bit: x | (x + 1)
+@inline(always)
+public fn set_lowest_clear_bit(x: UInt64) -> UInt64 {
+    x | (x + 1)
+}
+
+// Isolate rightmost 1 bit: x & (-x)
+@inline(always)
+public fn isolate_rightmost_one(x: UInt64) -> UInt64 {
+    x & (0 - x)
+}
+
+// Propagate rightmost 1 bit to the right
+// E.g., 01011000 -> 01011111
+@inline(always)
+public fn propagate_rightmost_one(x: UInt64) -> UInt64 {
+    x | (x - 1)
+}
+
+// =============================================================================
+// Bit Field Operations
+// =============================================================================
+
+// Extract bit field: (x >> offset) & ((1 << width) - 1)
+@inline(always)
+public fn extract_bits(x: UInt64, offset: UInt32, width: UInt32) -> UInt64 {
+    (x >> (offset as UInt64)) & ((1 << (width as UInt64)) - 1)
+}
+
+// Insert bit field: clear bits at offset, then set new value
+@inline(always)
+public fn insert_bits(x: UInt64, value: UInt64, offset: UInt32, width: UInt32) -> UInt64 {
+    let mask = ((1 << (width as UInt64)) - 1) << (offset as UInt64);
+    (x & !mask) | ((value << (offset as UInt64)) & mask)
+}
+
+// Test if bit is set
+@inline(always)
+public fn test_bit(x: UInt64, n: UInt32) -> Bool {
+    (x & (1 << (n as UInt64))) != 0
+}
+
+// Set bit at position
+@inline(always)
+public fn set_bit(x: UInt64, n: UInt32) -> UInt64 {
+    x | (1 << (n as UInt64))
+}
+
+// Clear bit at position
+@inline(always)
+public fn clear_bit(x: UInt64, n: UInt32) -> UInt64 {
+    x & !(1 << (n as UInt64))
+}
+
+// Toggle bit at position
+@inline(always)
+public fn toggle_bit(x: UInt64, n: UInt32) -> UInt64 {
+    x ^ (1 << (n as UInt64))
+}
+
+// =============================================================================
+// Bit Interleaving (Morton Codes)
+// =============================================================================
+
+// Interleave bits of x and y (Morton encoding for 2D)
+// Returns z where even bits are from x, odd bits are from y.
+public fn interleave_2d(x: UInt32, y: UInt32) -> UInt64 {
+    fn spread(mut n: UInt64) -> UInt64 {
+        n = (n | (n << 16)) & 0x0000FFFF0000FFFF;
+        n = (n | (n << 8)) & 0x00FF00FF00FF00FF;
+        n = (n | (n << 4)) & 0x0F0F0F0F0F0F0F0F;
+        n = (n | (n << 2)) & 0x3333333333333333;
+        n = (n | (n << 1)) & 0x5555555555555555;
+        n
+    }
+    spread(x as UInt64) | (spread(y as UInt64) << 1)
+}
+
+// Deinterleave Morton code back to x, y
+public fn deinterleave_2d(z: UInt64) -> (UInt32, UInt32) {
+    fn compact(mut n: UInt64) -> UInt32 {
+        n = n & 0x5555555555555555;
+        n = (n | (n >> 1)) & 0x3333333333333333;
+        n = (n | (n >> 2)) & 0x0F0F0F0F0F0F0F0F;
+        n = (n | (n >> 4)) & 0x00FF00FF00FF00FF;
+        n = (n | (n >> 8)) & 0x0000FFFF0000FFFF;
+        n = (n | (n >> 16)) & 0x00000000FFFFFFFF;
+        n as UInt32
+    }
+    (compact(z), compact(z >> 1))
+}
+
+// =============================================================================
+// Bit Count in Range
+// =============================================================================
+
+// Count 1 bits in range [0, n) in binary representation of all integers
+// Uses formula: sum of popcount(i) for i in 0..n
+public fn total_bits_set(n: UInt64) -> UInt64 {
+    if n == 0 { return 0; }
+    let n = n - 1;
+
+    let mut count: UInt64 = 0;
+    let mut remaining = n;
+    let mut bit_pos: UInt64 = 0;
+
+    while remaining > 0 {
+        if remaining & 1 == 1 {
+            // Add contribution of this bit position
+            let below = n & ((1 << bit_pos) - 1);
+            count += ((n >> (bit_pos + 1)) << bit_pos) + below + 1;
+        }
+        remaining >>= 1;
+        bit_pos += 1;
+    }
+
+    count
+}

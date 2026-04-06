@@ -1,0 +1,411 @@
+// =============================================================================
+// span.vr - Source Span and Location Tracking
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Source Spans
+//
+// Spans track source code locations for error reporting and code generation.
+// They enable precise diagnostic messages and accurate source mapping.
+//
+// ## Span Resolution
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                         SPAN RESOLUTION SITES                               │
+// ├─────────────────────────────────────────────────────────────────────────────┤
+// │                                                                             │
+// │  call_site()  ─────►  Location where macro is invoked                      │
+// │                       Used for: most generated code                         │
+// │                                                                             │
+// │  def_site()   ─────►  Location where macro is defined                      │
+// │                       Used for: hygiene, internal helpers                   │
+// │                                                                             │
+// │  mixed_site() ─────►  Hybrid: call_site() location + def_site() hygiene   │
+// │                       Used for: advanced hygiene control                    │
+// │                                                                             │
+// └─────────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// =============================================================================
+
+module meta.span;
+
+mount core.{Maybe, Text, Ordering};
+
+// =============================================================================
+// Span
+// =============================================================================
+
+/// Source code span
+///
+/// Represents a range in source code, used for error reporting and
+/// tracking the origin of generated code.
+///
+/// ## Hygiene
+///
+/// Spans carry hygiene information that determines how identifiers
+/// are resolved. This prevents accidental name collisions between
+/// macro-generated code and user code.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn my_macro(input: TokenStream) -> TokenStream using [AstAccess, CompileDiag] {
+///     let call = AstAccess.call_site();
+///
+///     if input.is_empty() {
+///         CompileDiag.emit_error("Expected input", call);
+///         return TokenStream.empty();
+///     }
+///
+///     quote {
+///         // This code will have span pointing to macro invocation
+///         let result = process($input);
+///         result
+///     }
+/// }
+/// ```
+@repr(C)
+public type Span is {
+    /// Internal span ID (opaque to users)
+    id: UInt64,
+
+    /// Hygiene context ID
+    hygiene: UInt32,
+
+    /// Span flags
+    flags: SpanFlags,
+};
+
+/// Span flags
+@repr(UInt8)
+public type SpanFlags is {
+    /// Span is from macro expansion
+    is_expansion: Bool,
+
+    /// Span is synthetic (generated, not from source)
+    is_synthetic: Bool,
+
+    /// Span should be hidden in error messages
+    is_hidden: Bool,
+};
+
+implement Span {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Get span of current macro invocation site
+    ///
+    /// This is the location where the macro is called in user code.
+    /// Use this for most generated code.
+    @compiler_intrinsic
+    public fn call_site() -> Self;
+
+    /// Get span of macro definition site
+    ///
+    /// This is the location where the macro is defined.
+    /// Use this for internal helper identifiers that should
+    /// not conflict with user code.
+    @compiler_intrinsic
+    public fn def_site() -> Self;
+
+    /// Get mixed site span
+    ///
+    /// Has call_site() location but def_site() hygiene.
+    /// Use for advanced hygiene control.
+    @compiler_intrinsic
+    public fn mixed_site() -> Self;
+
+    /// Create synthetic span with no source location
+    ///
+    /// Used for purely generated code with no meaningful source location.
+    @compiler_intrinsic
+    public fn synthetic() -> Self;
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Get source location information
+    ///
+    /// Returns None for synthetic spans or if source info unavailable.
+    @compiler_intrinsic
+    public fn location(&self) -> Maybe<SourceLocation>;
+
+    /// Get start byte offset in source file
+    @compiler_intrinsic
+    public fn start(&self) -> Int;
+
+    /// Get end byte offset in source file
+    @compiler_intrinsic
+    public fn end(&self) -> Int;
+
+    /// Get byte length of span
+    public fn len(&self) -> Int {
+        self.end() - self.start()
+    }
+
+    /// Check if span is empty (zero length)
+    public fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+
+    /// Check if this span is from macro expansion
+    public fn is_expansion(&self) -> Bool {
+        self.flags.is_expansion
+    }
+
+    /// Check if this span is synthetic (no source)
+    public fn is_synthetic(&self) -> Bool {
+        self.flags.is_synthetic
+    }
+
+    // =========================================================================
+    // Operations
+    // =========================================================================
+
+    /// Join two spans into one covering both
+    ///
+    /// # Arguments
+    /// - `other`: Span to join with
+    ///
+    /// # Returns
+    /// Span covering from start of self to end of other,
+    /// or self if spans are from different files.
+    @compiler_intrinsic
+    public fn join(&self, other: Span) -> Self;
+
+    /// Get subspan from byte offset
+    ///
+    /// # Arguments
+    /// - `start`: Start offset relative to span start
+    /// - `end`: End offset relative to span start
+    ///
+    /// # Returns
+    /// Subspan, or self if offsets invalid
+    @compiler_intrinsic
+    public fn subspan(&self, start: Int, end: Int) -> Maybe<Self>;
+
+    /// Get source text covered by this span
+    ///
+    /// Returns None if span is synthetic or source unavailable.
+    @compiler_intrinsic
+    public fn source_text(&self) -> Maybe<Text>;
+
+    /// Resolve span to call site hygiene
+    ///
+    /// Creates new span with same location but call_site hygiene.
+    @compiler_intrinsic
+    public fn resolved_at_call_site(&self) -> Self;
+
+    /// Resolve span to def site hygiene
+    ///
+    /// Creates new span with same location but def_site hygiene.
+    @compiler_intrinsic
+    public fn resolved_at_def_site(&self) -> Self;
+
+    // =========================================================================
+    // Comparison
+    // =========================================================================
+
+    /// Check if spans overlap
+    public fn overlaps(&self, other: &Span) -> Bool {
+        self.start() < other.end() && other.start() < self.end()
+    }
+
+    /// Check if this span contains another
+    public fn contains(&self, other: &Span) -> Bool {
+        self.start() <= other.start() && other.end() <= self.end()
+    }
+
+    /// Check if this span contains a byte offset
+    public fn contains_offset(&self, offset: Int) -> Bool {
+        self.start() <= offset && offset < self.end()
+    }
+}
+
+// Implement equality
+implement Eq for Span {
+    fn eq(&self, other: &Self) -> Bool {
+        self.id == other.id && self.hygiene == other.hygiene
+    }
+}
+
+// Implement ordering (by position)
+implement Ord for Span {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.start().cmp(&other.start()) {
+            Ordering.Equal => self.end().cmp(&other.end()),
+            ord => ord,
+        }
+    }
+}
+
+// Implement Debug
+implement Debug for Span {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        match self.location() {
+            Some(loc) => f.write_str(f"{loc.file}:{loc.line}:{loc.column}"),
+            None => f.write_str("<synthetic>"),
+        }
+    }
+}
+
+// =============================================================================
+// SourceLocation
+// =============================================================================
+
+/// Source file location
+///
+/// Human-readable location information (file, line, column).
+public type SourceLocation is {
+    /// File path (relative to project root)
+    file: Text,
+
+    /// Line number (1-based)
+    line: Int,
+
+    /// Column number (1-based, in characters not bytes)
+    column: Int,
+
+    /// Byte offset in file
+    offset: Int,
+};
+
+implement SourceLocation {
+    /// Create new source location
+    public fn new(file: Text, line: Int, column: Int, offset: Int) -> Self {
+        Self { file, line, column, offset }
+    }
+
+    /// Get display string "file:line:column"
+    public fn display(&self) -> Text {
+        f"{self.file}:{self.line}:{self.column}"
+    }
+}
+
+implement Debug for SourceLocation {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        f.write_str(self.display())
+    }
+}
+
+implement Eq for SourceLocation {
+    fn eq(&self, other: &Self) -> Bool {
+        self.file == other.file &&
+        self.line == other.line &&
+        self.column == other.column
+    }
+}
+
+// =============================================================================
+// SpanRange
+// =============================================================================
+
+/// Range of spans with start and end locations
+///
+/// Used for multi-span diagnostics covering a range of code.
+public type SpanRange is {
+    /// Start span
+    start: Span,
+
+    /// End span
+    end: Span,
+};
+
+implement SpanRange {
+    /// Create span range from two spans
+    public fn new(start: Span, end: Span) -> Self {
+        Self { start, end }
+    }
+
+    /// Create span range from single span
+    public fn single(span: Span) -> Self {
+        Self { start: span, end: span }
+    }
+
+    /// Get combined span covering entire range
+    public fn to_span(&self) -> Span {
+        self.start.join(self.end)
+    }
+
+    /// Get start location
+    public fn start_location(&self) -> Maybe<SourceLocation> {
+        self.start.location()
+    }
+
+    /// Get end location
+    public fn end_location(&self) -> Maybe<SourceLocation> {
+        self.end.location()
+    }
+
+    /// Check if range contains a span
+    public fn contains(&self, span: &Span) -> Bool {
+        self.start.start() <= span.start() && span.end() <= self.end.end()
+    }
+}
+
+// =============================================================================
+// MultiSpan
+// =============================================================================
+
+/// Collection of spans for complex diagnostics
+///
+/// Used when a diagnostic refers to multiple locations in the source.
+public type MultiSpan is {
+    /// Primary span (main location)
+    primary: Maybe<Span>,
+
+    /// Additional spans with labels
+    spans: List<(Span, Text)>,
+};
+
+implement MultiSpan {
+    /// Create empty multi-span
+    public fn empty() -> Self {
+        Self {
+            primary: None,
+            spans: List.new(),
+        }
+    }
+
+    /// Create multi-span with single primary span
+    public fn from_span(span: Span) -> Self {
+        Self {
+            primary: Some(span),
+            spans: List.new(),
+        }
+    }
+
+    /// Set primary span
+    public fn with_primary(mut self, span: Span) -> Self {
+        self.primary = Some(span);
+        self
+    }
+
+    /// Add labeled span
+    public fn with_span(mut self, span: Span, label: Text) -> Self {
+        self.spans.push((span, label));
+        self
+    }
+
+    /// Check if empty
+    public fn is_empty(&self) -> Bool {
+        self.primary.is_none() && self.spans.is_empty()
+    }
+
+    /// Get primary span
+    public fn primary_span(&self) -> Maybe<Span> {
+        self.primary
+    }
+
+    /// Iterate over all spans with labels
+    public fn iter(&self) -> some I: Iterator<Item = (Span, Maybe<Text>)> {
+        let primary_iter = self.primary.iter().map(|s| (s, None));
+        let spans_iter = self.spans.iter().map(|(s, l)| (s, Some(l)));
+        primary_iter.chain(spans_iter)
+    }
+}

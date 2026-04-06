@@ -1,0 +1,138 @@
+# VCS Proof Stability Configuration
+#
+# This configuration file controls proof stability testing behavior.
+# Copy to proof_stability.toml in your project root to customize.
+
+[solver]
+# Default SMT solver to use
+default_solver = "z3"
+
+# Path to Z3 binary (uses PATH if not specified)
+# z3_path = "/usr/local/bin/z3"
+
+# Path to CVC5 binary (uses PATH if not specified)
+# cvc5_path = "/usr/local/bin/cvc5"
+
+# Default timeout per proof in milliseconds
+default_timeout_ms = 30000
+
+# Maximum timeout in milliseconds
+max_timeout_ms = 300000
+
+# Random seed for deterministic solving (comment out for random)
+random_seed = 42
+
+# Enable deterministic mode
+deterministic = true
+
+# Number of retries with different seeds
+retry_count = 5
+
+# Specific seeds for stability testing
+retry_seeds = [42, 123, 456, 789, 1024]
+
+# Additional solver options (Z3 format)
+# [solver.options]
+# "smt.mbqi" = "false"
+# "smt.arith.solver" = "2"
+
+[cache]
+# Enable proof caching
+enabled = true
+
+# Cache directory path
+cache_dir = ".vcs/proof_cache"
+
+# Maximum cache size in MB
+max_size_mb = 1024
+
+# Cache TTL in seconds (0 = infinite)
+ttl_seconds = 0
+
+# Store SMT-LIB artifacts
+store_artifacts = true
+
+# Store counterexamples
+store_counterexamples = true
+
+# Compression level (0 = none, 9 = max)
+compression_level = 6
+
+[thresholds]
+# Minimum number of runs for stability determination
+min_runs = 3
+
+# Threshold for considering a proof stable (0.0-1.0)
+stable_threshold = 0.95
+
+# Threshold for considering a proof flaky (0.0-1.0)
+flaky_threshold = 0.80
+
+# Maximum variance in timing for stable proofs (coefficient of variation)
+timing_variance_threshold = 0.50
+
+# Threshold for timeout instability
+timeout_variance_threshold = 0.30
+
+# Per-category thresholds
+[thresholds.category_thresholds]
+arithmetic = 0.99
+bitvector = 0.98
+array = 0.95
+string = 0.90
+recursive = 0.85
+quantifier = 0.80
+mixed = 0.85
+
+[execution]
+# Number of parallel proof attempts
+parallel = 4
+
+# Default number of stability runs per proof
+stability_runs = 5
+
+# Continue on individual proof failure
+continue_on_failure = true
+
+# Fail fast on first flaky proof
+fail_fast_flaky = false
+
+# Record all attempts (even successful stable ones)
+record_all = false
+
+# Test paths to include
+test_paths = ["specs"]
+
+# Glob pattern for test files
+test_pattern = "**/*.vr"
+
+# Patterns to exclude
+exclude_patterns = ["**/skip/**", "**/wip/**"]
+
+[reporting]
+# Output format (console, json, html, markdown)
+format = "console"
+
+# Output path (stdout if not specified)
+# output_path = "stability_report.html"
+
+# Show detailed flaky proof information
+show_flaky_details = true
+
+# Show timing statistics
+show_timing = true
+
+# Show solver-specific details
+show_solver_details = false
+
+# Generate regression report
+generate_regression_report = true
+
+# Regression baseline path
+# baseline_path = "stability_baseline.json"
+
+# Use colors in console output
+use_colors = true
+
+# Verbose output
+verbose = false

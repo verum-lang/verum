@@ -1,0 +1,18 @@
+// =============================================================================
+// app/mod.vr - Layer 6: Application Framework
+// =============================================================================
+// Elm Architecture for TUI applications: Model → Update → View cycle.
+// =============================================================================
+module app;
+
+// Sub-modules
+public module app;
+public module command;
+public module prompt;
+public module accessibility;
+
+// Re-exports
+public mount .app.{Model, AppMessage, run};
+public mount .command.{Command, none, perform, batch, sequence, tick, quit};
+public mount .prompt.{confirm, select, input, multi_select, password};
+public mount .accessibility.{SemanticZone, Politeness, write_semantic_zone};

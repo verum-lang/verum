@@ -1,0 +1,870 @@
+// =============================================================================
+// set.vr - Hash Set implementation
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, collections/map
+// =============================================================================
+//
+// Set<T> is implemented as a thin wrapper around Map<T, ()>, providing
+// set-specific operations while reusing the Robin Hood hashing from Map.
+//
+// Performance characteristics:
+// - Insert: O(1) amortized
+// - Contains: O(1) average
+// - Remove: O(1) average
+// - Iteration: O(n)
+//
+// =============================================================================
+
+module core.collections.set;
+mount core.*;
+mount .map.*;
+
+// =============================================================================
+// Set<T>
+// =============================================================================
+
+// Hash set backed by Map<T, ()>.
+public type Set<T: Hash + Eq> is {
+    inner: Map<T, ()>,
+};
+
+implement<T: Hash + Eq> Set<T> {
+    // Create empty set.
+    public fn new() -> Set<T> {
+        Set { inner: Map.new() }
+    }
+
+    /// Create a set from an array literal.
+    ///
+    /// # Example
+    /// ```verum
+    /// let s = Set.from([1, 2, 3]);
+    /// assert_eq(s.len(), 3);
+    /// assert(s.contains(1));
+    /// ```
+    public fn from(values: [T; _]) -> Set<T> {
+        let mut s = Set { inner: Map.with_capacity(values.len()) };
+        for item in values {
+            s.insert(item);
+        }
+        s
+    }
+
+    // Create with pre-allocated capacity.
+    public fn with_capacity(capacity: Int) -> Set<T> {
+        Set { inner: Map.with_capacity(capacity) }
+    }
+
+    // Number of elements.
+    public fn len(&self) -> Int {
+        self.inner.len()
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.inner.is_empty()
+    }
+
+    // Current capacity.
+    public fn capacity(&self) -> Int {
+        self.inner.capacity()
+    }
+
+    // Check if set contains value.
+    public fn contains(&self, value: T) -> Bool {
+        self.inner.contains_key(value)
+    }
+
+    // Insert value into set.
+    // Returns true if value was not already present.
+    public fn insert(&mut self, value: T) -> Bool {
+        self.inner.insert(value, ()).is_none()
+    }
+
+    // Remove value from set.
+    // Returns true if value was present.
+    public fn remove(&mut self, value: T) -> Bool {
+        self.inner.remove(value).is_some()
+    }
+
+    // Take value from set (removes && returns if present).
+    public fn take(&mut self, value: T) -> Maybe<T> {
+        match self.inner.remove_entry(value) {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    // Remove all elements.
+    public fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Reserves capacity for at least `additional` more elements.
+    public fn reserve(&mut self, additional: Int) {
+        self.inner.reserve(additional);
+    }
+
+    /// Shrinks the capacity as much as possible.
+    public fn shrink_to_fit(&mut self) {
+        self.inner.shrink_to_fit();
+    }
+
+    /// Shrinks the capacity to at least `min_capacity`.
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        self.inner.shrink_to(min_capacity);
+    }
+
+    /// Replace a value in the set, returning the old value if present.
+    public fn replace(&mut self, value: T) -> Maybe<T> {
+        // Remove old value if present, insert new
+        let old = self.take(value);
+        self.insert(value);
+        old
+    }
+
+    // Get reference to equivalent value in set.
+    // O(1) average case lookup.
+    public fn get(&self, value: &T) -> Maybe<&T> {
+        // Use Map's O(1) get_key_value to return the key reference
+        match self.inner.get_key_value(value) {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    // Iterator over values.
+    public fn iter(&self) -> SetIter<T> {
+        SetIter { inner: self.inner.keys() }
+    }
+
+    // Drain iterator - removes && yields all elements.
+    public fn drain(&mut self) -> SetDrain<T> {
+        // Create drain from inner map
+        SetDrain { inner: self.inner.drain() }
+    }
+
+    // Retain only elements satisfying predicate.
+    public fn retain<F: fn(&T) -> Bool>(&mut self, f: F) {
+        self.inner.retain(|k, _| f(k));
+    }
+
+    // ==========================================================================
+    // Conversion
+    // ==========================================================================
+
+    /// Convert set to an owned List. The order of elements is unspecified.
+    ///
+    /// # Example
+    /// ```verum
+    /// let s = Set.from([1, 2, 3]);
+    /// let list = s.to_list(); // [1, 2, 3] (order may vary)
+    /// assert_eq(list.len(), 3);
+    /// ```
+    public fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.with_capacity(self.len());
+        let mut iter = self.iter();
+        while let Some(item) = iter.next() {
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Consume the set and return its elements as a List.
+    /// More efficient than to_list() since it avoids cloning.
+    ///
+    /// # Example
+    /// ```verum
+    /// let s = Set.from([1, 2, 3]);
+    /// let list = s.into_list(); // [1, 2, 3] (order may vary)
+    /// ```
+    public fn into_list(self) -> List<T> {
+        let mut result: List<T> = List.with_capacity(self.len());
+        let mut drain = self.inner.drain();
+        while let Some(pair) = drain.next() {
+            result.push(pair.0);
+        }
+        result
+    }
+
+    // ==========================================================================
+    // Set Operations
+    // ==========================================================================
+
+    // Check if self is disjoint from other (no common elements).
+    public fn is_disjoint(&self, other: &Set<T>) -> Bool {
+        if self.len() <= other.len() {
+            self.iter().all(|v| !other.contains(v))
+        } else {
+            other.iter().all(|v| !self.contains(v))
+        }
+    }
+
+    // Check if self is subset of other.
+    public fn is_subset(&self, other: &Set<T>) -> Bool {
+        if self.len() > other.len() {
+            return false;
+        }
+        self.iter().all(|v| other.contains(v))
+    }
+
+    // Check if self is superset of other.
+    public fn is_superset(&self, other: &Set<T>) -> Bool {
+        other.is_subset(self)
+    }
+
+    // Union: elements in self || other.
+    public fn union(&self, other: &Set<T>) -> Set<T>
+    where T: Clone
+    {
+        let mut res = self.clone();
+        let mut iter = other.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    res.insert(val);
+                }
+            }
+        }
+        res
+    }
+
+    // Intersection: elements in both self && other.
+    public fn intersection(&self, other: &Set<T>) -> Set<T>
+    where T: Clone
+    {
+        let mut res = Set.new();
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    if other.contains(val) {
+                        res.insert(val);
+                    }
+                }
+            }
+        }
+        res
+    }
+
+    // Difference: elements in self but not in other.
+    public fn difference(&self, other: &Set<T>) -> Set<T>
+    where T: Clone
+    {
+        let mut res = Set.new();
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    if !other.contains(val) {
+                        res.insert(val);
+                    }
+                }
+            }
+        }
+        res
+    }
+
+    // Symmetric difference: elements in self || other but not both.
+    public fn symmetric_difference(&self, other: &Set<T>) -> Set<T>
+    where T: Clone
+    {
+        let mut res = Set.new();
+        let mut iter1 = self.iter();
+        loop {
+            match iter1.next() {
+                None => break,
+                Some(val) => {
+                    if !other.contains(val) {
+                        res.insert(val);
+                    }
+                }
+            }
+        }
+        let mut iter2 = other.iter();
+        loop {
+            match iter2.next() {
+                None => break,
+                Some(val) => {
+                    if !self.contains(val) {
+                        res.insert(val);
+                    }
+                }
+            }
+        }
+        res
+    }
+
+    // Union in place: add all elements from other.
+    public fn extend_from_set(&mut self, other: &Set<T>)
+    where T: Clone
+    {
+        let mut iter = other.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    self.insert(val);
+                }
+            }
+        }
+    }
+
+    // Intersection in place: keep only elements also in other.
+    public fn retain_from_set(&mut self, other: &Set<T>) {
+        self.retain(|v| other.contains(v));
+    }
+
+    // Difference in place: remove elements also in other.
+    public fn remove_from_set(&mut self, other: &Set<T>) {
+        let mut iter = other.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    self.remove(val);
+                }
+            }
+        }
+    }
+
+    // Symmetric difference in place: keep only elements in one set but not both.
+    public fn symmetric_difference_update(&mut self, other: &Set<T>)
+    where T: Clone
+    {
+        let mut iter = other.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(val) => {
+                    if self.contains(val) {
+                        self.remove(val);
+                    } else {
+                        self.insert(val);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Removes all elements matching the predicate and returns them as a list.
+    ///
+    /// Similar to `retain` but returns the removed elements.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut s = Set.from([1, 2, 3, 4, 5]);
+    /// let evens = s.extract_if(|v| *v % 2 == 0);
+    /// // s = {1, 3, 5}, evens = [2, 4]
+    /// ```
+    public fn extract_if<F: fn(&T) -> Bool>(&mut self, f: F) -> List<T> {
+        let extracted = self.inner.extract_if(|k: &T, _v: &()| f(k));
+        let mut result: List<T> = List.with_capacity(extracted.len());
+        for i in range(0, extracted.len()) {
+            let pair = extracted[i];
+            result.push(pair.0);
+        }
+        result
+    }
+
+    /// Returns true if any element satisfies the predicate.
+    public fn any<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if f(v) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Returns true if all elements satisfy the predicate.
+    /// Returns true for empty sets (vacuously true).
+    public fn all<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !f(v) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Find the first element matching a predicate.
+    /// Order is implementation-defined (hash table order).
+    public fn find<F: fn(&T) -> Bool>(&self, f: F) -> Maybe<&T> {
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if f(v) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns `true` if `self` is a strict (proper) subset of `other`.
+    ///
+    /// A strict subset means all elements of `self` are in `other`,
+    /// and `other` has at least one element not in `self`.
+    public fn is_strict_subset(&self, other: &Set<T>) -> Bool {
+        self.len() < other.len() && self.is_subset(other)
+    }
+
+    /// Returns `true` if `self` is a strict (proper) superset of `other`.
+    ///
+    /// A strict superset means all elements of `other` are in `self`,
+    /// and `self` has at least one element not in `other`.
+    public fn is_strict_superset(&self, other: &Set<T>) -> Bool {
+        other.is_strict_subset(self)
+    }
+
+    /// Remove and return an arbitrary element from the set.
+    ///
+    /// Returns `None` if the set is empty.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut s = Set.from([1, 2, 3]);
+    /// let val = s.pop();
+    /// assert(val is Some);
+    /// assert_eq(s.len(), 2);
+    /// ```
+    public fn pop(&mut self) -> Maybe<T> {
+        let entry = self.inner.pop_entry();
+        match entry {
+            Some(pair) => {
+                let k = pair.0;
+                Some(k)
+            },
+            None => None,
+        }
+    }
+
+    /// Update the set with all elements from another set.
+    ///
+    /// This is an alias for `extend_from_set`.
+    public fn update(&mut self, other: &Set<T>)
+    where T: Clone
+    {
+        self.extend_from_set(other);
+    }
+
+    /// Returns a new set containing only elements for which the predicate returns true.
+    public fn filter<F: fn(&T) -> Bool>(&self, f: F) -> Set<T>
+    where T: Clone
+    {
+        let mut result = Set.new();
+        for v in self.iter() {
+            if f(v) {
+                result.insert(v.clone());
+            }
+        }
+        result
+    }
+
+    /// Applies a function to each element and collects results into a new set.
+    /// Duplicate mapped values will be deduplicated.
+    public fn map<U: Hash + Eq, F: fn(&T) -> U>(&self, f: F) -> Set<U> {
+        let mut result = Set.new();
+        for v in self.iter() {
+            result.insert(f(v));
+        }
+        result
+    }
+
+    /// Splits the set into two based on a predicate.
+    /// Returns (matching, non-matching).
+    public fn partition<F: fn(&T) -> Bool>(&self, f: F) -> (Set<T>, Set<T>)
+    where T: Clone
+    {
+        let mut yes = Set.new();
+        let mut no = Set.new();
+        for v in self.iter() {
+            if f(v) {
+                yes.insert(v.clone());
+            } else {
+                no.insert(v.clone());
+            }
+        }
+        (yes, no)
+    }
+
+    /// Returns the number of elements matching a predicate.
+    public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
+        let mut count = 0;
+        for v in self.iter() {
+            if f(v) {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    /// Applies a function to each element and collects results, filtering out None.
+    public fn filter_map<U: Hash + Eq, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Set<U> {
+        let mut result = Set.new();
+        for v in self.iter() {
+            if let Some(u) = f(v) {
+                result.insert(u);
+            }
+        }
+        result
+    }
+
+    /// Fold over all elements, accumulating a result.
+    public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
+        let mut acc = init;
+        for v in self.iter() {
+            acc = f(acc, v);
+        }
+        acc
+    }
+
+    /// Apply a function to each element for its side effects.
+    public fn for_each<F: fn(&T)>(&self, f: F) {
+        for v in self.iter() {
+            f(v);
+        }
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+// Iterator over set values.
+public type SetIter<T: Hash + Eq> is {
+    inner: MapKeys<T, ()>,
+};
+
+implement<T: Hash + Eq> Iterator for SetIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.inner.size_hint()
+    }
+}
+
+// IntoIterator for SetIter so it can be used in for loops
+implement<T: Hash + Eq> IntoIterator for SetIter<T> {
+    type Item = T;
+    type IntoIter = SetIter<T>;
+
+    fn into_iter(self) -> SetIter<T> {
+        self
+    }
+}
+
+// Drain iterator (removes && yields elements).
+public type SetDrain<T: Hash + Eq> is {
+    inner: MapDrain<T, ()>,
+};
+
+implement<T: Hash + Eq> Iterator for SetDrain<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        match self.inner.next() {
+            None => None,
+            Some(pair) => Some(pair.0),  // Extract key from (K, V) tuple
+        }
+    }
+}
+
+// Into iterator (consumes set).
+public type SetIntoIter<T: Hash + Eq> is {
+    inner: MapIntoIter<T, ()>,
+};
+
+implement<T: Hash + Eq> Iterator for SetIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        match self.inner.next() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.inner.size_hint()
+    }
+}
+
+// IntoIterator for SetDrain so it can be used in for loops.
+implement<T: Hash + Eq> IntoIterator for SetDrain<T> {
+    type Item = T;
+    type IntoIter = SetDrain<T>;
+
+    fn into_iter(self) -> SetDrain<T> { self }
+}
+
+// IntoIterator for SetIntoIter so it can be used in for loops.
+implement<T: Hash + Eq> IntoIterator for SetIntoIter<T> {
+    type Item = T;
+    type IntoIter = SetIntoIter<T>;
+
+    fn into_iter(self) -> SetIntoIter<T> { self }
+}
+
+// =============================================================================
+// ExactSizeIterator implementations
+// =============================================================================
+
+implement<T: Hash + Eq> ExactSizeIterator for SetIter<T> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+implement<T: Hash + Eq> ExactSizeIterator for SetDrain<T> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+implement<T: Hash + Eq> ExactSizeIterator for SetIntoIter<T> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<T: Hash + Eq> FusedIterator for SetIter<T> {}
+implement<T: Hash + Eq> FusedIterator for SetDrain<T> {}
+implement<T: Hash + Eq> FusedIterator for SetIntoIter<T> {}
+
+// =============================================================================
+// Protocol Implementations
+// =============================================================================
+
+implement<T: Hash + Eq> IntoIterator for Set<T> {
+    type Item = T;
+    type Iter = SetIntoIter<T>;
+
+    fn into_iter(self) -> SetIntoIter<T> {
+        SetIntoIter { inner: self.inner.into_iter() }
+    }
+}
+
+implement<T: Hash + Eq + Clone> Clone for Set<T> {
+    fn clone(&self) -> Set<T> {
+        Set { inner: self.inner.clone() }
+    }
+}
+
+implement<T: Hash + Eq> Default for Set<T> {
+    fn default() -> Set<T> {
+        Set.new()
+    }
+}
+
+implement<T: Hash + Eq + Debug> Debug for Set<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt_debug(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<T: Hash + Eq + Display> Display for Set<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<T: Hash + Eq> Eq for Set<T> {
+    fn eq(&self, other: &Set<T>) -> Bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    let item: &T = v;
+                    if !other.contains(item) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+implement<T: Hash + Eq> FromIterator<T> for Set<T> {
+    fn from_iter<I: Iterator<Item>>(iter: I) -> Set<T> {
+        let mut set = Set.new();
+        for v in iter {
+            set.insert(v);
+        }
+        set
+    }
+}
+
+implement<T: Hash + Eq> Extend<T> for Set<T> {
+    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+        for v in iter {
+            self.insert(v);
+        }
+    }
+}
+
+// =============================================================================
+// Set Operators
+// =============================================================================
+
+// Union operator: a | b
+implement<T: Hash + Eq + Clone> BitOr<&Set<T>> for &Set<T> {
+    type Output = Set<T>;
+
+    fn bitor(self, other: &Set<T>) -> Set<T> {
+        self.union(other)
+    }
+}
+
+// Intersection operator: a & b
+implement<T: Hash + Eq + Clone> BitAnd<&Set<T>> for &Set<T> {
+    type Output = Set<T>;
+
+    fn bitand(self, other: &Set<T>) -> Set<T> {
+        self.intersection(other)
+    }
+}
+
+// Difference operator: a - b
+implement<T: Hash + Eq + Clone> Sub<&Set<T>> for &Set<T> {
+    type Output = Set<T>;
+
+    fn sub(self, other: &Set<T>) -> Set<T> {
+        self.difference(other)
+    }
+}
+
+// Symmetric difference operator: a ^ b
+implement<T: Hash + Eq + Clone> BitXor<&Set<T>> for &Set<T> {
+    type Output = Set<T>;
+
+    fn bitxor(self, other: &Set<T>) -> Set<T> {
+        self.symmetric_difference(other)
+    }
+}
+
+// Union-assign operator: a |= b
+implement<T: Hash + Eq + Clone> BitOrAssign<&Set<T>> for Set<T> {
+    fn bitor_assign(&mut self, other: &Set<T>) {
+        self.extend_from_set(other);
+    }
+}
+
+// Intersection-assign operator: a &= b
+implement<T: Hash + Eq + Clone> BitAndAssign<&Set<T>> for Set<T> {
+    fn bitand_assign(&mut self, other: &Set<T>) {
+        self.retain_from_set(other);
+    }
+}
+
+// Difference-assign operator: a -= b
+implement<T: Hash + Eq> SubAssign<&Set<T>> for Set<T> {
+    fn sub_assign(&mut self, other: &Set<T>) {
+        self.remove_from_set(other);
+    }
+}
+
+// Symmetric-difference-assign operator: a ^= b
+implement<T: Hash + Eq + Clone> BitXorAssign<&Set<T>> for Set<T> {
+    fn bitxor_assign(&mut self, other: &Set<T>) {
+        self.symmetric_difference_update(other);
+    }
+}
+
+// =============================================================================
+// From conversions
+// =============================================================================
+
+implement<T: Hash + Eq> From<List<T>> for Set<T> {
+    fn from(list: List<T>) -> Set<T> {
+        let mut s = Set.with_capacity(list.len());
+        for item in list {
+            s.insert(item);
+        }
+        s
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+// Create set from values.
+public fn set<T: Hash + Eq>(values: &[T]) -> Set<T>
+where T: Clone
+{
+    let mut s = Set.with_capacity(values.len());
+    // Direct index access to avoid associated type issues
+    for i in range(0, values.len()) {
+        let v: &T = &values[i];
+        s.insert(v.clone());
+    }
+    s
+}
+
+// Create set from iterator.
+public fn set_from_iter<T: Hash + Eq, I: Iterator<Item>>(iter: I) -> Set<T> {
+    Set.from_iter(iter)
+}

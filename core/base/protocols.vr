@@ -1,0 +1,898 @@
+// =============================================================================
+// protocols.vr - Core protocols (traits)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: ordering.vr
+// =============================================================================
+
+// Import types from other core modules
+
+module core.base.protocols;
+mount core.ordering.{Ordering, Less, Equal, Greater};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.intrinsics.conversion.int_to_bytes;
+
+// =============================================================================
+// Partial Equality Protocol
+// =============================================================================
+
+/// Protocol for types that can be compared for partial equality.
+/// Unlike Eq, PartialEq does not require reflexivity (a == a may be false).
+/// This is useful for types like floating-point NaN values.
+public type PartialEq is protocol {
+    /// Test equality with another value of the same type.
+    fn eq(&self, other: &Self) -> Bool;
+
+    /// Test inequality (default implementation).
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+// =============================================================================
+// Equality Protocol
+// =============================================================================
+
+/// Protocol for types with reflexive equality.
+/// Types implementing Eq guarantee that a == a is always true.
+/// This is a marker protocol that extends PartialEq.
+public type Eq is protocol extends PartialEq {};
+
+// =============================================================================
+// Ordering Protocol
+// =============================================================================
+
+/// Protocol for types with total ordering.
+public type Ord is protocol extends Eq {
+    /// Compare with another value, returning an Ordering.
+    fn cmp(&self, other: &Self) -> Ordering;
+
+    /// Less than.
+    fn lt(&self, other: &Self) -> Bool {
+        self.cmp(other) is Less
+    }
+
+    /// Less than || equal.
+    fn le(&self, other: &Self) -> Bool {
+        !(self.cmp(other) is Greater)
+    }
+
+    /// Greater than.
+    fn gt(&self, other: &Self) -> Bool {
+        self.cmp(other) is Greater
+    }
+
+    /// Greater than || equal.
+    fn ge(&self, other: &Self) -> Bool {
+        !(self.cmp(other) is Less)
+    }
+
+    /// Returns the maximum of self && other.
+    fn max(self, other: Self) -> Self {
+        if self.ge(&other) { self } else { other }
+    }
+
+    /// Returns the minimum of self && other.
+    fn min(self, other: Self) -> Self {
+        if self.le(&other) { self } else { other }
+    }
+
+    /// Clamp value between min && max bounds.
+    fn clamp(self, min_val: Self, max_val: Self) -> Self {
+        assert(min_val.le(&max_val), "min must be <= max");
+        if self.lt(&min_val) { min_val }
+        else if self.gt(&max_val) { max_val }
+        else { self }
+    }
+};
+
+// =============================================================================
+// Partial Ordering Protocol
+// =============================================================================
+
+/// Protocol for types with partial ordering (may have incomparable values).
+public type PartialOrd is protocol extends PartialEq {
+    /// Compare with another value, returning Maybe<Ordering>.
+    /// Returns None if values are not comparable.
+    fn partial_cmp(&self, other: &Self) -> Maybe<Ordering>;
+
+    /// Less than (returns false if !comparable).
+    fn lt(&self, other: &Self) -> Bool {
+        self.partial_cmp(other).map(|o| o is Less).unwrap_or(false)
+    }
+
+    /// Less than || equal (returns false if !comparable).
+    fn le(&self, other: &Self) -> Bool {
+        self.partial_cmp(other).map(|o| !(o is Greater)).unwrap_or(false)
+    }
+
+    /// Greater than (returns false if !comparable).
+    fn gt(&self, other: &Self) -> Bool {
+        self.partial_cmp(other).map(|o| o is Greater).unwrap_or(false)
+    }
+
+    /// Greater than || equal (returns false if !comparable).
+    fn ge(&self, other: &Self) -> Bool {
+        self.partial_cmp(other).map(|o| !(o is Less)).unwrap_or(false)
+    }
+};
+
+// =============================================================================
+// Hashing Protocol
+// =============================================================================
+
+/// Protocol for types that can be hashed.
+public type Hash is protocol {
+    /// Feed this value into a Hasher.
+    fn hash(&self, hasher: &mut Hasher);
+
+    /// Compute hash directly (convenience method).
+    fn hash_value(&self) -> Int {
+        let mut hasher = DefaultHasher.new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+};
+
+/// Hasher state for computing hash values.
+public type Hasher is protocol {
+    /// Write bytes to the hasher.
+    fn write(&mut self, bytes: &[Byte]);
+
+    /// Write a single byte.
+    fn write_byte(&mut self, byte: Byte) {
+        self.write(&[byte]);
+    }
+
+    /// Write an Int.
+    fn write_int(&mut self, n: Int) {
+        self.write(int_to_bytes(n));
+    }
+
+    /// Finalize && return the hash value.
+    fn finish(&self) -> Int;
+};
+
+/// Default FxHash-based hasher for performance.
+public type DefaultHasher is {
+    state: Int,
+};
+
+implement DefaultHasher {
+    public fn new() -> DefaultHasher {
+        DefaultHasher { state: 0 }
+    }
+}
+
+implement Hasher for DefaultHasher {
+    fn write(&mut self, bytes: &[Byte]) {
+        // FxHash algorithm for fast hashing
+        for byte in bytes {
+            self.state = self.state.wrapping_mul(0x517cc1b727220a95);
+            self.state = self.state ^ (*byte as Int);
+        }
+    }
+
+    fn finish(&self) -> Int {
+        self.state
+    }
+}
+
+// =============================================================================
+// Clone Protocol
+// =============================================================================
+
+/// Protocol for types that can be cloned.
+public type Clone is protocol {
+    /// Create a deep copy of this value.
+    fn clone(&self) -> Self;
+
+    /// Clone from another value (default implementation).
+    fn clone_from(&mut self, source: &Self) {
+        *self = source.clone();
+    }
+};
+
+// =============================================================================
+// Copy Protocol (Marker)
+// =============================================================================
+
+/// Marker protocol for types that are trivially copyable.
+/// Types implementing Copy are implicitly cloned on assignment.
+public type Copy is protocol extends Clone {};
+
+// =============================================================================
+// Default Protocol
+// =============================================================================
+
+/// Protocol for types with a default value.
+public type Default is protocol {
+    /// Return the default value for this type.
+    fn default() -> Self;
+};
+
+// =============================================================================
+// Debug Protocol
+// =============================================================================
+
+/// Protocol for debug formatting.
+public type Debug is protocol {
+    /// Format value for debugging output.
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+// =============================================================================
+// Display Protocol
+// =============================================================================
+
+/// Protocol for user-facing formatting.
+public type Display is protocol {
+    /// Format value for display output.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+// =============================================================================
+// Drop Protocol
+// =============================================================================
+
+/// Protocol for resource cleanup on value destruction.
+public type Drop is protocol {
+    /// Clean up resources owned by this value.
+    fn drop(&mut self);
+};
+
+// =============================================================================
+// Deref Protocols
+// =============================================================================
+
+/// Protocol for automatic dereferencing.
+public type Deref is protocol {
+    /// The target type after dereferencing.
+    type Target;
+
+    /// Get a reference to the underlying value.
+    fn deref(&self) -> &Self.Target;
+};
+
+/// Protocol for mutable dereferencing.
+public type DerefMut is protocol extends Deref {
+    /// Get a mutable reference to the underlying value.
+    fn deref_mut(&mut self) -> &mut Self.Target;
+};
+
+// =============================================================================
+// AsRef / AsMut Protocols
+// =============================================================================
+
+/// Protocol for reference conversions.
+public type AsRef<T> is protocol {
+    /// Convert this reference to a reference of type T.
+    fn as_ref(&self) -> &T;
+};
+
+/// Protocol for mutable reference conversions.
+public type AsMut<T> is protocol {
+    /// Convert this mutable reference to a mutable reference of type T.
+    fn as_mut(&mut self) -> &mut T;
+};
+
+// =============================================================================
+// Into / From Protocols
+// =============================================================================
+
+/// Protocol for fallible type conversions.
+public type TryFrom<T> is protocol {
+    /// The error type if conversion fails.
+    type Error;
+
+    /// Try to convert from T to Self.
+    fn try_from(value: T) -> Result<Self, Self.Error>;
+};
+
+/// Protocol for infallible type conversions.
+public type From<T> is protocol {
+    /// Convert from T to Self.
+    fn from(value: T) -> Self;
+};
+
+/// Protocol for converting into another type.
+public type Into<T> is protocol {
+    /// Convert self into T.
+    fn into(self) -> T;
+};
+
+// Blanket implementation: Into<T> from From<Self>
+implement<T, U: From<T>> Into<U> for T {
+    fn into(self) -> U {
+        U.from(self)
+    }
+}
+
+/// Protocol for fallible type conversions (reverse direction).
+///
+/// This is the reciprocal of TryFrom. Where TryFrom allows you to write
+/// `U.try_from(value)`, TryInto allows you to write `value.try_into()`.
+///
+/// A blanket implementation provides TryInto<U> for any T where U: TryFrom<T>.
+///
+/// # Examples
+///
+/// ```verum
+/// let n: Int = 42;
+/// let result: Result<PositiveInt, Text> = n.try_into();
+/// assert(result.is_ok());
+/// ```
+public type TryInto<T> is protocol {
+    /// The error type if conversion fails.
+    type Error;
+
+    /// Try to convert self into T.
+    fn try_into(self) -> Result<T, Self.Error>;
+};
+
+// Blanket implementation: TryInto<U> from TryFrom<T>
+implement<T, U: TryFrom<T>> TryInto<U> for T {
+    type Error = U.Error;
+
+    fn try_into(self) -> Result<U, U.Error> {
+        U.try_from(self)
+    }
+}
+
+// =============================================================================
+// Formatter for Debug/Display
+// =============================================================================
+
+/// Format error type.
+public type FormatError is {};
+
+/// Format result alias - used by Display and Debug implementations.
+public type FmtResult is Result<Unit, FormatError>;
+
+/// Formatter state for writing formatted output.
+public type Formatter is {
+    buffer: &mut Text,
+};
+
+implement Formatter {
+    /// Write a string to the output.
+    public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
+        self.buffer.push_str(s);
+        Ok(())
+    }
+
+    /// Write a single character.
+    public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
+        self.buffer.push(c);
+        Ok(())
+    }
+
+    /// Write an integer as its decimal representation.
+    public fn write_int(&mut self, n: Int) -> Result<(), FormatError> {
+        if n == 0 {
+            return self.write_str("0");
+        }
+
+        let mut num = n;
+        if num < 0 {
+            self.write_char('-')?;
+            num = -num;
+        }
+
+        // Build digits in reverse
+        let mut buf: [Byte; 20] = [0; 20];
+        let mut i = 19;
+
+        while num > 0 {
+            buf[i] = ('0' as Byte) + ((num % 10) as Byte);
+            num = num / 10;
+            i = i - 1;
+        }
+
+        let start = i + 1;
+        let digit_str = Text.from_utf8_unchecked(&buf[start..20]);
+        self.write_str(&digit_str)
+    }
+}
+
+// =============================================================================
+// Sized Protocol (Marker)
+// =============================================================================
+
+/// Marker protocol for types with known size at compile time.
+/// Almost all types implement Sized; only dynamically-sized types don't.
+public type Sized is protocol {};
+
+// =============================================================================
+// Send / Sync Protocols (Markers)
+// =============================================================================
+
+/// Marker protocol for types that can be safely transferred across threads.
+public type Send is protocol {};
+
+/// Marker protocol for types whose references can be shared across threads.
+public type Sync is protocol {};
+
+// =============================================================================
+// Unpin Protocol (Marker)
+// =============================================================================
+
+/// Marker protocol for types that don't require pinning.
+public type Unpin is protocol {};
+
+// =============================================================================
+// Operator Protocols
+// =============================================================================
+
+/// Protocol for addition.
+public type Add<Rhs> is protocol {
+    type Output;
+    fn add(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for subtraction.
+public type Sub<Rhs> is protocol {
+    type Output;
+    fn sub(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for multiplication.
+public type Mul<Rhs> is protocol {
+    type Output;
+    fn mul(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for division.
+public type Div<Rhs> is protocol {
+    type Output;
+    fn div(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for remainder.
+public type Rem<Rhs> is protocol {
+    type Output;
+    fn rem(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for negation.
+public type Neg is protocol {
+    type Output;
+    fn neg(self) -> Self.Output;
+};
+
+/// Protocol for bitwise AND.
+public type BitAnd<Rhs> is protocol {
+    type Output;
+    fn bitand(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for bitwise OR.
+public type BitOr<Rhs> is protocol {
+    type Output;
+    fn bitor(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for bitwise XOR.
+public type BitXor<Rhs> is protocol {
+    type Output;
+    fn bitxor(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for bitwise NOT.
+public type Not is protocol {
+    type Output;
+    fn not(self) -> Self.Output;
+};
+
+/// Protocol for left shift.
+public type Shl<Rhs> is protocol {
+    type Output;
+    fn shl(self, rhs: Rhs) -> Self.Output;
+};
+
+/// Protocol for right shift.
+public type Shr<Rhs> is protocol {
+    type Output;
+    fn shr(self, rhs: Rhs) -> Self.Output;
+};
+
+// =============================================================================
+// Index Protocols
+// =============================================================================
+
+/// Protocol for indexing.
+public type Index<Idx> is protocol {
+    type Output;
+    fn index(&self, idx: Idx) -> &Self.Output;
+};
+
+/// Protocol for mutable indexing.
+public type IndexMut<Idx> is protocol extends Index<Idx> {
+    fn index_mut(&mut self, idx: Idx) -> &mut Self.Output;
+};
+
+// =============================================================================
+// Zero / One Protocols (for numeric operations)
+// =============================================================================
+
+/// Protocol for additive identity.
+public type Zero is protocol {
+    fn zero() -> Self;
+    fn is_zero(&self) -> Bool;
+};
+
+/// Protocol for multiplicative identity.
+public type One is protocol {
+    fn one() -> Self;
+    fn is_one(&self) -> Bool;
+};
+
+// =============================================================================
+// Atomic Protocol (for generic atomic operations)
+// =============================================================================
+
+/// Marker protocol for types that support atomic operations.
+///
+/// Types implementing Atomic can be used with generic atomic intrinsics:
+/// - atomic_load<T>
+/// - atomic_store<T>
+/// - atomic_cas<T>
+/// - atomic_exchange<T>
+/// - atomic_fetch_add<T> (requires T: Integer)
+/// - atomic_fetch_sub<T> (requires T: Integer)
+///
+/// ## Supported Sizes
+/// Atomic operations are supported for 1, 2, 4, and 8 byte types.
+/// The VBC runtime dispatches to appropriate hardware instructions
+/// based on the type's size.
+///
+/// Implementations may provide `meta fn ATOMIC_SIZE() -> Int` for
+/// compile-time size queries.
+public type Atomic is protocol extends Copy + Sized {};
+
+// Atomic implementations for primitive integer types
+// The compiler dispatches to appropriate atomic instructions based on type size.
+// Note: Pointer atomics use type-specific intrinsics (atomic_load_ptr, atomic_store_ptr, etc.)
+implement Atomic for UInt8  {}
+implement Atomic for UInt16 {}
+implement Atomic for UInt32 {}
+implement Atomic for UInt64 {}
+implement Atomic for Int8   {}
+implement Atomic for Int16  {}
+implement Atomic for Int32  {}
+implement Atomic for Int64  {}
+implement Atomic for Int    {}
+implement Atomic for ISize  {}
+implement Atomic for USize  {}
+implement Atomic for Bool   {}
+
+// =============================================================================
+// Integer Protocol (for numeric atomic operations)
+// =============================================================================
+
+/// Marker protocol for integer types that support arithmetic atomic operations.
+///
+/// Types implementing Integer can use fetch-and-modify atomics:
+/// - atomic_fetch_add<T>
+/// - atomic_fetch_sub<T>
+/// - atomic_fetch_and<T>
+/// - atomic_fetch_or<T>
+/// - atomic_fetch_xor<T>
+///
+/// Implementations may provide:
+/// - `meta fn IS_SIGNED() -> Bool` - whether this is a signed integer type
+/// - `meta fn BIT_WIDTH() -> Int` - bit width of the integer type
+public type Integer is protocol extends Atomic {};
+
+// Integer implementations for unsigned types
+// The compiler uses T.size and T.is_signed type properties for dispatch.
+implement Integer for UInt8   {}
+implement Integer for UInt16  {}
+implement Integer for UInt32  {}
+implement Integer for UInt64  {}
+implement Integer for UInt128 {}
+implement Integer for USize   {}
+
+// Integer implementations for signed types
+implement Integer for Int8   {}
+implement Integer for Int16  {}
+implement Integer for Int32  {}
+implement Integer for Int64  {}
+implement Integer for Int128 {}
+implement Integer for Int    {}
+implement Integer for ISize  {}
+
+// =============================================================================
+// SignedInteger Protocol
+// =============================================================================
+
+/// Marker protocol for signed integer types.
+///
+/// Types implementing SignedInteger support operations that depend on
+/// signed arithmetic semantics, such as wrapping_neg which handles MIN.
+public type SignedInteger is protocol extends Integer {};
+
+implement SignedInteger for Int8   {}
+implement SignedInteger for Int16  {}
+implement SignedInteger for Int32  {}
+implement SignedInteger for Int64  {}
+implement SignedInteger for Int128 {}
+implement SignedInteger for Int    {}
+implement SignedInteger for ISize  {}
+
+// =============================================================================
+// Numeric Protocol (for generic arithmetic intrinsics)
+// =============================================================================
+
+/// Marker protocol for all numeric types (integers and floats).
+///
+/// Types implementing Numeric support basic arithmetic operations:
+/// - add, sub, mul, div, rem (via intrinsics)
+///
+/// This protocol is used by the generic arithmetic intrinsics in
+/// stdlib.intrinsics to provide type-safe arithmetic for all numeric types.
+public type Numeric is protocol extends Copy + Sized {};
+
+// Numeric implementations for integer types
+implement Numeric for UInt8   {}
+implement Numeric for UInt16  {}
+implement Numeric for UInt32  {}
+implement Numeric for UInt64  {}
+implement Numeric for UInt128 {}
+implement Numeric for USize   {}
+implement Numeric for Int8    {}
+implement Numeric for Int16   {}
+implement Numeric for Int32   {}
+implement Numeric for Int64   {}
+implement Numeric for Int128  {}
+implement Numeric for Int     {}
+implement Numeric for ISize   {}
+
+// Numeric implementations for floating-point types
+implement Numeric for Float   {}
+implement Numeric for Float32 {}
+implement Numeric for Float64 {}
+
+// =============================================================================
+// SignedNumeric Protocol
+// =============================================================================
+
+/// Marker protocol for signed numeric types (signed integers and floats).
+///
+/// Types implementing SignedNumeric support operations that depend on
+/// sign, such as negation.
+public type SignedNumeric is protocol extends Numeric {};
+
+implement SignedNumeric for Int8    {}
+implement SignedNumeric for Int16   {}
+implement SignedNumeric for Int32   {}
+implement SignedNumeric for Int64   {}
+implement SignedNumeric for Int128  {}
+implement SignedNumeric for Int     {}
+implement SignedNumeric for ISize   {}
+implement SignedNumeric for Float   {}
+implement SignedNumeric for Float32 {}
+implement SignedNumeric for Float64 {}
+
+// =============================================================================
+// TypeId - Runtime type identification
+// =============================================================================
+
+/// Opaque type identifier for runtime type discrimination.
+///
+/// Used by the `Any` protocol for dynamic dispatch and downcasting.
+/// Each distinct type has a unique TypeId at runtime.
+public type TypeId is (UInt64);
+
+implement TypeId {
+    /// Create a TypeId from a raw value.
+    fn from_raw(id: UInt64) -> TypeId {
+        TypeId(id)
+    }
+
+    /// Get the raw numeric value.
+    fn raw(&self) -> UInt64 {
+        self.0
+    }
+}
+
+implement Eq for TypeId {
+    fn eq(&self, other: &TypeId) -> Bool {
+        self.0 == other.0
+    }
+}
+
+implement Hash for TypeId {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.0 as Int);
+    }
+}
+
+// =============================================================================
+// Any Protocol (for type erasure and dynamic dispatch)
+// =============================================================================
+
+/// Protocol for type erasure, enabling dynamic dispatch and runtime type
+/// identification.
+///
+/// Types implementing Any can:
+/// - Be stored as `&dyn Any` for type-erased storage
+/// - Have their TypeId queried at runtime
+/// - Be downcast back to their concrete type
+///
+/// All types automatically implement Any.
+public type Any is protocol {
+    /// Get the TypeId of the concrete type.
+    fn type_id(&self) -> TypeId;
+};
+
+// =============================================================================
+// Describable Protocol (for error types)
+// =============================================================================
+
+/// Protocol for types that provide a human-readable description.
+///
+/// This is the base protocol for error types, enabling structured error handling.
+/// All error types should implement Describable to provide a description.
+///
+/// # Examples
+///
+/// ```verum
+/// type IoError is { message: Text, kind: IoErrorKind };
+///
+/// implement Describable for IoError {
+///     fn description(&self) -> Text {
+///         self.message.clone()
+///     }
+/// }
+/// ```
+public type Describable is protocol {
+    /// Get a human-readable description.
+    fn description(&self) -> Text;
+};
+
+// =============================================================================
+// ErrorSource Protocol (extends Describable with error chaining)
+// =============================================================================
+
+/// Protocol for error types with source chaining.
+///
+/// Extends Describable with optional source error for building error chains.
+/// Named `ErrorSource` to avoid collision with the concrete `Error` type in
+/// `core.base.result`.
+///
+/// # Examples
+///
+/// ```verum
+/// type IoError is { message: Text, cause: Maybe<Heap<dyn Describable>> };
+///
+/// implement ErrorSource for IoError {
+///     fn description(&self) -> Text { self.message.clone() }
+///     fn source(&self) -> Maybe<&dyn Describable> { None }
+/// }
+/// ```
+public type ErrorSource is protocol extends Describable {
+    /// Get the underlying cause of this error, if any.
+    fn source(&self) -> Maybe<&dyn Describable> {
+        None
+    }
+};
+
+// =============================================================================
+// FromStr Protocol (parsing from text)
+// =============================================================================
+
+/// Protocol for types that can be parsed from a text representation.
+///
+/// This enables the standard parsing pattern:
+/// ```verum
+/// let n: Int = "42".parse()?;
+/// ```
+public type FromStr is protocol {
+    /// The error type returned when parsing fails.
+    type ParseError;
+
+    /// Parse a string into this type.
+    fn from_str(s: &Text) -> Result<Self, Self.ParseError>;
+};
+
+// =============================================================================
+// ToString Protocol
+// =============================================================================
+
+/// Protocol for converting values to Text.
+///
+/// All types implementing Display automatically get ToString.
+public type ToString is protocol {
+    /// Convert to a Text representation.
+    fn to_string(&self) -> Text;
+};
+
+// Blanket implementation: any Display type can be converted to string
+implement<T: Display> ToString for T {
+    fn to_string(&self) -> Text {
+        let mut buf = Text.new();
+        let mut f = Formatter { buffer: &mut buf };
+        let _ = self.fmt(&mut f);
+        buf
+    }
+}
+
+// =============================================================================
+// Borrow / BorrowMut Protocols
+// =============================================================================
+
+/// Protocol for borrowing data as a reference of a different type.
+///
+/// Used for efficient lookups in hash maps and other collections
+/// where owned and borrowed keys should be interchangeable.
+///
+/// # Contract
+///
+/// If a type implements both Borrow<T> and Hash, then the hash of
+/// the borrowed form must equal the hash of the original.
+public type Borrow<Borrowed> is protocol {
+    /// Borrow this value as a reference to Borrowed.
+    fn borrow(&self) -> &Borrowed;
+};
+
+/// Mutable variant of Borrow.
+public type BorrowMut<Borrowed> is protocol extends Borrow<Borrowed> {
+    /// Mutably borrow this value.
+    fn borrow_mut(&mut self) -> &mut Borrowed;
+};
+
+// =============================================================================
+// Compound Assignment Operator Protocols
+// =============================================================================
+
+/// Protocol for addition assignment (+=).
+public type AddAssign<Rhs> is protocol {
+    fn add_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for subtraction assignment (-=).
+public type SubAssign<Rhs> is protocol {
+    fn sub_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for multiplication assignment (*=).
+public type MulAssign<Rhs> is protocol {
+    fn mul_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for division assignment (/=).
+public type DivAssign<Rhs> is protocol {
+    fn div_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for remainder assignment (%=).
+public type RemAssign<Rhs> is protocol {
+    fn rem_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for bitwise AND assignment (&=).
+public type BitAndAssign<Rhs> is protocol {
+    fn bitand_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for bitwise OR assignment (|=).
+public type BitOrAssign<Rhs> is protocol {
+    fn bitor_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for bitwise XOR assignment (^=).
+public type BitXorAssign<Rhs> is protocol {
+    fn bitxor_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for left shift assignment (<<=).
+public type ShlAssign<Rhs> is protocol {
+    fn shl_assign(&mut self, rhs: Rhs);
+};
+
+/// Protocol for right shift assignment (>>=).
+public type ShrAssign<Rhs> is protocol {
+    fn shr_assign(&mut self, rhs: Rhs);
+};

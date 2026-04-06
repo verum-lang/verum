@@ -1,0 +1,475 @@
+module sys.linux.time;
+
+// =============================================================================
+// sys/linux/time.vr - Linux Time and Clock Operations
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/linux/syscall
+// Platform: Linux x86_64
+// =============================================================================
+//
+// This module provides high-resolution time operations using Linux syscalls:
+// - clock_gettime: Get time from various clock sources
+// - clock_nanosleep: High-precision sleep
+// - gettimeofday: Traditional Unix time (legacy)
+// - rdtsc: Direct CPU timestamp counter access
+//
+// Clock sources:
+// - CLOCK_MONOTONIC: Time since boot (not affected by NTP)
+// - CLOCK_REALTIME: Wall-clock time (affected by NTP)
+// - CLOCK_BOOTTIME: Like monotonic but includes suspend time
+// - CLOCK_THREAD_CPUTIME_ID: Thread CPU time
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.OSError;
+mount sys.linux.syscall.{
+    syscall_raw,
+    SYS_CLOCK_GETTIME, SYS_CLOCK_NANOSLEEP, SYS_NANOSLEEP,
+    SYS_GETTIMEOFDAY,
+};
+mount core.intrinsics.{
+    rdtsc as rdtsc_intrinsic,
+    rdtscp as rdtscp_intrinsic,
+};
+
+// =============================================================================
+// Clock IDs
+// =============================================================================
+
+/// Real-time clock (wall clock, affected by NTP)
+public const CLOCK_REALTIME: Int = 0;
+
+/// Monotonic clock (time since boot, not affected by NTP)
+public const CLOCK_MONOTONIC: Int = 1;
+
+/// Per-process CPU time
+public const CLOCK_PROCESS_CPUTIME_ID: Int = 2;
+
+/// Per-thread CPU time
+public const CLOCK_THREAD_CPUTIME_ID: Int = 3;
+
+/// Monotonic raw (not adjusted by NTP)
+public const CLOCK_MONOTONIC_RAW: Int = 4;
+
+/// Coarse realtime clock (faster, ~1ms resolution)
+public const CLOCK_REALTIME_COARSE: Int = 5;
+
+/// Coarse monotonic clock (faster, ~1ms resolution)
+public const CLOCK_MONOTONIC_COARSE: Int = 6;
+
+/// Boot time clock (includes suspend time)
+public const CLOCK_BOOTTIME: Int = 7;
+
+/// Real-time clock with alarm capability
+public const CLOCK_REALTIME_ALARM: Int = 8;
+
+/// Boot time clock with alarm capability
+public const CLOCK_BOOTTIME_ALARM: Int = 9;
+
+/// TAI (International Atomic Time) clock
+public const CLOCK_TAI: Int = 11;
+
+// =============================================================================
+// Time Structures
+// =============================================================================
+
+/// Timespec structure (used by clock_gettime, clock_nanosleep)
+@repr(C)
+public type Timespec is {
+    tv_sec: Int64,   // Seconds
+    tv_nsec: Int64,  // Nanoseconds (0-999999999)
+};
+
+/// Timeval structure (used by gettimeofday, select)
+@repr(C)
+public type Timeval is {
+    tv_sec: Int64,   // Seconds
+    tv_usec: Int64,  // Microseconds (0-999999)
+};
+
+/// Duration type (nanoseconds)
+public type Duration is (UInt64);
+
+implement Duration {
+    /// Create duration from nanoseconds.
+    public fn from_nanos(nanos: UInt64) -> Duration {
+        Duration(nanos)
+    }
+
+    /// Create duration from microseconds.
+    public fn from_micros(micros: UInt64) -> Duration {
+        Duration(micros * 1_000)
+    }
+
+    /// Create duration from milliseconds.
+    public fn from_millis(millis: UInt64) -> Duration {
+        Duration(millis * 1_000_000)
+    }
+
+    /// Create duration from seconds.
+    public fn from_secs(secs: UInt64) -> Duration {
+        Duration(secs * 1_000_000_000)
+    }
+
+    /// Get duration as nanoseconds.
+    public fn as_nanos(&self) -> UInt64 {
+        self.0
+    }
+
+    /// Get duration as microseconds.
+    public fn as_micros(&self) -> UInt64 {
+        self.0 / 1_000
+    }
+
+    /// Get duration as milliseconds.
+    public fn as_millis(&self) -> UInt64 {
+        self.0 / 1_000_000
+    }
+
+    /// Get duration as seconds.
+    public fn as_secs(&self) -> UInt64 {
+        self.0 / 1_000_000_000
+    }
+
+    /// Get fractional nanoseconds (subsecond part).
+    public fn subsec_nanos(&self) -> UInt32 {
+        (self.0 % 1_000_000_000) as UInt32
+    }
+
+    /// Convert to Timespec.
+    public fn to_timespec(&self) -> Timespec {
+        Timespec {
+            tv_sec: (self.0 / 1_000_000_000) as Int64,
+            tv_nsec: (self.0 % 1_000_000_000) as Int64,
+        }
+    }
+}
+
+/// Instant type (monotonic time point)
+public type Instant is (UInt64);  // Nanoseconds since boot
+
+implement Instant {
+    /// Get the current instant (monotonic time).
+    public fn now() -> Instant {
+        Instant(monotonic_nanos())
+    }
+
+    /// Duration elapsed since this instant.
+    public fn elapsed(&self) -> Duration {
+        let now = monotonic_nanos();
+        Duration(now - self.0)
+    }
+
+    /// Duration between two instants.
+    public fn duration_since(&self, earlier: &Instant) -> Duration {
+        Duration(self.0 - earlier.0)
+    }
+
+    /// Add duration to instant.
+    public fn add(&self, duration: Duration) -> Instant {
+        Instant(self.0 + duration.0)
+    }
+
+    /// Subtract duration from instant.
+    public fn sub(&self, duration: Duration) -> Instant {
+        Instant(self.0 - duration.0)
+    }
+}
+
+// =============================================================================
+// Clock Operations
+// =============================================================================
+
+/// Get time from a specific clock.
+///
+/// # Arguments
+/// * `clock_id` - Clock to query (CLOCK_* constant)
+/// * `ts` - Output timespec
+public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_CLOCK_GETTIME,
+            clock_id,
+            ts as Int,
+            0, 0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get monotonic time in nanoseconds.
+///
+/// This is the primary time source for performance measurement
+/// and timeouts. It is not affected by system time changes.
+public fn monotonic_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_MONOTONIC, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get monotonic time in microseconds.
+public fn monotonic_micros() -> UInt64 {
+    monotonic_nanos() / 1_000
+}
+
+/// Get monotonic time in milliseconds.
+public fn monotonic_millis() -> UInt64 {
+    monotonic_nanos() / 1_000_000
+}
+
+/// Get raw monotonic time in nanoseconds.
+///
+/// Like monotonic_nanos but not adjusted by NTP.
+public fn monotonic_raw_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_MONOTONIC_RAW, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get coarse monotonic time in nanoseconds.
+///
+/// Faster but lower resolution (~1ms).
+public fn monotonic_coarse_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_MONOTONIC_COARSE, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get real time (wall clock) in nanoseconds since Unix epoch.
+public fn realtime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_REALTIME, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get real time in seconds since Unix epoch.
+public fn unix_timestamp() -> Int64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_REALTIME, &mut ts);
+    ts.tv_sec
+}
+
+/// Get boot time in nanoseconds (includes suspend time).
+public fn boottime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_BOOTTIME, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get current thread's CPU time in nanoseconds.
+public fn thread_cputime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get current process's CPU time in nanoseconds.
+public fn process_cputime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let _ = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut ts);
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+// =============================================================================
+// Sleep Operations
+// =============================================================================
+
+/// Clock nanosleep flags
+public const TIMER_ABSTIME: Int = 1;
+
+/// Sleep for a duration (relative time).
+///
+/// # Arguments
+/// * `duration` - Time to sleep
+///
+/// # Returns
+/// Remaining time if interrupted, None if completed.
+public fn sleep(duration: Duration) -> Maybe<Duration> {
+    let req = duration.to_timespec();
+    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+
+    let result = unsafe {
+        syscall_raw(
+            SYS_NANOSLEEP,
+            &req as Int,
+            &mut rem as Int,
+            0, 0, 0, 0
+        )
+    };
+
+    if result == 0 {
+        None
+    } else {
+        Some(Duration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+    }
+}
+
+/// Sleep using a specific clock (absolute or relative time).
+///
+/// # Arguments
+/// * `clock_id` - Clock to use
+/// * `flags` - 0 for relative, TIMER_ABSTIME for absolute
+/// * `req` - Time to sleep until (absolute) or duration (relative)
+/// * `rem` - Remaining time if interrupted (for relative only)
+public fn clock_nanosleep(
+    clock_id: Int,
+    flags: Int,
+    req: &Timespec,
+    rem: Maybe<&mut Timespec>
+) -> Result<(), OSError> {
+    let rem_ptr = match rem {
+        Some(r) => r as Int,
+        None => 0,
+    };
+
+    let result = unsafe {
+        syscall_raw(
+            SYS_CLOCK_NANOSLEEP,
+            clock_id,
+            flags,
+            req as Int,
+            rem_ptr,
+            0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Sleep until an absolute time.
+///
+/// More precise than relative sleep for periodic wakeups.
+public fn sleep_until(deadline_nanos: UInt64) -> Result<(), OSError> {
+    let req = Timespec {
+        tv_sec: (deadline_nanos / 1_000_000_000) as Int64,
+        tv_nsec: (deadline_nanos % 1_000_000_000) as Int64,
+    };
+
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &req, None)
+}
+
+/// Sleep for milliseconds.
+public fn sleep_ms(ms: UInt64) {
+    let _ = sleep(Duration.from_millis(ms));
+}
+
+/// Sleep for microseconds.
+public fn sleep_us(us: UInt64) {
+    let _ = sleep(Duration.from_micros(us));
+}
+
+// =============================================================================
+// High-Resolution Timer (RDTSC)
+// =============================================================================
+
+/// Read CPU timestamp counter.
+///
+/// Very fast (~10-20 cycles) but:
+/// - Not synchronized across cores (use RDTSCP for that)
+/// - Frequency may vary (use invariant TSC on modern CPUs)
+/// - Not directly convertible to wall time
+///
+/// Best used for micro-benchmarking and elapsed time between
+/// operations on the same core.
+@inline
+public fn rdtsc() -> UInt64 {
+    // Uses intrinsic for rdtsc - compiler emits appropriate assembly
+    rdtsc_intrinsic()
+}
+
+/// Read CPU timestamp counter with processor ID.
+///
+/// Like rdtsc but also returns the processor ID, and includes
+/// a serializing instruction to prevent reordering.
+@inline
+public fn rdtscp() -> (UInt64, UInt32) {
+    // Uses intrinsic for rdtscp - compiler emits appropriate assembly
+    // Returns (timestamp, processor_id)
+    rdtscp_intrinsic()
+}
+
+/// Serializing fence + TSC read for accurate timing.
+///
+/// Use at start and end of timed region for accurate measurement.
+@inline
+public fn rdtsc_serialized() -> UInt64 {
+    // lfence serializes rdtsc on Intel (and AMD with appropriate MSR)
+    @asm("lfence");
+    rdtsc()
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Measure elapsed time for a closure.
+///
+/// Returns (result, duration in nanoseconds).
+public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
+    let start = Instant.now();
+    let result = f();
+    let elapsed = start.elapsed();
+    (result, elapsed)
+}
+
+/// Simple stopwatch for timing code sections.
+public type Stopwatch is {
+    start: UInt64,
+    running: Bool,
+    accumulated: UInt64,
+};
+
+implement Stopwatch {
+    public fn new() -> Stopwatch {
+        Stopwatch {
+            start: 0,
+            running: false,
+            accumulated: 0,
+        }
+    }
+
+    public fn start(&mut self) {
+        if !self.running {
+            self.start = monotonic_nanos();
+            self.running = true;
+        }
+    }
+
+    public fn stop(&mut self) {
+        if self.running {
+            self.accumulated += monotonic_nanos() - self.start;
+            self.running = false;
+        }
+    }
+
+    public fn reset(&mut self) {
+        self.start = 0;
+        self.running = false;
+        self.accumulated = 0;
+    }
+
+    public fn restart(&mut self) {
+        self.reset();
+        self.start();
+    }
+
+    public fn elapsed(&self) -> Duration {
+        let current = if self.running {
+            monotonic_nanos() - self.start + self.accumulated
+        } else {
+            self.accumulated
+        };
+        Duration(current)
+    }
+}

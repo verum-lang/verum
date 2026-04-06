@@ -1,0 +1,912 @@
+// =============================================================================
+// net/tls.vr - TLS (Transport Layer Security) Types and Protocols
+// =============================================================================
+// Layer: 6 (Application Protocol)
+// Dependencies: core, io, net/tcp
+// =============================================================================
+//
+// Provides types and protocols for TLS/SSL encrypted communication.
+// This module defines the interface; actual cryptographic operations
+// are delegated to platform-native TLS libraries:
+//
+// - Linux: OpenSSL / rustls-style pure implementation
+// - macOS: Security.framework (SecureTransport)
+// - Windows: SChannel (Schannel SSP)
+//
+// # Example
+// ```verum
+// let config = TlsConfig.client()
+//     .with_root_certs(SystemCerts.load());
+//
+// let tcp = TcpStream.connect("example.com:443").await?;
+// let tls = TlsStream.connect(tcp, "example.com", &config).await?;
+// tls.write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n").await?;
+// ```
+//
+// =============================================================================
+
+module net.tls;
+
+mount core.*;
+mount core.io.{Read, Write};
+mount .tcp.{TcpStream};
+
+// =============================================================================
+// TLS Protocol Version
+// =============================================================================
+
+/// TLS protocol version.
+public type TlsVersion is
+    /// TLS 1.0 (deprecated, insecure)
+    | Tls10
+    /// TLS 1.1 (deprecated, insecure)
+    | Tls11
+    /// TLS 1.2
+    | Tls12
+    /// TLS 1.3 (recommended)
+    | Tls13;
+
+implement TlsVersion {
+    /// Get the version as a human-readable string.
+    public fn as_str(&self) -> Text {
+        match self {
+            Tls10 => "TLS 1.0",
+            Tls11 => "TLS 1.1",
+            Tls12 => "TLS 1.2",
+            Tls13 => "TLS 1.3",
+        }
+    }
+
+    /// Get the wire protocol version number (major, minor).
+    public fn wire_version(&self) -> (Int, Int) {
+        match self {
+            Tls10 => (3, 1),
+            Tls11 => (3, 2),
+            Tls12 => (3, 3),
+            Tls13 => (3, 4),
+        }
+    }
+
+    /// Check if this version is considered secure.
+    public fn is_secure(&self) -> Bool {
+        match self {
+            Tls10 | Tls11 => false,
+            Tls12 | Tls13 => true,
+        }
+    }
+}
+
+implement Eq for TlsVersion {
+    fn eq(&self, other: &TlsVersion) -> Bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+implement Clone for TlsVersion {
+    fn clone(&self) -> TlsVersion { *self }
+}
+
+implement Copy for TlsVersion {}
+
+implement Debug for TlsVersion {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+implement Display for TlsVersion {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+// =============================================================================
+// Certificate Types
+// =============================================================================
+
+/// An X.509 certificate in DER (binary) format.
+public type Certificate is {
+    /// DER-encoded certificate data.
+    der_data: List<Byte>,
+};
+
+implement Certificate {
+    /// Create a certificate from DER-encoded bytes.
+    public fn from_der(data: List<Byte>) -> Certificate {
+        Certificate { der_data: data }
+    }
+
+    /// Parse a PEM-encoded certificate string.
+    ///
+    /// Expects the standard PEM format:
+    /// ```
+    /// -----BEGIN CERTIFICATE-----
+    /// <base64 data>
+    /// -----END CERTIFICATE-----
+    /// ```
+    public fn from_pem(pem: &Text) -> Result<Certificate, TlsError> {
+        let start_marker = "-----BEGIN CERTIFICATE-----";
+        let end_marker = "-----END CERTIFICATE-----";
+
+        let start = pem.find(start_marker)
+            .ok_or(TlsError.InvalidCertificate("missing BEGIN CERTIFICATE marker"))?;
+        let end = pem.find(end_marker)
+            .ok_or(TlsError.InvalidCertificate("missing END CERTIFICATE marker"))?;
+
+        let base64_data = pem.slice(start + start_marker.len(), end).trim();
+        let der_bytes = base64_decode(base64_data)
+            .map_err(|e| TlsError.InvalidCertificate(f"invalid base64: {e}"))?;
+
+        Ok(Certificate { der_data: der_bytes })
+    }
+
+    /// Parse multiple PEM-encoded certificates from a single string.
+    public fn from_pem_chain(pem: &Text) -> Result<List<Certificate>, TlsError> {
+        let mut certs = List.new();
+        let marker = "-----BEGIN CERTIFICATE-----";
+        let mut search_start = 0;
+
+        while let Some(pos) = pem.slice(search_start, pem.len()).find(marker) {
+            let abs_pos = search_start + pos;
+            let end_marker = "-----END CERTIFICATE-----";
+            let end_pos = pem.slice(abs_pos, pem.len()).find(end_marker)
+                .ok_or(TlsError.InvalidCertificate("unterminated PEM block"))?;
+            let block = pem.slice(abs_pos, abs_pos + end_pos + end_marker.len());
+            certs.push(Certificate.from_pem(&block)?);
+            search_start = abs_pos + end_pos + end_marker.len();
+        }
+
+        if certs.is_empty() {
+            return Err(TlsError.InvalidCertificate("no certificates found in PEM data"));
+        }
+
+        Ok(certs)
+    }
+
+    /// Get the DER-encoded data.
+    public fn der_bytes(&self) -> &[Byte] {
+        &self.der_data
+    }
+
+    /// Get the size of the certificate in bytes.
+    public fn size(&self) -> Int {
+        self.der_data.len()
+    }
+}
+
+implement Clone for Certificate {
+    fn clone(&self) -> Certificate {
+        Certificate { der_data: self.der_data.clone() }
+    }
+}
+
+implement Debug for Certificate {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Certificate({self.der_data.len()} bytes)")
+    }
+}
+
+// =============================================================================
+// Private Key
+// =============================================================================
+
+/// A private key for TLS authentication.
+public type PrivateKey is {
+    /// DER-encoded key data.
+    der_data: List<Byte>,
+    /// Key type (RSA, EC, Ed25519).
+    key_type: KeyType,
+};
+
+/// Private key algorithm type.
+public type KeyType is
+    | Rsa
+    | Ec
+    | Ed25519;
+
+implement KeyType {
+    public fn as_str(&self) -> Text {
+        match self {
+            Rsa => "RSA",
+            Ec => "EC",
+            Ed25519 => "Ed25519",
+        }
+    }
+}
+
+implement Eq for KeyType {
+    fn eq(&self, other: &KeyType) -> Bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+implement Clone for KeyType {
+    fn clone(&self) -> KeyType { *self }
+}
+
+implement Copy for KeyType {}
+
+implement Debug for KeyType {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+implement PrivateKey {
+    /// Create a private key from DER-encoded bytes.
+    public fn from_der(data: List<Byte>, key_type: KeyType) -> PrivateKey {
+        PrivateKey { der_data: data, key_type: key_type }
+    }
+
+    /// Parse a PEM-encoded private key.
+    public fn from_pem(pem: &Text) -> Result<PrivateKey, TlsError> {
+        let key_type = if pem.contains("RSA PRIVATE KEY") {
+            KeyType.Rsa
+        } else if pem.contains("EC PRIVATE KEY") {
+            KeyType.Ec
+        } else if pem.contains("PRIVATE KEY") {
+            // PKCS#8 - could be any type, default to RSA
+            KeyType.Rsa
+        } else {
+            return Err(TlsError.InvalidKey("unrecognized PEM key format"));
+        };
+
+        // Extract base64 data between markers
+        let lines: List<Text> = pem.lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+        let base64_data = lines.join("");
+        let der_bytes = base64_decode(&base64_data)
+            .map_err(|e| TlsError.InvalidKey(f"invalid base64: {e}"))?;
+
+        Ok(PrivateKey { der_data: der_bytes, key_type: key_type })
+    }
+
+    /// Get the key type.
+    public fn key_type(&self) -> KeyType {
+        self.key_type
+    }
+}
+
+implement Clone for PrivateKey {
+    fn clone(&self) -> PrivateKey {
+        PrivateKey {
+            der_data: self.der_data.clone(),
+            key_type: self.key_type,
+        }
+    }
+}
+
+implement Debug for PrivateKey {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PrivateKey({self.key_type.as_str()}, {self.der_data.len()} bytes)")
+    }
+}
+
+// =============================================================================
+// TLS Configuration
+// =============================================================================
+
+/// Certificate verification mode.
+public type CertVerifyMode is
+    /// Full verification (default, recommended).
+    | Full
+    /// Skip certificate verification (DANGEROUS - for testing only).
+    | None
+    /// Custom verification callback.
+    | Custom;
+
+implement Clone for CertVerifyMode {
+    fn clone(&self) -> CertVerifyMode { *self }
+}
+
+implement Copy for CertVerifyMode {}
+
+/// TLS configuration for client or server connections.
+///
+/// # Client Example
+/// ```verum
+/// let config = TlsConfig.client()
+///     .with_min_version(TlsVersion.Tls12)
+///     .with_root_certs(SystemCerts.load());
+/// ```
+///
+/// # Server Example
+/// ```verum
+/// let cert = Certificate.from_pem(&cert_pem)?;
+/// let key = PrivateKey.from_pem(&key_pem)?;
+///
+/// let config = TlsConfig.server()
+///     .with_identity(cert, key)
+///     .with_min_version(TlsVersion.Tls12);
+/// ```
+public type TlsConfig is {
+    /// Minimum TLS version to accept.
+    min_version: TlsVersion,
+    /// Maximum TLS version to accept.
+    max_version: TlsVersion,
+    /// Root CA certificates for verification.
+    root_certs: List<Certificate>,
+    /// Client/server certificate (for mutual TLS or server identity).
+    identity_cert: Maybe<Certificate>,
+    /// Private key for the identity certificate.
+    identity_key: Maybe<PrivateKey>,
+    /// Certificate verification mode.
+    verify_mode: CertVerifyMode,
+    /// ALPN protocol names (e.g., ["h2", "http/1.1"]).
+    alpn_protocols: List<Text>,
+    /// Whether to use the system certificate store.
+    use_system_certs: Bool,
+    /// Whether this is a server config.
+    is_server: Bool,
+};
+
+implement TlsConfig {
+    /// Create a client TLS configuration with secure defaults.
+    public fn client() -> TlsConfig {
+        TlsConfig {
+            min_version: TlsVersion.Tls12,
+            max_version: TlsVersion.Tls13,
+            root_certs: List.new(),
+            identity_cert: None,
+            identity_key: None,
+            verify_mode: CertVerifyMode.Full,
+            alpn_protocols: List.new(),
+            use_system_certs: true,
+            is_server: false,
+        }
+    }
+
+    /// Create a server TLS configuration.
+    public fn server() -> TlsConfig {
+        TlsConfig {
+            min_version: TlsVersion.Tls12,
+            max_version: TlsVersion.Tls13,
+            root_certs: List.new(),
+            identity_cert: None,
+            identity_key: None,
+            verify_mode: CertVerifyMode.Full,
+            alpn_protocols: List.new(),
+            use_system_certs: false,
+            is_server: true,
+        }
+    }
+
+    /// Set the minimum TLS version.
+    public fn with_min_version(self, version: TlsVersion) -> TlsConfig {
+        TlsConfig { min_version: version, ..self }
+    }
+
+    /// Set the maximum TLS version.
+    public fn with_max_version(self, version: TlsVersion) -> TlsConfig {
+        TlsConfig { max_version: version, ..self }
+    }
+
+    /// Add root CA certificates for server verification.
+    public fn with_root_certs(self, certs: List<Certificate>) -> TlsConfig {
+        let mut config = self;
+        for cert in certs {
+            config.root_certs.push(cert);
+        }
+        config
+    }
+
+    /// Add a single root CA certificate.
+    public fn with_root_cert(self, cert: Certificate) -> TlsConfig {
+        let mut config = self;
+        config.root_certs.push(cert);
+        config
+    }
+
+    /// Set the identity certificate and private key.
+    ///
+    /// Required for TLS servers. Optional for clients (mutual TLS).
+    public fn with_identity(self, cert: Certificate, key: PrivateKey) -> TlsConfig {
+        TlsConfig {
+            identity_cert: Some(cert),
+            identity_key: Some(key),
+            ..self
+        }
+    }
+
+    /// Set the certificate verification mode.
+    ///
+    /// WARNING: Setting to `None` disables certificate verification.
+    /// Only use for testing or development.
+    public fn with_verify_mode(self, mode: CertVerifyMode) -> TlsConfig {
+        TlsConfig { verify_mode: mode, ..self }
+    }
+
+    /// Set ALPN protocol names.
+    ///
+    /// Common values: ["h2", "http/1.1"] for HTTP, ["mqtt"] for MQTT.
+    public fn with_alpn(self, protocols: List<Text>) -> TlsConfig {
+        TlsConfig { alpn_protocols: protocols, ..self }
+    }
+
+    /// Set whether to use the system certificate store.
+    public fn with_system_certs(self, use_system: Bool) -> TlsConfig {
+        TlsConfig { use_system_certs: use_system, ..self }
+    }
+}
+
+implement Clone for TlsConfig {
+    fn clone(&self) -> TlsConfig {
+        TlsConfig {
+            min_version: self.min_version,
+            max_version: self.max_version,
+            root_certs: self.root_certs.clone(),
+            identity_cert: self.identity_cert.clone(),
+            identity_key: self.identity_key.clone(),
+            verify_mode: self.verify_mode,
+            alpn_protocols: self.alpn_protocols.clone(),
+            use_system_certs: self.use_system_certs,
+            is_server: self.is_server,
+        }
+    }
+}
+
+implement Debug for TlsConfig {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TlsConfig { ")?;
+        f.write_str(f"min: {self.min_version}, max: {self.max_version}, ")?;
+        f.write_str(f"root_certs: {self.root_certs.len()}, ")?;
+        f.write_str(f"has_identity: {self.identity_cert.is_some()}, ")?;
+        f.write_str(f"alpn: {self.alpn_protocols.len()} protocols")?;
+        f.write_str(" }")
+    }
+}
+
+// =============================================================================
+// System Certificate Store
+// =============================================================================
+
+/// Access to the operating system's trusted root certificate store.
+public type SystemCerts is ();
+
+implement SystemCerts {
+    /// Load all trusted root certificates from the system store.
+    ///
+    /// Platform-specific:
+    /// - Linux: reads from /etc/ssl/certs/ or /etc/pki/tls/certs/
+    /// - macOS: reads from System Keychain via Security.framework
+    /// - Windows: reads from the Windows Certificate Store
+    public fn load() -> List<Certificate> {
+        @cfg(target_os = "linux")
+        {
+            SystemCerts.load_linux()
+        }
+
+        @cfg(target_os = "macos")
+        {
+            SystemCerts.load_macos()
+        }
+
+        @cfg(target_os = "windows")
+        {
+            SystemCerts.load_windows()
+        }
+    }
+
+    @cfg(target_os = "linux")
+    fn load_linux() -> List<Certificate> {
+        let cert_paths = [
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/tls/certs/ca-bundle.crt",
+            "/etc/ssl/ca-bundle.pem",
+        ];
+        for path in cert_paths {
+            if let Ok(pem) = core.io.read_text(path) {
+                if let Ok(certs) = Certificate.from_pem_chain(&pem) {
+                    return certs;
+                }
+            }
+        }
+        List.new()
+    }
+
+    @cfg(target_os = "macos")
+    fn load_macos() -> List<Certificate> {
+        // Delegate to Security.framework via FFI
+        @intrinsic("verum.tls.load_system_certs_macos")
+    }
+
+    @cfg(target_os = "windows")
+    fn load_windows() -> List<Certificate> {
+        // Delegate to Windows Certificate Store API
+        @intrinsic("verum.tls.load_system_certs_windows")
+    }
+}
+
+// =============================================================================
+// TLS Stream
+// =============================================================================
+
+/// A TLS-encrypted stream wrapping a TCP connection.
+///
+/// Provides encrypted read/write operations over an underlying TCP stream.
+/// The TLS handshake is performed during `connect()` (client) or
+/// `accept()` (server).
+///
+/// # Example
+/// ```verum
+/// let config = TlsConfig.client();
+/// let tcp = TcpStream.connect("example.com:443").await?;
+/// let tls = TlsStream.connect(tcp, "example.com", &config).await?;
+///
+/// tls.write_all("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n".as_bytes()).await?;
+/// let mut buf = List.with_capacity(4096);
+/// let n = tls.read(&mut buf).await?;
+/// ```
+public type TlsStream is {
+    /// The underlying TCP stream.
+    inner: TcpStream,
+    /// TLS session state (opaque, managed by platform).
+    session: TlsSession,
+    /// Negotiated ALPN protocol.
+    alpn_protocol: Maybe<Text>,
+    /// Negotiated TLS version.
+    negotiated_version: Maybe<TlsVersion>,
+};
+
+/// Opaque TLS session state.
+///
+/// Managed by platform-specific TLS implementation.
+type TlsSession is {
+    handle: Int,  // Platform-specific handle
+};
+
+implement TlsStream {
+    /// Perform a TLS client handshake over an existing TCP connection.
+    ///
+    /// The `server_name` is used for SNI (Server Name Indication) and
+    /// certificate verification.
+    public async fn connect(
+        tcp: TcpStream,
+        server_name: &Text,
+        config: &TlsConfig,
+    ) -> Result<TlsStream, TlsError> {
+        // Platform-specific TLS handshake
+        let session = @intrinsic("verum.tls.client_handshake",
+            &tcp, server_name, config);
+
+        let alpn = @intrinsic("verum.tls.get_alpn", &session);
+        let version = @intrinsic("verum.tls.get_version", &session);
+
+        Ok(TlsStream {
+            inner: tcp,
+            session: session,
+            alpn_protocol: alpn,
+            negotiated_version: version,
+        })
+    }
+
+    /// Accept a TLS server handshake over an existing TCP connection.
+    public async fn accept(
+        tcp: TcpStream,
+        config: &TlsConfig,
+    ) -> Result<TlsStream, TlsError> {
+        if config.identity_cert.is_none() || config.identity_key.is_none() {
+            return Err(TlsError.HandshakeFailed("server requires identity certificate and key"));
+        }
+
+        let session = @intrinsic("verum.tls.server_handshake",
+            &tcp, config);
+
+        let alpn = @intrinsic("verum.tls.get_alpn", &session);
+        let version = @intrinsic("verum.tls.get_version", &session);
+
+        Ok(TlsStream {
+            inner: tcp,
+            session: session,
+            alpn_protocol: alpn,
+            negotiated_version: version,
+        })
+    }
+
+    /// Read decrypted data from the TLS stream.
+    public async fn read(&self, buf: &mut List<Byte>) -> Result<Int, TlsError> {
+        @intrinsic("verum.tls.read", &self.session, buf)
+    }
+
+    /// Write data to the TLS stream (encrypts before sending).
+    public async fn write(&self, data: &[Byte]) -> Result<Int, TlsError> {
+        @intrinsic("verum.tls.write", &self.session, data)
+    }
+
+    /// Write all data to the TLS stream.
+    public async fn write_all(&self, data: &[Byte]) -> Result<(), TlsError> {
+        let mut written = 0;
+        while written < data.len() {
+            let n = self.write(&data[written..]).await?;
+            if n == 0 {
+                return Err(TlsError.IoError("write returned 0 bytes"));
+            }
+            written = written + n;
+        }
+        Ok(())
+    }
+
+    /// Perform a clean TLS shutdown.
+    ///
+    /// Sends a close_notify alert to the peer and waits for their
+    /// close_notify in response.
+    public async fn shutdown(&self) -> Result<(), TlsError> {
+        @intrinsic("verum.tls.shutdown", &self.session)
+    }
+
+    /// Get the negotiated ALPN protocol, if any.
+    public fn alpn_protocol(&self) -> Maybe<&Text> {
+        self.alpn_protocol.as_ref()
+    }
+
+    /// Get the negotiated TLS version.
+    public fn negotiated_version(&self) -> Maybe<TlsVersion> {
+        self.negotiated_version
+    }
+
+    /// Get a reference to the underlying TCP stream.
+    public fn get_ref(&self) -> &TcpStream {
+        &self.inner
+    }
+
+    /// Get the peer's certificate, if available.
+    public fn peer_certificate(&self) -> Maybe<Certificate> {
+        @intrinsic("verum.tls.peer_cert", &self.session)
+    }
+}
+
+implement Debug for TlsStream {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TlsStream { ")?;
+        if let Some(ver) = self.negotiated_version {
+            f.write_str(f"version: {ver}, ")?;
+        }
+        if let Some(alpn) = &self.alpn_protocol {
+            f.write_str(f"alpn: {alpn}, ")?;
+        }
+        f.write_str("}")
+    }
+}
+
+// =============================================================================
+// TLS Connector (convenience for client connections)
+// =============================================================================
+
+/// A reusable TLS client connector.
+///
+/// Wraps a TlsConfig and provides a convenient interface for making
+/// TLS connections.
+///
+/// # Example
+/// ```verum
+/// let connector = TlsConnector.new()
+///     .with_alpn(["h2", "http/1.1"]);
+///
+/// let stream = connector.connect("example.com", 443).await?;
+/// ```
+public type TlsConnector is {
+    config: TlsConfig,
+};
+
+implement TlsConnector {
+    /// Create a new TLS connector with default settings.
+    public fn new() -> TlsConnector {
+        TlsConnector { config: TlsConfig.client() }
+    }
+
+    /// Create a connector from a specific configuration.
+    public fn from_config(config: TlsConfig) -> TlsConnector {
+        TlsConnector { config: config }
+    }
+
+    /// Set ALPN protocols.
+    public fn with_alpn(self, protocols: List<Text>) -> TlsConnector {
+        TlsConnector { config: self.config.with_alpn(protocols) }
+    }
+
+    /// Connect to a TLS server.
+    public async fn connect(&self, host: &Text, port: Int) -> Result<TlsStream, TlsError> {
+        let addr = f"{host}:{port}";
+        let tcp = TcpStream.connect(&addr).await
+            .map_err(|e| TlsError.IoError(f"TCP connect failed: {e}"))?;
+        TlsStream.connect(tcp, host, &self.config).await
+    }
+}
+
+implement Clone for TlsConnector {
+    fn clone(&self) -> TlsConnector {
+        TlsConnector { config: self.config.clone() }
+    }
+}
+
+implement Debug for TlsConnector {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TlsConnector { ")?;
+        self.config.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+// =============================================================================
+// TLS Acceptor (convenience for server connections)
+// =============================================================================
+
+/// A reusable TLS server acceptor.
+///
+/// Wraps a TlsConfig and provides a convenient interface for accepting
+/// TLS connections on a server.
+///
+/// # Example
+/// ```verum
+/// let cert = Certificate.from_pem(&cert_pem)?;
+/// let key = PrivateKey.from_pem(&key_pem)?;
+/// let acceptor = TlsAcceptor.new(cert, key);
+///
+/// let listener = TcpListener.bind("0.0.0.0:443").await?;
+/// loop {
+///     let (tcp, addr) = listener.accept().await?;
+///     let tls = acceptor.accept(tcp).await?;
+///     // handle connection...
+/// }
+/// ```
+public type TlsAcceptor is {
+    config: TlsConfig,
+};
+
+implement TlsAcceptor {
+    /// Create a new TLS acceptor with a certificate and key.
+    public fn new(cert: Certificate, key: PrivateKey) -> TlsAcceptor {
+        let config = TlsConfig.server()
+            .with_identity(cert, key);
+        TlsAcceptor { config: config }
+    }
+
+    /// Create an acceptor from a specific configuration.
+    public fn from_config(config: TlsConfig) -> TlsAcceptor {
+        TlsAcceptor { config: config }
+    }
+
+    /// Accept a TLS connection.
+    public async fn accept(&self, tcp: TcpStream) -> Result<TlsStream, TlsError> {
+        TlsStream.accept(tcp, &self.config).await
+    }
+}
+
+implement Clone for TlsAcceptor {
+    fn clone(&self) -> TlsAcceptor {
+        TlsAcceptor { config: self.config.clone() }
+    }
+}
+
+implement Debug for TlsAcceptor {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TlsAcceptor { ")?;
+        self.config.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+// =============================================================================
+// TLS Error
+// =============================================================================
+
+/// Errors that can occur during TLS operations.
+public type TlsError is
+    /// TLS handshake failed.
+    | HandshakeFailed(Text)
+    /// Certificate is invalid or could not be parsed.
+    | InvalidCertificate(Text)
+    /// Private key is invalid or could not be parsed.
+    | InvalidKey(Text)
+    /// Certificate verification failed.
+    | CertificateVerificationFailed(Text)
+    /// Certificate has expired.
+    | CertificateExpired
+    /// Hostname does not match certificate.
+    | HostnameMismatch(Text)
+    /// The peer sent an alert.
+    | AlertReceived(Int, Text)
+    /// I/O error during TLS operations.
+    | IoError(Text)
+    /// Protocol version not supported.
+    | UnsupportedVersion(TlsVersion)
+    /// No shared cipher suites.
+    | NoCipherSuites;
+
+implement Debug for TlsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HandshakeFailed(msg) => f.write_str(f"TlsError.HandshakeFailed({msg})"),
+            InvalidCertificate(msg) => f.write_str(f"TlsError.InvalidCertificate({msg})"),
+            InvalidKey(msg) => f.write_str(f"TlsError.InvalidKey({msg})"),
+            CertificateVerificationFailed(msg) => f.write_str(f"TlsError.CertificateVerificationFailed({msg})"),
+            CertificateExpired => f.write_str("TlsError.CertificateExpired"),
+            HostnameMismatch(name) => f.write_str(f"TlsError.HostnameMismatch({name})"),
+            AlertReceived(code, msg) => f.write_str(f"TlsError.AlertReceived({code}, {msg})"),
+            IoError(msg) => f.write_str(f"TlsError.IoError({msg})"),
+            UnsupportedVersion(v) => f.write_str(f"TlsError.UnsupportedVersion({v})"),
+            NoCipherSuites => f.write_str("TlsError.NoCipherSuites"),
+        }
+    }
+}
+
+implement Display for TlsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HandshakeFailed(msg) => f.write_str(f"TLS handshake failed: {msg}"),
+            InvalidCertificate(msg) => f.write_str(f"invalid certificate: {msg}"),
+            InvalidKey(msg) => f.write_str(f"invalid private key: {msg}"),
+            CertificateVerificationFailed(msg) => f.write_str(f"certificate verification failed: {msg}"),
+            CertificateExpired => f.write_str("certificate has expired"),
+            HostnameMismatch(name) => f.write_str(f"hostname mismatch: {name}"),
+            AlertReceived(code, msg) => f.write_str(f"TLS alert {code}: {msg}"),
+            IoError(msg) => f.write_str(f"TLS I/O error: {msg}"),
+            UnsupportedVersion(v) => f.write_str(f"unsupported TLS version: {v}"),
+            NoCipherSuites => f.write_str("no shared cipher suites"),
+        }
+    }
+}
+
+implement Describable for TlsError {
+    fn description(&self) -> Text {
+        match self {
+            HandshakeFailed(msg) => f"TLS handshake failed: {msg}",
+            InvalidCertificate(msg) => f"invalid certificate: {msg}",
+            InvalidKey(msg) => f"invalid private key: {msg}",
+            CertificateVerificationFailed(msg) => f"certificate verification failed: {msg}",
+            CertificateExpired => "certificate has expired",
+            HostnameMismatch(name) => f"hostname mismatch: {name}",
+            AlertReceived(code, msg) => f"TLS alert {code}: {msg}",
+            IoError(msg) => f"TLS I/O error: {msg}",
+            UnsupportedVersion(v) => f"unsupported TLS version: {v}",
+            NoCipherSuites => "no shared cipher suites",
+        }
+    }
+}
+
+// =============================================================================
+// Helper: base64 decode (minimal, for PEM parsing)
+// =============================================================================
+
+/// Decode a base64-encoded string to bytes.
+fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
+    let cleaned = input.replace("\n", "").replace("\r", "").replace(" ", "");
+    let mut result = List.new();
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let chars: List<Char> = cleaned.chars().collect();
+    let len = chars.len();
+
+    if len % 4 != 0 {
+        return Err("invalid base64 length");
+    }
+
+    let mut i = 0;
+    while i < len {
+        let mut sextet = [0; 4];
+        for j in 0..4 {
+            let c = chars[i + j];
+            if c == '=' {
+                sextet[j] = 0;
+            } else {
+                match alphabet.find_char(c) {
+                    Some(idx) => sextet[j] = idx,
+                    None => return Err(f"invalid base64 character: {c}"),
+                }
+            }
+        }
+
+        result.push(((sextet[0] << 2) | (sextet[1] >> 4)) as Byte);
+        if chars[i + 2] != '=' {
+            result.push((((sextet[1] & 0x0F) << 4) | (sextet[2] >> 2)) as Byte);
+        }
+        if chars[i + 3] != '=' {
+            result.push((((sextet[2] & 0x03) << 6) | sextet[3]) as Byte);
+        }
+
+        i = i + 4;
+    }
+
+    Ok(result)
+}

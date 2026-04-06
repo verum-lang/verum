@@ -1,0 +1,170 @@
+// =============================================================================
+// style/profile.vr - Color profile detection and adaptive downscaling
+// =============================================================================
+// ColorProfile represents the terminal's color capability level.
+// adapt_color() automatically downgrades colors to match the profile.
+// Utility functions for color manipulation: darken, lighten, lerp, gradient.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
+// =============================================================================
+
+module profile;
+
+mount super.color.{Color, Rgb, Hsl};
+mount super.convert.{rgb_to_hsl, hsl_to_rgb};
+
+// =============================================================================
+// ColorProfile — terminal color capability level
+// =============================================================================
+
+/// ColorProfile represents the maximum color fidelity the terminal supports.
+///
+/// Levels (ordered by capability):
+///   NoColor   — monochrome, no color escape sequences
+///   Base16    — 16 standard ANSI colors (SGR 30-37, 90-97)
+///   Ansi256   — 256-color palette (SGR 38;5;N)
+///   TrueColor — 24-bit color (SGR 38;2;R;G;B)
+public type ColorProfile is
+    | NoColor
+    | Base16
+    | Ansi256
+    | TrueColor;
+
+// =============================================================================
+// Adaptive downscaling
+// =============================================================================
+
+/// Adapt a Color to the terminal's ColorProfile.
+/// True Color terminals pass through unchanged. Lower profiles get the
+/// perceptually closest match via CIELAB distance.
+///
+/// Examples:
+///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), TrueColor) -> Rgb(255,128,0)
+///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), Ansi256)   -> Ansi256(208)
+///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), Base16)    -> Color.Red
+///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), NoColor)   -> Color.Reset
+public fn adapt_color(color: Color, profile: ColorProfile) -> Color {
+    match (color, profile) {
+        // True color: no changes needed
+        (_, TrueColor) => color,
+
+        // Downscale Rgb to Ansi256 palette
+        (Rgb(rgb), Ansi256) => Color.Ansi256(rgb.to_ansi256()),
+
+        // Downscale Rgb to Base16
+        (Rgb(rgb), Base16) => rgb.to_base16(),
+
+        // Hsl: convert to Rgb first, then downscale
+        (Hsl(hsl), _) => adapt_color(Color.Rgb(hsl.to_rgb()), profile),
+
+        // Ansi256 to Base16: convert via approximate Rgb
+        (Ansi256(n), Base16) => {
+            let rgb = ansi256_to_approx_rgb(n);
+            rgb.to_base16()
+        }
+
+        // NoColor: strip all color information
+        (_, NoColor) => Color.Reset,
+
+        // Base16/Ansi256 colors at their own level or above: no change
+        _ => color,
+    }
+}
+
+// =============================================================================
+// Color manipulation utilities
+// =============================================================================
+
+/// Darken an Rgb color by reducing lightness.
+/// `amount` is in [0, 1] where 0 means no change and 1 means fully black.
+public fn darken(color: Rgb, amount: Float) -> Rgb {
+    let hsl = color.to_hsl();
+    let new_l = (hsl.l * (1.0 - amount)).clamp(0.0, 1.0);
+    let result = Hsl.new(hsl.h, hsl.s, new_l);
+    result.to_rgb()
+}
+
+/// Lighten an Rgb color by increasing lightness.
+/// `amount` is in [0, 1] where 0 means no change and 1 means fully white.
+public fn lighten(color: Rgb, amount: Float) -> Rgb {
+    let hsl = color.to_hsl();
+    let new_l = (hsl.l + (1.0 - hsl.l) * amount).clamp(0.0, 1.0);
+    let result = Hsl.new(hsl.h, hsl.s, new_l);
+    result.to_rgb()
+}
+
+/// Linearly interpolate between two Rgb colors.
+/// `t` is in [0, 1] where 0 returns `a` and 1 returns `b`.
+public fn lerp_color(a: Rgb, b: Rgb, t: Float) -> Rgb {
+    let t_clamped = t.clamp(0.0, 1.0);
+    let inv = 1.0 - t_clamped;
+    Rgb {
+        r: (a.r as Float * inv + b.r as Float * t_clamped).round().clamp(0.0, 255.0) as UInt8,
+        g: (a.g as Float * inv + b.g as Float * t_clamped).round().clamp(0.0, 255.0) as UInt8,
+        b: (a.b as Float * inv + b.b as Float * t_clamped).round().clamp(0.0, 255.0) as UInt8,
+    }
+}
+
+/// Generate a gradient of `steps` colors between `start` and `end` (inclusive).
+/// Returns a list with exactly `steps` Rgb values.
+/// If steps <= 0, returns an empty list. If steps == 1, returns [start].
+public fn gradient(start: Rgb, end: Rgb, steps: Int) -> List<Rgb> {
+    let mut result = List.new();
+    if steps <= 0 {
+        return result;
+    }
+    if steps == 1 {
+        result.push(start);
+        return result;
+    }
+    for i in 0..steps {
+        let t = i as Float / (steps - 1) as Float;
+        result.push(lerp_color(start, end, t));
+    }
+    result
+}
+
+// =============================================================================
+// Helper: Ansi256 index to approximate Rgb
+// =============================================================================
+
+/// Convert an Ansi256 palette index to an approximate Rgb color.
+/// Handles the standard 16 colors, 6x6x6 cube, and grayscale ramp.
+fn ansi256_to_approx_rgb(n: Int) -> Rgb {
+    if n < 0 || n > 255 {
+        return Rgb.new(0, 0, 0);
+    }
+
+    // Standard 16 colors (approximate)
+    if n < 16 {
+        let table = [
+            Rgb.new(0, 0, 0),       Rgb.new(170, 0, 0),
+            Rgb.new(0, 170, 0),     Rgb.new(170, 85, 0),
+            Rgb.new(0, 0, 170),     Rgb.new(170, 0, 170),
+            Rgb.new(0, 170, 170),   Rgb.new(170, 170, 170),
+            Rgb.new(85, 85, 85),    Rgb.new(255, 85, 85),
+            Rgb.new(85, 255, 85),   Rgb.new(255, 255, 85),
+            Rgb.new(85, 85, 255),   Rgb.new(255, 85, 255),
+            Rgb.new(85, 255, 255),  Rgb.new(255, 255, 255),
+        ];
+        return table[n];
+    }
+
+    // 6x6x6 color cube (indices 16-231)
+    if n < 232 {
+        let idx = n - 16;
+        let cube_levels = [0, 0x5F, 0x87, 0xAF, 0xD7, 0xFF];
+        let ri = idx / 36;
+        let gi = (idx % 36) / 6;
+        let bi = idx % 6;
+        return Rgb {
+            r: cube_levels[ri] as UInt8,
+            g: cube_levels[gi] as UInt8,
+            b: cube_levels[bi] as UInt8,
+        };
+    }
+
+    // Grayscale ramp (indices 232-255)
+    let gray = (8 + 10 * (n - 232)) as UInt8;
+    Rgb { r: gray, g: gray, b: gray }
+}

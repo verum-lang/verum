@@ -1,0 +1,434 @@
+// =============================================================================
+// core/intrinsics/atomic.vr - Atomic Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides atomic operation intrinsics that map directly to
+// LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Memory Ordering
+//
+// All atomic operations require a memory ordering parameter:
+// - Relaxed: No ordering constraints
+// - Acquire: Subsequent loads see writes before matching Release
+// - Release: Previous writes visible after matching Acquire
+// - AcqRel: Both Acquire and Release
+// - SeqCst: Full sequential consistency
+//
+// # Operations
+//
+// - Load/Store: atomic_load, atomic_store
+// - Read-Modify-Write: atomic_add, atomic_sub, atomic_and, atomic_or, atomic_xor
+// - Compare-and-Swap: atomic_cmpxchg, atomic_cmpxchg_weak
+// - Exchange: atomic_xchg
+// - Fences: atomic_fence, compiler_fence
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.atomic;
+
+// =============================================================================
+// SECTION 1: Memory Ordering
+// =============================================================================
+
+/// Memory ordering for atomic operations
+@repr(UInt8)
+public type MemoryOrder is
+    | Relaxed    // No ordering constraints
+    | Acquire    // Subsequent loads see writes before Release
+    | Release    // Previous writes visible after Acquire
+    | AcqRel     // Both Acquire and Release
+    | SeqCst;    // Full sequential consistency
+
+// =============================================================================
+// SECTION 2: Basic Atomic Operations
+// =============================================================================
+
+/// Atomic load
+public fn atomic_load<T>(ptr: &T, order: MemoryOrder) -> T { @intrinsic("atomic_load", ptr, order) }
+
+/// Atomic store
+public fn atomic_store<T>(ptr: &mut T, val: T, order: MemoryOrder) { @intrinsic("atomic_store", ptr, val, order) }
+
+/// Atomic exchange
+public fn atomic_xchg<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_xchg", ptr, val, order)
+}
+
+// =============================================================================
+// SECTION 3: Compare-and-Swap
+// =============================================================================
+
+/// Atomic compare-and-swap. Returns (old_value, success).
+public fn atomic_cmpxchg<T>(
+    ptr: &mut T,
+    expected: T,
+    desired: T,
+    success: MemoryOrder,
+    failure: MemoryOrder,
+) -> (T, Bool) {
+    @intrinsic("cmpxchg", ptr, expected, desired, success, failure)
+}
+
+/// Atomic compare-and-swap (weak). May fail spuriously.
+public fn atomic_cmpxchg_weak<T>(
+    ptr: &mut T,
+    expected: T,
+    desired: T,
+    success: MemoryOrder,
+    failure: MemoryOrder,
+) -> (T, Bool) {
+    @intrinsic("cmpxchg_weak", ptr, expected, desired, success, failure)
+}
+
+// =============================================================================
+// SECTION 4: Atomic Arithmetic
+// =============================================================================
+
+/// Atomic add, returns old value
+public fn atomic_add<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_add", ptr, val, order)
+}
+
+/// Atomic subtract, returns old value
+public fn atomic_sub<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_sub", ptr, val, order)
+}
+
+/// Atomic maximum (signed), returns old value
+public fn atomic_max<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_max", ptr, val, order)
+}
+
+/// Atomic minimum (signed), returns old value
+public fn atomic_min<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_min", ptr, val, order)
+}
+
+/// Atomic maximum (unsigned), returns old value
+public fn atomic_umax<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_umax", ptr, val, order)
+}
+
+/// Atomic minimum (unsigned), returns old value
+public fn atomic_umin<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_umin", ptr, val, order)
+}
+
+// =============================================================================
+// SECTION 5: Atomic Bitwise Operations
+// =============================================================================
+
+/// Atomic bitwise AND, returns old value
+public fn atomic_and<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_and", ptr, val, order)
+}
+
+/// Atomic bitwise NAND, returns old value
+public fn atomic_nand<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_nand", ptr, val, order)
+}
+
+/// Atomic bitwise OR, returns old value
+public fn atomic_or<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_or", ptr, val, order)
+}
+
+/// Atomic bitwise XOR, returns old value
+public fn atomic_xor<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+    @intrinsic("atomicrmw_xor", ptr, val, order)
+}
+
+// =============================================================================
+// SECTION 6: Memory Fences
+// =============================================================================
+
+/// Memory fence
+public fn atomic_fence(order: MemoryOrder) { @intrinsic("fence", order) }
+
+/// Compiler fence (prevents reordering, no CPU fence)
+public fn compiler_fence(order: MemoryOrder) { @intrinsic("compiler_fence", order) }
+
+// =============================================================================
+// SECTION 7: VBC-Specific Size-Typed Atomic Operations
+// =============================================================================
+// These are retained for VBC bytecode compatibility where size-specific
+// opcodes are needed. For generic atomic operations, use the generic functions above.
+//
+// VBC Opcodes: AtomicLoad (0x48), AtomicStore (0x49), AtomicCas (0x4A)
+// =============================================================================
+
+/// Memory ordering constants for atomic operations (VBC compatible).
+public const ORDERING_RELAXED: UInt8 = 0;
+public const ORDERING_ACQUIRE: UInt8 = 1;
+public const ORDERING_RELEASE: UInt8 = 2;
+public const ORDERING_ACQ_REL: UInt8 = 3;
+public const ORDERING_SEQ_CST: UInt8 = 4;
+
+/// Atomic load of UInt8 (VBC opcode: AtomicLoad 0x48 with size=1).
+@intrinsic("atomic_load_u8")
+@vbc_direct_lowering
+public fn atomic_load_u8(ptr: *const UInt8, ordering: UInt8) -> UInt8;
+
+/// Atomic load of UInt16 (VBC opcode: AtomicLoad 0x48 with size=2).
+@intrinsic("atomic_load_u16")
+@vbc_direct_lowering
+public fn atomic_load_u16(ptr: *const UInt16, ordering: UInt8) -> UInt16;
+
+/// Atomic load of UInt32 (VBC opcode: AtomicLoad 0x48 with size=4).
+@intrinsic("atomic_load_u32")
+@vbc_direct_lowering
+public fn atomic_load_u32(ptr: *const UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic load of UInt64 (VBC opcode: AtomicLoad 0x48 with size=8).
+@intrinsic("atomic_load_u64")
+@vbc_direct_lowering
+public fn atomic_load_u64(ptr: *const UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic load of Int32.
+@intrinsic("atomic_load_i32")
+@vbc_direct_lowering
+public fn atomic_load_i32(ptr: *const Int32, ordering: UInt8) -> Int32;
+
+/// Atomic load of pointer.
+@intrinsic("atomic_load_ptr")
+@vbc_direct_lowering
+public fn atomic_load_ptr<T>(ptr: *const *const T, ordering: UInt8) -> *const T;
+
+/// Atomic store of UInt8 (VBC opcode: AtomicStore 0x49 with size=1).
+@intrinsic("atomic_store_u8")
+@vbc_direct_lowering
+public fn atomic_store_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8);
+
+/// Atomic store of UInt16.
+@intrinsic("atomic_store_u16")
+@vbc_direct_lowering
+public fn atomic_store_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8);
+
+/// Atomic store of UInt32.
+@intrinsic("atomic_store_u32")
+@vbc_direct_lowering
+public fn atomic_store_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8);
+
+/// Atomic store of UInt64.
+@intrinsic("atomic_store_u64")
+@vbc_direct_lowering
+public fn atomic_store_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8);
+
+/// Atomic store of Int32.
+@intrinsic("atomic_store_i32")
+@vbc_direct_lowering
+public fn atomic_store_i32(ptr: *mut Int32, value: Int32, ordering: UInt8);
+
+/// Atomic store of pointer.
+@intrinsic("atomic_store_ptr")
+@vbc_direct_lowering
+public fn atomic_store_ptr<T>(ptr: *mut *const T, value: *const T, ordering: UInt8);
+
+/// Atomic compare-and-swap for UInt32 (VBC opcode: AtomicCas 0x4A).
+@intrinsic("atomic_cas_u32")
+@vbc_direct_lowering
+public fn atomic_cas_u32(
+    ptr: *mut UInt32,
+    expected: UInt32,
+    desired: UInt32,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (UInt32, Bool);
+
+/// Atomic compare-and-swap for UInt64.
+@intrinsic("atomic_cas_u64")
+@vbc_direct_lowering
+public fn atomic_cas_u64(
+    ptr: *mut UInt64,
+    expected: UInt64,
+    desired: UInt64,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (UInt64, Bool);
+
+/// Atomic compare-and-swap for Int32.
+@intrinsic("atomic_cas_i32")
+@vbc_direct_lowering
+public fn atomic_cas_i32(
+    ptr: *mut Int32,
+    expected: Int32,
+    desired: Int32,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (Int32, Bool);
+
+/// Atomic compare-and-swap for pointer.
+@intrinsic("atomic_cas_ptr")
+@vbc_direct_lowering
+public fn atomic_cas_ptr<T>(
+    ptr: *mut *const T,
+    expected: *const T,
+    desired: *const T,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (*const T, Bool);
+
+/// Atomic fetch-and-add for UInt32.
+@intrinsic("atomic_fetch_add_u32")
+@vbc_direct_lowering
+public fn atomic_fetch_add_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic fetch-and-add for UInt64.
+@intrinsic("atomic_fetch_add_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_add_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic fetch-and-add for UInt16.
+@intrinsic("atomic_fetch_add_u16")
+@vbc_direct_lowering
+public fn atomic_fetch_add_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
+
+/// Atomic fetch-and-sub for UInt32.
+@intrinsic("atomic_fetch_sub_u32")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic fetch-and-sub for UInt64.
+@intrinsic("atomic_fetch_sub_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_sub_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic fetch-and-and for UInt32.
+@intrinsic("atomic_fetch_and_u32")
+@vbc_direct_lowering
+public fn atomic_fetch_and_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic fetch-and-and for UInt64.
+@intrinsic("atomic_fetch_and_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_and_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic fetch-and-and for UInt16.
+@intrinsic("atomic_fetch_and_u16")
+@vbc_direct_lowering
+public fn atomic_fetch_and_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
+
+/// Atomic fetch-and-or for UInt64.
+@intrinsic("atomic_fetch_or_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_or_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic fetch-and-xor for UInt64.
+@intrinsic("atomic_fetch_xor_u64")
+@vbc_direct_lowering
+public fn atomic_fetch_xor_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic exchange for UInt32.
+@intrinsic("atomic_exchange_u32")
+@vbc_direct_lowering
+public fn atomic_exchange_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
+
+/// Atomic exchange for UInt64.
+@intrinsic("atomic_exchange_u64")
+@vbc_direct_lowering
+public fn atomic_exchange_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
+
+/// Atomic exchange for Int32.
+@intrinsic("atomic_exchange_i32")
+@vbc_direct_lowering
+public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) -> Int32;
+
+// =============================================================================
+// SECTION 8: Int-sized Atomic Helpers
+// =============================================================================
+// Convenience wrappers that delegate to size-specific atomics.
+// =============================================================================
+
+/// Atomic load for Int (delegates to UInt64 on 64-bit platforms).
+@inline(always)
+public fn atomic_load_int(ptr: *const Int, ordering: UInt8) -> Int {
+    atomic_load_u64(ptr as *const UInt64, ordering) as Int
+}
+
+/// Atomic store for Int.
+@inline(always)
+public fn atomic_store_int(ptr: *mut Int, value: Int, ordering: UInt8) {
+    atomic_store_u64(ptr as *mut UInt64, value as UInt64, ordering)
+}
+
+/// Atomic compare-exchange for Int.
+@inline(always)
+public fn atomic_cmpxchg_int(
+    ptr: *mut Int,
+    expected: Int,
+    desired: Int,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (Int, Bool) {
+    let (old, success) = atomic_cas_u64(
+        ptr as *mut UInt64,
+        expected as UInt64,
+        desired as UInt64,
+        success_order,
+        failure_order,
+    );
+    (old as Int, success)
+}
+
+/// Atomic fetch-and-add for Int.
+@inline(always)
+public fn atomic_fetch_add_int(ptr: *mut Int, value: Int, ordering: UInt8) -> Int {
+    atomic_fetch_add_u64(ptr as *mut UInt64, value as UInt64, ordering) as Int
+}
+
+// =============================================================================
+// SECTION 9: Compatibility Aliases
+// =============================================================================
+// Aliases for backwards compatibility with code using old naming conventions.
+// =============================================================================
+
+/// Alias for atomic_cas_u32 (backwards compatibility).
+@inline(always)
+public fn atomic_compare_exchange_u32(
+    ptr: *mut UInt32,
+    expected: UInt32,
+    desired: UInt32,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (UInt32, Bool) {
+    atomic_cas_u32(ptr, expected, desired, success_order, failure_order)
+}
+
+/// Alias for atomic_cas_u64 (backwards compatibility).
+@inline(always)
+public fn atomic_compare_exchange_u64(
+    ptr: *mut UInt64,
+    expected: UInt64,
+    desired: UInt64,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (UInt64, Bool) {
+    atomic_cas_u64(ptr, expected, desired, success_order, failure_order)
+}
+
+/// Alias for atomic_cas_i32 (backwards compatibility).
+@inline(always)
+public fn atomic_compare_exchange_i32(
+    ptr: *mut Int32,
+    expected: Int32,
+    desired: Int32,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (Int32, Bool) {
+    atomic_cas_i32(ptr, expected, desired, success_order, failure_order)
+}
+
+/// Alias for atomic_cas_ptr (backwards compatibility).
+@inline(always)
+public fn atomic_cmpxchg_ptr<T>(
+    ptr: *mut *const T,
+    expected: *const T,
+    desired: *const T,
+    success_order: UInt8,
+    failure_order: UInt8,
+) -> (*const T, Bool) {
+    atomic_cas_ptr(ptr, expected, desired, success_order, failure_order)
+}

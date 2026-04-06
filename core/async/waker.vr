@@ -1,0 +1,193 @@
+// =============================================================================
+// waker.vr - Waker and Context for async runtime
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core
+// =============================================================================
+//
+// Waker is used to wake up tasks when progress can be made.
+// Context provides the waker to futures during polling.
+//
+// =============================================================================
+
+module core.async.waker;
+mount core.*;
+
+// =============================================================================
+// RawWakerVTable
+// =============================================================================
+
+// Virtual table for raw waker operations.
+public type RawWakerVTable is {
+    // Clone the waker data, returning new RawWaker.
+    clone: fn(&unsafe Byte) -> RawWaker,
+
+    // Wake by value (consumes the waker).
+    wake: fn(&unsafe Byte),
+
+    // Wake by reference (doesn't consume).
+    wake_by_ref: fn(&unsafe Byte),
+
+    // Drop the waker data.
+    drop: fn(&unsafe Byte),
+};
+
+implement RawWakerVTable {
+    // Create a new vtable.
+    public fn new(
+        clone: fn(&unsafe Byte) -> RawWaker,
+        wake: fn(&unsafe Byte),
+        wake_by_ref: fn(&unsafe Byte),
+        drop: fn(&unsafe Byte),
+    ) -> RawWakerVTable {
+        RawWakerVTable {
+            clone: clone,
+            wake: wake,
+            wake_by_ref: wake_by_ref,
+            drop: drop,
+        }
+    }
+}
+
+// =============================================================================
+// RawWaker
+// =============================================================================
+
+// Low-level waker consisting of data pointer && vtable.
+public type RawWaker is {
+    data: &unsafe Byte,
+    vtable: &RawWakerVTable,
+};
+
+implement RawWaker {
+    // Create a new raw waker.
+    public fn new(data: &unsafe Byte, vtable: &RawWakerVTable) -> RawWaker {
+        RawWaker {
+            data: data,
+            vtable: vtable,
+        }
+    }
+}
+
+// =============================================================================
+// Waker
+// =============================================================================
+
+// Handle for waking up a task.
+public type Waker is {
+    raw: RawWaker,
+};
+
+implement Waker {
+    // Create waker from raw waker.
+    public unsafe fn from_raw(raw: RawWaker) -> Waker {
+        Waker { raw: raw }
+    }
+
+    // Wake the task associated with this waker.
+    // Consumes the waker.
+    public fn wake(self) {
+        let wake_fn = self.raw.vtable.wake;
+        let data = self.raw.data;
+        // Don't run drop since wake consumes
+        forget(self);
+        wake_fn(data);
+    }
+
+    // Wake by reference without consuming.
+    public fn wake_by_ref(&self) {
+        (self.raw.vtable.wake_by_ref)(self.raw.data);
+    }
+
+    // Check if two wakers will wake the same task.
+    public fn will_wake(&self, other: &Waker) -> Bool {
+        // Same data pointer && vtable means same waker
+        self.raw.data as Int == other.raw.data as Int &&
+        self.raw.vtable as Int == other.raw.vtable as Int
+    }
+}
+
+implement Clone for Waker {
+    fn clone(&self) -> Waker {
+        let raw = (self.raw.vtable.clone)(self.raw.data);
+        Waker { raw: raw }
+    }
+}
+
+implement Drop for Waker {
+    fn drop(&mut self) {
+        (self.raw.vtable.drop)(self.raw.data);
+    }
+}
+
+implement Debug for Waker {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Waker { .. }")
+    }
+}
+
+// =============================================================================
+// Context
+// =============================================================================
+
+// Context passed to futures during polling.
+// Contains the waker to use for scheduling wake-ups.
+public type Context is {
+    waker: &Waker,
+};
+
+implement Context {
+    // Create context from waker.
+    public fn from_waker(waker: &Waker) -> Context {
+        Context { waker: waker }
+    }
+
+    // Get the waker from context.
+    public fn waker(&self) -> &Waker {
+        self.waker
+    }
+}
+
+// =============================================================================
+// Noop Waker (for simple cases)
+// =============================================================================
+
+// VTable for noop waker that does nothing.
+fn noop_clone(data: &unsafe Byte) -> RawWaker {
+    RawWaker.new(data, &NOOP_VTABLE)
+}
+
+fn noop_wake(_data: &unsafe Byte) {
+    // Do nothing
+}
+
+fn noop_wake_by_ref(_data: &unsafe Byte) {
+    // Do nothing
+}
+
+fn noop_drop(_data: &unsafe Byte) {
+    // Do nothing
+}
+
+const NOOP_VTABLE: RawWakerVTable = RawWakerVTable {
+    clone: noop_clone,
+    wake: noop_wake,
+    wake_by_ref: noop_wake_by_ref,
+    drop: noop_drop,
+};
+
+// Create a waker that does nothing when woken.
+// Useful for testing || simple synchronous contexts.
+public fn noop_waker() -> Waker {
+    unsafe {
+        Waker.from_raw(RawWaker.new(null_ptr(), &NOOP_VTABLE))
+    }
+}
+
+// Create a context with noop waker.
+// Useful for testing futures synchronously.
+public fn noop_context() -> Context {
+    // Note: This creates a temporary waker, which is safe for single-use
+    let waker = noop_waker();
+    Context.from_waker(&waker)
+}

@@ -1,0 +1,4 @@
+// Simple test to check basic parsing
+fn main() {
+    print(f"Hello, World!");
+}

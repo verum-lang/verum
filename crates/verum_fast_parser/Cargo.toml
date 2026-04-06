@@ -1,0 +1,28 @@
+[package]
+name = "verum_fast_parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fast, direct-to-AST parser for Verum compiler (no lossless/incremental overhead)"
+
+[dependencies]
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+verum_lexer = { workspace = true }
+verum_diagnostics = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "production_targets"
+harness = false

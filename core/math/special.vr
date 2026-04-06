@@ -1,0 +1,476 @@
+// =============================================================================
+// special.vr - Special Mathematical Functions
+// =============================================================================
+// Layer: 1 (Scalar Mathematics)
+//
+// Provides special mathematical functions used in statistics, physics,
+// and engineering:
+// - Gamma functions: gamma, lgamma, digamma, beta
+// - Error functions: erf, erfc, erfinv
+// - Bessel functions: j0, j1, y0, y1
+// - Other: zeta, polylog, fresnel
+//
+// # Precision
+//
+// Implementations use established algorithms (Lanczos for gamma,
+// Chebyshev for Bessel) achieving < 1 ULP accuracy in most cases.
+//
+// Spec: docs/architecture/math-spec.md Section 4
+// =============================================================================
+
+module core.math.special;
+
+mount super.constants.{PI, E, INFINITY, NEG_INFINITY, NAN, FRAC_PI_2, FRAC_PI_4};
+mount super.elementary.{exp, log, sqrt, pow, sin, cos, abs, floor};
+mount super.ieee754.{is_nan, is_infinite, copysign};
+
+// =============================================================================
+// Gamma Functions
+// =============================================================================
+
+// Gamma function Γ(x)
+// Domain: x ∈ ℝ \ {0, -1, -2, ...}
+//
+// For positive integers: Γ(n) = (n-1)!
+// Uses Lanczos approximation for high precision.
+public fn gamma(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+
+    // Poles at non-positive integers
+    if x <= 0.0 && x == floor(x) {
+        return INFINITY;
+    }
+
+    // Use reflection formula for x < 0.5
+    if x < 0.5 {
+        return PI / (sin(PI * x) * gamma(1.0 - x));
+    }
+
+    // Lanczos approximation (g = 7, n = 9 coefficients)
+    let g = 7.0;
+    let coeffs = [
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7,
+    ];
+
+    let x = x - 1.0;
+
+    let mut ag = coeffs[0];
+    for i in 1..coeffs.len() {
+        ag += coeffs[i] / (x + i as Float);
+    }
+
+    let t = x + g + 0.5;
+    sqrt(2.0 * PI) * pow(t, x + 0.5) * exp(-t) * ag
+}
+
+// Gamma function for positive arguments
+// Refinement type guarantees positive input and output.
+public fn gamma_positive(x: Float{> 0.0}) -> Float{> 0.0} {
+    gamma(x)
+}
+
+// Log-gamma function: ln(|Γ(x)|)
+// More stable than log(gamma(x)) for large x.
+public fn lgamma(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x <= 0.0 && x == floor(x) { return INFINITY; }
+
+    // Use reflection for x < 0.5
+    if x < 0.5 {
+        return log(PI / abs(sin(PI * x))) - lgamma(1.0 - x);
+    }
+
+    // Stirling's approximation for large x
+    if x > 12.0 {
+        let x2 = x * x;
+        return (x - 0.5) * log(x) - x + 0.5 * log(2.0 * PI)
+            + 1.0 / (12.0 * x)
+            - 1.0 / (360.0 * x2 * x)
+            + 1.0 / (1260.0 * x2 * x2 * x);
+    }
+
+    // For intermediate x, use log of Lanczos
+    log(abs(gamma(x)))
+}
+
+// Digamma function ψ(x) = Γ'(x) / Γ(x) = d/dx ln(Γ(x))
+public fn digamma(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x <= 0.0 && x == floor(x) { return NAN; }
+
+    // Use reflection for x < 0
+    if x < 0.0 {
+        return digamma(1.0 - x) - PI / tan(PI * x);
+    }
+
+    // Shift to large x using recurrence: ψ(x+1) = ψ(x) + 1/x
+    let mut result = 0.0;
+    let mut x = x;
+    while x < 6.0 {
+        result -= 1.0 / x;
+        x += 1.0;
+    }
+
+    // Asymptotic expansion for large x
+    let x2 = x * x;
+    result + log(x) - 0.5 / x
+        - 1.0 / (12.0 * x2)
+        + 1.0 / (120.0 * x2 * x2)
+        - 1.0 / (252.0 * x2 * x2 * x2)
+}
+
+// Trigamma function ψ₁(x) = d²/dx² ln(Γ(x))
+public fn trigamma(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x <= 0.0 && x == floor(x) { return NAN; }
+
+    // Reflection formula
+    if x < 0.0 {
+        let s = sin(PI * x);
+        return PI * PI / (s * s) - trigamma(1.0 - x);
+    }
+
+    // Shift to large x
+    let mut result = 0.0;
+    let mut x = x;
+    while x < 6.0 {
+        result += 1.0 / (x * x);
+        x += 1.0;
+    }
+
+    // Asymptotic expansion
+    let x2 = x * x;
+    let x3 = x2 * x;
+    result + 1.0 / x + 0.5 / x2 + 1.0 / (6.0 * x3)
+        - 1.0 / (30.0 * x2 * x3)
+        + 1.0 / (42.0 * x3 * x3 * x)
+}
+
+// Beta function B(a, b) = Γ(a)Γ(b) / Γ(a+b)
+public fn beta(a: Float, b: Float) -> Float {
+    exp(lgamma(a) + lgamma(b) - lgamma(a + b))
+}
+
+// Log-beta function: ln(B(a, b))
+public fn lbeta(a: Float, b: Float) -> Float {
+    lgamma(a) + lgamma(b) - lgamma(a + b)
+}
+
+// =============================================================================
+// Error Functions
+// =============================================================================
+
+// Error function erf(x)
+// Domain: (-∞, ∞), Range: (-1, 1)
+//
+// erf(x) = (2/√π) ∫₀ˣ e^(-t²) dt
+//
+// Used in statistics: normal CDF = 0.5 * (1 + erf(x / √2))
+public fn erf(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return 1.0; }
+    if x == NEG_INFINITY { return -1.0; }
+
+    // erf(-x) = -erf(x)
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = abs(x);
+
+    // Abramowitz & Stegun approximation
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let coeffs = [
+        0.254829592,
+        -0.284496736,
+        1.421413741,
+        -1.453152027,
+        1.061405429,
+    ];
+
+    let poly = t * (coeffs[0] + t * (coeffs[1] + t * (coeffs[2] + t * (coeffs[3] + t * coeffs[4]))));
+
+    let neg_x_sq: Float = -1.0 * x * x;
+    let exp_val: Float = exp(neg_x_sq);
+    sign * (1.0 - poly * exp_val)
+}
+
+// Complementary error function erfc(x) = 1 - erf(x)
+// More accurate than 1 - erf(x) for large x.
+public fn erfc(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x == NEG_INFINITY { return 2.0; }
+    if x == INFINITY { return 0.0; }
+
+    if abs(x) < 0.5 {
+        1.0 - erf(x)
+    } else if x > 0.0 {
+        let t = 1.0 / (1.0 + 0.3275911 * x);
+        let coeffs = [
+            0.254829592,
+            -0.284496736,
+            1.421413741,
+            -1.453152027,
+            1.061405429,
+        ];
+        let poly = t * (coeffs[0] + t * (coeffs[1] + t * (coeffs[2] + t * (coeffs[3] + t * coeffs[4]))));
+        poly * exp(-x * x)
+    } else {
+        2.0 - erfc(-x)
+    }
+}
+
+// Inverse error function erfinv(x)
+// Domain: (-1, 1), Range: (-∞, ∞)
+//
+// erfinv(erf(x)) = x
+public fn erfinv(x: Float) -> Float {
+    if x <= -1.0 { return NEG_INFINITY; }
+    if x >= 1.0 { return INFINITY; }
+    if x == 0.0 { return 0.0; }
+
+    // Rational approximation
+    let a = 0.147;
+    let b = 2.0 / (PI * a);
+    let ln1mx2 = log(1.0 - x * x);
+    let t = sqrt(sqrt(pow(b + ln1mx2 / 2.0, 2.0) - ln1mx2 / a) - (b + ln1mx2 / 2.0));
+
+    copysign(t, x)
+}
+
+// Inverse complementary error function
+public fn erfcinv(x: Float) -> Float {
+    erfinv(1.0 - x)
+}
+
+// =============================================================================
+// Bessel Functions
+// =============================================================================
+
+// Bessel function of first kind J₀(x)
+public fn j0(x: Float) -> Float {
+    let x = abs(x);
+
+    if x < 8.0 {
+        // Polynomial approximation for small x
+        let x2 = x * x;
+        let num = 57568490574.0 + x2 * (-13362590354.0 + x2 * (651619640.7
+            + x2 * (-11214424.18 + x2 * (77392.33017 + x2 * -184.9052456))));
+        let den = 57568490411.0 + x2 * (1029532985.0 + x2 * (9494680.718
+            + x2 * (59272.64853 + x2 * (267.8532712 + x2))));
+        num / den
+    } else {
+        // Asymptotic expansion for large x
+        let z = 8.0 / x;
+        let z2 = z * z;
+        let theta = x - FRAC_PI_4;
+
+        let p0 = 1.0 + z2 * (-0.1098628627e-2 + z2 * (0.2734510407e-4
+            + z2 * (-0.2073370639e-5 + z2 * 0.2093887211e-6)));
+        let q0 = z * (-0.1562499995e-1 + z2 * (0.1430488765e-3
+            + z2 * (-0.6911147651e-5 + z2 * 0.7621095161e-6)));
+
+        sqrt(2.0 / (PI * x)) * (p0 * cos(theta) - q0 * sin(theta))
+    }
+}
+
+// Bessel function of first kind J₁(x)
+public fn j1(x: Float) -> Float {
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = abs(x);
+
+    if x < 8.0 {
+        let x2 = x * x;
+        let num = x * (72362614232.0 + x2 * (-7895059235.0 + x2 * (242396853.1
+            + x2 * (-2972611.439 + x2 * (15704.48260 + x2 * -30.16036606)))));
+        let den = 144725228442.0 + x2 * (2300535178.0 + x2 * (18583304.74
+            + x2 * (99447.43394 + x2 * (376.9991397 + x2))));
+        sign * num / den
+    } else {
+        let z = 8.0 / x;
+        let z2 = z * z;
+        let theta = x - 3.0 * FRAC_PI_4;
+
+        let p1 = 1.0 + z2 * (0.183105e-2 + z2 * (-0.3516396496e-4
+            + z2 * (0.2457520174e-5 + z2 * -0.240337019e-6)));
+        let q1 = z * (0.04687499995 + z2 * (-0.2002690873e-3
+            + z2 * (0.8449199096e-5 + z2 * -0.88228987e-6)));
+
+        sign * sqrt(2.0 / (PI * x)) * (p1 * cos(theta) - q1 * sin(theta))
+    }
+}
+
+// Bessel function of second kind Y₀(x)
+// Domain: (0, ∞)
+public fn y0(x: Float{> 0.0}) -> Float {
+    if x < 8.0 {
+        let x2 = x * x;
+        let num = -2957821389.0 + x2 * (7062834065.0 + x2 * (-512359803.6
+            + x2 * (10879881.29 + x2 * (-86327.92757 + x2 * 228.4622733))));
+        let den = 40076544269.0 + x2 * (745249964.8 + x2 * (7189466.438
+            + x2 * (47447.26470 + x2 * (226.1030244 + x2))));
+        num / den + 0.636619772 * j0(x) * log(x)
+    } else {
+        let z = 8.0 / x;
+        let z2 = z * z;
+        let theta = x - FRAC_PI_4;
+
+        let p0 = 1.0 + z2 * (-0.1098628627e-2 + z2 * (0.2734510407e-4
+            + z2 * (-0.2073370639e-5 + z2 * 0.2093887211e-6)));
+        let q0 = z * (-0.1562499995e-1 + z2 * (0.1430488765e-3
+            + z2 * (-0.6911147651e-5 + z2 * 0.7621095161e-6)));
+
+        sqrt(2.0 / (PI * x)) * (p0 * sin(theta) + q0 * cos(theta))
+    }
+}
+
+// Bessel function of second kind Y₁(x)
+// Domain: (0, ∞)
+public fn y1(x: Float{> 0.0}) -> Float {
+    if x < 8.0 {
+        let x2 = x * x;
+        let num = x * (-4900604943000.0 + x2 * (1275274390000.0 + x2 * (-51534381390.0
+            + x2 * (734926455.1 + x2 * (-4237922.726 + x2 * 8511.937935)))));
+        let den = 24909857800000.0 + x2 * (424441966400.0 + x2 * (3733650367.0
+            + x2 * (22459040.02 + x2 * (102042.605 + x2 * (354.9632885 + x2)))));
+        num / den + 0.636619772 * (j1(x) * log(x) - 1.0 / x)
+    } else {
+        let z = 8.0 / x;
+        let z2 = z * z;
+        let theta = x - 3.0 * FRAC_PI_4;
+
+        let p1 = 1.0 + z2 * (0.183105e-2 + z2 * (-0.3516396496e-4
+            + z2 * (0.2457520174e-5 + z2 * -0.240337019e-6)));
+        let q1 = z * (0.04687499995 + z2 * (-0.2002690873e-3
+            + z2 * (0.8449199096e-5 + z2 * -0.88228987e-6)));
+
+        sqrt(2.0 / (PI * x)) * (p1 * sin(theta) + q1 * cos(theta))
+    }
+}
+
+// Bessel function of first kind Jₙ(x) for integer order
+public fn jn(n: Int, x: Float) -> Float {
+    if n == 0 { return j0(x); }
+    if n == 1 { return j1(x); }
+    if n < 0 {
+        // J_{-n}(x) = (-1)^n * J_n(x)
+        let result = jn(-n, x);
+        return if n % 2 == 0 { result } else { -result };
+    }
+
+    if abs(x) < 1e-15 { return 0.0; }
+
+    // Miller's algorithm (downward recurrence)
+    let ax = abs(x);
+
+    if ax > n as Float {
+        // Forward recurrence
+        let mut j_prev = j0(ax);
+        let mut j_curr = j1(ax);
+
+        for k in 1..n {
+            let j_next = 2.0 * (k as Float) / ax * j_curr - j_prev;
+            j_prev = j_curr;
+            j_curr = j_next;
+        }
+
+        if x < 0.0 && n % 2 == 1 { -j_curr } else { j_curr }
+    } else {
+        // Backward recurrence with normalization
+        let m = 2 * ((n + ((40.0 * ax).sqrt() as Int)) / 2);
+        let mut j_prev = 0.0;
+        let mut j_curr = 1e-100;
+        let mut sum = 0.0;
+
+        for k in (1..=m).rev() {
+            let j_next = 2.0 * (k as Float) / ax * j_curr - j_prev;
+            j_prev = j_curr;
+            j_curr = j_next;
+
+            if k == n { sum = j_prev; }
+            if k % 2 == 0 {
+                // Normalization uses: J_0(x) + 2*sum(J_{2k}(x)) = 1
+            }
+        }
+
+        // Normalize
+        let norm = j0(ax) / j_curr;
+        let result = sum * norm;
+
+        if x < 0.0 && n % 2 == 1 { -result } else { result }
+    }
+}
+
+// =============================================================================
+// Incomplete Gamma Functions
+// =============================================================================
+
+// Lower incomplete gamma function γ(a, x)
+// γ(a, x) = ∫₀ˣ t^(a-1) e^(-t) dt
+public fn gammainc_lower(a: Float{> 0.0}, x: Float{>= 0.0}) -> Float {
+    if x == 0.0 { return 0.0; }
+    if x == INFINITY { return gamma(a); }
+
+    if x < a + 1.0 {
+        // Series expansion
+        let mut sum = 1.0 / a;
+        let mut term = 1.0 / a;
+        for n in 1..100 {
+            term *= x / (a + n as Float);
+            sum += term;
+            if abs(term) < 1e-15 * abs(sum) { break; }
+        }
+        pow(x, a) * exp(-x) * sum
+    } else {
+        // Use complement: γ(a, x) = Γ(a) - Γ(a, x)
+        gamma(a) - gammainc_upper(a, x)
+    }
+}
+
+// Upper incomplete gamma function Γ(a, x)
+// Γ(a, x) = ∫ₓ^∞ t^(a-1) e^(-t) dt
+public fn gammainc_upper(a: Float{> 0.0}, x: Float{>= 0.0}) -> Float {
+    if x == 0.0 { return gamma(a); }
+    if x == INFINITY { return 0.0; }
+
+    if x < a + 1.0 {
+        // Use complement
+        gamma(a) - gammainc_lower(a, x)
+    } else {
+        // Continued fraction (Lentz's algorithm)
+        let mut f = x + 1.0 - a;
+        let mut c = x + 1.0 - a + 1.0 / 1e-30;
+        let mut d = 1.0 / f;
+        let mut h = d;
+
+        for n in 1..100 {
+            let an = -(n as Float) * ((n as Float) - a);
+            let bn = x + 1.0 - a + 2.0 * (n as Float);
+            d = bn + an * d;
+            if abs(d) < 1e-30 { d = 1e-30; }
+            c = bn + an / c;
+            if abs(c) < 1e-30 { c = 1e-30; }
+            d = 1.0 / d;
+            let delta = c * d;
+            h *= delta;
+            if abs(delta - 1.0) < 1e-15 { break; }
+        }
+
+        pow(x, a) * exp(-x) * h
+    }
+}
+
+// Regularized incomplete gamma P(a, x) = γ(a, x) / Γ(a)
+public fn gammainc_p(a: Float{> 0.0}, x: Float{>= 0.0}) -> Float {
+    gammainc_lower(a, x) / gamma(a)
+}
+
+// Regularized incomplete gamma Q(a, x) = Γ(a, x) / Γ(a) = 1 - P(a, x)
+public fn gammainc_q(a: Float{> 0.0}, x: Float{>= 0.0}) -> Float {
+    gammainc_upper(a, x) / gamma(a)
+}

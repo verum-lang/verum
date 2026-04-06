@@ -1,0 +1,170 @@
+// =============================================================================
+// poll.vr - Poll state for futures
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core
+// =============================================================================
+//
+// Poll<T> represents the state of an asynchronous computation:
+// - Ready(T): The computation completed with value T
+// - Pending: The computation is not yet complete
+//
+// =============================================================================
+
+module core.async.poll;
+mount core.*;
+
+// =============================================================================
+// Poll<T>
+// =============================================================================
+
+// Result of polling a future.
+public type Poll<T> is
+    | Ready(T)      // Future completed with value
+    | Pending;      // Future not yet complete
+
+implement<T> Poll<T> {
+    // Check if ready.
+    public fn is_ready(&self) -> Bool {
+        match self {
+            Ready(_) => true,
+            Pending => false,
+        }
+    }
+
+    // Check if pending.
+    public fn is_pending(&self) -> Bool {
+        match self {
+            Ready(_) => false,
+            Pending => true,
+        }
+    }
+
+    // Map the ready value.
+    public fn map<U, F: fn(T) -> U>(self, f: F) -> Poll<U> {
+        match self {
+            Ready(t) => Ready(f(t)),
+            Pending => Pending,
+        }
+    }
+
+    // Map ready to result.
+    public fn map_ok<U, E, F: fn(T) -> U>(self, f: F) -> Poll<Result<U, E>>
+    where T: Into<Result<T, E>>
+    {
+        match self {
+            Ready(Ok(t)) => Ready(Ok(f(t))),
+            Ready(Err(e)) => Ready(Err(e)),
+            Pending => Pending,
+        }
+    }
+
+    // Map ready error.
+    public fn map_err<U, E, F: fn(E) -> U>(self, f: F) -> Poll<Result<T, U>>
+    where T: Into<Result<T, E>>
+    {
+        match self {
+            Ready(Ok(t)) => Ready(Ok(t)),
+            Ready(Err(e)) => Ready(Err(f(e))),
+            Pending => Pending,
+        }
+    }
+
+    // Get the ready value, panicking if pending.
+    public fn unwrap(self) -> T {
+        match self {
+            Ready(t) => t,
+            Pending => panic("called unwrap() on Pending"),
+        }
+    }
+
+    // Get ready value or default.
+    public fn unwrap_or(self, default: T) -> T {
+        match self {
+            Ready(t) => t,
+            Pending => default,
+        }
+    }
+
+    // Convert to Maybe.
+    public fn ready(self) -> Maybe<T> {
+        match self {
+            Ready(t) => Some(t),
+            Pending => None,
+        }
+    }
+}
+
+// For Poll<Result<T, E>>
+implement<T, E> Poll<Result<T, E>> {
+    // Shorthand for creating Ready(Ok(t)).
+    public fn ready_ok(t: T) -> Poll<Result<T, E>> {
+        Ready(Ok(t))
+    }
+
+    // Shorthand for creating Ready(Err(e)).
+    public fn ready_err(e: E) -> Poll<Result<T, E>> {
+        Ready(Err(e))
+    }
+}
+
+// Clone if T is Clone
+implement<T: Clone> Clone for Poll<T> {
+    fn clone(&self) -> Poll<T> {
+        match self {
+            Ready(t) => Ready(t.clone()),
+            Pending => Pending,
+        }
+    }
+}
+
+// Eq if T is Eq
+implement<T: Eq> Eq for Poll<T> {
+    fn eq(&self, other: &Poll<T>) -> Bool {
+        match (self, other) {
+            (Ready(a), Ready(b)) => a == b,
+            (Pending, Pending) => true,
+            _ => false,
+        }
+    }
+}
+
+// Debug
+implement<T: Debug> Debug for Poll<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Ready(t) => {
+                f.write_str("Ready(")?;
+                t.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Pending => f.write_str("Pending"),
+        }
+    }
+}
+
+// Default is Pending
+implement<T> Default for Poll<T> {
+    fn default() -> Poll<T> {
+        Pending
+    }
+}
+
+// =============================================================================
+// Conversions
+// =============================================================================
+
+implement<T> From<T> for Poll<T> {
+    fn from(t: T) -> Poll<T> {
+        Ready(t)
+    }
+}
+
+implement<T> From<Maybe<T>> for Poll<T> {
+    fn from(opt: Maybe<T>) -> Poll<T> {
+        match opt {
+            Some(t) => Ready(t),
+            None => Pending,
+        }
+    }
+}

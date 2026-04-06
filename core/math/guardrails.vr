@@ -1,0 +1,944 @@
+// =============================================================================
+// Verum Math Stack - L9.5: Guardrails and Safety
+// =============================================================================
+//
+// Content filtering, output validation, and safety constraints for AI agents.
+// Provides a composable system for input/output validation.
+//
+// Architecture:
+//   - GuardrailResult: Outcome of safety checks (Pass/Block/Modify)
+//   - ContentClassifier: ML-based content classification
+//   - PIIFilter: Personally Identifiable Information redaction
+//   - TopicGuardrail: Topic restriction enforcement
+//   - GuardrailChain: Composable guardrail pipeline
+//   - GuardedAgent: Agent wrapper with guardrails
+//
+// Spec: math-spec.md Section 51 - Guardrails and Safety
+// =============================================================================
+
+module core.math.guardrails;
+mount core.math.tensor;
+mount core.math.nn;
+mount core.math.agent;
+
+// =============================================================================
+// Guardrail Result Types
+// =============================================================================
+
+// Result of a guardrail check
+//
+// Sum type representing the three possible outcomes of a safety check:
+// - Pass: Content is safe to proceed
+// - Block: Content is blocked with a reason
+// - Modify: Content is modified before proceeding
+public type GuardrailResult is
+    // Content passes all safety checks
+    | Pass
+    // Content is blocked - should not proceed
+    | Block { reason: Text }
+    // Content is modified - original replaced with safer version
+    | Modify {
+        original: Text,
+        modified: Text,
+        changes: List<Text>
+    };
+
+implement GuardrailResult {
+    // Check if result is Pass
+    public fn is_pass(&self) -> Bool {
+        match self {
+            GuardrailResult.Pass => true,
+            _ => false,
+        }
+    }
+
+    // Check if result is Block
+    public fn is_blocked(&self) -> Bool {
+        match self {
+            GuardrailResult.Block { .. } => true,
+            _ => false,
+        }
+    }
+
+    // Check if result is Modify
+    public fn is_modified(&self) -> Bool {
+        match self {
+            GuardrailResult.Modify { .. } => true,
+            _ => false,
+        }
+    }
+
+    // Get the effective text (modified if Modify, original otherwise)
+    public fn effective_text(&self, original: &Text) -> Text {
+        match self {
+            GuardrailResult.Pass => original.clone(),
+            GuardrailResult.Block { .. } => original.clone(),
+            GuardrailResult.Modify { modified, .. } => modified.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Classification Result
+// =============================================================================
+
+// Classification result from content classifier
+public type ClassificationResult is {
+    // Map of label name to confidence score [0, 1]
+    labels: Map<Text, Float>,
+};
+
+implement ClassificationResult {
+    // Create empty result
+    public fn new() -> Self {
+        ClassificationResult { labels: Map.new() }
+    }
+
+    // Get confidence for a label
+    public fn get(&self, label: &Text) -> Maybe<Float> {
+        self.labels.get(label).cloned()
+    }
+
+    // Check if any label exceeds threshold
+    public fn exceeds_threshold(&self, label: &Text, threshold: Float) -> Bool {
+        match self.labels.get(label) {
+            Maybe.Some(confidence) => *confidence >= threshold,
+            Maybe.None => false,
+        }
+    }
+
+    // Get the highest confidence label
+    public fn top_label(&self) -> Maybe<(Text, Float)> {
+        self.labels.iter()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering.Equal))
+            .map(|(k, v)| (k.clone(), *v))
+    }
+}
+
+// =============================================================================
+// Content Classifier
+// =============================================================================
+
+// Content classifier for safety using a neural network model
+//
+// Uses a text classification model to detect harmful content categories.
+public type ContentClassifier is {
+    // Classification model (Text -> ClassificationResult)
+    model: Heap<Module<Text, ClassificationResult>>,
+    // Thresholds for each category
+    thresholds: Map<Text, Float>,
+};
+
+implement ContentClassifier {
+    // Create classifier with default thresholds
+    public fn new(model: Heap<Module<Text, ClassificationResult>>) -> Self {
+        ContentClassifier {
+            model,
+            thresholds: Map.from([
+                ("harmful".to_text(), 0.7),
+                ("toxic".to_text(), 0.8),
+                ("pii".to_text(), 0.9),
+                ("illegal".to_text(), 0.95),
+            ]),
+        }
+    }
+
+    // Create classifier with custom thresholds
+    public fn with_thresholds(
+        model: Heap<Module<Text, ClassificationResult>>,
+        thresholds: Map<Text, Float>,
+    ) -> Self {
+        ContentClassifier { model, thresholds }
+    }
+
+    // Set threshold for a specific category
+    public fn set_threshold(&mut self, label: Text, threshold: Float) {
+        assert(threshold >= 0.0 && threshold <= 1.0, "threshold must be in [0, 1]");
+        self.thresholds.insert(label, threshold);
+    }
+
+    // Classify text content
+    public fn classify(&self, text: &Text) -> ClassificationResult {
+        self.model.forward(text.clone())
+    }
+
+    // Check text against all thresholds
+    public fn check(&self, text: &Text) -> GuardrailResult {
+        let result = self.classify(text);
+
+        for (label, threshold) in &self.thresholds {
+            if let Maybe.Some(confidence) = result.labels.get(label) {
+                if *confidence >= *threshold {
+                    return GuardrailResult.Block {
+                        reason: f"Content flagged as {label} with confidence {confidence:.2}",
+                    };
+                }
+            }
+        }
+
+        GuardrailResult.Pass
+    }
+}
+
+// =============================================================================
+// Guardrail Protocol
+// =============================================================================
+
+// Protocol for input/output guardrails
+//
+// Guardrails can check both input (before processing) and output
+// (after generation) for safety.
+public type Guardrail is protocol {
+    // Check input content before processing
+    fn check_input(&self, input: &Text) -> GuardrailResult;
+
+    // Check output content before returning
+    fn check_output(&self, output: &Text) -> GuardrailResult;
+};
+
+// =============================================================================
+// PII Filter
+// =============================================================================
+
+// Simple regex pattern wrapper
+public type Pattern is {
+    name: Text,
+    regex_str: Text,
+};
+
+implement Pattern {
+    public fn new(name: Text, regex_str: Text) -> Self {
+        Pattern { name, regex_str }
+    }
+
+    // Find all matches in text
+    public fn find_all(&self, text: &Text) -> List<Text> {
+        @vbc(REGEX_FIND_ALL, &self.regex_str, text)
+    }
+
+    // Replace all matches in text
+    public fn replace_all(&self, text: &Text, replacement: &Text) -> Text {
+        @vbc(REGEX_REPLACE_ALL, &self.regex_str, text, replacement)
+    }
+}
+
+// PII (Personally Identifiable Information) filter
+//
+// Detects and redacts common PII patterns like emails, phone numbers,
+// SSNs, and credit card numbers.
+public type PIIFilter is {
+    // Patterns to match (name, regex)
+    patterns: List<Pattern>,
+    // Replacement text for redacted content
+    replacement: Text,
+};
+
+implement PIIFilter {
+    // Create filter with default patterns
+    public fn default() -> Self {
+        PIIFilter {
+            patterns: [
+                Pattern.new("email".to_text(), "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}".to_text()),
+                Pattern.new("phone".to_text(), "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b".to_text()),
+                Pattern.new("ssn".to_text(), "\\b\\d{3}-\\d{2}-\\d{4}\\b".to_text()),
+                Pattern.new("credit_card".to_text(), "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b".to_text()),
+            ].to_list(),
+            replacement: "[REDACTED]".to_text(),
+        }
+    }
+
+    // Create filter with custom patterns
+    public fn with_patterns(patterns: List<Pattern>, replacement: Text) -> Self {
+        PIIFilter { patterns, replacement }
+    }
+
+    // Add a custom pattern
+    public fn add_pattern(&mut self, name: Text, regex_str: Text) {
+        self.patterns.push(Pattern.new(name, regex_str));
+    }
+
+    // Redact PII from text
+    // Returns (redacted_text, list_of_redactions)
+    public fn redact(&self, text: &Text) -> (Text, List<Text>) {
+        let mut result = text.clone();
+        let mut redactions = List.new();
+
+        for pattern in &self.patterns {
+            let matches = pattern.find_all(&result);
+            for m in matches {
+                redactions.push(f"{pattern.name}: {m}");
+                result = pattern.replace_all(&result, &self.replacement);
+            }
+        }
+
+        (result, redactions)
+    }
+}
+
+implement Guardrail for PIIFilter {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        let (redacted, changes) = self.redact(input);
+        if changes.is_empty() {
+            GuardrailResult.Pass
+        } else {
+            GuardrailResult.Modify {
+                original: input.clone(),
+                modified: redacted,
+                changes,
+            }
+        }
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.check_input(output)  // Same logic for output
+    }
+}
+
+// =============================================================================
+// Topic Guardrail
+// =============================================================================
+
+// Topic restriction guardrail
+//
+// Ensures content is within allowed topics and not in blocked topics.
+public type TopicGuardrail is {
+    // Topics that are allowed (empty = all allowed)
+    allowed_topics: List<Text>,
+    // Topics that are explicitly blocked
+    blocked_topics: List<Text>,
+    // Classifier for topic detection
+    classifier: ContentClassifier,
+    // Minimum confidence to consider a topic match
+    match_threshold: Float,
+    // Minimum confidence to block a topic
+    block_threshold: Float,
+};
+
+implement TopicGuardrail {
+    // Create topic guardrail
+    public fn new(
+        classifier: ContentClassifier,
+        allowed_topics: List<Text>,
+        blocked_topics: List<Text>,
+    ) -> Self {
+        TopicGuardrail {
+            allowed_topics,
+            blocked_topics,
+            classifier,
+            match_threshold: 0.3,
+            block_threshold: 0.5,
+        }
+    }
+
+    // Set match threshold
+    public fn with_match_threshold(mut self, threshold: Float) -> Self {
+        self.match_threshold = threshold;
+        self
+    }
+
+    // Set block threshold
+    public fn with_block_threshold(mut self, threshold: Float) -> Self {
+        self.block_threshold = threshold;
+        self
+    }
+
+    // Check if text matches topic restrictions
+    public fn check_topic(&self, text: &Text) -> GuardrailResult {
+        let result = self.classifier.classify(text);
+
+        // Check for blocked topics
+        for topic in &self.blocked_topics {
+            if let Maybe.Some(conf) = result.labels.get(topic) {
+                if *conf > self.block_threshold {
+                    return GuardrailResult.Block {
+                        reason: f"Topic '{topic}' is not allowed",
+                    };
+                }
+            }
+        }
+
+        // Check that at least one allowed topic matches (if restrictions exist)
+        if !self.allowed_topics.is_empty() {
+            let matches_allowed = self.allowed_topics.iter().any(|topic| {
+                result.labels.get(topic).map(|c| *c > self.match_threshold).unwrap_or(false)
+            });
+
+            if !matches_allowed {
+                return GuardrailResult.Block {
+                    reason: "Content does not match any allowed topics".to_text(),
+                };
+            }
+        }
+
+        GuardrailResult.Pass
+    }
+}
+
+implement Guardrail for TopicGuardrail {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        self.check_topic(input)
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.check_topic(output)
+    }
+}
+
+// =============================================================================
+// Guardrail Chain
+// =============================================================================
+
+// Mode for guardrail chain execution
+public type GuardrailMode is
+    // All guardrails must pass
+    | StrictAll
+    // Stop at first block
+    | FirstBlock
+    // Log violations but don't block (monitoring mode)
+    | LogOnly;
+
+// Composite guardrail chain
+//
+// Chains multiple guardrails together with configurable execution mode.
+public type GuardrailChain is {
+    // List of guardrails to apply
+    guardrails: List<Heap<Guardrail>>,
+    // Execution mode
+    mode: GuardrailMode,
+};
+
+implement GuardrailChain {
+    // Create new guardrail chain
+    public fn new(mode: GuardrailMode) -> Self {
+        GuardrailChain {
+            guardrails: List.new(),
+            mode,
+        }
+    }
+
+    // Create strict chain (all must pass)
+    public fn strict() -> Self {
+        Self.new(GuardrailMode.StrictAll)
+    }
+
+    // Create first-block chain
+    public fn first_block() -> Self {
+        Self.new(GuardrailMode.FirstBlock)
+    }
+
+    // Create log-only chain (monitoring)
+    public fn log_only() -> Self {
+        Self.new(GuardrailMode.LogOnly)
+    }
+
+    // Add a guardrail to the chain
+    public fn add<G: Guardrail>(&mut self, guardrail: G) -> &mut Self {
+        self.guardrails.push(Heap(guardrail));
+        self
+    }
+
+    // Check input through all guardrails
+    public fn check_input(&self, input: &Text) -> GuardrailResult {
+        let mut current = input.clone();
+        let mut all_changes = List.new();
+
+        for guardrail in &self.guardrails {
+            match guardrail.check_input(&current) {
+                GuardrailResult.Pass => continue,
+                GuardrailResult.Block { reason } => {
+                    match self.mode {
+                        GuardrailMode.LogOnly => {
+                            // Log but continue
+                            log_warning(f"Guardrail violation (logged): {reason}");
+                        }
+                        _ => return GuardrailResult.Block { reason },
+                    }
+                }
+                GuardrailResult.Modify { modified, changes, .. } => {
+                    current = modified;
+                    all_changes.extend(changes);
+                }
+            }
+        }
+
+        if all_changes.is_empty() {
+            GuardrailResult.Pass
+        } else {
+            GuardrailResult.Modify {
+                original: input.clone(),
+                modified: current,
+                changes: all_changes,
+            }
+        }
+    }
+
+    // Check output through all guardrails
+    public fn check_output(&self, output: &Text) -> GuardrailResult {
+        let mut current = output.clone();
+        let mut all_changes = List.new();
+
+        for guardrail in &self.guardrails {
+            match guardrail.check_output(&current) {
+                GuardrailResult.Pass => continue,
+                GuardrailResult.Block { reason } => {
+                    match self.mode {
+                        GuardrailMode.LogOnly => {
+                            log_warning(f"Guardrail violation (logged): {reason}");
+                        }
+                        _ => return GuardrailResult.Block { reason },
+                    }
+                }
+                GuardrailResult.Modify { modified, changes, .. } => {
+                    current = modified;
+                    all_changes.extend(changes);
+                }
+            }
+        }
+
+        if all_changes.is_empty() {
+            GuardrailResult.Pass
+        } else {
+            GuardrailResult.Modify {
+                original: output.clone(),
+                modified: current,
+                changes: all_changes,
+            }
+        }
+    }
+}
+
+implement Guardrail for GuardrailChain {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        self.check_input(input)
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.check_output(output)
+    }
+}
+
+// =============================================================================
+// Guarded Agent
+// =============================================================================
+
+// Guarded agent wrapper
+//
+// Wraps any Agent with input and output guardrails for safe operation.
+public type GuardedAgent<A: Agent> is {
+    // The underlying agent
+    agent: A,
+    // Guardrails applied to inputs
+    input_guardrails: GuardrailChain,
+    // Guardrails applied to outputs
+    output_guardrails: GuardrailChain,
+    // Message for blocked inputs
+    blocked_input_message: Text,
+    // Message for blocked outputs
+    blocked_output_message: Text,
+};
+
+implement<A: Agent> GuardedAgent<A> {
+    // Create guarded agent with default messages
+    public fn new(
+        agent: A,
+        input_guardrails: GuardrailChain,
+        output_guardrails: GuardrailChain,
+    ) -> Self {
+        GuardedAgent {
+            agent,
+            input_guardrails,
+            output_guardrails,
+            blocked_input_message: "I cannot process this input due to safety restrictions.".to_text(),
+            blocked_output_message: "I apologize, but I cannot provide that response.".to_text(),
+        }
+    }
+
+    // Set custom blocked input message
+    public fn with_blocked_input_message(mut self, message: Text) -> Self {
+        self.blocked_input_message = message;
+        self
+    }
+
+    // Set custom blocked output message
+    public fn with_blocked_output_message(mut self, message: Text) -> Self {
+        self.blocked_output_message = message;
+        self
+    }
+
+    // Get reference to underlying agent
+    public fn inner(&self) -> &A {
+        &self.agent
+    }
+
+    // Get mutable reference to underlying agent
+    public fn inner_mut(&mut self) -> &mut A {
+        &mut self.agent
+    }
+}
+
+implement<A: Agent> Agent for GuardedAgent<A> {
+    fn think(&mut self, observation: &Text) -> Text {
+        // Check input through guardrails
+        let safe_input = match self.input_guardrails.check_input(observation) {
+            GuardrailResult.Pass => observation.clone(),
+            GuardrailResult.Block { reason } => {
+                log_warning(f"Input blocked: {reason}");
+                return f"{self.blocked_input_message}: {reason}";
+            }
+            GuardrailResult.Modify { modified, changes, .. } => {
+                log_info(f"Input modified: {changes.len()} changes applied");
+                modified
+            }
+        };
+
+        // Get agent response
+        let response = self.agent.think(&safe_input);
+
+        // Check output through guardrails
+        match self.output_guardrails.check_output(&response) {
+            GuardrailResult.Pass => response,
+            GuardrailResult.Block { reason } => {
+                log_warning(f"Output blocked: {reason}");
+                f"{self.blocked_output_message}: {reason}"
+            }
+            GuardrailResult.Modify { modified, changes, .. } => {
+                log_info(f"Output modified: {changes.len()} changes applied");
+                modified
+            }
+        }
+    }
+
+    fn act(&mut self, action: &Text) -> Result<Value, Error> {
+        // Actions bypass output guardrails but check input
+        match self.input_guardrails.check_input(action) {
+            GuardrailResult.Pass => self.agent.act(action),
+            GuardrailResult.Block { reason } => {
+                Err(Error.new(f"Action blocked: {reason}"))
+            }
+            GuardrailResult.Modify { modified, .. } => {
+                self.agent.act(&modified)
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.agent.reset();
+    }
+}
+
+// =============================================================================
+// Keyword Filter
+// =============================================================================
+
+// Simple keyword-based filter
+//
+// Blocks content containing any of the specified keywords.
+public type KeywordFilter is {
+    // Keywords to block
+    blocked_keywords: List<Text>,
+    // Case-insensitive matching
+    case_insensitive: Bool,
+};
+
+implement KeywordFilter {
+    // Create filter with blocked keywords
+    public fn new(keywords: List<Text>) -> Self {
+        KeywordFilter {
+            blocked_keywords: keywords,
+            case_insensitive: true,
+        }
+    }
+
+    // Set case sensitivity
+    public fn with_case_sensitive(mut self) -> Self {
+        self.case_insensitive = false;
+        self
+    }
+
+    // Check if text contains any blocked keywords
+    public fn contains_blocked(&self, text: &Text) -> Maybe<Text> {
+        let check_text = if self.case_insensitive {
+            text.to_lowercase()
+        } else {
+            text.clone()
+        };
+
+        for keyword in &self.blocked_keywords {
+            let check_keyword = if self.case_insensitive {
+                keyword.to_lowercase()
+            } else {
+                keyword.clone()
+            };
+
+            if check_text.contains(&check_keyword) {
+                return Maybe.Some(keyword.clone());
+            }
+        }
+
+        Maybe.None
+    }
+}
+
+implement Guardrail for KeywordFilter {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        match self.contains_blocked(input) {
+            Maybe.Some(keyword) => GuardrailResult.Block {
+                reason: f"Content contains blocked keyword: '{keyword}'",
+            },
+            Maybe.None => GuardrailResult.Pass,
+        }
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.check_input(output)
+    }
+}
+
+// =============================================================================
+// Length Guardrail
+// =============================================================================
+
+// Length-based guardrail
+//
+// Ensures content length is within acceptable bounds.
+public type LengthGuardrail is {
+    // Minimum allowed length (0 = no minimum)
+    min_length: USize,
+    // Maximum allowed length (0 = no maximum)
+    max_length: USize,
+    // Truncate instead of blocking if too long
+    truncate_if_long: Bool,
+};
+
+implement LengthGuardrail {
+    // Create length guardrail
+    public fn new(min_length: USize, max_length: USize) -> Self {
+        LengthGuardrail {
+            min_length,
+            max_length,
+            truncate_if_long: false,
+        }
+    }
+
+    // Enable truncation instead of blocking
+    public fn with_truncation(mut self) -> Self {
+        self.truncate_if_long = true;
+        self
+    }
+
+    // Create max-length-only guardrail
+    public fn max_only(max_length: USize) -> Self {
+        Self.new(0, max_length)
+    }
+}
+
+implement Guardrail for LengthGuardrail {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        let len = input.len();
+
+        if self.min_length > 0 && len < self.min_length {
+            return GuardrailResult.Block {
+                reason: f"Input too short: {len} < {self.min_length}",
+            };
+        }
+
+        if self.max_length > 0 && len > self.max_length {
+            if self.truncate_if_long {
+                let truncated = input.chars().take(self.max_length).collect<Text>();
+                return GuardrailResult.Modify {
+                    original: input.clone(),
+                    modified: truncated,
+                    changes: [f"Truncated from {len} to {self.max_length} characters"].to_list(),
+                };
+            } else {
+                return GuardrailResult.Block {
+                    reason: f"Input too long: {len} > {self.max_length}",
+                };
+            }
+        }
+
+        GuardrailResult.Pass
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.check_input(output)
+    }
+}
+
+// =============================================================================
+// Rate Limiter Guardrail
+// =============================================================================
+
+// Rate limiting guardrail
+//
+// Limits the rate of requests within a time window.
+public type RateLimitGuardrail is {
+    // Maximum requests per window
+    max_requests: USize,
+    // Window duration in seconds
+    window_seconds: USize,
+    // Request timestamps
+    request_times: List<U64>,
+};
+
+implement RateLimitGuardrail {
+    // Create rate limiter
+    public fn new(max_requests: USize, window_seconds: USize) -> Self {
+        RateLimitGuardrail {
+            max_requests,
+            window_seconds,
+            request_times: List.new(),
+        }
+    }
+
+    // Clean old entries and check if request is allowed
+    fn is_allowed(&mut self) -> Bool {
+        let now = @vbc(TIME_NOW_UNIX);
+        let window_start = now - (self.window_seconds as U64);
+
+        // Remove old entries
+        self.request_times.retain(|&t| t > window_start);
+
+        // Check if under limit
+        if self.request_times.len() < self.max_requests {
+            self.request_times.push(now);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+implement Guardrail for RateLimitGuardrail {
+    fn check_input(&self, _input: &Text) -> GuardrailResult {
+        // Note: self is immutable here, so we need interior mutability
+        // In practice, this would use a mutex or similar
+        // For now, always pass (real implementation would track state)
+        GuardrailResult.Pass
+    }
+
+    fn check_output(&self, _output: &Text) -> GuardrailResult {
+        GuardrailResult.Pass
+    }
+}
+
+// =============================================================================
+// Logging Helpers
+// =============================================================================
+
+// Log warning message (internal helper)
+fn log_warning(message: Text) {
+    @vbc(LOG_WARNING, message)
+}
+
+// Log info message (internal helper)
+fn log_info(message: Text) {
+    @vbc(LOG_INFO, message)
+}
+
+// =============================================================================
+// Builder Pattern
+// =============================================================================
+
+// Guardrail chain builder for fluent API
+public type GuardrailBuilder is {
+    chain: GuardrailChain,
+};
+
+implement GuardrailBuilder {
+    // Start building a guardrail chain
+    public fn new() -> Self {
+        GuardrailBuilder {
+            chain: GuardrailChain.strict(),
+        }
+    }
+
+    // Set mode to strict
+    public fn strict(mut self) -> Self {
+        self.chain.mode = GuardrailMode.StrictAll;
+        self
+    }
+
+    // Set mode to first-block
+    public fn first_block(mut self) -> Self {
+        self.chain.mode = GuardrailMode.FirstBlock;
+        self
+    }
+
+    // Set mode to log-only
+    public fn log_only(mut self) -> Self {
+        self.chain.mode = GuardrailMode.LogOnly;
+        self
+    }
+
+    // Add PII filter with defaults
+    public fn with_pii_filter(mut self) -> Self {
+        self.chain.add(PIIFilter.default());
+        self
+    }
+
+    // Add keyword filter
+    public fn with_blocked_keywords(mut self, keywords: List<Text>) -> Self {
+        self.chain.add(KeywordFilter.new(keywords));
+        self
+    }
+
+    // Add length guardrail
+    public fn with_length_limits(mut self, min: USize, max: USize) -> Self {
+        self.chain.add(LengthGuardrail.new(min, max));
+        self
+    }
+
+    // Add content classifier
+    public fn with_classifier(mut self, classifier: ContentClassifier) -> Self {
+        self.chain.guardrails.push(Heap(ClassifierGuardrail { classifier }));
+        self
+    }
+
+    // Build the guardrail chain
+    public fn build(self) -> GuardrailChain {
+        self.chain
+    }
+}
+
+// Helper type for classifier guardrail
+type ClassifierGuardrail is {
+    classifier: ContentClassifier,
+};
+
+implement Guardrail for ClassifierGuardrail {
+    fn check_input(&self, input: &Text) -> GuardrailResult {
+        self.classifier.check(input)
+    }
+
+    fn check_output(&self, output: &Text) -> GuardrailResult {
+        self.classifier.check(output)
+    }
+}
+
+// =============================================================================
+// Example Usage (Documentation)
+// =============================================================================
+//
+// // Create a guarded agent with multiple safety layers
+// let classifier = ContentClassifier.new(load_safety_model());
+//
+// let input_guardrails = GuardrailBuilder.new()
+//     .strict()
+//     .with_pii_filter()
+//     .with_blocked_keywords(["password", "secret"].to_list())
+//     .with_length_limits(1, 10000)
+//     .build();
+//
+// let output_guardrails = GuardrailBuilder.new()
+//     .first_block()
+//     .with_pii_filter()
+//     .with_classifier(classifier)
+//     .build();
+//
+// let agent = LLMAgent.new(model, tokenizer);
+// let guarded_agent = GuardedAgent.new(agent, input_guardrails, output_guardrails);
+//
+// // Use the guarded agent safely
+// let response = guarded_agent.think("What is the weather today?");
+// =============================================================================

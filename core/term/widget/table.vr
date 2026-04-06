@@ -1,0 +1,343 @@
+// =============================================================================
+// table.vr - Table widget with headers, rows, footer, and selection
+// =============================================================================
+module table;
+
+mount super.protocol.{Widget, StatefulWidget, Styled};
+mount super.block.Block;
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.layout.constraint.{Constraint, Layout, Direction};
+mount super.super.style.style.Style;
+
+// =============================================================================
+// TableCell — a styled cell in a table row
+// =============================================================================
+
+/// A table cell with content and an optional per-cell style.
+public type TableCell is {
+    content: Line,
+    style: Style,
+};
+
+implement TableCell {
+    /// Create a cell from plain text.
+    public fn raw(text: Text) -> TableCell {
+        TableCell { content: Line.raw(text), style: Style.DEFAULT }
+    }
+
+    /// Create a cell from plain text with a style.
+    public fn styled(text: Text, style: Style) -> TableCell {
+        TableCell { content: Line.raw(text), style: style }
+    }
+
+    /// Create a cell from an existing Line.
+    public fn from_line(line: Line) -> TableCell {
+        TableCell { content: line, style: Style.DEFAULT }
+    }
+}
+
+// =============================================================================
+// HighlightSpacing — controls when the highlight symbol column is shown
+// =============================================================================
+
+/// Controls when space is reserved for the highlight symbol.
+public type HighlightSpacing is Always | WhenSelected | Never;
+
+// =============================================================================
+// Row — a row of cells in the table
+// =============================================================================
+
+/// A row in the table.
+public type Row is {
+    cells: List<TableCell>,
+    height: Int,
+    style: Style,
+    bottom_margin: Int,
+};
+
+implement Row {
+    /// Create a new row from a list of text strings.
+    public fn new(cells: List<Text>) -> Row {
+        let mut table_cells = List.new();
+        for c in &cells {
+            table_cells.push(TableCell.raw(c.clone()));
+        }
+        Row {
+            cells: table_cells,
+            height: 1,
+            style: Style.DEFAULT,
+            bottom_margin: 0,
+        }
+    }
+
+    /// Create a new row from text strings with a uniform style.
+    public fn styled(cells: List<Text>, style: Style) -> Row {
+        let mut table_cells = List.new();
+        for c in &cells {
+            table_cells.push(TableCell.styled(c.clone(), style));
+        }
+        Row {
+            cells: table_cells,
+            height: 1,
+            style: style,
+            bottom_margin: 0,
+        }
+    }
+
+    /// Set the row height in lines.
+    public fn height(self, h: Int) -> Row {
+        Row { height: h, ..self }
+    }
+
+    /// Set the row style.
+    public fn style(self, s: Style) -> Row {
+        Row { style: s, ..self }
+    }
+
+    /// Set the bottom margin (gap below this row).
+    public fn bottom_margin(self, m: Int) -> Row {
+        Row { bottom_margin: m, ..self }
+    }
+}
+
+// =============================================================================
+// TableState — tracks selection and scroll offset
+// =============================================================================
+
+/// Table state for tracking selection and scroll.
+public type TableState is {
+    selected: Maybe<Int>,
+    offset: Int,
+};
+
+implement TableState {
+    public fn new() -> TableState {
+        TableState { selected: None, offset: 0 }
+    }
+
+    public fn with_selected(idx: Int) -> TableState {
+        TableState { selected: Some(idx), offset: 0 }
+    }
+
+    /// Set the selected index (or None to deselect).
+    public fn select(&mut self, index: Maybe<Int>) {
+        self.selected = index;
+    }
+
+    /// Move selection to the next row, wrapping at bottom.
+    public fn next(&mut self, total: Int) {
+        self.selected = match self.selected {
+            Some(i) => Some((i + 1).min(total - 1)),
+            None => if total > 0 { Some(0) } else { None },
+        };
+    }
+
+    /// Move selection to the previous row, clamping at top.
+    public fn previous(&mut self) {
+        self.selected = match self.selected {
+            Some(i) => Some((i - 1).max(0)),
+            None => None,
+        };
+    }
+
+    /// Jump to the first row.
+    public fn first(&mut self) {
+        self.selected = Some(0);
+    }
+
+    /// Jump to the last row.
+    public fn last(&mut self, total: Int) {
+        self.selected = Some((total - 1).max(0));
+    }
+}
+
+// =============================================================================
+// Table — full table widget with header, footer, column widths, and selection
+// =============================================================================
+
+/// Table widget with headers, column widths, footer, and row selection.
+public type Table is {
+    rows: List<Row>,
+    header: Maybe<Row>,
+    footer: Maybe<Row>,
+    widths: List<Constraint>,
+    column_spacing: Int,
+    block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    highlight_symbol: Maybe<Text>,
+    highlight_spacing: HighlightSpacing,
+};
+
+implement Table {
+    public fn new(rows: List<Row>, widths: List<Constraint>) -> Table {
+        Table {
+            rows: rows,
+            header: None,
+            footer: None,
+            widths: widths,
+            column_spacing: 1,
+            block: None,
+            style: Style.DEFAULT,
+            highlight_style: Style.new().reversed(),
+            highlight_symbol: Some(">> "),
+            highlight_spacing: HighlightSpacing.WhenSelected,
+        }
+    }
+
+    // Builder chain
+    public fn header(self, row: Row) -> Table {
+        Table { header: Some(row), ..self }
+    }
+
+    public fn footer(self, row: Row) -> Table {
+        Table { footer: Some(row), ..self }
+    }
+
+    public fn block(self, block: Block) -> Table {
+        Table { block: Some(block), ..self }
+    }
+
+    public fn style(self, style: Style) -> Table {
+        Table { style: style, ..self }
+    }
+
+    public fn highlight_style(self, style: Style) -> Table {
+        Table { highlight_style: style, ..self }
+    }
+
+    public fn highlight_symbol(self, sym: Text) -> Table {
+        Table { highlight_symbol: Some(sym), ..self }
+    }
+
+    public fn column_spacing(self, spacing: Int) -> Table {
+        Table { column_spacing: spacing, ..self }
+    }
+
+    public fn highlight_spacing(self, hs: HighlightSpacing) -> Table {
+        Table { highlight_spacing: hs, ..self }
+    }
+}
+
+implement StatefulWidget for Table {
+    type State = TableState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut TableState) {
+        // 1. Draw block border
+        let table_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if table_area.width < 1 || table_area.height < 1 { return; }
+
+        buf.set_style(table_area, self.style);
+
+        // 2. Calculate column widths using layout
+        let col_widths = Layout.horizontal()
+            .constraints(self.widths.clone())
+            .spacing(self.column_spacing)
+            .split(Rect.new(table_area.x, table_area.y, table_area.width, 1));
+
+        // 3. Draw header
+        let mut y = table_area.y;
+        match self.header {
+            Some(header) => {
+                if y < table_area.bottom() {
+                    render_row(buf, &header, &col_widths, y, table_area.width);
+                    y = y + header.height + header.bottom_margin;
+                }
+            }
+            None => {}
+        }
+
+        // 4. Calculate visible rows, reserving space for footer
+        let footer_height = match self.footer {
+            Some(ref f) => f.height + 1,
+            None => 0,
+        };
+        let available_height = table_area.bottom() - y;
+        let rows_height = available_height - footer_height;
+
+        // Auto-scroll: ensure selected row is in viewport
+        match state.selected {
+            Some(sel) => {
+                if sel < state.offset {
+                    state.offset = sel;
+                }
+                if sel >= state.offset + rows_height {
+                    state.offset = sel - rows_height + 1;
+                }
+            }
+            None => {}
+        }
+
+        // 5. Render visible rows
+        let total = self.rows.len();
+        let mut row_idx = state.offset;
+        while row_idx < total && y < table_area.bottom() - footer_height {
+            let row = &self.rows[row_idx];
+            let is_selected = state.selected == Some(row_idx);
+
+            let row_style = if is_selected {
+                row.style.patch(self.highlight_style)
+            } else {
+                row.style
+            };
+
+            // Draw highlight symbol
+            if is_selected {
+                match self.highlight_symbol {
+                    Some(ref sym) => {
+                        buf.set_string(table_area.x, y, sym, self.highlight_style);
+                    }
+                    None => {}
+                }
+            }
+
+            render_row(buf, row, &col_widths, y, table_area.width);
+
+            // Apply highlight style to entire row
+            if is_selected {
+                for x in table_area.x..table_area.right() {
+                    buf.get_mut(x, y).style = buf.get_mut(x, y).style.patch(self.highlight_style);
+                }
+            }
+
+            y = y + row.height + row.bottom_margin;
+            row_idx = row_idx + 1;
+        }
+
+        // 6. Render footer at bottom of table area
+        match self.footer {
+            Some(ref footer) => {
+                let footer_y = table_area.bottom() - footer.height;
+                if footer_y >= y {
+                    render_row(buf, footer, &col_widths, footer_y, table_area.width);
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+/// Render a single row of TableCells into column areas.
+fn render_row(buf: &mut Buffer, row: &Row, col_areas: &List<Rect>, y: Int, total_width: Int) {
+    let num_cols = row.cells.len().min(col_areas.len());
+    for col in 0..num_cols {
+        let cell_area = Rect.new(col_areas[col].x, y, col_areas[col].width, row.height);
+        let cell = &row.cells[col];
+        let line = &cell.content;
+        let mut x = cell_area.x;
+        for span in &line.spans {
+            let combined = cell.style.patch(span.style);
+            x = buf.set_string(x, y, &span.content, combined);
+        }
+    }
+}

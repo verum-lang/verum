@@ -1,0 +1,343 @@
+module sys.darwin;
+
+// =============================================================================
+// sys/darwin/mod.vr - macOS (Darwin/XNU) system interface module
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+@cfg(target_os = "macos")
+//
+// This module provides macOS-specific system interface primitives.
+//
+// CRITICAL: macOS does NOT support stable syscall numbers.
+// All system calls MUST go through libSystem.B.dylib.
+// Direct syscalls are forbidden by Apple and will break between OS versions.
+//
+// Architecture:
+// - libsystem.vr: BSD/POSIX functions via libSystem FFI
+// - mach.vr: Mach kernel primitives (VM, ports, semaphores, time)
+// - errno.vr: BSD errno constants
+// - tls.vr: Thread-local storage and context system
+// - io.vr: Completion-based I/O with kqueue
+// - thread.vr: Thread creation and synchronization
+// - time.vr: Duration, Instant, and timing utilities
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+// BSD/POSIX functions via libSystem
+public module libsystem;
+
+// Mach kernel interface
+public module mach;
+
+// BSD errno constants
+public module errno;
+
+// Thread-local storage and context system
+public module tls;
+
+// Completion-based I/O (kqueue)
+public module io;
+
+// Thread creation and synchronization
+public module thread;
+
+// Time and duration utilities
+public module time;
+
+// =============================================================================
+// Re-exports for convenience
+// =============================================================================
+
+// File I/O
+public mount .libsystem.{
+    safe_read as read,
+    safe_write as write,
+    safe_close as close,
+    safe_mmap as mmap,
+    safe_munmap as munmap,
+    safe_madvise as madvise,
+    madvise_willneed,
+    madvise_dontneed,
+    madvise_free,
+    madvise_free_reusable,
+    madvise_free_reuse,
+    safe_getpid as getpid,
+    safe_gettid as gettid,
+    safe_getentropy as getentropy,
+    safe_kqueue as kqueue,
+    safe_nanosleep as nanosleep,
+    safe_clock_gettime as clock_gettime,
+    monotonic_nanos,
+    monotonic_micros,
+    monotonic_millis,
+};
+
+// libsystem types
+public mount .libsystem.{
+    Timespec,
+    Timeval,
+    KEvent,
+    KEvent64,
+    Stat,
+    Sockaddr,
+    SockaddrIn,
+    SockaddrIn6,
+    PthreadT,
+    PthreadKey,
+    PthreadMutex,
+    PthreadCond,
+    MachTimebaseInfo,
+};
+
+// libsystem constants
+public mount .libsystem.{
+    // Open flags
+    O_RDONLY, O_WRONLY, O_RDWR, O_NONBLOCK, O_APPEND,
+    O_CREAT, O_TRUNC, O_EXCL, O_CLOEXEC, O_DIRECTORY, O_SYMLINK,
+    // Seek whence
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    // Memory protection
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    // Memory mapping
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANON, MAP_ANONYMOUS, MAP_JIT, MAP_NOCACHE,
+    // madvise
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED,
+    MADV_FREE, MADV_FREE_REUSABLE, MADV_FREE_REUSE,
+    // kqueue filters
+    EVFILT_READ, EVFILT_WRITE, EVFILT_AIO, EVFILT_VNODE, EVFILT_PROC,
+    EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_MACHPORT, EVFILT_USER,
+    // kqueue flags
+    EV_ADD, EV_DELETE, EV_ENABLE, EV_DISABLE, EV_ONESHOT, EV_CLEAR,
+    EV_RECEIPT, EV_DISPATCH, EV_EOF, EV_ERROR,
+    // kqueue fflags
+    NOTE_DELETE, NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB, NOTE_LINK,
+    NOTE_RENAME, NOTE_REVOKE, NOTE_TRIGGER,
+    NOTE_SECONDS, NOTE_USECONDS, NOTE_NSECONDS, NOTE_ABSOLUTE,
+    // Socket
+    AF_UNSPEC, AF_UNIX, AF_INET, AF_INET6,
+    SOCK_STREAM, SOCK_DGRAM, SOCK_RAW,
+    SOL_SOCKET, SO_REUSEADDR, SO_KEEPALIVE, SO_RCVBUF, SO_SNDBUF,
+    SO_RCVTIMEO, SO_SNDTIMEO, SO_ERROR, SO_NOSIGPIPE,
+    IPPROTO_TCP, TCP_NODELAY, TCP_KEEPALIVE,
+    SHUT_RD, SHUT_WR, SHUT_RDWR,
+    // Clock
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW, CLOCK_UPTIME_RAW,
+    // Signals
+    SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGFPE, SIGKILL,
+    SIGBUS, SIGSEGV, SIGSYS, SIGPIPE, SIGALRM, SIGTERM, SIGURG, SIGSTOP,
+    SIGTSTP, SIGCONT, SIGCHLD, SIGUSR1, SIGUSR2,
+    // dlopen
+    RTLD_LAZY, RTLD_NOW, RTLD_LOCAL, RTLD_GLOBAL,
+    // fcntl
+    F_DUPFD, F_GETFD, F_SETFD, F_GETFL, F_SETFL,
+    FD_CLOEXEC,
+};
+
+// Mach primitives
+public mount .mach.{
+    current_task,
+    current_thread,
+    host_self,
+    safe_vm_allocate as vm_allocate,
+    safe_vm_deallocate as vm_deallocate,
+    safe_vm_protect as vm_protect,
+    safe_semaphore_create as semaphore_create,
+    safe_semaphore_destroy as semaphore_destroy,
+    safe_semaphore_signal as semaphore_signal,
+    safe_semaphore_wait as semaphore_wait,
+    sleep_until,
+    error_string as mach_error_string,
+};
+
+// Mach types
+public mount .mach.{
+    MachPort,
+    KernReturn,
+    VmAddress,
+    VmSize,
+    VmProt,
+    SemaphoreT,
+    MachMsgHeader,
+};
+
+// Mach constants
+public mount .mach.{
+    // Kernel returns
+    KERN_SUCCESS, KERN_INVALID_ADDRESS, KERN_PROTECTION_FAILURE,
+    KERN_NO_SPACE, KERN_INVALID_ARGUMENT, KERN_FAILURE,
+    KERN_RESOURCE_SHORTAGE, KERN_ABORTED, KERN_OPERATION_TIMED_OUT,
+    // VM protection
+    VM_PROT_NONE, VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+    VM_PROT_DEFAULT, VM_PROT_ALL,
+    // VM flags
+    VM_FLAGS_FIXED, VM_FLAGS_ANYWHERE, VM_FLAGS_PURGABLE,
+    // Semaphore policies
+    SYNC_POLICY_FIFO, SYNC_POLICY_LIFO,
+    // Thread states
+    TH_STATE_RUNNING, TH_STATE_STOPPED, TH_STATE_WAITING,
+};
+
+// Errno
+public mount .errno.{
+    // Common errors
+    EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO, E2BIG, ENOEXEC,
+    EBADF, ECHILD, EDEADLK, ENOMEM, EACCES, EFAULT, EBUSY,
+    EEXIST, EXDEV, ENODEV, ENOTDIR, EISDIR, EINVAL, ENFILE,
+    EMFILE, ENOTTY, ETXTBSY, EFBIG, ENOSPC, ESPIPE, EROFS,
+    EMLINK, EPIPE, EDOM, ERANGE,
+    // Non-blocking
+    EAGAIN, EWOULDBLOCK, EINPROGRESS, EALREADY,
+    // Socket errors
+    ENOTSOCK, EDESTADDRREQ, EMSGSIZE, EPROTOTYPE, ENOPROTOOPT,
+    EPROTONOSUPPORT, ESOCKTNOSUPPORT, ENOTSUP, EPFNOSUPPORT,
+    EAFNOSUPPORT, EADDRINUSE, EADDRNOTAVAIL,
+    // Network errors
+    ENETDOWN, ENETUNREACH, ENETRESET, ECONNABORTED, ECONNRESET,
+    ENOBUFS, EISCONN, ENOTCONN, ESHUTDOWN, ETIMEDOUT, ECONNREFUSED,
+    EHOSTDOWN, EHOSTUNREACH,
+    // File system errors
+    ELOOP, ENAMETOOLONG, ENOTEMPTY, EDQUOT, ESTALE,
+    ENOLCK, ENOSYS, EOVERFLOW, ECANCELED,
+    // Helper functions
+    is_retryable,
+    is_connection_error,
+    is_permission_error,
+    is_not_found,
+    is_resource_exhausted,
+    is_would_block,
+    errno_name,
+    errno_short_name,
+};
+
+// Low-level errno access
+public mount .libsystem.{
+    errno,
+    set_errno,
+};
+
+// =============================================================================
+// TLS Re-exports
+// =============================================================================
+
+public mount .tls.{
+    // Types
+    TlsError,
+    ThreadControlBlock,
+    ContextSlots,
+    ContextEntry,
+    // Initialization
+    init_tls_key,
+    init_main_thread_tls,
+    create_thread_tls,
+    cleanup_thread_tls,
+    // TCB access
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    // Context operations
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+    ctx_depth,
+    // Utilities
+    is_tls_initialized,
+    get_tid_fast,
+    get_errno,
+    set_errno as tls_set_errno,
+    check_stack_guard,
+    get_user_data,
+    set_user_data,
+    // Constants
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+};
+
+// =============================================================================
+// I/O Re-exports
+// =============================================================================
+
+public mount .io.{
+    // Types
+    IoError,
+    IoOpKind,
+    IoToken,
+    IoOp,
+    IoCqe,
+    KqueueDriver,
+    KqueueEventIter,
+    IoDriver,
+    // Functions
+    create_io_driver,
+    is_kqueue_available,
+    // Constants
+    MAX_EVENTS,
+    DEFAULT_TIMEOUT_NS,
+};
+
+// =============================================================================
+// Thread Re-exports
+// =============================================================================
+
+public mount .thread.{
+    // Types
+    ThreadError,
+    Thread,
+    ThreadFn,
+    Mutex,
+    Condvar,
+    SpinLock,
+    Once,
+    // Functions
+    spawn,
+    current_thread,
+    current_tid,
+    // Constants
+    ONCE_INIT,
+    ONCE_RUNNING,
+    ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Time Re-exports
+// =============================================================================
+
+public mount .time.{
+    // Types
+    Duration,
+    Instant,
+    Stopwatch,
+    PerfCounter,
+    DeadlineTimer,
+    // Clock functions
+    monotonic_nanos as time_monotonic_nanos,
+    monotonic_raw_nanos,
+    realtime_nanos,
+    unix_timestamp,
+    thread_cputime_nanos,
+    process_cputime_nanos,
+    // Sleep functions
+    sleep,
+    sleep_ms,
+    sleep_us,
+    sleep_until as time_sleep_until,
+    sleep_until_mach,
+    // Utilities
+    time_it,
+    // Clock IDs
+    CLOCK_REALTIME_ID,
+    CLOCK_MONOTONIC_ID,
+    CLOCK_MONOTONIC_RAW_ID,
+    CLOCK_PROCESS_CPUTIME,
+    CLOCK_THREAD_CPUTIME,
+};
+
+// Direct FFI access for advanced use
+public mount .libsystem as sys_ffi;

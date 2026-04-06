@@ -1,0 +1,14 @@
+// Test: BS-002/003 - Let bindings (immutable and mutable)
+// Priority: Critical
+// Expected output: 42\n15
+
+fn main() {
+    // Immutable binding
+    let x = 42;
+    print(f"{x}");
+
+    // Mutable binding
+    let mut y = 10;
+    y = y + 5;
+    print(f"{y}");
+}

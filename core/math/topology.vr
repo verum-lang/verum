@@ -1,0 +1,394 @@
+// =============================================================================
+// topology.vr - Point-Set and Algebraic Topology
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// Defines topological spaces, continuous maps, homeomorphisms, compactness,
+// connectedness, separation axioms, metric spaces, normed spaces, manifolds,
+// and algebraic topology structures (fundamental group, homology).
+// =============================================================================
+
+module core.math.topology;
+
+mount core.math.algebra.{Group, AbelianGroup, Ring, Field};
+
+// =============================================================================
+// 1. Topological Spaces
+// =============================================================================
+
+/// A topological space is a set X together with a collection of open sets
+/// satisfying the standard axioms.
+public type TopologicalSpace is protocol {
+    /// The type of points in the space.
+    type Point;
+
+    /// Test whether a predicate defines an open set.
+    /// (Abstractly: membership in the topology.)
+    fn is_open(&self, set_id: Int) -> Bool;
+
+    /// The empty set is open.
+    @verify(formal)
+    fn empty_open(&self) -> Bool;
+
+    /// The whole space is open.
+    @verify(formal)
+    fn whole_space_open(&self) -> Bool;
+
+    /// Arbitrary unions of open sets are open.
+    @verify(formal)
+    fn union_open(&self, sets: &List<Int>) -> Bool;
+
+    /// Finite intersections of open sets are open.
+    @verify(formal)
+    fn finite_intersection_open(&self, a: Int, b: Int) -> Bool;
+};
+
+/// A closed set is the complement of an open set.
+public type ClosedSet<X: TopologicalSpace> is {
+    /// Identifier for the set.
+    set_id: Int,
+};
+
+/// A neighborhood of a point x is an open set containing x.
+public type Neighborhood<X: TopologicalSpace> is {
+    /// The point.
+    point_id: Int,
+    /// The open set containing the point.
+    open_set_id: Int,
+};
+
+// =============================================================================
+// 2. Continuous Maps
+// =============================================================================
+
+/// A continuous map between topological spaces: the preimage of every
+/// open set is open.
+public type ContinuousMap<X: TopologicalSpace, Y: TopologicalSpace> is protocol {
+    /// Apply the map to a point.
+    fn apply(&self, x: &Int) -> Int;
+
+    /// Continuity: the preimage of every open set in Y is open in X.
+    @verify(formal)
+    fn preimage_open(&self, open_set: Int) -> Bool;
+};
+
+/// A homeomorphism is a continuous bijection with a continuous inverse.
+public type Homeomorphism<X: TopologicalSpace, Y: TopologicalSpace> is protocol extends ContinuousMap<X, Y> {
+    /// The inverse map.
+    fn inverse(&self, y: &Int) -> Int;
+
+    /// The inverse is also continuous.
+    @verify(formal)
+    fn inverse_continuous(&self) -> Bool;
+
+    /// f(f_inv(y)) = y for all y.
+    @verify(formal)
+    fn right_inverse(&self, y: &Int) -> Bool;
+
+    /// f_inv(f(x)) = x for all x.
+    @verify(formal)
+    fn left_inverse(&self, x: &Int) -> Bool;
+};
+
+/// An open map sends open sets to open sets.
+public type OpenMap<X: TopologicalSpace, Y: TopologicalSpace> is protocol extends ContinuousMap<X, Y> {
+    /// Image of an open set is open.
+    @verify(formal)
+    fn image_open(&self, open_set: Int) -> Bool;
+};
+
+// =============================================================================
+// 3. Separation Axioms
+// =============================================================================
+
+/// T0 (Kolmogorov): for any two distinct points, there is an open set
+/// containing one but not the other.
+public type T0Space is protocol extends TopologicalSpace {
+    @verify(formal)
+    fn t0_separation(&self, x: &Int, y: &Int) -> Bool;
+};
+
+/// T1: for any two distinct points, each has a neighborhood not
+/// containing the other.
+public type T1Space is protocol extends T0Space {
+    @verify(formal)
+    fn t1_separation(&self, x: &Int, y: &Int) -> Bool;
+};
+
+/// T2 (Hausdorff): any two distinct points have disjoint neighborhoods.
+public type HausdorffSpace is protocol extends T1Space {
+    /// For distinct x, y there exist disjoint open sets U, V with x in U, y in V.
+    @verify(formal)
+    fn hausdorff_separation(&self, x: &Int, y: &Int) -> Bool;
+};
+
+/// T3 (Regular): a Hausdorff space where points and closed sets can be
+/// separated by neighborhoods.
+public type RegularSpace is protocol extends HausdorffSpace {
+    @verify(formal)
+    fn regular_separation(&self, x: &Int, closed_set: Int) -> Bool;
+};
+
+/// T4 (Normal): disjoint closed sets can be separated by open sets.
+public type NormalSpace is protocol extends RegularSpace {
+    @verify(formal)
+    fn normal_separation(&self, closed1: Int, closed2: Int) -> Bool;
+};
+
+// =============================================================================
+// 4. Compactness and Connectedness
+// =============================================================================
+
+/// A compact space: every open cover has a finite subcover.
+public type CompactSpace is protocol extends TopologicalSpace {
+    /// Every open cover has a finite subcover.
+    @verify(formal)
+    fn has_finite_subcover(&self, cover: &List<Int>) -> Bool;
+};
+
+/// Sequentially compact: every sequence has a convergent subsequence.
+public type SequentiallyCompactSpace is protocol extends TopologicalSpace {
+    @verify(formal)
+    fn has_convergent_subsequence(&self, sequence: &List<Int>) -> Bool;
+};
+
+/// A connected space cannot be partitioned into two nonempty open sets.
+public type ConnectedSpace is protocol extends TopologicalSpace {
+    /// The space is not the union of two disjoint nonempty open sets.
+    @verify(formal)
+    fn no_separation(&self) -> Bool;
+};
+
+/// A path-connected space: any two points can be joined by a continuous path.
+public type PathConnectedSpace is protocol extends ConnectedSpace {
+    /// For any x, y there exists a continuous path from x to y.
+    @verify(formal)
+    fn path_exists(&self, x: &Int, y: &Int) -> Bool;
+};
+
+/// Simply connected: path-connected with trivial fundamental group.
+public type SimplyConnectedSpace is protocol extends PathConnectedSpace {
+    /// Every loop is contractible to a point.
+    @verify(formal)
+    fn loops_contractible(&self, base: &Int) -> Bool;
+};
+
+// =============================================================================
+// 5. Metric Spaces
+// =============================================================================
+
+/// A metric space is a set with a distance function satisfying the metric axioms.
+public type MetricSpace is protocol {
+    /// The type of points.
+    type Point;
+
+    /// Distance between two points.
+    fn distance(&self, x: &Int, y: &Int) -> Float;
+
+    /// Non-negativity: d(x, y) >= 0
+    @verify(formal)
+    fn non_negative(&self, x: &Int, y: &Int) -> Bool;
+
+    /// Identity of indiscernibles: d(x, y) = 0 iff x = y
+    @verify(formal)
+    fn identity_of_indiscernibles(&self, x: &Int, y: &Int) -> Bool;
+
+    /// Symmetry: d(x, y) = d(y, x)
+    @verify(formal)
+    fn symmetry(&self, x: &Int, y: &Int) -> Bool;
+
+    /// Triangle inequality: d(x, z) <= d(x, y) + d(y, z)
+    @verify(formal)
+    fn triangle_inequality(&self, x: &Int, y: &Int, z: &Int) -> Bool;
+};
+
+/// An ultrametric space strengthens the triangle inequality.
+public type UltrametricSpace is protocol extends MetricSpace {
+    /// Strong triangle inequality: d(x, z) <= max(d(x, y), d(y, z))
+    @verify(formal)
+    fn strong_triangle_inequality(&self, x: &Int, y: &Int, z: &Int) -> Bool;
+};
+
+/// A complete metric space: every Cauchy sequence converges.
+public type CompleteMetricSpace is protocol extends MetricSpace {
+    /// Every Cauchy sequence converges.
+    @verify(formal)
+    fn cauchy_convergence(&self, sequence: &List<Int>) -> Bool;
+};
+
+// =============================================================================
+// 6. Normed and Inner Product Spaces
+// =============================================================================
+
+/// A normed space is a vector space with a norm function.
+public type NormedSpace<F: Field> is protocol {
+    /// The norm of a vector.
+    fn norm(&self) -> Float;
+
+    /// Non-negativity: norm(v) >= 0
+    @verify(formal)
+    fn norm_non_negative(&self) -> Bool;
+
+    /// Positive definiteness: norm(v) = 0 iff v = 0
+    @verify(formal)
+    fn norm_positive_definite(&self) -> Bool;
+
+    /// Absolute homogeneity: norm(a * v) = |a| * norm(v)
+    @verify(formal)
+    fn norm_homogeneous(&self, scalar: &Float) -> Bool;
+
+    /// Triangle inequality: norm(u + v) <= norm(u) + norm(v)
+    @verify(formal)
+    fn norm_triangle(&self, other: &Self) -> Bool;
+};
+
+/// An inner product space (pre-Hilbert space).
+public type InnerProductSpace<F: Field> is protocol extends NormedSpace<F> {
+    /// Inner product of two vectors.
+    fn inner_product(&self, other: &Self) -> Float;
+
+    /// Conjugate symmetry: <x, y> = conj(<y, x>)
+    @verify(formal)
+    fn conjugate_symmetry(&self, other: &Self) -> Bool;
+
+    /// Linearity in the first argument.
+    @verify(formal)
+    fn linearity_first(&self, other: &Self, scalar: &Float) -> Bool;
+
+    /// Positive definiteness: <x, x> >= 0 and <x, x> = 0 iff x = 0
+    @verify(formal)
+    fn inner_positive_definite(&self) -> Bool;
+
+    /// The norm is induced by the inner product: norm(x) = sqrt(<x, x>)
+    @verify(formal)
+    fn norm_from_inner(&self) -> Bool;
+};
+
+// =============================================================================
+// 7. Manifolds
+// =============================================================================
+
+/// A topological manifold: a Hausdorff, second-countable space locally
+/// homeomorphic to R^n.
+public type TopologicalManifold is protocol extends HausdorffSpace {
+    /// The dimension of the manifold.
+    fn manifold_dimension(&self) -> Int;
+
+    /// Local homeomorphism: every point has a neighborhood homeomorphic to R^n.
+    @verify(formal)
+    fn locally_euclidean(&self, point: &Int) -> Bool;
+
+    /// Second countability: the topology has a countable base.
+    @verify(formal)
+    fn second_countable(&self) -> Bool;
+};
+
+/// A chart maps an open subset of the manifold to an open subset of R^n.
+public type Chart<M: TopologicalManifold> is {
+    /// Domain: open subset of the manifold.
+    domain: Int,
+    /// The coordinate map (homeomorphism to R^n).
+    coordinate_map: Int,
+    /// The inverse coordinate map.
+    inverse_map: Int,
+};
+
+/// An atlas is a collection of charts covering the manifold.
+public type Atlas<M: TopologicalManifold> is {
+    /// The charts in the atlas.
+    charts: List<Int>,
+};
+
+/// A smooth (differentiable) manifold: transition maps between charts
+/// are smooth (infinitely differentiable).
+public type SmoothManifold is protocol extends TopologicalManifold {
+    /// Transition maps between overlapping charts are smooth.
+    @verify(formal)
+    fn smooth_transitions(&self, chart1: &Int, chart2: &Int) -> Bool;
+};
+
+/// A Riemannian manifold: a smooth manifold with a Riemannian metric
+/// (smoothly varying inner product on tangent spaces).
+public type RiemannianManifold is protocol extends SmoothManifold {
+    /// The metric tensor evaluated at a point.
+    fn metric_tensor(&self, point: &Int, v1: &Int, v2: &Int) -> Float;
+
+    /// The metric is positive definite at every point.
+    @verify(formal)
+    fn metric_positive_definite(&self, point: &Int) -> Bool;
+
+    /// The metric is symmetric.
+    @verify(formal)
+    fn metric_symmetric(&self, point: &Int, v1: &Int, v2: &Int) -> Bool;
+};
+
+// =============================================================================
+// 8. Algebraic Topology
+// =============================================================================
+
+/// The fundamental group pi_1(X, x0) of a topological space at a base point.
+/// Elements are homotopy classes of loops.
+public type FundamentalGroup<X: TopologicalSpace> is protocol extends Group {
+    /// The base point.
+    fn base_point() -> Int;
+
+    /// Concatenation of loops (the group operation).
+    fn loop_concat(&self, other: &Self) -> Self;
+
+    /// The constant loop (identity element).
+    fn constant_loop() -> Self;
+
+    /// Reverse a loop (inverse element).
+    fn loop_reverse(&self) -> Self;
+
+    /// Two loops are homotopic.
+    @verify(formal)
+    fn homotopic(&self, other: &Self) -> Bool;
+};
+
+/// A higher homotopy group pi_n(X, x0).
+public type HomotopyGroup<X: TopologicalSpace> is protocol extends AbelianGroup {
+    /// The dimension n of the homotopy group.
+    fn homotopy_dimension() -> Int;
+
+    /// The base point.
+    fn base_point() -> Int;
+};
+
+/// A homology group H_n(X) in a given coefficient ring.
+public type HomologyGroup<X: TopologicalSpace, R: Ring> is protocol extends AbelianGroup {
+    /// The degree n of the homology group.
+    fn degree() -> Int;
+};
+
+/// A cohomology group H^n(X) in a given coefficient ring.
+public type CohomologyGroup<X: TopologicalSpace, R: Ring> is protocol extends AbelianGroup {
+    /// The degree n of the cohomology group.
+    fn degree() -> Int;
+};
+
+/// A fiber bundle with base B, fiber F, and total space E.
+public type FiberBundle<B: TopologicalSpace, F: TopologicalSpace> is protocol {
+    /// Projection map: E -> B.
+    fn projection(&self, e: &Int) -> Int;
+
+    /// Local triviality: each point in B has a neighborhood U such that
+    /// the preimage of U is homeomorphic to U x F.
+    @verify(formal)
+    fn locally_trivial(&self, point: &Int) -> Bool;
+};
+
+/// A covering space is a fiber bundle with discrete fibers.
+public type CoveringSpace<B: TopologicalSpace> is protocol {
+    /// The covering map p : E -> B.
+    fn covering_map(&self, e: &Int) -> Int;
+
+    /// Every point in B has an evenly covered neighborhood.
+    @verify(formal)
+    fn evenly_covered(&self, point: &Int) -> Bool;
+
+    /// Path lifting property.
+    @verify(formal)
+    fn path_lifting(&self, path: &Int, start: &Int) -> Bool;
+};

@@ -1,0 +1,1148 @@
+// =============================================================================
+// data.vr - Structured dynamic data type for JSON/API/external data
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: maybe.vr, result.vr, primitives.vr
+// Spec: docs/improvements.md Section 13.1 - Data Type
+// =============================================================================
+//
+// The Data type provides type-safe access to dynamically-structured data.
+// Unlike a full "dyn" escape hatch, Data maintains static typing while
+// enabling work with JSON, external APIs, and other unstructured sources.
+//
+// Key design principles:
+// - Semantically honest: "Data" = "runtime-typed value"
+// - All operations are explicitly typed (no implicit any)
+// - Pattern matching provides exhaustive case coverage
+// - Compatible with Verum's "always statically typed" philosophy
+
+/// Structured dynamic data type.
+///
+/// Represents any JSON-like value at runtime. All access is explicit
+/// and type-safe through accessor methods that return Maybe<T>.
+///
+/// # Examples
+///
+/// ```verum
+/// let response: Data = http.get(url).json()?;
+/// let name = response["user"]["name"].as_text() ?? "Unknown";
+/// let age = response["user"]["age"].as_int() ?? 0;
+///
+/// match response {
+///     Data.Object(obj) => process_object(obj),
+///     Data.Array(arr) => process_array(arr),
+///     Data.Null => handle_null(),
+///     _ => handle_primitive(),
+/// }
+/// ```
+
+module core.base.data;
+public type Data is
+    | Null
+    | Bool(Bool)
+    | Int(Int)
+    | Float(Float)
+    | Text(Text)
+    | Array(List<Data>)
+    | Object(Map<Text, Data>);
+
+/// Error type for Data operations
+public type DataError is
+    | TypeMismatch { expected: Text, actual: Text }
+    | KeyNotFound { key: Text }
+    | IndexOutOfBounds { index: Int, length: Int }
+    | ParseError { message: Text }
+    | InvalidCast { from: Text, to: Text };
+
+implement Debug for DataError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TypeMismatch { expected, actual } =>
+                f.write_str(f"TypeMismatch(expected={expected}, actual={actual})"),
+            KeyNotFound { key } =>
+                f.write_str(f"KeyNotFound({key})"),
+            IndexOutOfBounds { index, length } =>
+                f.write_str(f"IndexOutOfBounds(index={index}, length={length})"),
+            ParseError { message } =>
+                f.write_str(f"ParseError({message})"),
+            InvalidCast { from, to } =>
+                f.write_str(f"InvalidCast(from={from}, to={to})"),
+        }
+    }
+}
+
+implement Display for DataError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TypeMismatch { expected, actual } =>
+                f.write_str(f"type mismatch: expected {expected}, got {actual}"),
+            KeyNotFound { key } =>
+                f.write_str(f"key not found: {key}"),
+            IndexOutOfBounds { index, length } =>
+                f.write_str(f"index {index} out of bounds for length {length}"),
+            ParseError { message } =>
+                f.write_str(message),
+            InvalidCast { from, to } =>
+                f.write_str(f"invalid cast from {from} to {to}"),
+        }
+    }
+}
+
+implement Data {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Create null Data value
+    fn null() -> Data {
+        Data.Null
+    }
+
+    /// Create Data from bool
+    fn from_bool(value: Bool) -> Data {
+        Data.Bool(value)
+    }
+
+    /// Create Data from integer
+    fn from_int(value: Int) -> Data {
+        Data.Int(value)
+    }
+
+    /// Create Data from float
+    fn from_float(value: Float) -> Data {
+        Data.Float(value)
+    }
+
+    /// Create Data from text
+    fn from_text(value: Text) -> Data {
+        Data.Text(value)
+    }
+
+    /// Create Data from list
+    fn from_array(value: List<Data>) -> Data {
+        Data.Array(value)
+    }
+
+    /// Create Data from map
+    fn from_object(value: Map<Text, Data>) -> Data {
+        Data.Object(value)
+    }
+
+    /// Create empty object
+    fn empty_object() -> Data {
+        Data.Object(Map.new())
+    }
+
+    /// Create empty array
+    fn empty_array() -> Data {
+        Data.Array(List.new())
+    }
+
+    // =========================================================================
+    // Type predicates
+    // =========================================================================
+
+    /// Returns true if this is Null
+    fn is_null(&self) -> Bool {
+        match self {
+            Data.Null => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is a boolean
+    fn is_bool(&self) -> Bool {
+        match self {
+            Data.Bool(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is an integer
+    fn is_int(&self) -> Bool {
+        match self {
+            Data.Int(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is a float
+    fn is_float(&self) -> Bool {
+        match self {
+            Data.Float(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is numeric (int or float)
+    fn is_number(&self) -> Bool {
+        match self {
+            Data.Int(_) | Data.Float(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is text
+    fn is_text(&self) -> Bool {
+        match self {
+            Data.Text(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is an array
+    fn is_array(&self) -> Bool {
+        match self {
+            Data.Array(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is an object
+    fn is_object(&self) -> Bool {
+        match self {
+            Data.Object(_) => true,
+            _ => false,
+        }
+    }
+
+    // =========================================================================
+    // Safe accessors - return Maybe<T>
+    // =========================================================================
+
+    /// Extract boolean value, returns None if not a Bool
+    fn as_bool(&self) -> Maybe<Bool> {
+        match self {
+            Data.Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Extract integer value, returns None if not an Int
+    fn as_int(&self) -> Maybe<Int> {
+        match self {
+            Data.Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Extract float value, returns None if not a Float
+    fn as_float(&self) -> Maybe<Float> {
+        match self {
+            Data.Float(f) => Some(*f),
+            Data.Int(i) => Some(*i as Float),  // Int coerces to Float
+            _ => None,
+        }
+    }
+
+    /// Extract text value, returns None if not Text
+    fn as_text(&self) -> Maybe<Text> {
+        match self {
+            Data.Text(ref s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    /// Extract array reference, returns None if not Array
+    fn as_array(&self) -> Maybe<&List<Data>> {
+        match self {
+            Data.Array(ref arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Extract mutable array reference
+    fn as_array_mut(&mut self) -> Maybe<&mut List<Data>> {
+        match self {
+            Data.Array(ref mut arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Extract object reference, returns None if not Object
+    fn as_object(&self) -> Maybe<&Map<Text, Data>> {
+        match self {
+            Data.Object(ref obj) => Some(obj),
+            _ => None,
+        }
+    }
+
+    /// Extract mutable object reference
+    fn as_object_mut(&mut self) -> Maybe<&mut Map<Text, Data>> {
+        match self {
+            Data.Object(ref mut obj) => Some(obj),
+            _ => None,
+        }
+    }
+
+    // =========================================================================
+    // Object field access
+    // =========================================================================
+
+    /// Get field by key, returns None if not an object or key doesn't exist
+    fn get(&self, key: Text) -> Maybe<&Data> {
+        match self {
+            Data.Object(ref obj) => obj.get(&key),
+            _ => None,
+        }
+    }
+
+    /// Get mutable field by key
+    fn get_mut(&mut self, key: Text) -> Maybe<&mut Data> {
+        match self {
+            Data.Object(ref mut obj) => obj.get_mut(&key),
+            _ => None,
+        }
+    }
+
+    /// Check if object contains key
+    fn contains_key(&self, key: Text) -> Bool {
+        match self {
+            Data.Object(ref obj) => obj.contains_key(&key),
+            _ => false,
+        }
+    }
+
+    /// Set field in object (returns error if not an object)
+    fn set(&mut self, key: Text, value: Data) -> Result<(), DataError> {
+        match self {
+            Data.Object(ref mut obj) => {
+                obj.insert(key, value);
+                Ok(())
+            }
+            _ => Err(DataError.TypeMismatch {
+                expected: "Object".to_text(),
+                actual: self.type_name(),
+            }),
+        }
+    }
+
+    /// Remove field from object
+    fn remove(&mut self, key: Text) -> Maybe<Data> {
+        match self {
+            Data.Object(ref mut obj) => obj.remove(&key),
+            _ => None,
+        }
+    }
+
+    // =========================================================================
+    // Array index access
+    // =========================================================================
+
+    /// Get element at index, returns None if not array or index out of bounds
+    fn at(&self, index: Int) -> Maybe<&Data> {
+        match self {
+            Data.Array(ref arr) => {
+                if index >= 0 && (index as USize) < arr.len() {
+                    Some(&arr[index as USize])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Get mutable element at index
+    fn at_mut(&mut self, index: Int) -> Maybe<&mut Data> {
+        match self {
+            Data.Array(ref mut arr) => {
+                if index >= 0 && (index as USize) < arr.len() {
+                    Some(&mut arr[index as USize])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Push element to array (returns error if not array)
+    fn push(&mut self, value: Data) -> Result<(), DataError> {
+        match self {
+            Data.Array(ref mut arr) => {
+                arr.push(value);
+                Ok(())
+            }
+            _ => Err(DataError.TypeMismatch {
+                expected: "Array".to_text(),
+                actual: self.type_name(),
+            }),
+        }
+    }
+
+    /// Pop element from array
+    fn pop(&mut self) -> Maybe<Data> {
+        match self {
+            Data.Array(ref mut arr) => arr.pop(),
+            _ => None,
+        }
+    }
+
+    /// Get array length, returns 0 if not array
+    fn len(&self) -> Int {
+        match self {
+            Data.Array(ref arr) => arr.len() as Int,
+            Data.Object(ref obj) => obj.len() as Int,
+            Data.Text(ref s) => s.len() as Int,
+            _ => 0,
+        }
+    }
+
+    /// Check if empty (array, object, or text)
+    fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+
+    // =========================================================================
+    // Type introspection
+    // =========================================================================
+
+    /// Get the type name as a string
+    fn type_name(&self) -> Text {
+        match self {
+            Data.Null => "Null".to_text(),
+            Data.Bool(_) => "Bool".to_text(),
+            Data.Int(_) => "Int".to_text(),
+            Data.Float(_) => "Float".to_text(),
+            Data.Text(_) => "Text".to_text(),
+            Data.Array(_) => "Array".to_text(),
+            Data.Object(_) => "Object".to_text(),
+        }
+    }
+
+    // =========================================================================
+    // Path-based access (JSON pointer style)
+    // =========================================================================
+
+    /// Access nested field using dot notation path
+    /// Example: data.path("user.profile.name")
+    fn path(&self, path: Text) -> Maybe<&Data> {
+        let parts = path.split(".");
+        let mut current = self;
+
+        for part in parts {
+            match current.get(part) {
+                Some(next) => current = next,
+                None => {
+                    // Try array index
+                    match part.parse_int() {
+                        Some(idx) => {
+                            match current.at(idx) {
+                                Some(next) => current = next,
+                                None => return None,
+                            }
+                        }
+                        None => return None,
+                    }
+                }
+            }
+        }
+
+        Some(current)
+    }
+
+    // =========================================================================
+    // Conversion
+    // =========================================================================
+
+    fn escape_json_string(s: &Text) -> Text {
+        let mut escaped = Text.new();
+        escaped.push('"');
+        for c in s.chars() {
+            match c {
+                '"' => { escaped.push('\\'); escaped.push('"'); }
+                '\\' => { escaped.push('\\'); escaped.push('\\'); }
+                '\n' => { escaped.push('\\'); escaped.push('n'); }
+                '\t' => { escaped.push('\\'); escaped.push('t'); }
+                '\r' => { escaped.push('\\'); escaped.push('r'); }
+                '\x08' => { escaped.push('\\'); escaped.push('b'); }
+                '\x0C' => { escaped.push('\\'); escaped.push('f'); }
+                _ => {
+                    let code = c as Int;
+                    if code < 0x20 {
+                        escaped.push('\\');
+                        escaped.push('u');
+                        escaped.push('0');
+                        escaped.push('0');
+                        let hi = (code >> 4) & 0xF;
+                        let lo = code & 0xF;
+                        escaped.push(Char.from_digit(hi, 16).unwrap_or('0'));
+                        escaped.push(Char.from_digit(lo, 16).unwrap_or('0'));
+                    } else {
+                        escaped.push(c);
+                    }
+                }
+            }
+        }
+        escaped.push('"');
+        escaped
+    }
+
+    /// Convert to JSON string representation
+    fn to_json(&self) -> Text {
+        match self {
+            Data.Null => Text.from("null"),
+            Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
+            Data.Int(i) => i.to_text(),
+            Data.Float(f) => f.to_text(),
+            Data.Text(ref s) => Data.escape_json_string(s),
+            Data.Array(ref arr) => {
+                let items = arr.iter()
+                    .map(|item| item.to_json())
+                    .collect<List<Text>>()
+                    .join(", ");
+                f"[{items}]"
+            }
+            Data.Object(ref obj) => {
+                let mut parts: List<Text> = List.new();
+                for (k, v) in obj.iter() {
+                    let escaped_key = Data.escape_json_string(k);
+                    let val_json = v.to_json();
+                    parts.push(f"{escaped_key}: {val_json}");
+                }
+                let pairs = parts.join(", ");
+                f"{{{pairs}}}"
+            }
+        }
+    }
+
+    /// Try to convert to a specific numeric type
+    fn to_number(&self) -> Maybe<Float> {
+        match self {
+            Data.Int(i) => Some(*i as Float),
+            Data.Float(f) => Some(*f),
+            Data.Text(ref s) => s.parse_float().ok(),
+            _ => None,
+        }
+    }
+
+    /// Convert any value to text representation
+    fn to_string(&self) -> Text {
+        match self {
+            Data.Null => Text.from("null"),
+            Data.Bool(b) => b.to_text(),
+            Data.Int(i) => i.to_text(),
+            Data.Float(f) => f.to_text(),
+            Data.Text(ref s) => s.clone(),
+            Data.Array(_) | Data.Object(_) => self.to_json(),
+        }
+    }
+
+    /// Serialize to pretty-printed JSON with indentation.
+    public fn to_json_pretty(&self) -> Text {
+        self.to_json_indent(0)
+    }
+
+    fn to_json_indent(&self, indent: Int) -> Text {
+        let indent_str = "  ".repeat(indent);
+        let next_indent = "  ".repeat(indent + 1);
+        match self {
+            Data.Null => Text.from("null"),
+            Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
+            Data.Int(i) => i.to_text(),
+            Data.Float(f) => f.to_text(),
+            Data.Text(ref s) => Data.escape_json_string(s),
+            Data.Array(ref arr) => {
+                if arr.is_empty() {
+                    return "[]".to_text();
+                }
+                let mut result = "[\n".to_text();
+                let mut first = true;
+                for item in arr.iter() {
+                    if !first {
+                        result.push_str(&",\n");
+                    }
+                    result.push_str(&next_indent);
+                    result.push_str(&item.to_json_indent(indent + 1));
+                    first = false;
+                }
+                result.push('\n');
+                result.push_str(&indent_str);
+                result.push(']');
+                result
+            }
+            Data.Object(ref obj) => {
+                if obj.is_empty() {
+                    return "{}".to_text();
+                }
+                let mut result = "{\n".to_text();
+                let mut first = true;
+                for (k, v) in obj.iter() {
+                    if !first {
+                        result.push_str(&",\n");
+                    }
+                    result.push_str(&next_indent);
+                    result.push_str(&Data.escape_json_string(k));
+                    result.push_str(&": ");
+                    result.push_str(&v.to_json_indent(indent + 1));
+                    first = false;
+                }
+                result.push('\n');
+                result.push_str(&indent_str);
+                result.push('}');
+                result
+            }
+        }
+    }
+
+    /// Merge two Data objects. If both are Object, the other's keys
+    /// overwrite self's keys. Returns a new merged Data.
+    /// For non-object types, returns `other`.
+    public fn merge(&self, other: &Data) -> Data {
+        match (self, other) {
+            (Data.Object(ref a), Data.Object(ref b)) => {
+                let mut result = a.clone();
+                for (k, v) in b.iter() {
+                    result.insert(k.clone(), v.clone());
+                }
+                Data.Object(result)
+            }
+            (_, _) => other.clone(),
+        }
+    }
+
+    /// Deep merge two Data objects. Nested objects are merged recursively.
+    public fn deep_merge(&self, other: &Data) -> Data {
+        match (self, other) {
+            (Data.Object(ref a), Data.Object(ref b)) => {
+                let mut result = a.clone();
+                for (k, v) in b.iter() {
+                    let merged = match result.get(&k) {
+                        Some(existing) => existing.deep_merge(v),
+                        None => v.clone(),
+                    };
+                    result.insert(k.clone(), merged);
+                }
+                Data.Object(result)
+            }
+            (_, _) => other.clone(),
+        }
+    }
+
+    /// Get all keys if this is an Object.
+    public fn keys(&self) -> Maybe<List<Text>> {
+        match self {
+            Data.Object(ref obj) => {
+                let mut ks = List.new();
+                for (k, _) in obj.iter() {
+                    ks.push(k.clone());
+                }
+                Some(ks)
+            }
+            _ => None,
+        }
+    }
+
+    /// Get all values if this is an Object.
+    public fn values(&self) -> Maybe<List<Data>> {
+        match self {
+            Data.Object(ref obj) => {
+                let mut vs = List.new();
+                for (_, v) in obj.iter() {
+                    vs.push(v.clone());
+                }
+                Some(vs)
+            }
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Index implementation for convenient access
+// =============================================================================
+
+/// Index by Text key for object access: data["key"]
+implement Index<Text> for Data {
+    type Output = Maybe<Data>;
+
+    fn index(&self, key: Text) -> Self.Output {
+        self.get(key).map(|d| d.clone())
+    }
+}
+
+/// Index by Int for array access: data[0]
+implement Index<Int> for Data {
+    type Output = Maybe<Data>;
+
+    fn index(&self, index: Int) -> Self.Output {
+        self.at(index).map(|d| d.clone())
+    }
+}
+
+// =============================================================================
+// Protocol implementations
+// =============================================================================
+
+implement Debug for Data {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write(self.to_json())
+    }
+}
+
+implement Clone for Data {
+    fn clone(&self) -> Self {
+        match self {
+            Data.Null => Data.Null,
+            Data.Bool(b) => Data.Bool(*b),
+            Data.Int(i) => Data.Int(*i),
+            Data.Float(f) => Data.Float(*f),
+            Data.Text(ref s) => Data.Text(s.clone()),
+            Data.Array(ref arr) => Data.Array(arr.clone()),
+            Data.Object(ref obj) => Data.Object(obj.clone()),
+        }
+    }
+}
+
+implement PartialEq for Data {
+    fn eq(&self, other: &Self) -> Bool {
+        match (self, other) {
+            (Data.Null, Data.Null) => true,
+            (Data.Bool(a), Data.Bool(b)) => a == b,
+            (Data.Int(a), Data.Int(b)) => a == b,
+            (Data.Float(a), Data.Float(b)) => a == b,
+            (Data.Text(ref a), Data.Text(ref b)) => a == b,
+            (Data.Array(ref a), Data.Array(ref b)) => a == b,
+            (Data.Object(ref a), Data.Object(ref b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Default for Data {
+    fn default() -> Self {
+        Data.Null
+    }
+}
+
+// =============================================================================
+// JSON Parsing (basic implementation)
+// =============================================================================
+
+/// Internal mutable parse position.
+type JsonParser is {
+    input: Text,
+    pos: Int,
+};
+
+implement JsonParser {
+    fn new(input: Text) -> JsonParser {
+        JsonParser { input: input, pos: 0 }
+    }
+
+    fn at_end(&self) -> Bool {
+        self.pos >= self.input.len()
+    }
+
+    fn peek(&self) -> Maybe<Char> {
+        self.input.char_at(self.pos)
+    }
+
+    fn advance(&mut self) -> Maybe<Char> {
+        let c = self.input.char_at(self.pos);
+        if c.is_some() {
+            self.pos = self.pos + 1;
+        }
+        c
+    }
+
+    fn skip_whitespace(&mut self) {
+        while !self.at_end() {
+            let c = self.input.char_at(self.pos);
+            match c {
+                Some(' ') => { self.pos = self.pos + 1; }
+                Some('\t') => { self.pos = self.pos + 1; }
+                Some('\n') => { self.pos = self.pos + 1; }
+                Some('\r') => { self.pos = self.pos + 1; }
+                _ => { return; }
+            }
+        }
+    }
+
+    fn expect(&mut self, expected: Char) -> Result<(), DataError> {
+        match self.advance() {
+            Some(c) => {
+                if c == expected {
+                    Ok(())
+                } else {
+                    Err(DataError.ParseError {
+                        message: f"Expected '{expected}' but got '{c}' at position {self.pos - 1}",
+                    })
+                }
+            }
+            None => Err(DataError.ParseError {
+                message: f"Expected '{expected}' but got end of input",
+            }),
+        }
+    }
+
+    fn parse_value(&mut self) -> Result<Data, DataError> {
+        self.skip_whitespace();
+        match self.peek() {
+            None => Err(DataError.ParseError { message: "Unexpected end of input" }),
+            Some('"') => self.parse_string_value(),
+            Some('{') => self.parse_object(),
+            Some('[') => self.parse_array(),
+            Some('t') => self.parse_true(),
+            Some('f') => self.parse_false(),
+            Some('n') => self.parse_null(),
+            Some(c) => {
+                if c == '-' || (c >= '0' && c <= '9') {
+                    self.parse_number()
+                } else {
+                    Err(DataError.ParseError {
+                        message: f"Unexpected character '{c}' at position {self.pos}",
+                    })
+                }
+            }
+        }
+    }
+
+    fn parse_null(&mut self) -> Result<Data, DataError> {
+        if self.match_literal("null") {
+            Ok(Data.null())
+        } else {
+            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+        }
+    }
+
+    fn parse_true(&mut self) -> Result<Data, DataError> {
+        if self.match_literal("true") {
+            Ok(Data.from_bool(true))
+        } else {
+            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+        }
+    }
+
+    fn parse_false(&mut self) -> Result<Data, DataError> {
+        if self.match_literal("false") {
+            Ok(Data.from_bool(false))
+        } else {
+            Err(DataError.ParseError { message: f"Invalid token at position {self.pos}" })
+        }
+    }
+
+    fn match_literal(&mut self, lit: &str) -> Bool {
+        let lit_text = Text.from(lit);
+        let lit_len = lit_text.len();
+        if self.pos + lit_len > self.input.len() {
+            return false;
+        }
+        let slice = self.input.substring(self.pos, self.pos + lit_len);
+        if slice == lit_text {
+            self.pos = self.pos + lit_len;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_number(&mut self) -> Result<Data, DataError> {
+        let start = self.pos;
+        let mut is_float = false;
+
+        // Optional negative sign
+        if !self.at_end() && self.peek() == Some('-') {
+            self.pos = self.pos + 1;
+        }
+
+        // Integer part
+        if self.at_end() {
+            return Err(DataError.ParseError { message: "Unexpected end in number" });
+        }
+        while !self.at_end() {
+            let c = self.peek().unwrap();
+            if c >= '0' && c <= '9' {
+                self.pos = self.pos + 1;
+            } else {
+                break;
+            }
+        }
+
+        // Fractional part
+        if !self.at_end() && self.peek() == Some('.') {
+            is_float = true;
+            self.pos = self.pos + 1;
+            while !self.at_end() {
+                let c = self.peek().unwrap();
+                if c >= '0' && c <= '9' {
+                    self.pos = self.pos + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Exponent part
+        if !self.at_end() {
+            let c = self.peek().unwrap();
+            if c == 'e' || c == 'E' {
+                is_float = true;
+                self.pos = self.pos + 1;
+                if !self.at_end() {
+                    let sign = self.peek().unwrap();
+                    if sign == '+' || sign == '-' {
+                        self.pos = self.pos + 1;
+                    }
+                }
+                while !self.at_end() {
+                    let c2 = self.peek().unwrap();
+                    if c2 >= '0' && c2 <= '9' {
+                        self.pos = self.pos + 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let num_str = self.input.substring(start, self.pos);
+        if is_float {
+            match num_str.parse_float() {
+                Ok(f) => Ok(Data.from_float(f)),
+                Err(_) => Err(DataError.ParseError {
+                    message: f"Invalid float: {num_str}",
+                }),
+            }
+        } else {
+            match num_str.parse_int() {
+                Ok(i) => Ok(Data.from_int(i)),
+                Err(_) => Err(DataError.ParseError {
+                    message: f"Invalid integer: {num_str}",
+                }),
+            }
+        }
+    }
+
+    fn parse_hex4(&mut self) -> Result<Int, DataError> {
+        let mut value = 0;
+        let mut i = 0;
+        while i < 4 {
+            match self.advance() {
+                None => {
+                    return Err(DataError.ParseError {
+                        message: "Unterminated unicode escape",
+                    });
+                }
+                Some(c) => {
+                    match c.to_digit(16) {
+                        Some(d) => { value = value * 16 + d; }
+                        None => {
+                            return Err(DataError.ParseError {
+                                message: "Invalid hex digit in unicode escape",
+                            });
+                        }
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        Ok(value)
+    }
+
+    fn parse_string_value(&mut self) -> Result<Data, DataError> {
+        let s = self.parse_string()?;
+        Ok(Data.from_text(s))
+    }
+
+    fn parse_string(&mut self) -> Result<Text, DataError> {
+        self.expect('"')?;
+        let mut result = Text.new();
+
+        while !self.at_end() {
+            let c = self.advance().unwrap();
+            if c == '"' {
+                return Ok(result);
+            }
+            if c == '\\' {
+                // Escape sequence
+                match self.advance() {
+                    None => {
+                        return Err(DataError.ParseError {
+                            message: "Unterminated escape sequence",
+                        });
+                    }
+                    Some('"') => result.push('"'),
+                    Some('\\') => result.push('\\'),
+                    Some('/') => result.push('/'),
+                    Some('n') => result.push('\n'),
+                    Some('t') => result.push('\t'),
+                    Some('r') => result.push('\r'),
+                    Some('b') => result.push('\x08'),
+                    Some('f') => result.push('\x0C'),
+                    Some('u') => {
+                        // Parse \uXXXX unicode escape
+                        let cp = self.parse_hex4()?;
+                        if cp >= 0xD800 && cp <= 0xDBFF {
+                            // High surrogate — expect \uXXXX low surrogate
+                            if self.peek() == Some('\\') {
+                                self.advance();
+                                if self.peek() == Some('u') {
+                                    self.advance();
+                                    let low = self.parse_hex4()?;
+                                    if low >= 0xDC00 && low <= 0xDFFF {
+                                        let full = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                                        result.push(full as Char);
+                                    } else {
+                                        return Err(DataError.ParseError {
+                                            message: "Invalid low surrogate in unicode escape",
+                                        });
+                                    }
+                                } else {
+                                    return Err(DataError.ParseError {
+                                        message: "Expected low surrogate after high surrogate",
+                                    });
+                                }
+                            } else {
+                                return Err(DataError.ParseError {
+                                    message: "Expected low surrogate after high surrogate",
+                                });
+                            }
+                        } else if cp >= 0xDC00 && cp <= 0xDFFF {
+                            return Err(DataError.ParseError {
+                                message: "Unexpected low surrogate in unicode escape",
+                            });
+                        } else {
+                            result.push(cp as Char);
+                        }
+                    }
+                    Some(other) => {
+                        result.push('\\');
+                        result.push(other);
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+
+        Err(DataError.ParseError { message: "Unterminated string" })
+    }
+
+    fn parse_array(&mut self) -> Result<Data, DataError> {
+        self.expect('[')?;
+        self.skip_whitespace();
+
+        let mut items: List<Data> = List.new();
+
+        if !self.at_end() && self.peek() == Some(']') {
+            self.pos = self.pos + 1;
+            return Ok(Data.from_array(items));
+        }
+
+        // Parse first element
+        let first = self.parse_value()?;
+        items.push(first);
+
+        // Parse remaining elements
+        self.skip_whitespace();
+        while !self.at_end() && self.peek() == Some(',') {
+            self.pos = self.pos + 1; // consume comma
+            let item = self.parse_value()?;
+            items.push(item);
+            self.skip_whitespace();
+        }
+
+        self.expect(']')?;
+        Ok(Data.from_array(items))
+    }
+
+    fn parse_object(&mut self) -> Result<Data, DataError> {
+        self.expect('{')?;
+        self.skip_whitespace();
+
+        let mut map: Map<Text, Data> = Map.new();
+
+        if !self.at_end() && self.peek() == Some('}') {
+            self.pos = self.pos + 1;
+            return Ok(Data.from_object(map));
+        }
+
+        // Parse first key-value pair
+        self.skip_whitespace();
+        let key = self.parse_string()?;
+        self.skip_whitespace();
+        self.expect(':')?;
+        let value = self.parse_value()?;
+        map.insert(key, value);
+
+        // Parse remaining pairs
+        self.skip_whitespace();
+        while !self.at_end() && self.peek() == Some(',') {
+            self.pos = self.pos + 1; // consume comma
+            self.skip_whitespace();
+            let k = self.parse_string()?;
+            self.skip_whitespace();
+            self.expect(':')?;
+            let v = self.parse_value()?;
+            map.insert(k, v);
+            self.skip_whitespace();
+        }
+
+        self.expect('}')?;
+        Ok(Data.from_object(map))
+    }
+}
+
+/// Parse JSON string into Data.
+///
+/// Supports all JSON value types: null, booleans, numbers (integer and float),
+/// strings (with escape sequences), arrays, and objects.
+///
+/// # Examples
+/// ```verum
+/// let data = parse_json("{\"name\": \"Alice\", \"age\": 30}").unwrap();
+/// assert_eq(data["name"].as_text().unwrap(), "Alice");
+/// assert_eq(data["age"].as_int().unwrap(), 30);
+/// ```
+public fn parse_json(input: Text) -> Result<Data, DataError> {
+    let mut parser = JsonParser.new(input);
+    let result = parser.parse_value()?;
+    parser.skip_whitespace();
+    if !parser.at_end() {
+        Err(DataError.ParseError {
+            message: f"Unexpected trailing content at position {parser.pos}",
+        })
+    } else {
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// Builder pattern for Data objects
+// =============================================================================
+
+/// Builder for constructing Data objects incrementally
+type DataBuilder is {
+    data: Data,
+};
+
+implement DataBuilder {
+    /// Create a new builder starting with empty object
+    fn new() -> DataBuilder {
+        DataBuilder { data: Data.empty_object() }
+    }
+
+    /// Create builder starting with empty array
+    fn new_array() -> DataBuilder {
+        DataBuilder { data: Data.empty_array() }
+    }
+
+    /// Set field (for objects)
+    fn set(mut self, key: Text, value: Data) -> Self {
+        let _ = self.data.set(key, value);
+        self
+    }
+
+    /// Push element (for arrays)
+    fn push(mut self, value: Data) -> Self {
+        let _ = self.data.push(value);
+        self
+    }
+
+    /// Build the final Data value
+    fn build(self) -> Data {
+        self.data
+    }
+}

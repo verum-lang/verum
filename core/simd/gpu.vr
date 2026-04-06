@@ -1,0 +1,284 @@
+// =============================================================================
+// simd/gpu.vr - GPU Compute Types & Kernel API
+// =============================================================================
+// Layer: 3 (Extended)
+// Dependencies: core
+// =============================================================================
+//
+// Verum GPU compute API for high-performance parallel computation.
+// Targets: CUDA (NVIDIA), ROCm (AMD), Metal (Apple), Vulkan.
+//
+// Architecture:
+//   @device(gpu) fn kernel(params...) { ... }
+//   → VBC tensor/gpu opcodes
+//   → MLIR gpu/linalg/tensor dialects
+//   → Target-specific lowering (NVVM/ROCDL/Metal/SPIRV)
+//   → GPU binary (PTX/HSACO/AIR/SPIRV)
+//
+// Performance model:
+//   - Zero-copy host↔device transfers where possible
+//   - Automatic fusion of element-wise operations
+//   - Tensor core utilization on NVIDIA (TF32/FP16 matmul)
+//   - Workgroup-level shared memory for reductions
+//
+// =============================================================================
+
+module gpu;
+
+mount core.*;
+
+// =============================================================================
+// GPU Device Management
+// =============================================================================
+
+/// GPU device handle.
+public type GpuDevice is {
+    id: Int,
+    name: Text,
+    compute_capability: Int,  // e.g., 89 for SM_89 (Ada Lovelace)
+    memory_bytes: Int,
+    max_threads_per_block: Int,
+    max_shared_memory: Int,
+    warp_size: Int,
+};
+
+/// GPU target backend.
+public type GpuBackend is
+    Cuda           // NVIDIA CUDA (PTX → cubin)
+    | Rocm         // AMD ROCm (HSACO)
+    | Metal        // Apple Metal (AIR → metallib)
+    | Vulkan;      // Vulkan (SPIR-V)
+
+/// GPU compilation configuration.
+public type GpuConfig is {
+    backend: GpuBackend,
+    opt_level: Int,                // 0-3
+    enable_tensor_cores: Bool,     // NVIDIA Tensor Cores
+    max_shared_memory: Int,        // bytes per block
+    default_block_size: Int,       // threads per block (default 256)
+    enable_async_copy: Bool,       // async memory transfers
+    compute_capability: Int,       // target SM version (CUDA)
+};
+
+implement GpuConfig {
+    /// Default Metal configuration for Apple Silicon.
+    public fn metal() -> GpuConfig {
+        GpuConfig {
+            backend: Metal,
+            opt_level: 2,
+            enable_tensor_cores: false,
+            max_shared_memory: 32768,  // 32KB
+            default_block_size: 256,
+            enable_async_copy: true,
+            compute_capability: 0,     // N/A for Metal
+        }
+    }
+
+    /// Default CUDA configuration.
+    public fn cuda(sm_version: Int) -> GpuConfig {
+        GpuConfig {
+            backend: Cuda,
+            opt_level: 2,
+            enable_tensor_cores: sm_version >= 70,  // Volta+
+            max_shared_memory: 49152,  // 48KB
+            default_block_size: 256,
+            enable_async_copy: sm_version >= 80,   // Ampere+
+            compute_capability: sm_version,
+        }
+    }
+
+    /// Default ROCm configuration.
+    public fn rocm() -> GpuConfig {
+        GpuConfig {
+            backend: Rocm,
+            opt_level: 2,
+            enable_tensor_cores: false,
+            max_shared_memory: 65536,  // 64KB
+            default_block_size: 256,
+            enable_async_copy: true,
+            compute_capability: 0,
+        }
+    }
+
+    /// Default Vulkan configuration.
+    public fn vulkan() -> GpuConfig {
+        GpuConfig {
+            backend: Vulkan,
+            opt_level: 2,
+            enable_tensor_cores: false,
+            max_shared_memory: 32768,  // 32KB
+            default_block_size: 256,
+            enable_async_copy: false,
+            compute_capability: 0,
+        }
+    }
+
+    /// Auto-detect best GPU backend for current platform.
+    public fn auto() -> GpuConfig {
+        @cfg(target_os = "macos")
+        { GpuConfig.metal() }
+
+        @cfg(target_os = "linux")
+        { GpuConfig.cuda(80) }  // Default to Ampere
+
+        @cfg(target_os = "windows")
+        { GpuConfig.cuda(80) }
+    }
+}
+
+// =============================================================================
+// GPU Memory Types
+// =============================================================================
+
+/// GPU buffer — typed memory on device.
+public type GpuBuffer<T> is {
+    ptr: Int,           // device pointer
+    len: Int,           // element count
+    size_bytes: Int,    // total bytes
+    device_id: Int,     // which GPU
+};
+
+/// Memory transfer direction.
+public type TransferKind is
+    HostToDevice
+    | DeviceToHost
+    | DeviceToDevice;
+
+// =============================================================================
+// GPU Kernel Execution
+// =============================================================================
+
+/// Execution grid configuration.
+public type Grid is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+/// Thread block configuration.
+public type Block is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+implement Grid {
+    /// Create 1D grid.
+    public fn d1(x: Int) -> Grid { Grid { x: x, y: 1, z: 1 } }
+    /// Create 2D grid.
+    public fn d2(x: Int, y: Int) -> Grid { Grid { x: x, y: y, z: 1 } }
+    /// Create 3D grid.
+    public fn d3(x: Int, y: Int, z: Int) -> Grid { Grid { x: x, y: y, z: z } }
+}
+
+implement Block {
+    /// Create 1D block.
+    public fn d1(x: Int) -> Block { Block { x: x, y: 1, z: 1 } }
+    /// Create 2D block.
+    public fn d2(x: Int, y: Int) -> Block { Block { x: x, y: y, z: 1 } }
+    /// Create 3D block.
+    public fn d3(x: Int, y: Int, z: Int) -> Block { Block { x: x, y: y, z: z } }
+
+    /// Calculate total threads in block.
+    public fn total_threads(&self) -> Int { self.x * self.y * self.z }
+}
+
+// =============================================================================
+// GPU Thread Intrinsics (available inside @device(gpu) functions)
+// =============================================================================
+
+/// Get thread index within block.
+@intrinsic("gpu_thread_id_x")
+public fn thread_id_x() -> Int;
+
+@intrinsic("gpu_thread_id_y")
+public fn thread_id_y() -> Int;
+
+@intrinsic("gpu_thread_id_z")
+public fn thread_id_z() -> Int;
+
+/// Get block index within grid.
+@intrinsic("gpu_block_id_x")
+public fn block_id_x() -> Int;
+
+@intrinsic("gpu_block_id_y")
+public fn block_id_y() -> Int;
+
+@intrinsic("gpu_block_id_z")
+public fn block_id_z() -> Int;
+
+/// Get block dimensions.
+@intrinsic("gpu_block_dim_x")
+public fn block_dim_x() -> Int;
+
+@intrinsic("gpu_block_dim_y")
+public fn block_dim_y() -> Int;
+
+@intrinsic("gpu_block_dim_z")
+public fn block_dim_z() -> Int;
+
+/// Get grid dimensions.
+@intrinsic("gpu_grid_dim_x")
+public fn grid_dim_x() -> Int;
+
+@intrinsic("gpu_grid_dim_y")
+public fn grid_dim_y() -> Int;
+
+@intrinsic("gpu_grid_dim_z")
+public fn grid_dim_z() -> Int;
+
+/// Synchronize all threads in a block.
+@intrinsic("gpu_sync_threads")
+public fn sync_threads();
+
+/// Synchronize threads within a warp.
+@intrinsic("gpu_sync_warp")
+public fn sync_warp();
+
+/// Get warp size (32 for CUDA/ROCm, varies for Metal).
+@intrinsic("gpu_warp_size")
+public fn warp_size() -> Int;
+
+/// Calculate global linear thread ID.
+public fn global_thread_id() -> Int {
+    block_id_x() * block_dim_x() + thread_id_x()
+}
+
+/// Calculate global thread ID for 2D grids.
+public fn global_thread_id_2d() -> (Int, Int) {
+    let gx = block_id_x() * block_dim_x() + thread_id_x();
+    let gy = block_id_y() * block_dim_y() + thread_id_y();
+    (gx, gy)
+}
+
+// =============================================================================
+// Shared Memory (block-local fast memory)
+// =============================================================================
+
+/// Allocate shared memory (visible to all threads in block).
+@intrinsic("gpu_shared_mem_alloc")
+public fn shared_alloc(size_bytes: Int) -> Int;
+
+/// Load i64 from shared memory.
+@intrinsic("gpu_shared_mem_load_i64")
+public fn shared_load_i64(ptr: Int, offset: Int) -> Int;
+
+/// Store i64 to shared memory.
+@intrinsic("gpu_shared_mem_store_i64")
+public fn shared_store_i64(ptr: Int, offset: Int, value: Int);
+
+/// Load f64 from shared memory.
+@intrinsic("gpu_shared_mem_load_f64")
+public fn shared_load_f64(ptr: Int, offset: Int) -> Float;
+
+/// Store f64 to shared memory.
+@intrinsic("gpu_shared_mem_store_f64")
+public fn shared_store_f64(ptr: Int, offset: Int, value: Float);
+
+/// Atomic add on shared memory (i64).
+@intrinsic("gpu_shared_mem_atomic_add_i64")
+public fn shared_atomic_add_i64(ptr: Int, offset: Int, value: Int) -> Int;
+
+/// Atomic add on shared memory (f64).
+@intrinsic("gpu_shared_mem_atomic_add_f64")
+public fn shared_atomic_add_f64(ptr: Int, offset: Int, value: Float) -> Float;

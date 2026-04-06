@@ -1,0 +1,76 @@
+// =============================================================================
+// layout/shortcuts.vr - Convenience layout functions
+// =============================================================================
+// Common layout patterns as one-liner functions: header/body/footer splits,
+// sidebar+main, centered boxes, equal columns/rows, percentage splits.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#16.2
+// =============================================================================
+
+module shortcuts;
+
+mount super.rect.Rect;
+mount super.constraint.{Constraint, Layout};
+
+/// Split into header, body, footer areas.
+public fn header_body_footer(area: Rect, header_h: Int, footer_h: Int) -> (Rect, Rect, Rect) {
+    let mut constraints = List.new();
+    constraints.push(Constraint.Length(header_h));
+    constraints.push(Constraint.Fill(1));
+    constraints.push(Constraint.Length(footer_h));
+    let areas = Layout.vertical().constraints(constraints).split(area);
+    (areas[0], areas[1], areas[2])
+}
+
+/// Split into sidebar and main content.
+public fn sidebar_main(area: Rect, sidebar_width: Int) -> (Rect, Rect) {
+    let mut constraints = List.new();
+    constraints.push(Constraint.Length(sidebar_width));
+    constraints.push(Constraint.Fill(1));
+    let areas = Layout.horizontal().constraints(constraints).split(area);
+    (areas[0], areas[1])
+}
+
+/// Center a fixed-size box within an area.
+public fn centered(area: Rect, width: Int, height: Int) -> Rect {
+    let mut v_constraints = List.new();
+    v_constraints.push(Constraint.Fill(1));
+    v_constraints.push(Constraint.Length(height));
+    v_constraints.push(Constraint.Fill(1));
+    let vert = Layout.vertical().constraints(v_constraints).split(area);
+
+    let mut h_constraints = List.new();
+    h_constraints.push(Constraint.Fill(1));
+    h_constraints.push(Constraint.Length(width));
+    h_constraints.push(Constraint.Fill(1));
+    let horiz = Layout.horizontal().constraints(h_constraints).split(vert[1]);
+    horiz[1]
+}
+
+/// Create N equal-width columns.
+public fn equal_columns(area: Rect, n: Int) -> List<Rect> {
+    let mut constraints = List.new();
+    for _ in 0..n { constraints.push(Constraint.Fill(1)); }
+    Layout.horizontal().constraints(constraints).spacing(1).split(area)
+}
+
+/// Create N equal-height rows.
+public fn equal_rows(area: Rect, n: Int) -> List<Rect> {
+    let mut constraints = List.new();
+    for _ in 0..n { constraints.push(Constraint.Fill(1)); }
+    Layout.vertical().constraints(constraints).split(area)
+}
+
+/// Create a percentage-based horizontal split.
+public fn percentage_split(area: Rect, percentages: &List<Int>) -> List<Rect> {
+    let mut constraints = List.new();
+    for p in percentages { constraints.push(Constraint.Percentage(p)); }
+    Layout.horizontal().constraints(constraints).split(area)
+}
+
+/// Create a percentage-based vertical split.
+public fn percentage_rows(area: Rect, percentages: &List<Int>) -> List<Rect> {
+    let mut constraints = List.new();
+    for p in percentages { constraints.push(Constraint.Percentage(p)); }
+    Layout.vertical().constraints(constraints).split(area)
+}

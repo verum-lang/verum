@@ -1,0 +1,10 @@
+// Test async/await functionality
+async fn async_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn main() {
+    // Test with await
+    let result = await async_add(5, 3);
+    print(f"Awaited result: {result}");
+}

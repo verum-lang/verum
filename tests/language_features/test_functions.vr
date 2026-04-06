@@ -1,0 +1,32 @@
+// Test: Functions with various signatures
+// This tests different function definitions and calls
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn greet(name: Text) {
+    print(f"Hello, {name}!");
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn main() {
+    print(f"Testing functions...");
+
+    let result = add(5, 10);
+    print(f"5 + 10 = {result}");
+
+    greet("Verum");
+
+    let fact5 = factorial(5);
+    print(f"5! = {fact5}");
+
+    print(f"Functions test complete!");
+}

@@ -1,0 +1,62 @@
+// Test: FFI - Foreign Function Interface declarations
+// Priority: Advanced
+// Expected output: FFI binding tests
+
+// ========== Basic FFI Declarations ==========
+
+// External C function declarations
+ffi CStdlib {
+    @extern("C") fn test_fn() -> Int;
+}
+
+// ========== FFI Structs ==========
+
+// C-compatible struct
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// ========== FFI Enums ==========
+
+// C-compatible enum
+type Status is
+    | Success
+    | Error
+    | Pending;
+
+// ========== FFI Testing Functions ==========
+
+fn test_basic_ffi() {
+    print(f"=== Basic FFI ===");
+    print(f"FFI declarations loaded");
+}
+
+fn test_ffi_structs() {
+    print(f"=== FFI Structs ===");
+
+    // Create C-compatible struct
+    let point = Point { x: 10.0, y: 20.0 };
+    print(f"Point: ({point.x}, {point.y})");
+}
+
+fn test_ffi_enums() {
+    print(f"=== FFI Enums ===");
+
+    let status = Status.Success;
+    match status {
+        Status.Success => print(f"Success"),
+        Status.Error => print(f"Error"),
+        Status.Pending => print(f"Pending"),
+    }
+}
+
+fn main() {
+    print(f"Starting FFI tests...");
+
+    test_basic_ffi();
+    test_ffi_structs();
+    test_ffi_enums();
+
+    print(f"All FFI tests complete");
+}

@@ -1,0 +1,53 @@
+module runtime.tls;
+
+/// Get TLS base pointer.
+@intrinsic("verum.runtime.tls_get_base")
+public fn tls_get_base() -> Int;
+
+/// Get a TLS slot value.
+@intrinsic("verum.runtime.tls_slot_get")
+public fn tls_slot_get(slot: Int) -> Int;
+
+/// Set a TLS slot value.
+@intrinsic("verum.runtime.tls_slot_set")
+public fn tls_slot_set(slot: Int, value: Int);
+
+/// Clear a TLS slot.
+@intrinsic("verum.runtime.tls_slot_clear")
+public fn tls_slot_clear(slot: Int);
+
+/// Check if a TLS slot has a value.
+@intrinsic("verum.runtime.tls_slot_has")
+public fn tls_slot_has(slot: Int) -> Bool;
+
+/// Push a TLS frame.
+@intrinsic("verum.runtime.tls_frame_push")
+public fn tls_frame_push() -> Int;
+
+/// Pop a TLS frame.
+@intrinsic("verum.runtime.tls_frame_pop")
+public fn tls_frame_pop(frame: Int);
+
+/// Read a pointer from TLS.
+@intrinsic("verum.runtime.tls_read_ptr")
+public fn tls_read_ptr(offset: Int) -> Int;
+
+/// Write a pointer to TLS.
+@intrinsic("verum.runtime.tls_write_ptr")
+public fn tls_write_ptr(offset: Int, value: Int);
+
+/// Read an i32 from TLS.
+@intrinsic("verum.runtime.tls_read_i32")
+public fn tls_read_i32(offset: Int) -> Int;
+
+/// Write an i32 to TLS.
+@intrinsic("verum.runtime.tls_write_i32")
+public fn tls_write_i32(offset: Int, value: Int);
+
+/// Read a usize from TLS.
+@intrinsic("verum.runtime.tls_read_usize")
+public fn tls_read_usize(offset: Int) -> Int;
+
+/// Write a usize to TLS.
+@intrinsic("verum.runtime.tls_write_usize")
+public fn tls_write_usize(offset: Int, value: Int);

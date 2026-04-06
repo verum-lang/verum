@@ -1,0 +1,37 @@
+// Binary Search Tree operations
+// Spec: 03-type-system.md#1.4.1 (Algebraic data types)
+
+fn main() {
+    // Build a simple tree
+    let tree = Node(5,
+        Node(3, Empty, Empty),
+        Node(7, Empty, Empty)
+    );
+
+    // Search for values
+    let found_5 = search(tree, 5);
+    let found_10 = search(tree, 10);
+
+    print(f"Tree search(5): {found_5}");
+    print(f"Tree search(10): {found_10}");
+}
+
+// Binary tree type
+type Tree<T> is
+    | Empty
+    | Node(T, Tree<T>, Tree<T>)
+
+fn search<T>(tree: Tree<T>, target: T) -> Bool {
+    match tree {
+        Empty => false,
+        Node(value, left, right) => {
+            if value == target {
+                true
+            } else if target < value {
+                search(left, target)
+            } else {
+                search(right, target)
+            }
+        }
+    }
+}

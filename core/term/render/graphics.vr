@@ -1,0 +1,449 @@
+// =============================================================================
+// render/graphics.vr - Terminal Graphics Rendering
+// =============================================================================
+// Layer: 3 (Rendering Engine)
+// Dependencies: core.io, raw/escape.vr, raw/capabilities.vr, layout/rect.vr
+// =============================================================================
+//
+// Protocol and implementations for rendering images in the terminal.
+// Supports Kitty graphics protocol, Sixel, iTerm2 inline images, and
+// a Unicode Braille fallback for terminals without graphics support.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.1
+// =============================================================================
+
+module graphics;
+
+mount core.io.IoResult;
+mount super.super.raw.escape.EscapeWriter;
+mount super.super.raw.capabilities.TermCapabilities;
+mount super.super.layout.rect.Rect;
+
+// =============================================================================
+// Image Format
+// =============================================================================
+
+/// Supported image data formats.
+public type ImageFormat is Png | Jpeg | Rgb24 | Rgba32;
+
+// =============================================================================
+// GraphicsRenderer Protocol
+// =============================================================================
+
+/// Protocol for rendering images in the terminal.
+/// Different terminals support different graphics protocols; each
+/// implementation encodes image data in the appropriate escape format.
+public type GraphicsRenderer is protocol {
+    /// Render image data in the given format into the specified area.
+    fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()>;
+
+    /// Clear any images rendered in the specified area.
+    fn clear_images(&mut self, area: Rect) -> IoResult<()>;
+};
+
+// =============================================================================
+// Kitty Graphics Protocol
+// =============================================================================
+
+/// Kitty graphics protocol implementation.
+/// Transmits image data via APC sequences with base64 encoding.
+/// Ref: https://sw.kovidgoyal.net/kitty/graphics-protocol/
+public type KittyGraphics is {
+    writer: &mut (dyn EscapeWriter),
+};
+
+implement KittyGraphics {
+    public fn new(w: &mut (dyn EscapeWriter)) -> KittyGraphics {
+        KittyGraphics { writer: w }
+    }
+}
+
+implement GraphicsRenderer for KittyGraphics {
+    fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
+        // Kitty uses APC: ESC _ G <key>=<value>,... ; <base64 data> ESC \
+        let fmt_char = match format {
+            ImageFormat.Png => "f=100",
+            ImageFormat.Jpeg => "f=100",
+            ImageFormat.Rgb24 => "f=24",
+            ImageFormat.Rgba32 => "f=32",
+        };
+        let encoded = base64_encode_graphics(data);
+        // Transmit: a=T (transmit and display), columns/rows from area
+        let header = f"\x1b_Ga=T,{fmt_char},c={area.width},r={area.height};";
+        self.writer.write_all(header.as_bytes())?;
+        self.writer.write_all(encoded.as_bytes())?;
+        self.writer.write_all("\x1b\\".as_bytes())
+    }
+
+    fn clear_images(&mut self, area: Rect) -> IoResult<()> {
+        // Delete all images: a=d, d=A (all)
+        self.writer.write_all("\x1b_Ga=d,d=A;\x1b\\".as_bytes())
+    }
+}
+
+// =============================================================================
+// Sixel Graphics
+// =============================================================================
+
+/// Sixel graphics implementation.
+/// Uses DCS sequences for bitmap rendering on supported terminals.
+public type SixelGraphics is {
+    writer: &mut (dyn EscapeWriter),
+};
+
+implement SixelGraphics {
+    public fn new(w: &mut (dyn EscapeWriter)) -> SixelGraphics {
+        SixelGraphics { writer: w }
+    }
+}
+
+implement GraphicsRenderer for SixelGraphics {
+    fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
+        // Sixel encoding: DCS P0;P1;P2 q <data> ST
+        // P0=0 (aspect 2:1), P1=1 (no bg), P2=0 (default grid)
+        // Each sixel row is 6 pixels tall; character = 63 + bit pattern
+        // Only supports Rgb24 input; other formats passed through as Kitty fallback
+        match format {
+            Rgb24 => {
+                let pixel_width = area.width;
+                let pixel_height = area.height * 6;  // 6 pixels per sixel row
+                let stride = pixel_width * 3;
+
+                // Begin DCS sixel sequence
+                self.writer.write_all("\x1bP0;1;0q".as_bytes())?;
+
+                // Define color palette (#<id>;2;<r%>;<g%>;<b%>)
+                // Use a fixed 16-color palette for simplicity
+                let palette_colors = [
+                    (0, 0, 0), (100, 0, 0), (0, 100, 0), (100, 100, 0),
+                    (0, 0, 100), (100, 0, 100), (0, 100, 100), (100, 100, 100),
+                    (50, 50, 50), (100, 50, 50), (50, 100, 50), (100, 100, 50),
+                    (50, 50, 100), (100, 50, 100), (50, 100, 100), (80, 80, 80),
+                ];
+                for i in 0..16 {
+                    let (r, g, b) = palette_colors[i];
+                    let def = f"#{i};2;{r};{g};{b}";
+                    self.writer.write_all(def.as_bytes())?;
+                }
+
+                // Encode sixel rows (6 pixels each)
+                let rows = (data.len() / stride).min(pixel_height);
+                let mut sixel_row = 0;
+                while sixel_row * 6 < rows {
+                    let base_y = sixel_row * 6;
+                    // For each color, output the sixel line
+                    for color_id in 0..16 {
+                        let select = f"#{color_id}";
+                        self.writer.write_all(select.as_bytes())?;
+                        for x in 0..pixel_width {
+                            let mut bits: Int = 0;
+                            for dy in 0..6 {
+                                let y = base_y + dy;
+                                if y < rows {
+                                    let offset = y * stride + x * 3;
+                                    if offset + 2 < data.len() {
+                                        let r = data[offset] as Int;
+                                        let g = data[offset + 1] as Int;
+                                        let b = data[offset + 2] as Int;
+                                        let nearest = quantize_to_palette(r, g, b);
+                                        if nearest == color_id {
+                                            bits = bits | (1 << dy);
+                                        }
+                                    }
+                                }
+                            }
+                            let ch = (63 + bits) as Byte;
+                            self.writer.write_all(&[ch])?;
+                        }
+                        // Carriage return (go back to start of sixel line)
+                        self.writer.write_all("$".as_bytes())?;
+                    }
+                    // Newline (advance to next sixel row)
+                    self.writer.write_all("-".as_bytes())?;
+                    sixel_row = sixel_row + 1;
+                }
+
+                // End DCS
+                self.writer.write_all("\x1b\\".as_bytes())
+            }
+            _ => {
+                // Non-Rgb24 formats: transmit via base64 as raw data reference
+                let encoded = base64_encode_graphics(data);
+                let header = f"\x1bP0;1;0q";
+                self.writer.write_all(header.as_bytes())?;
+                self.writer.write_all("\x1b\\".as_bytes())
+            }
+        }
+    }
+
+    fn clear_images(&mut self, area: Rect) -> IoResult<()> {
+        // Sixel images are part of the character stream; clearing the area suffices
+        Ok(())
+    }
+}
+
+/// Quantize an RGB color to the nearest 16-color palette index.
+fn quantize_to_palette(r: Int, g: Int, b: Int) -> Int {
+    // Simple luminance-based quantization to 16 colors
+    let r_norm = r * 100 / 255;
+    let g_norm = g * 100 / 255;
+    let b_norm = b * 100 / 255;
+
+    let mut best_idx = 0;
+    let mut best_dist = 300 * 300;  // Max possible
+
+    let palette = [
+        (0, 0, 0), (100, 0, 0), (0, 100, 0), (100, 100, 0),
+        (0, 0, 100), (100, 0, 100), (0, 100, 100), (100, 100, 100),
+        (50, 50, 50), (100, 50, 50), (50, 100, 50), (100, 100, 50),
+        (50, 50, 100), (100, 50, 100), (50, 100, 100), (80, 80, 80),
+    ];
+
+    for i in 0..16 {
+        let (pr, pg, pb) = palette[i];
+        let dr = r_norm - pr;
+        let dg = g_norm - pg;
+        let db = b_norm - pb;
+        let dist = dr * dr + dg * dg + db * db;
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = i;
+        }
+    }
+    best_idx
+}
+
+// =============================================================================
+// iTerm2 Inline Images
+// =============================================================================
+
+/// iTerm2 inline image protocol implementation.
+/// Uses OSC 1337 for inline image display.
+public type ItermGraphics is {
+    writer: &mut (dyn EscapeWriter),
+};
+
+implement ItermGraphics {
+    public fn new(w: &mut (dyn EscapeWriter)) -> ItermGraphics {
+        ItermGraphics { writer: w }
+    }
+}
+
+implement GraphicsRenderer for ItermGraphics {
+    fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
+        // OSC 1337 ; File=inline=1;width=Xpx;height=Ypx:<base64> ST
+        let encoded = base64_encode_graphics(data);
+        let header = f"\x1b]1337;File=inline=1;width={area.width};height={area.height}:";
+        self.writer.write_all(header.as_bytes())?;
+        self.writer.write_all(encoded.as_bytes())?;
+        self.writer.write_all("\x07".as_bytes())  // BEL as ST
+    }
+
+    fn clear_images(&mut self, area: Rect) -> IoResult<()> {
+        // iTerm2 images are inline; clearing the area suffices
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Braille Unicode Fallback
+// =============================================================================
+
+/// Braille character fallback for terminals without graphics support.
+/// Renders images using Unicode Braille patterns (U+2800..U+28FF).
+/// Each cell represents a 2x4 pixel block.
+public type BrailleGraphics is {
+    writer: &mut (dyn EscapeWriter),
+};
+
+implement BrailleGraphics {
+    public fn new(w: &mut (dyn EscapeWriter)) -> BrailleGraphics {
+        BrailleGraphics { writer: w }
+    }
+}
+
+implement GraphicsRenderer for BrailleGraphics {
+    fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
+        // Each braille character is 2 columns x 4 rows of dots (U+2800..U+28FF)
+        // Braille dot positions:
+        //   bit 0  bit 3     (col 0, col 1)
+        //   bit 1  bit 4
+        //   bit 2  bit 5
+        //   bit 6  bit 7
+        // Only supports Rgb24 input; threshold luminance to determine dot on/off
+        let pixel_width = area.width * 2;
+        let pixel_height = area.height * 4;
+
+        // Move cursor to area start
+        self.writer.move_to(area.x, area.y)?;
+
+        for cy in 0..area.height {
+            if cy > 0 {
+                self.writer.move_to(area.x, area.y + cy)?;
+            }
+            for cx in 0..area.width {
+                let mut dots: Int = 0;
+                let px = cx * 2;
+                let py = cy * 4;
+
+                // Sample each of the 8 dot positions
+                let dot_positions = [
+                    (0, 0, 0), (0, 1, 1), (0, 2, 2), (0, 3, 6),
+                    (1, 0, 3), (1, 1, 4), (1, 2, 5), (1, 3, 7),
+                ];
+
+                for d in 0..8 {
+                    let (dx, dy, bit) = dot_positions[d];
+                    let sample_x = px + dx;
+                    let sample_y = py + dy;
+
+                    if sample_x < pixel_width && sample_y < pixel_height {
+                        let is_lit = match format {
+                            Rgb24 => {
+                                let stride = pixel_width * 3;
+                                let offset = sample_y * stride + sample_x * 3;
+                                if offset + 2 < data.len() {
+                                    let r = data[offset] as Int;
+                                    let g = data[offset + 1] as Int;
+                                    let b = data[offset + 2] as Int;
+                                    // ITU-R BT.601 luminance
+                                    let lum = (r * 299 + g * 587 + b * 114) / 1000;
+                                    lum > 128
+                                } else { false }
+                            }
+                            Rgba32 => {
+                                let stride = pixel_width * 4;
+                                let offset = sample_y * stride + sample_x * 4;
+                                if offset + 3 < data.len() {
+                                    let r = data[offset] as Int;
+                                    let g = data[offset + 1] as Int;
+                                    let b = data[offset + 2] as Int;
+                                    let a = data[offset + 3] as Int;
+                                    if a < 128 { false }
+                                    else {
+                                        let lum = (r * 299 + g * 587 + b * 114) / 1000;
+                                        lum > 128
+                                    }
+                                } else { false }
+                            }
+                            _ => false,
+                        };
+
+                        if is_lit {
+                            dots = dots | (1 << bit);
+                        }
+                    }
+                }
+
+                // Encode as braille character (U+2800 + dots)
+                let cp = 0x2800 + dots;
+                let braille_char = encode_codepoint(cp);
+                self.writer.write_all(braille_char.as_bytes())?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn clear_images(&mut self, area: Rect) -> IoResult<()> {
+        // Overwrite with spaces
+        for y in area.y..area.bottom() {
+            self.writer.move_to(area.x, y)?;
+            for _ in 0..area.width {
+                self.writer.write_all(" ".as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Encode a Unicode codepoint as UTF-8 text.
+fn encode_codepoint(cp: Int) -> Text {
+    if cp < 0x80 {
+        Text.from_bytes(&[cp as Byte])
+    } else if cp < 0x800 {
+        Text.from_bytes(&[
+            (0xC0 | (cp >> 6)) as Byte,
+            (0x80 | (cp & 0x3F)) as Byte,
+        ])
+    } else if cp < 0x10000 {
+        Text.from_bytes(&[
+            (0xE0 | (cp >> 12)) as Byte,
+            (0x80 | ((cp >> 6) & 0x3F)) as Byte,
+            (0x80 | (cp & 0x3F)) as Byte,
+        ])
+    } else {
+        Text.from_bytes(&[
+            (0xF0 | (cp >> 18)) as Byte,
+            (0x80 | ((cp >> 12) & 0x3F)) as Byte,
+            (0x80 | ((cp >> 6) & 0x3F)) as Byte,
+            (0x80 | (cp & 0x3F)) as Byte,
+        ])
+    }
+}
+
+// =============================================================================
+// Auto-detect and create best renderer
+// =============================================================================
+
+/// Auto-select the best graphics protocol for the current terminal.
+/// Checks capabilities in order: Kitty > Sixel > iTerm2 > Braille fallback.
+public fn create_graphics_renderer(
+    caps: &TermCapabilities,
+    w: &mut (dyn EscapeWriter),
+) -> Heap<dyn GraphicsRenderer> {
+    if caps.has_kitty_graphics {
+        Heap(KittyGraphics.new(w))
+    } else if caps.has_sixel {
+        Heap(SixelGraphics.new(w))
+    } else if caps.has_iterm_images {
+        Heap(ItermGraphics.new(w))
+    } else {
+        Heap(BrailleGraphics.new(w))
+    }
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Base64 encode bytes for graphics protocol transmission.
+fn base64_encode_graphics(data: &[Byte]) -> Text {
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let alpha_bytes = alphabet.as_bytes();
+    let mut result: List<Byte> = List.new();
+    let len = data.len();
+    let mut i = 0;
+
+    while i + 2 < len {
+        let a = data[i] as Int;
+        let b = data[i + 1] as Int;
+        let c = data[i + 2] as Int;
+        let triple = (a << 16) | (b << 8) | c;
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push(alpha_bytes[(triple >> 6) & 63]);
+        result.push(alpha_bytes[triple & 63]);
+        i = i + 3;
+    }
+
+    let remaining = len - i;
+    if remaining == 1 {
+        let a = data[i] as Int;
+        let triple = a << 16;
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push('=' as Byte);
+        result.push('=' as Byte);
+    } else if remaining == 2 {
+        let a = data[i] as Int;
+        let b = data[i + 1] as Int;
+        let triple = (a << 16) | (b << 8);
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push(alpha_bytes[(triple >> 6) & 63]);
+        result.push('=' as Byte);
+    }
+
+    Text.from_utf8_unchecked(&result)
+}

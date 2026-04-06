@@ -1,0 +1,44 @@
+// =============================================================================
+// core/intrinsics/runtime/tier.vr - VBC Tier Management Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: VBC interpreter/JIT
+//
+// Tier transitions in VBC execution:
+// - Tier 0: VBC Interpreter (~20ns/op)
+// - Tier 1-2: JIT compiled (~5ns/op)
+// - Tier 3: AOT compiled (~1ns/op)
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.tier;
+
+// =============================================================================
+// SECTION 1: Tier Promotion
+// =============================================================================
+
+/// Request tier promotion for a function.
+///
+/// Hints to the runtime that this function should be JIT compiled.
+/// Requires: VBC/JIT runtime
+@intrinsic("tier_promote")
+public fn tier_promote(func_id: UInt32);
+
+// =============================================================================
+// SECTION 2: Tier Detection
+// =============================================================================
+
+/// Check if running in interpreter mode (Tier 0).
+///
+/// Always false in AOT compilation.
+/// Requires: VBC runtime (or compile-time constant in AOT)
+@intrinsic("is_interpreted")
+public fn is_interpreted() -> Bool;
+
+/// Check current execution tier.
+///
+/// Returns: 0=VBC interpreter, 1=JIT baseline, 2=JIT optimized, 3=AOT
+/// Requires: VBC runtime (or compile-time constant in AOT)
+@intrinsic("get_tier")
+public fn get_tier() -> UInt8;

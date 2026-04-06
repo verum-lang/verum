@@ -1,0 +1,157 @@
+// =============================================================================
+// style/convert.vr - Color space conversion utilities
+// =============================================================================
+// Provides sRGB <-> linear, RGB <-> HSL conversions, and hex parsing.
+// Used by color.vr, profile.vr, and theme.vr.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
+// =============================================================================
+
+module convert;
+
+mount core.math.{pow, abs};
+
+// =============================================================================
+// sRGB <-> Linear RGB
+// =============================================================================
+
+/// Convert sRGB component [0,1] to linear light [0,1].
+/// Applies the sRGB inverse companding (gamma ~2.2 with linear toe).
+public fn srgb_to_linear(c: Float) -> Float {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        pow((c + 0.055) / 1.055, 2.4)
+    }
+}
+
+/// Convert linear light component [0,1] to sRGB [0,1].
+/// Applies the sRGB forward companding.
+public fn linear_to_srgb(c: Float) -> Float {
+    if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * pow(c, 1.0 / 2.4) - 0.055
+    }
+}
+
+// =============================================================================
+// RGB <-> HSL
+// =============================================================================
+
+/// Convert RGB components [0,1] to HSL.
+/// Returns (hue [0,360), saturation [0,1], lightness [0,1]).
+public fn rgb_to_hsl(r: Float, g: Float, b: Float) -> (Float, Float, Float) {
+    let max_c = r.max(g).max(b);
+    let min_c = r.min(g).min(b);
+    let delta = max_c - min_c;
+    let l = (max_c + min_c) / 2.0;
+
+    if delta < 0.00001 {
+        // Achromatic (grey)
+        return (0.0, 0.0, l);
+    }
+
+    let s = if l <= 0.5 {
+        delta / (max_c + min_c)
+    } else {
+        delta / (2.0 - max_c - min_c)
+    };
+
+    let h = if abs(max_c - r) < 0.00001 {
+        let segment = (g - b) / delta;
+        if segment < 0.0 { segment + 6.0 } else { segment }
+    } else if abs(max_c - g) < 0.00001 {
+        (b - r) / delta + 2.0
+    } else {
+        (r - g) / delta + 4.0
+    };
+
+    (h * 60.0, s, l)
+}
+
+/// Convert HSL to RGB components [0,1].
+/// h is hue [0,360), s is saturation [0,1], l is lightness [0,1].
+/// Returns (r, g, b) each in [0,1].
+public fn hsl_to_rgb(h: Float, s: Float, l: Float) -> (Float, Float, Float) {
+    if s < 0.00001 {
+        // Achromatic
+        return (l, l, l);
+    }
+
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    let h_norm = h / 360.0;
+
+    let r = hue_to_rgb(p, q, h_norm + 1.0 / 3.0);
+    let g = hue_to_rgb(p, q, h_norm);
+    let b = hue_to_rgb(p, q, h_norm - 1.0 / 3.0);
+
+    (r, g, b)
+}
+
+/// Helper: convert hue sector to RGB component.
+fn hue_to_rgb(p: Float, q: Float, t_in: Float) -> Float {
+    let mut t = t_in;
+    if t < 0.0 { t = t + 1.0; }
+    if t > 1.0 { t = t - 1.0; }
+
+    if t < 1.0 / 6.0 {
+        p + (q - p) * 6.0 * t
+    } else if t < 1.0 / 2.0 {
+        q
+    } else if t < 2.0 / 3.0 {
+        p + (q - p) * (2.0 / 3.0 - t) * 6.0
+    } else {
+        p
+    }
+}
+
+// =============================================================================
+// Hex parsing
+// =============================================================================
+
+/// Parse a two-character hex string (e.g. "FF") into a UInt8 value.
+/// Returns None if the string is not valid hex.
+public fn parse_hex_pair(s: &Text) -> Maybe<UInt8> {
+    if s.len() != 2 { return None; }
+    let b0 = match s.byte_at(0) {
+        Some(b) => b,
+        None => return None,
+    };
+    let b1 = match s.byte_at(1) {
+        Some(b) => b,
+        None => return None,
+    };
+    let high_opt = hex_digit(b0);
+    let low_opt = hex_digit(b1);
+    match (high_opt, low_opt) {
+        (Some(h), Some(l)) => {
+            let val = h * 16 + l;
+            let byte_val = val as UInt8;
+            Some(byte_val)
+        }
+        _ => None,
+    }
+}
+
+/// Convert a single ASCII hex digit to its integer value [0,15].
+/// Accepts '0'-'9', 'a'-'f', 'A'-'F'.
+public fn hex_digit(c: Byte) -> Maybe<Int> {
+    if c >= 0x30 && c <= 0x39 {
+        // '0' .. '9'
+        Some((c - 0x30) as Int)
+    } else if c >= 0x41 && c <= 0x46 {
+        // 'A' .. 'F'
+        Some((c - 0x41 + 10) as Int)
+    } else if c >= 0x61 && c <= 0x66 {
+        // 'a' .. 'f'
+        Some((c - 0x61 + 10) as Int)
+    } else {
+        None
+    }
+}

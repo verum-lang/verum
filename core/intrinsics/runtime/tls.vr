@@ -1,0 +1,133 @@
+// =============================================================================
+// core/intrinsics/runtime/tls.vr - Thread-Local Storage Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Threading runtime with TLS support
+//
+// Direct access to thread-local storage for the V-LLSI context system.
+// These provide ~2ns access compared to ~20ns for HashMap lookups.
+//
+// VBC Opcodes: TlsGet (0x4E), TlsSet (0x4F)
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.tls;
+
+// =============================================================================
+// SECTION 1: TLS Base Access
+// =============================================================================
+
+/// Get the TLS base pointer for the current thread.
+///
+/// On x86_64 Linux: reads from FS segment register
+/// On ARM64: reads from TPIDR_EL0
+/// Requires: TLS runtime
+@intrinsic("tls_get_base")
+@vbc_direct_lowering
+public fn tls_get_base() -> *mut Byte;
+
+// =============================================================================
+// SECTION 2: TLS Slot Operations
+// =============================================================================
+
+/// Get a value from a TLS slot by index.
+///
+/// This is the hot path for context access (~2ns).
+/// Index must be < 256 (MAX_CONTEXT_SLOTS).
+/// Requires: TLS runtime
+@intrinsic("tls_slot_get")
+@inline(always)
+@vbc_direct_lowering
+public fn tls_slot_get(slot: UInt8) -> *const Byte;
+
+/// Set a value in a TLS slot by index.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_slot_set")
+@inline(always)
+@vbc_direct_lowering
+public fn tls_slot_set(slot: UInt8, value: *const Byte);
+
+/// Clear a TLS slot (set to null).
+///
+/// Requires: TLS runtime
+@intrinsic("tls_slot_clear")
+@vbc_direct_lowering
+public fn tls_slot_clear(slot: UInt8);
+
+/// Check if a TLS slot is set (non-null).
+///
+/// Uses bitmask for O(1) check.
+/// Requires: TLS runtime
+@intrinsic("tls_slot_has")
+@inline(always)
+@vbc_direct_lowering
+public fn tls_slot_has(slot: UInt8) -> Bool;
+
+// =============================================================================
+// SECTION 3: TLS Context Frames
+// =============================================================================
+
+/// Push a new TLS context frame for nested scopes.
+///
+/// VBC Opcode: PushContext (0xB3)
+/// Used by `provide` blocks for context inheritance.
+/// Requires: TLS runtime
+@intrinsic("tls_frame_push")
+@vbc_direct_lowering
+public fn tls_frame_push() -> *const Byte;
+
+/// Pop a TLS context frame.
+///
+/// VBC Opcode: PopContext (0xB4)
+/// Requires: TLS runtime
+@intrinsic("tls_frame_pop")
+@vbc_direct_lowering
+public fn tls_frame_pop();
+
+// =============================================================================
+// SECTION 4: Typed TLS Access
+// =============================================================================
+
+/// Read pointer from TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_read_ptr")
+@inline(always)
+public unsafe fn tls_read_ptr<T>(offset: Int) -> *const T;
+
+/// Write pointer to TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_write_ptr")
+@inline(always)
+public unsafe fn tls_write_ptr<T>(offset: Int, value: *const T);
+
+/// Read Int32 from TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_read_i32")
+@inline(always)
+public unsafe fn tls_read_i32(offset: Int) -> Int32;
+
+/// Write Int32 to TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_write_i32")
+@inline(always)
+public unsafe fn tls_write_i32(offset: Int, value: Int32);
+
+/// Read USize from TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_read_usize")
+@inline(always)
+public unsafe fn tls_read_usize(offset: Int) -> Int;
+
+/// Write USize to TLS at byte offset.
+///
+/// Requires: TLS runtime
+@intrinsic("tls_write_usize")
+@inline(always)
+public unsafe fn tls_write_usize(offset: Int, value: Int);

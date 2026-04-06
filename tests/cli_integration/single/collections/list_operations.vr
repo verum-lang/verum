@@ -1,0 +1,28 @@
+// Test: CL-001 through CL-005 - List operations
+// Priority: Critical/High
+// Expected output: Various list operations
+
+fn main() {
+    // List creation
+    let nums = [1, 2, 3, 4, 5];
+    print(f"Length: {len(nums)}");
+
+    // List indexing
+    let values = [10, 20, 30];
+    print(f"{values[0]} {values[2]}");
+
+    // List mutation and iteration
+    let mut list = [1, 2];
+    list.push(3);
+    for n in list {
+        print(f"{n}");
+    }
+
+    // List comprehension
+    let squares = [x * x for x in 1..5];
+    print(f"{squares:?}");
+
+    // List comprehension with filter
+    let evens = [x for x in 1..10 if x % 2 == 0];
+    print(f"{evens:?}");
+}

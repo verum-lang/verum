@@ -1,0 +1,45 @@
+// Test: CX-001 through CX-004 - Context System (Dependency Injection)
+// Priority: Critical
+// Expected output: Context-based operations
+
+// Context declaration
+context Logger {
+    fn log(message: Text);
+    fn info(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Result<List<Text>, Text>;
+}
+
+// Function using single context
+fn greet(name: Text) using Logger {
+    Logger.log(f"Hello, {name}");
+}
+
+// Function using multiple contexts
+fn fetch_users() using [Database, Logger] {
+    Logger.info("Fetching users...");
+    Database.query("SELECT * FROM users")
+}
+
+// Context implementation
+type ConsoleLogger is {};
+
+implement Logger for ConsoleLogger {
+    fn log(self, message: Text) {
+        print(f"[LOG] {message}");
+    }
+
+    fn info(self, message: Text) {
+        print(f"[INFO] {message}");
+    }
+}
+
+fn main() {
+    // Provide context implementation
+    provide Logger = ConsoleLogger {} {
+        greet("World");
+        Logger.info("Context system working!");
+    }
+}

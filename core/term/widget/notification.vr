@@ -1,0 +1,184 @@
+// =============================================================================
+// widget/notification.vr - Toast Notification Widget
+// =============================================================================
+// Layer: 5 (Widget Library)
+// Dependencies: protocol.vr, block.vr, paragraph.vr, render/buffer.vr,
+//               layout/rect.vr, style/style.vr, style/color.vr
+// =============================================================================
+//
+// Toast-style notification widget with level-based coloring (Info, Warning,
+// Error, Success). Renders as a bordered box, typically positioned at the
+// top-right corner of the screen.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 3
+// =============================================================================
+
+module notification;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.{Block, Borders, BorderType};
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// =============================================================================
+// Notification Level
+// =============================================================================
+
+/// Severity level for a notification, determines default styling.
+public type NotificationLevel is Info | Warning | Error | Success;
+
+// =============================================================================
+// Notification Widget
+// =============================================================================
+
+/// Toast notification widget.
+/// Displays a brief message with level-based styling and optional title.
+public type Notification is {
+    title: Maybe<Text>,
+    message: Text,
+    level: NotificationLevel,
+    style: Style,
+    border_type: BorderType,
+    width: Int,
+    visible: Bool,
+};
+
+// =============================================================================
+// Constructors & Builder API
+// =============================================================================
+
+implement Notification {
+    /// Create an info notification.
+    public fn info(msg: Text) -> Notification {
+        Notification {
+            title: None,
+            message: msg,
+            level: NotificationLevel.Info,
+            style: Style.DEFAULT.fg(Color.Blue),
+            border_type: BorderType.Rounded,
+            width: 40,
+            visible: true,
+        }
+    }
+
+    /// Create a warning notification.
+    public fn warning(msg: Text) -> Notification {
+        Notification {
+            title: None,
+            message: msg,
+            level: NotificationLevel.Warning,
+            style: Style.DEFAULT.fg(Color.Yellow),
+            border_type: BorderType.Rounded,
+            width: 40,
+            visible: true,
+        }
+    }
+
+    /// Create an error notification.
+    public fn error(msg: Text) -> Notification {
+        Notification {
+            title: None,
+            message: msg,
+            level: NotificationLevel.Error,
+            style: Style.DEFAULT.fg(Color.Red),
+            border_type: BorderType.Rounded,
+            width: 40,
+            visible: true,
+        }
+    }
+
+    /// Create a success notification.
+    public fn success(msg: Text) -> Notification {
+        Notification {
+            title: None,
+            message: msg,
+            level: NotificationLevel.Success,
+            style: Style.DEFAULT.fg(Color.Green),
+            border_type: BorderType.Rounded,
+            width: 40,
+            visible: true,
+        }
+    }
+
+    /// Set the notification title.
+    public fn title(self, title: Text) -> Notification {
+        Notification { title: Some(title), ..self }
+    }
+
+    /// Set the notification width.
+    public fn width(self, w: Int) -> Notification {
+        Notification { width: w.max(10), ..self }
+    }
+
+    /// Set the border type.
+    public fn border_type(self, bt: BorderType) -> Notification {
+        Notification { border_type: bt, ..self }
+    }
+
+    /// Set custom style override.
+    public fn style(self, style: Style) -> Notification {
+        Notification { style: style, ..self }
+    }
+
+    /// Get the level-appropriate icon character.
+    fn level_icon(&self) -> Text {
+        match self.level {
+            NotificationLevel.Info => "i",
+            NotificationLevel.Warning => "!",
+            NotificationLevel.Error => "x",
+            NotificationLevel.Success => "*",
+        }
+    }
+}
+
+// =============================================================================
+// Widget Implementation
+// =============================================================================
+
+implement Widget for Notification {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if !self.visible { return; }
+
+        // Position at top-right corner of the area
+        let w = self.width.min(area.width);
+        let h = 3 + if self.title is Some(_) { 1 } else { 0 };
+        let x = area.x + area.width - w;
+        let y = area.y;
+        let toast_area = Rect.new(x, y, w, h.min(area.height));
+
+        if toast_area.is_empty() { return; }
+
+        // Build block with border
+        let block_title = match self.title {
+            Some(t) => f" {self.level_icon()} {t} ",
+            None => f" {self.level_icon()} ",
+        };
+        let block = Block.new()
+            .title(block_title)
+            .borders(Borders.ALL)
+            .border_type(self.border_type)
+            .style(self.style);
+
+        // Render block border
+        block.render(toast_area, buf);
+
+        // Render message text in inner area
+        let inner = toast_area.inner(block.inner_margin());
+        if !inner.is_empty() {
+            let line = Line { spans: [Span.styled(self.message, self.style)] };
+            let mut col = inner.x;
+            for span in line.spans {
+                let bytes = span.content.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() && col < inner.right() {
+                    buf.set_char(col, inner.y, bytes[i] as Char, span.style);
+                    col = col + 1;
+                    i = i + 1;
+                }
+            }
+        }
+    }
+}

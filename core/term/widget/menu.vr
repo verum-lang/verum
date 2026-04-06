@@ -1,0 +1,269 @@
+// =============================================================================
+// menu.vr - Menu widget with keyboard navigation
+// =============================================================================
+module menu;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.block.{Block, Borders, BorderType};
+mount super.paragraph.Line;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// =============================================================================
+// MenuItem — a single entry in a menu (spec Section 15.10)
+// =============================================================================
+
+/// MenuItem represents a menu entry with optional shortcut, children, or separator.
+public type MenuItem is {
+    label: Line,
+    shortcut: Maybe<Text>,
+    enabled: Bool,
+    children: List<MenuItem>,
+    separator: Bool,
+};
+
+implement MenuItem {
+    /// Create an enabled menu item.
+    public fn new(label: Text) -> MenuItem {
+        MenuItem {
+            label: Line.raw(label),
+            shortcut: None,
+            enabled: true,
+            children: List.new(),
+            separator: false,
+        }
+    }
+
+    /// Set keyboard shortcut text (e.g. "Ctrl+S").
+    public fn shortcut(self, shortcut: Text) -> MenuItem {
+        MenuItem { shortcut: Some(shortcut), ..self }
+    }
+
+    /// Mark as disabled.
+    public fn disabled(self) -> MenuItem {
+        MenuItem { enabled: false, ..self }
+    }
+
+    /// Add submenu items.
+    public fn submenu(self, items: List<MenuItem>) -> MenuItem {
+        MenuItem { children: items, ..self }
+    }
+
+    /// Create a separator line.
+    public fn separator() -> MenuItem {
+        MenuItem {
+            label: Line.raw(""),
+            shortcut: None,
+            enabled: false,
+            children: List.new(),
+            separator: true,
+        }
+    }
+
+    /// Whether this item is selectable (not a separator and enabled).
+    public fn is_selectable(&self) -> Bool {
+        !self.separator && self.enabled
+    }
+
+    /// Whether this item has a submenu.
+    public fn has_children(&self) -> Bool {
+        self.children.len() > 0
+    }
+}
+
+// =============================================================================
+// MenuState — tracks selection and submenu state (spec Section 15.10)
+// =============================================================================
+
+/// Menu navigation state.
+public type MenuState is {
+    selected: Int,
+    submenu_open: Maybe<Int>,
+    submenu_state: Maybe<Heap<MenuState>>,
+};
+
+implement MenuState {
+    public fn new() -> MenuState {
+        MenuState {
+            selected: 0,
+            submenu_open: None,
+            submenu_state: None,
+        }
+    }
+
+    /// Open the submenu for the currently selected item.
+    public fn open_submenu(&mut self) {
+        self.submenu_open = Some(self.selected);
+        self.submenu_state = Some(Heap(MenuState.new()));
+    }
+
+    /// Close the currently open submenu.
+    public fn close_submenu(&mut self) {
+        self.submenu_open = None;
+        self.submenu_state = None;
+    }
+
+    /// Check if a submenu is currently open.
+    public fn is_submenu_open(&self) -> Bool {
+        self.submenu_open.is_some()
+    }
+}
+
+// =============================================================================
+// Menu widget (spec Section 15.10)
+// =============================================================================
+
+/// Menu — a vertical list of menu items with keyboard navigation,
+/// submenu support, shortcuts, and disabled item handling.
+public type Menu is {
+    items: List<MenuItem>,
+    block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    disabled_style: Style,
+    separator_style: Style,
+    shortcut_style: Style,
+};
+
+implement Menu {
+    /// Create a new menu from items.
+    public fn new(items: List<MenuItem>) -> Menu {
+        Menu {
+            items: items,
+            block: Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
+            style: Style.DEFAULT,
+            highlight_style: Style.new().bg(Color.Blue).fg(Color.White),
+            disabled_style: Style.new().fg(Color.DarkGrey),
+            separator_style: Style.new().fg(Color.DarkGrey),
+            shortcut_style: Style.new().fg(Color.DarkGrey).italic(),
+        }
+    }
+
+    // Builder API
+    public fn block(self, block: Block) -> Menu { Menu { block: Some(block), ..self } }
+    public fn highlight_style(self, style: Style) -> Menu { Menu { highlight_style: style, ..self } }
+    public fn disabled_style(self, style: Style) -> Menu { Menu { disabled_style: style, ..self } }
+    public fn separator_style(self, style: Style) -> Menu { Menu { separator_style: style, ..self } }
+    public fn shortcut_style(self, style: Style) -> Menu { Menu { shortcut_style: style, ..self } }
+}
+
+/// Move selection to the next selectable item.
+fn select_next(items: &List<MenuItem>, current: Int) -> Int {
+    if items.len() == 0 { return 0; }
+    let mut idx = current + 1;
+    let start = idx;
+    loop {
+        if idx >= items.len() { idx = 0; }
+        if items[idx].is_selectable() { return idx; }
+        idx = idx + 1;
+        if idx == start || idx >= items.len() + current + 1 { break; }
+    }
+    current
+}
+
+/// Move selection to the previous selectable item.
+fn select_previous(items: &List<MenuItem>, current: Int) -> Int {
+    if items.len() == 0 { return 0; }
+    let mut idx = if current == 0 { items.len() - 1 } else { current - 1 };
+    let start = idx;
+    loop {
+        if items[idx].is_selectable() { return idx; }
+        idx = if idx == 0 { items.len() - 1 } else { idx - 1 };
+        if idx == start { break; }
+    }
+    current
+}
+
+implement Styled for Menu {
+    fn style(self, style: Style) -> Menu {
+        Menu { style: style, ..self }
+    }
+}
+
+implement StatefulWidget for Menu {
+    type State = MenuState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut MenuState) {
+        let menu_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if menu_area.width < 1 || menu_area.height < 1 { return; }
+
+        buf.set_style(menu_area, self.style);
+
+        let mut y = menu_area.y;
+        let mut idx = 0;
+
+        for item in &self.items {
+            if y >= menu_area.bottom() { break; }
+
+            if item.separator {
+                // Draw separator line
+                for x in menu_area.x..menu_area.right() {
+                    buf.get_mut(x, y).set_char("─", self.separator_style);
+                }
+                y = y + 1;
+                idx = idx + 1;
+                continue;
+            }
+
+            let is_selected = idx == state.selected;
+            let base_style = if !item.enabled {
+                self.disabled_style
+            } else if is_selected {
+                self.highlight_style
+            } else {
+                self.style
+            };
+
+            // Fill row background for selected item
+            if is_selected {
+                for x in menu_area.x..menu_area.right() {
+                    buf.get_mut(x, y).style = self.highlight_style;
+                }
+            }
+
+            // Draw label with leading space
+            let mut x = buf.set_string(menu_area.x, y, " ", base_style);
+            for span in &item.label.spans {
+                let combined = base_style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined);
+            }
+
+            // Draw shortcut right-aligned (if present)
+            match item.shortcut {
+                Some(ref sc) => {
+                    let sc_x = menu_area.right() - sc.len() - 1;
+                    if sc_x > x + 1 {
+                        let sc_style = if is_selected {
+                            self.highlight_style.patch(self.shortcut_style)
+                        } else {
+                            self.shortcut_style
+                        };
+                        buf.set_string(sc_x, y, sc, sc_style);
+                    }
+                }
+                None => {}
+            }
+
+            // Draw submenu indicator if has children
+            if item.has_children() {
+                let arrow_x = menu_area.right() - 2;
+                if arrow_x > x {
+                    buf.set_string(arrow_x, y, "▸", base_style);
+                }
+            }
+
+            y = y + 1;
+            idx = idx + 1;
+        }
+    }
+}

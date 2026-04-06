@@ -1,0 +1,137 @@
+// =============================================================================
+// collections/mod.vr - Collections module manifest
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, text
+// =============================================================================
+//
+// The collections module provides data structures:
+//
+// - slice.vr: Slice utilities and operations
+// - list.vr: Dynamic array (List<T>)
+// - map.vr: Hash map (Map<K, V>)
+// - set.vr: Hash set (Set<T>)
+// - deque.vr: Double-ended queue (Deque<T>)
+// - heap.vr: Binary heap (priority queue)
+// - btree.vr: B-tree map and set (BTreeMap, BTreeSet)
+//
+// =============================================================================
+
+module collections;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module slice;
+public module list;
+public module map;
+public module set;
+public module deque;
+public module heap;
+public module btree;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// From list
+public mount .list.List;
+public mount .list.ListIter;
+public mount .list.ListIterMut;
+public mount .list.IntoList;
+public mount .list.Drain;
+public mount .list.list;
+
+// From slice (slice types are primitive, but utilities are here)
+public mount .slice.SliceIter;
+public mount .slice.SliceIterMut;
+public mount .slice.SliceEnumerate;
+public mount .slice.Chunks;
+public mount .slice.ChunksExact;
+public mount .slice.Windows;
+public mount .slice.slice_from_raw_parts;
+public mount .slice.slice_from_raw_parts_mut;
+
+// From map
+public mount .map.Map;
+public mount .map.MapEntry;
+public mount .map.OccupiedEntry;
+public mount .map.VacantEntry;
+public mount .map.MapIter;
+public mount .map.MapIterMut;
+public mount .map.MapKeys;
+public mount .map.MapValues;
+public mount .map.MapValuesMut;
+public mount .map.MapIntoIter;
+public mount .map.MapDrain;
+public mount .map.map;
+
+// From set
+public mount .set.Set;
+public mount .set.SetIter;
+public mount .set.SetIntoIter;
+public mount .set.SetDrain;
+public mount .set.set;
+
+// From deque
+public mount .deque.Deque;
+public mount .deque.DequeIter;
+public mount .deque.DequeIterMut;
+public mount .deque.DequeIntoIter;
+public mount .deque.DequeDrain;
+public mount .deque.deque;
+
+// From heap
+public mount .heap.BinaryHeap;
+public mount .heap.MinHeap;
+public mount .heap.Reverse;
+public mount .heap.HeapIter;
+public mount .heap.HeapDrain;
+public mount .heap.HeapDrainSorted;
+public mount .heap.HeapIntoIter;
+public mount .heap.heap;
+public mount .heap.min_heap;
+public mount .heap.list_heap_sort;
+
+// From btree
+public mount .btree.BTreeMap;
+public mount .btree.BTreeSet;
+public mount .btree.BTreeMapIter;
+public mount .btree.BTreeMapKeys;
+public mount .btree.BTreeMapValues;
+public mount .btree.BTreeMapRange;
+public mount .btree.BTreeSetIter;
+public mount .btree.BTreeSetRange;
+public mount .btree.BTreeEntry;
+public mount .btree.BTreeOccupiedEntry;
+public mount .btree.BTreeVacantEntry;
+public mount .btree.RangeBounds;
+
+// =============================================================================
+// Prelude exports
+// =============================================================================
+
+public module prelude {
+    public mount super.List;
+    public mount super.list;
+    public mount super.Map;
+    public mount super.map;
+    public mount super.Set;
+    public mount super.set;
+    public mount super.Deque;
+    public mount super.deque;
+    public mount super.BinaryHeap;
+    public mount super.BTreeMap;
+    public mount super.BTreeSet;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+// Default initial capacity for collections
+public const DEFAULT_CAPACITY: Int = 4;
+
+// Growth factor for collection resizing
+public const GROWTH_FACTOR: Int = 2;

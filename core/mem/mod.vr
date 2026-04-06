@@ -1,0 +1,331 @@
+// =============================================================================
+// mem/mod.vr - Memory Management Module Root
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common, sys/{platform}/mem
+// =============================================================================
+//
+// This module provides the CBGR (Counter-Based Generation Reference) memory
+// safety system and allocator infrastructure for the Verum standard library.
+//
+// # Architecture
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │                        std.mem Module                               │
+// ├─────────────────────────────────────────────────────────────────────┤
+// │  allocator.vr      - CBGR-aware allocator with inline headers      │
+// │  header.vr         - AllocationHeader (32 bytes, cache-aligned)    │
+// │  thin_ref.vr       - ThinRef<T> (16 bytes, sized types)            │
+// │  fat_ref.vr        - FatRef<T> (32 bytes, unsized types)           │
+// │  hazard.vr         - Hazard pointer system (race protection)       │
+// │  epoch.vr          - Epoch management (wraparound safety)          │
+// │  capability.vr     - Capability flags for access control           │
+// └─────────────────────────────────────────────────────────────────────┘
+//                              │
+//                              ▼
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │                     sys/ Platform Layer                             │
+// │  sys/linux/mem.vr    - mmap, munmap, mprotect                      │
+// │  sys/darwin/libsystem.vr - mmap, munmap, mprotect                  │
+// │  sys/windows/kernel32.vr - VirtualAlloc, VirtualFree               │
+// └─────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// # CBGR Overview
+//
+// CBGR provides memory safety without garbage collection by:
+// 1. Prepending a 32-byte header to each allocation
+// 2. Storing generation + epoch in references (ThinRef/FatRef)
+// 3. Validating generation on each dereference (~15ns)
+// 4. Using hazard pointers to prevent race conditions
+//
+// # Performance Targets
+//
+// - CBGR check: ~15ns per dereference (Tier 0)
+// - CBGR check (hot path): ~5ns (Tier 1+ with inlining)
+// - Memory overhead: 32 bytes per allocation header
+// - Reference overhead: 16 bytes (ThinRef) or 32 bytes (FatRef)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6
+// =============================================================================
+
+module mem;
+
+// =============================================================================
+// Core CBGR Components
+// =============================================================================
+
+/// Capability flags for access control.
+public mount .capability.{
+    Capability, CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
+    CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE, CAP_ALL, CAP_READ_ONLY,
+    CAP_READ_WRITE, has_capability, can_delegate, can_revoke,
+};
+
+/// Allocation header (32 bytes, cache-aligned).
+public mount .header.{
+    AllocationHeader, HEADER_SIZE, AllocationFlags,
+    FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK, FLAG_CAPABILITY,
+};
+
+/// ThinRef for sized types (16 bytes).
+public mount .thin_ref.{ThinRef};
+
+/// FatRef for unsized types (32 bytes).
+public mount .fat_ref.{FatRef};
+
+/// Hazard pointer system for race condition protection.
+public mount .hazard.{
+    HazardGuard, acquire_hazard, retire_hazard, hazard_stats,
+    force_reclaim_all, HazardStats,
+};
+
+/// Epoch management for generation wraparound safety.
+public mount .epoch.{
+    EpochManager, EpochCache, GLOBAL_EPOCH,
+    register_epoch_callback, unregister_epoch_callback,
+    register_revocation_callback, unregister_revocation_callback,
+};
+
+/// CBGR-aware allocator.
+public mount .allocator.{
+    // Core allocation functions
+    cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc,
+    get_header_from_ptr, AllocError,
+    // Memory layout
+    Layout, align_up, align_down,
+    // Allocator protocols
+    Alloc, Allocator, GlobalAllocator, get_allocator,
+    // Context-aware allocation (V-LLSI integration)
+    set_context_allocator, clear_context_allocator,
+    ctx_alloc, ctx_alloc_zeroed, ctx_dealloc, ctx_realloc,
+    CONTEXT_SLOT_ALLOCATOR,
+    // Specialized allocators (for runtime configurations)
+    TieredAllocator, SimpleAllocator, StackAllocator,
+    // Statistics
+    AllocStats, get_alloc_stats, get_global_alloc_stats,
+};
+
+/// Generational arena allocator (O(1) mass invalidation).
+public mount .arena.{
+    GenerationalArena, ArenaConfig, ArenaError, ArenaSnapshot,
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+};
+
+// =============================================================================
+// Mimalloc-Style Allocator Components (Industrial Grade)
+// =============================================================================
+
+/// Segment management (32 MiB chunks with lazy commit).
+public mount .segment.{
+    Segment, SliceInfo, SegmentError, SegmentStats,
+    segment_alloc, segment_free, segment_abandon, ptr_to_segment,
+    get_segment_stats,
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE, LARGE_PAGE_THRESHOLD,
+    SEGMENT_NORMAL, SEGMENT_HUGE,
+};
+
+/// Size class system (73 bins with 12.5% spacing).
+public mount .size_class.{
+    size_to_bin, bin_to_size, slices_for_bin, page_size_for_bin,
+    blocks_per_page, aligned_size,
+    is_small_size, is_medium_size, is_large_size, is_huge_size,
+    page_kind_for_bin, optimal_bin, fragmentation_percent,
+    PageKind, SizeClassStats,
+    BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT,
+    SIZE_CLASSES, SMALL_SIZE_MAX, MEDIUM_SIZE_MAX,
+    LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
+};
+
+/// Raw memory operations (memcpy, memmove, memset, strlen, strcmp).
+public mount .raw_ops.*;
+
+/// Thread-local heap with lock-free fast path.
+public mount .heap.{
+    LocalHeap, PageHeader, PageQueue, HeapStats, HeapError,
+    get_heap, init_thread_heap, shutdown_thread_heap,
+    heap_alloc, heap_alloc_zeroed, heap_free, heap_free_validated,
+    get_heap_stats,
+    PAGE_HEADER_SIZE, DIRECT_LOOKUP_SIZE,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Initial generation value for new allocations.
+public const GEN_INITIAL: UInt32 = 1;
+
+/// Maximum generation value before wraparound.
+public const GEN_MAX: UInt32 = 0xFFFF_FFFE;
+
+/// Generation value indicating unallocated memory.
+public const GEN_UNALLOCATED: UInt32 = 0;
+
+// =============================================================================
+// CBGR Error Types
+// =============================================================================
+
+/// Error returned when use-after-free is detected.
+public type UseAfterFreeError is {
+    /// Expected generation from reference.
+    expected_gen: UInt32,
+    /// Actual generation from header.
+    actual_gen: UInt32,
+    /// Expected epoch from reference.
+    expected_epoch: UInt16,
+    /// Actual epoch from header.
+    actual_epoch: UInt16,
+    /// Type name for diagnostics.
+    type_name: Text,
+};
+
+implement UseAfterFreeError {
+    /// Create a new use-after-free error.
+    public fn new(
+        expected_gen: UInt32,
+        actual_gen: UInt32,
+        expected_epoch: UInt16,
+        actual_epoch: UInt16,
+        type_name: Text,
+    ) -> UseAfterFreeError {
+        UseAfterFreeError {
+            expected_gen: expected_gen,
+            actual_gen: actual_gen,
+            expected_epoch: expected_epoch,
+            actual_epoch: actual_epoch,
+            type_name: type_name,
+        }
+    }
+
+    /// Create error for null pointer access.
+    public fn null_pointer(type_name: Text) -> UseAfterFreeError {
+        UseAfterFreeError {
+            expected_gen: GEN_UNALLOCATED,
+            actual_gen: GEN_UNALLOCATED,
+            expected_epoch: 0,
+            actual_epoch: 0,
+            type_name: type_name,
+        }
+    }
+
+    /// Create error for capability violation.
+    public fn capability_violation(capability: Text, type_name: Text) -> UseAfterFreeError {
+        UseAfterFreeError {
+            expected_gen: 0,
+            actual_gen: 0,
+            expected_epoch: 0,
+            actual_epoch: 0,
+            type_name: f"capability violation: {capability} on {type_name}",
+        }
+    }
+
+    /// Get error message.
+    public fn message(&self) -> Text {
+        if self.expected_gen == GEN_UNALLOCATED {
+            f"null pointer dereference for {self.type_name}"
+        } else {
+            f"use-after-free detected for {self.type_name}: " +
+            f"expected gen={self.expected_gen} epoch={self.expected_epoch}, " +
+            f"actual gen={self.actual_gen} epoch={self.actual_epoch}"
+        }
+    }
+}
+
+implement Debug for UseAfterFreeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("UseAfterFreeError { ")?;
+        f.write_str(&self.message())?;
+        f.write_str(" }")
+    }
+}
+
+implement Display for UseAfterFreeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message())
+    }
+}
+
+/// Error returned when revocation fails.
+public type RevocationError is
+    | NullPointer { type_name: Text }
+    | CapabilityViolation { type_name: Text }
+    | AlreadyRevoked { type_name: Text }
+    | Internal { type_name: Text, reason: Text }
+    ;
+
+implement RevocationError {
+    /// Create null pointer error.
+    public fn null_pointer(type_name: Text) -> RevocationError {
+        RevocationError.NullPointer { type_name: type_name }
+    }
+
+    /// Create capability violation error.
+    public fn capability_violation(type_name: Text) -> RevocationError {
+        RevocationError.CapabilityViolation { type_name: type_name }
+    }
+
+    /// Create already-revoked error.
+    public fn already_revoked(type_name: Text) -> RevocationError {
+        RevocationError.AlreadyRevoked { type_name: type_name }
+    }
+
+    /// Create internal error.
+    public fn internal_error(type_name: Text, reason: Text) -> RevocationError {
+        RevocationError.Internal { type_name: type_name, reason: reason }
+    }
+
+    /// Get error message.
+    public fn message(&self) -> Text {
+        match self {
+            RevocationError.NullPointer { type_name } => f"cannot revoke null pointer for {type_name}",
+            RevocationError.CapabilityViolation { type_name } => f"no revoke capability for {type_name}",
+            RevocationError.AlreadyRevoked { type_name } => f"reference already revoked for {type_name}",
+            RevocationError.Internal { type_name, reason } => f"internal revocation error for {type_name}: {reason}",
+        }
+    }
+}
+
+implement Debug for RevocationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NullPointer { type_name } => f.write_str(f"NullPointer({type_name})"),
+            CapabilityViolation { type_name } => f.write_str(f"CapabilityViolation({type_name})"),
+            AlreadyRevoked { type_name } => f.write_str(f"AlreadyRevoked({type_name})"),
+            Internal { type_name, reason } => f.write_str(f"Internal({type_name}: {reason})"),
+        }
+    }
+}
+
+implement Display for RevocationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message())
+    }
+}
+
+// =============================================================================
+// Execution Tiers
+// =============================================================================
+
+/// Execution tier determines CBGR validation strategy.
+public type CbgrTier is
+    | Interpreter    // Full validation (~15ns)
+    | BaselineJit    // Standard validation (~10ns)
+    | OptimizingJit  // Selective validation (~5ns)
+    | Aot            // Minimal validation (~3ns)
+    ;
+
+/// Global tier selector for runtime tier selection.
+static mut CURRENT_TIER: CbgrTier = CbgrTier.Interpreter;
+
+/// Get the current execution tier.
+public fn get_execution_tier() -> CbgrTier {
+    unsafe { CURRENT_TIER }
+}
+
+/// Set the current execution tier.
+public fn set_execution_tier(tier: CbgrTier) {
+    unsafe { CURRENT_TIER = tier }
+}

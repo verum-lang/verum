@@ -1,0 +1,24 @@
+// Test: Pattern matching with guards
+// This tests pattern matching with if guards
+
+fn classify_number(x: Int) {
+    match x {
+        n if n < 0 => print(f"{n} is negative"),
+        n if n == 0 => print(f"{n} is zero"),
+        n if n < 10 => print(f"{n} is single digit"),
+        n if n < 100 => print(f"{n} is double digit"),
+        n => print(f"{n} is large"),
+    }
+}
+
+fn main() {
+    print(f"Testing pattern matching with guards...");
+
+    classify_number(-5);
+    classify_number(0);
+    classify_number(7);
+    classify_number(42);
+    classify_number(999);
+
+    print(f"Pattern guards test complete!");
+}

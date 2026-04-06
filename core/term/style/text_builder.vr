@@ -1,0 +1,75 @@
+// =============================================================================
+// style/text_builder.vr - Quick styled text creation helpers
+// =============================================================================
+// Convenience functions for creating styled Spans without manual Style
+// construction. Provides bold(), italic(), color-named helpers, etc.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#16.1
+// =============================================================================
+
+module text_builder;
+
+mount super.super.widget.paragraph.{Span, Line};
+mount super.style.Style;
+mount super.modifier.Modifier;
+mount super.color.Color;
+
+// =============================================================================
+// Modifier helpers — one function per text modifier
+// =============================================================================
+
+/// Create a bold span.
+public fn bold(text: Text) -> Span { Span.styled(text, Style.new().bold()) }
+
+/// Create an italic span.
+public fn italic(text: Text) -> Span { Span.styled(text, Style.new().italic()) }
+
+/// Create a dim span.
+public fn dim(text: Text) -> Span { Span.styled(text, Style.new().dim()) }
+
+/// Create an underlined span.
+public fn underlined(text: Text) -> Span { Span.styled(text, Style.new().underlined()) }
+
+/// Create a crossed-out span.
+public fn crossed_out(text: Text) -> Span { Span.styled(text, Style.new().crossed_out()) }
+
+/// Create a reversed (inverted) span.
+public fn reversed(text: Text) -> Span { Span.styled(text, Style.new().reversed()) }
+
+// =============================================================================
+// Foreground / background color helpers
+// =============================================================================
+
+/// Create a span with a specific foreground color.
+public fn fg(text: Text, color: Color) -> Span { Span.styled(text, Style.new().fg(color)) }
+
+/// Create a span with a specific background color.
+public fn bg(text: Text, color: Color) -> Span { Span.styled(text, Style.new().bg(color)) }
+
+// =============================================================================
+// Named color shortcuts (foreground)
+// =============================================================================
+
+/// Red foreground text.
+public fn red(text: Text) -> Span { fg(text, Color.Red) }
+
+/// Green foreground text.
+public fn green(text: Text) -> Span { fg(text, Color.Green) }
+
+/// Blue foreground text.
+public fn blue(text: Text) -> Span { fg(text, Color.Blue) }
+
+/// Yellow foreground text.
+public fn yellow(text: Text) -> Span { fg(text, Color.Yellow) }
+
+/// Cyan foreground text.
+public fn cyan(text: Text) -> Span { fg(text, Color.Cyan) }
+
+/// Magenta foreground text.
+public fn magenta(text: Text) -> Span { fg(text, Color.Magenta) }
+
+/// White foreground text.
+public fn white(text: Text) -> Span { fg(text, Color.White) }
+
+/// Grey foreground text.
+public fn grey(text: Text) -> Span { fg(text, Color.Grey) }

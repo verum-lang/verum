@@ -1,0 +1,466 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, stress, large-formula
+// @timeout: 60000
+// @expected-proof-time: <500ms
+
+/// Description: Stress tests SMT stability with large formulas
+/// Regression Detection: Large formula proofs stress the SMT solver's ability
+/// to handle complex assertions. Expected time is <500ms. Proofs exceeding
+/// 1000ms or timing out indicate solver performance regression. These tests
+/// also check for memory issues and solver crashes on large inputs.
+
+// ============================================================================
+// Large Conjunction Formulas
+// ============================================================================
+
+/// Many conjuncts - tests CNF handling
+@verify(proof)
+fn large_conjunction(x: Int) -> Bool {
+    contract#"
+        requires x >= 0 && x <= 100;
+        ensures result == true;
+    "
+    // 20 conjuncts
+    x >= 0 &&
+    x <= 100 &&
+    x * 2 >= 0 &&
+    x * 2 <= 200 &&
+    x + 1 > x &&
+    x - 1 < x || x == 0 &&
+    x * x >= 0 &&
+    x / 1 == x &&
+    x % 101 == x &&
+    x + x == 2 * x &&
+    (x + 1) * (x + 1) >= x * x &&
+    x - x == 0 &&
+    x * 0 == 0 &&
+    x * 1 == x &&
+    x + 0 == x &&
+    x >= x &&
+    x <= x &&
+    x == x &&
+    !(x != x) &&
+    (x > 50) || (x <= 50)
+}
+
+/// Deep conjunction nesting
+@verify(proof)
+fn nested_conjunction(a: Int, b: Int, c: Int, d: Int) -> Bool {
+    contract#"
+        requires a >= 0 && b >= 0 && c >= 0 && d >= 0;
+        ensures result == true;
+    "
+    ((a >= 0 && b >= 0) && (c >= 0 && d >= 0)) &&
+    ((a + b >= 0 && c + d >= 0) && (a + c >= 0 && b + d >= 0)) &&
+    ((a + b + c >= 0 && a + b + d >= 0) && (a + c + d >= 0 && b + c + d >= 0)) &&
+    (a + b + c + d >= 0)
+}
+
+// ============================================================================
+// Large Disjunction Formulas
+// ============================================================================
+
+/// Many disjuncts - tests DNF handling
+@verify(proof)
+fn large_disjunction(x: Int) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    // Covering all cases
+    x < -1000 ||
+    x == -1000 ||
+    (x > -1000 && x < -100) ||
+    x == -100 ||
+    (x > -100 && x < -10) ||
+    x == -10 ||
+    (x > -10 && x < -1) ||
+    x == -1 ||
+    x == 0 ||
+    x == 1 ||
+    (x > 1 && x < 10) ||
+    x == 10 ||
+    (x > 10 && x < 100) ||
+    x == 100 ||
+    (x > 100 && x < 1000) ||
+    x == 1000 ||
+    x > 1000
+}
+
+/// Exclusive disjunction (XOR-like)
+@verify(proof)
+fn exclusive_cases(x: Int) -> Int {
+    contract#"
+        ensures result >= 0 && result <= 4;
+    "
+    if x < -10 { 0 }
+    else if x < 0 { 1 }
+    else if x == 0 { 2 }
+    else if x <= 10 { 3 }
+    else { 4 }
+}
+
+// ============================================================================
+// Large Implication Chains
+// ============================================================================
+
+/// Long implication chain
+@verify(proof)
+fn implication_chain(x: Int) -> Bool {
+    contract#"
+        requires x >= 0 && x <= 20;
+        ensures result == true;
+    "
+    // x = 0 => x + 1 = 1 => x + 2 = 2 => ... => x + 20 = 20
+    (x == 0) implies (x + 1 == 1) &&
+    (x == 1) implies (x + 1 == 2) &&
+    (x == 2) implies (x + 1 == 3) &&
+    (x == 3) implies (x + 1 == 4) &&
+    (x == 4) implies (x + 1 == 5) &&
+    (x == 5) implies (x + 1 == 6) &&
+    (x == 6) implies (x + 1 == 7) &&
+    (x == 7) implies (x + 1 == 8) &&
+    (x == 8) implies (x + 1 == 9) &&
+    (x == 9) implies (x + 1 == 10) &&
+    (x == 10) implies (x + 1 == 11) &&
+    (x == 11) implies (x + 1 == 12) &&
+    (x == 12) implies (x + 1 == 13) &&
+    (x == 13) implies (x + 1 == 14) &&
+    (x == 14) implies (x + 1 == 15) &&
+    (x == 15) implies (x + 1 == 16) &&
+    (x == 16) implies (x + 1 == 17) &&
+    (x == 17) implies (x + 1 == 18) &&
+    (x == 18) implies (x + 1 == 19) &&
+    (x == 19) implies (x + 1 == 20)
+}
+
+/// Bi-directional implications
+@verify(proof)
+fn biconditional_chain(x: Int, y: Int) -> Bool {
+    contract#"
+        requires x >= 0 && y >= 0;
+        ensures result == true;
+    "
+    // x == y iff properties are equal
+    (x == y) == (x + 1 == y + 1) &&
+    (x == y) == (x * 2 == y * 2) &&
+    (x == y) == (x - x == y - y) &&
+    (x > y) == (x + 1 > y + 1) &&
+    (x > y) == (x * 2 > y * 2 || x == 0 && y == 0) &&
+    (x >= y) == (y <= x) &&
+    (x < y) == (y > x) &&
+    (x != y) == !(x == y)
+}
+
+// ============================================================================
+// Large Quantified Formulas
+// ============================================================================
+
+/// Forall with many variables
+@verify(proof)
+fn forall_many_vars(list: &List<Int>) -> Bool {
+    contract#"
+        requires list.len() >= 5;
+        requires forall i. 0 <= i < list.len() implies list[i] >= 0;
+        ensures result == true;
+    "
+    // Check pairwise relationships
+    list[0] + list[1] >= 0 &&
+    list[1] + list[2] >= 0 &&
+    list[2] + list[3] >= 0 &&
+    list[3] + list[4] >= 0 &&
+    list[0] + list[2] >= 0 &&
+    list[0] + list[3] >= 0 &&
+    list[0] + list[4] >= 0 &&
+    list[1] + list[3] >= 0 &&
+    list[1] + list[4] >= 0 &&
+    list[2] + list[4] >= 0
+}
+
+/// Nested quantifiers
+@verify(proof)
+fn nested_quantifiers(matrix: &List<List<Int>>) -> Bool {
+    contract#"
+        requires matrix.len() >= 3;
+        requires forall i. 0 <= i < matrix.len() implies matrix[i].len() >= 3;
+        requires forall i, j. 0 <= i < matrix.len() && 0 <= j < matrix[i].len()
+                            implies matrix[i][j] >= 0;
+        ensures result == true;
+    "
+    // All elements non-negative
+    matrix[0][0] >= 0 &&
+    matrix[0][1] >= 0 &&
+    matrix[0][2] >= 0 &&
+    matrix[1][0] >= 0 &&
+    matrix[1][1] >= 0 &&
+    matrix[1][2] >= 0 &&
+    matrix[2][0] >= 0 &&
+    matrix[2][1] >= 0 &&
+    matrix[2][2] >= 0
+}
+
+// ============================================================================
+// Large Arithmetic Formulas
+// ============================================================================
+
+/// Many arithmetic operations
+@verify(proof)
+fn large_arithmetic(a: Int, b: Int, c: Int, d: Int) -> Int {
+    contract#"
+        requires a >= 1 && a <= 10;
+        requires b >= 1 && b <= 10;
+        requires c >= 1 && c <= 10;
+        requires d >= 1 && d <= 10;
+        ensures result == a * b * c * d + a * b * c + a * b + a +
+                          b * c * d + b * c + b +
+                          c * d + c +
+                          d;
+    "
+    let term1 = a * b * c * d;
+    let term2 = a * b * c;
+    let term3 = a * b;
+    let term4 = a;
+    let term5 = b * c * d;
+    let term6 = b * c;
+    let term7 = b;
+    let term8 = c * d;
+    let term9 = c;
+    let term10 = d;
+    term1 + term2 + term3 + term4 + term5 + term6 + term7 + term8 + term9 + term10
+}
+
+/// Polynomial evaluation
+@verify(proof)
+fn polynomial_eval(x: Int) -> Int {
+    contract#"
+        requires x >= -5 && x <= 5;
+        ensures result == x**5 + 2*x**4 + 3*x**3 + 4*x**2 + 5*x + 6;
+    "
+    // Horner's method
+    let r = 1;
+    let r = r * x + 2;
+    let r = r * x + 3;
+    let r = r * x + 4;
+    let r = r * x + 5;
+    let r = r * x + 6;
+    r
+}
+
+// ============================================================================
+// Large Comparison Chains
+// ============================================================================
+
+/// Many comparisons
+@verify(proof)
+fn comparison_chain(a: Int, b: Int, c: Int, d: Int, e: Int) -> Bool {
+    contract#"
+        requires a <= b && b <= c && c <= d && d <= e;
+        ensures result == true;
+    "
+    // All implied relationships
+    a <= b && a <= c && a <= d && a <= e &&
+    b <= c && b <= d && b <= e &&
+    c <= d && c <= e &&
+    d <= e &&
+    // Transitive closure
+    (a <= c) && (a <= d) && (a <= e) &&
+    (b <= d) && (b <= e) &&
+    (c <= e) &&
+    // Reflexive
+    a <= a && b <= b && c <= c && d <= d && e <= e
+}
+
+/// Mixed comparisons
+@verify(proof)
+fn mixed_comparisons(x: Int, y: Int, z: Int) -> Bool {
+    contract#"
+        requires x < y && y < z;
+        ensures result == true;
+    "
+    x < y && y < z &&
+    x < z &&
+    x != y && y != z && x != z &&
+    x <= y && y <= z && x <= z &&
+    !(x > y) && !(y > z) && !(x > z) &&
+    !(x >= y) && !(y >= z) && !(x >= z) &&
+    y > x && z > y && z > x
+}
+
+// ============================================================================
+// Large Structure Formulas
+// ============================================================================
+
+type Point3D is { x: Int, y: Int, z: Int };
+type Box is { min: Point3D, max: Point3D };
+
+/// Structure field comparisons
+@verify(proof)
+fn box_valid(b: &Box) -> Bool {
+    contract#"
+        requires b.min.x <= b.max.x;
+        requires b.min.y <= b.max.y;
+        requires b.min.z <= b.max.z;
+        ensures result == true;
+    "
+    b.min.x <= b.max.x &&
+    b.min.y <= b.max.y &&
+    b.min.z <= b.max.z &&
+    // Volume is non-negative
+    (b.max.x - b.min.x) >= 0 &&
+    (b.max.y - b.min.y) >= 0 &&
+    (b.max.z - b.min.z) >= 0 &&
+    // All coordinates relationships
+    b.min.x <= b.min.x + (b.max.x - b.min.x) &&
+    b.min.y <= b.min.y + (b.max.y - b.min.y) &&
+    b.min.z <= b.min.z + (b.max.z - b.min.z)
+}
+
+/// Multiple structures
+@verify(proof)
+fn boxes_overlap(a: &Box, b: &Box) -> Bool {
+    contract#"
+        requires a.min.x <= a.max.x && a.min.y <= a.max.y && a.min.z <= a.max.z;
+        requires b.min.x <= b.max.x && b.min.y <= b.max.y && b.min.z <= b.max.z;
+    "
+    // Check overlap in all dimensions
+    let x_overlap = a.min.x <= b.max.x && b.min.x <= a.max.x;
+    let y_overlap = a.min.y <= b.max.y && b.min.y <= a.max.y;
+    let z_overlap = a.min.z <= b.max.z && b.min.z <= a.max.z;
+    x_overlap && y_overlap && z_overlap
+}
+
+// ============================================================================
+// Large Case Analysis
+// ============================================================================
+
+/// Many case match
+@verify(proof)
+fn large_match(day: Int) -> Text {
+    contract#"
+        requires day >= 1 && day <= 7;
+        ensures result.len() > 0;
+    "
+    match day {
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        7 => "Sunday",
+        _ => unreachable()
+    }
+}
+
+/// Exhaustive enum-like match
+@verify(proof)
+fn month_days(month: Int, is_leap: Bool) -> Int {
+    contract#"
+        requires month >= 1 && month <= 12;
+        ensures result >= 28 && result <= 31;
+    "
+    match month {
+        1 => 31,
+        2 => if is_leap { 29 } else { 28 },
+        3 => 31,
+        4 => 30,
+        5 => 31,
+        6 => 30,
+        7 => 31,
+        8 => 31,
+        9 => 30,
+        10 => 31,
+        11 => 30,
+        12 => 31,
+        _ => unreachable()
+    }
+}
+
+// ============================================================================
+// Combined Large Formula
+// ============================================================================
+
+/// Very large combined formula
+@verify(proof)
+fn combined_large(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        requires a >= 0 && a <= 50;
+        requires b >= 0 && b <= 50;
+        requires c >= 0 && c <= 50;
+        ensures result == true;
+    "
+    // Arithmetic properties
+    (a + b == b + a) &&
+    (a + b + c == c + b + a) &&
+    ((a + b) + c == a + (b + c)) &&
+    (a * b == b * a) &&
+    (a * (b + c) == a * b + a * c) &&
+    // Comparison properties
+    (a >= 0 && b >= 0 implies a + b >= 0) &&
+    (a >= 0 && b >= 0 implies a * b >= 0) &&
+    (a <= 50 && b <= 50 implies a + b <= 100) &&
+    // Relationship properties
+    (a == b implies a + c == b + c) &&
+    (a == b implies a * c == b * c) &&
+    (a < b implies a + 1 <= b) &&
+    (a > b implies a >= b + 1) &&
+    // Identity properties
+    (a + 0 == a) &&
+    (a * 1 == a) &&
+    (a * 0 == 0) &&
+    (a - a == 0) &&
+    // Combined
+    ((a + b) * c == a * c + b * c) &&
+    ((a - b) + b == a) &&
+    ((a / 1) == a) &&
+    true
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Conjunction tests
+    assert(large_conjunction(50));
+    assert(nested_conjunction(1, 2, 3, 4));
+
+    // Disjunction tests
+    assert(large_disjunction(42));
+    assert(exclusive_cases(5) == 3);
+
+    // Implication tests
+    assert(implication_chain(10));
+    assert(biconditional_chain(5, 5));
+
+    // Quantifier tests
+    assert(forall_many_vars(&list![1, 2, 3, 4, 5]));
+    let matrix = list![list![1, 2, 3], list![4, 5, 6], list![7, 8, 9]];
+    assert(nested_quantifiers(&matrix));
+
+    // Arithmetic tests
+    assert(large_arithmetic(2, 3, 4, 5) > 0);
+    assert(polynomial_eval(2) == 1*32 + 2*16 + 3*8 + 4*4 + 5*2 + 6);
+
+    // Comparison tests
+    assert(comparison_chain(1, 2, 3, 4, 5));
+    assert(mixed_comparisons(1, 2, 3));
+
+    // Structure tests
+    let b = Box {
+        min: Point3D { x: 0, y: 0, z: 0 },
+        max: Point3D { x: 10, y: 10, z: 10 }
+    };
+    assert(box_valid(&b));
+
+    // Case tests
+    assert(large_match(3) == "Wednesday");
+    assert(month_days(2, true) == 29);
+    assert(month_days(2, false) == 28);
+
+    // Combined
+    assert(combined_large(10, 20, 30));
+
+    println("All large formula stress tests verified successfully!");
+}

@@ -1,0 +1,7 @@
+[cog]
+name = "core"
+version = "0.1.0"
+description = "Verum standard library"
+
+[language]
+profile = "systems"  # core itself uses systems features (unsafe, raw ptrs, etc.)

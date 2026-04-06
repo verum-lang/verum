@@ -1,0 +1,255 @@
+// =============================================================================
+// rwlock.vr - Read-Write Lock
+// =============================================================================
+// Layer: 2.5 (Sync)
+// Dependencies: core, sync/atomic
+// =============================================================================
+//
+// RwLock<T> allows multiple readers or a single writer.
+// Uses atomic counters for efficient reader tracking.
+//
+// =============================================================================
+
+module core.sync.rwlock;
+mount core.*;
+mount .atomic.*;
+
+// Cross-platform futex imports for OS-level blocking
+@cfg(target_os = "linux")
+mount sys.linux.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+mount core.intrinsics.spin_hint;
+
+// =============================================================================
+// RwLock<T>
+// =============================================================================
+
+// Read-write lock allowing multiple readers or one writer.
+public type RwLock<T> is {
+    // State encoding:
+    // - 0: unlocked
+    // - positive: number of readers
+    // - -1: write locked
+    state: AtomicInt,
+    data: T,
+    poisoned: AtomicBool,
+};
+
+const WRITE_LOCKED: Int = -1;
+
+implement<T> RwLock<T> {
+    // Create new unlocked RwLock.
+    public fn new(data: T) -> RwLock<T> {
+        RwLock {
+            state: AtomicInt.new(0),
+            data: data,
+            poisoned: AtomicBool.new(false),
+        }
+    }
+
+    // Acquire read lock.
+    // Blocks via futex until no writer holds the lock.
+    public fn read(&self) -> LockResult<RwLockReadGuard<T>> {
+        loop {
+            let state = self.state.load(MemoryOrdering.Acquire);
+            if state >= 0 {
+                // Try to increment reader count
+                if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+                    let guard = RwLockReadGuard { rwlock: self };
+                    if self.poisoned.load(MemoryOrdering.Relaxed) {
+                        return Err(PoisonError.new(guard));
+                    }
+                    return Ok(guard);
+                }
+            } else {
+                // Writer present — sleep via futex until state changes
+                let _ = sys_futex_wait(&self.state.value, state, None);
+            }
+        }
+    }
+
+    // Try to acquire read lock without blocking.
+    public fn try_read(&self) -> TryLockResult<RwLockReadGuard<T>> {
+        let state = self.state.load(MemoryOrdering.Acquire);
+        if state >= 0 {
+            if self.state.compare_exchange(state, state + 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+                let guard = RwLockReadGuard { rwlock: self };
+                if self.poisoned.load(MemoryOrdering.Relaxed) {
+                    return Err(TryLockError.Poisoned(PoisonError.new(guard)));
+                }
+                return Ok(guard);
+            }
+        }
+        Err(TryLockError.WouldBlock)
+    }
+
+    // Acquire write lock.
+    // Blocks via futex until no readers or writers hold the lock.
+    public fn write(&self) -> LockResult<RwLockWriteGuard<T>> {
+        loop {
+            let state = self.state.load(MemoryOrdering.Acquire);
+            if state == 0 {
+                if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+                    let guard = RwLockWriteGuard { rwlock: self };
+                    if self.poisoned.load(MemoryOrdering.Relaxed) {
+                        return Err(PoisonError.new(guard));
+                    }
+                    return Ok(guard);
+                }
+            } else {
+                // Readers or writer present — sleep via futex until state changes
+                let _ = sys_futex_wait(&self.state.value, state, None);
+            }
+        }
+    }
+
+    // Try to acquire write lock without blocking.
+    public fn try_write(&self) -> TryLockResult<RwLockWriteGuard<T>> {
+        if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+            let guard = RwLockWriteGuard { rwlock: self };
+            if self.poisoned.load(MemoryOrdering.Relaxed) {
+                return Err(TryLockError.Poisoned(PoisonError.new(guard)));
+            }
+            return Ok(guard);
+        }
+        Err(TryLockError.WouldBlock)
+    }
+
+    // Check if poisoned.
+    public fn is_poisoned(&self) -> Bool {
+        self.poisoned.load(MemoryOrdering.Relaxed)
+    }
+
+    // Clear poison.
+    public fn clear_poison(&self) {
+        self.poisoned.store(false, MemoryOrdering.Relaxed);
+    }
+
+    // Get mutable reference without locking.
+    public fn get_mut(&mut self) -> LockResult<&mut T> {
+        if self.poisoned.load(MemoryOrdering.Relaxed) {
+            Err(PoisonError.new(&mut self.data))
+        } else {
+            Ok(&mut self.data)
+        }
+    }
+
+    // Consume && return inner value.
+    public fn into_inner(self) -> LockResult<T> {
+        if self.poisoned.load(MemoryOrdering.Relaxed) {
+            Err(PoisonError.new(self.data))
+        } else {
+            Ok(self.data)
+        }
+    }
+
+    // Internal: release read lock.
+    fn release_read(&self) {
+        let prev = self.state.fetch_sub(1, MemoryOrdering.Release);
+        if prev == 1 {
+            // Last reader — wake one writer that may be waiting
+            let _ = sys_futex_wake(&self.state.value, 1);
+        }
+    }
+
+    // Internal: release write lock.
+    fn release_write(&self) {
+        self.state.store(0, MemoryOrdering.Release);
+        // Wake all waiters — both readers and writers may be waiting
+        let _ = sys_futex_wake(&self.state.value, Int.MAX);
+    }
+}
+
+implement<T: Default> Default for RwLock<T> {
+    fn default() -> RwLock<T> {
+        RwLock.new(T.default())
+    }
+}
+
+implement<T: Debug> Debug for RwLock<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("RwLock { ... }")
+    }
+}
+
+// =============================================================================
+// RwLockReadGuard<T>
+// =============================================================================
+
+// RAII guard for read access.
+public type RwLockReadGuard<T> is {
+    rwlock: &RwLock<T>,
+};
+
+implement<T> Deref for RwLockReadGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.rwlock.data
+    }
+}
+
+implement<T> Drop for RwLockReadGuard<T> {
+    fn drop(&mut self) {
+        self.rwlock.release_read();
+    }
+}
+
+// =============================================================================
+// RwLockWriteGuard<T>
+// =============================================================================
+
+// RAII guard for write access.
+public type RwLockWriteGuard<T> is {
+    rwlock: &RwLock<T>,
+};
+
+implement<T> Deref for RwLockWriteGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.rwlock.data
+    }
+}
+
+implement<T> DerefMut for RwLockWriteGuard<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *(&self.rwlock.data as *const T as *mut T) }
+    }
+}
+
+implement<T> Drop for RwLockWriteGuard<T> {
+    fn drop(&mut self) {
+        self.rwlock.release_write();
+    }
+}
+
+implement<T: Debug> Debug for RwLockReadGuard<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("RwLockReadGuard { .. }")
+    }
+}
+
+implement<T: Debug> Debug for RwLockWriteGuard<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("RwLockWriteGuard { .. }")
+    }
+}
+
+// =============================================================================
+// Re-export error types from mutex
+// =============================================================================
+
+public mount super.mutex.LockResult;
+public mount super.mutex.TryLockResult;
+public mount super.mutex.PoisonError;
+public mount super.mutex.TryLockError;

@@ -1,0 +1,1659 @@
+// =============================================================================
+// gpu.vr - GPU/Accelerator Compute Module (L5)
+// =============================================================================
+// Layer: 5 (GPU Compute)
+//
+// Multi-backend GPU acceleration with device abstraction, memory management,
+// kernel execution, and stream synchronization.
+//
+// # Architecture
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │                        Device Abstraction Layer                          │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │  DeviceRegistry → DeviceInfo → ComputeCapability                        │
+// │       ↓                                                                  │
+// │  Backend Selection: CUDA | ROCm | Metal | Vulkan | SYCL                 │
+// └─────────────────────────────────────────────────────────────────────────┘
+//                              ↓
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │                         Memory Management                                │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │  GPUBuffer<T>: Device memory with CBGR tracking                         │
+// │  MemorySpace: Host | HostPinned | Global | Shared | Local | Unified    │
+// │  Transfers: to_device() | to_host() | memcpy() | prefetch()            │
+// └─────────────────────────────────────────────────────────────────────────┘
+//                              ↓
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │                        Kernel Execution                                  │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │  LaunchConfig: grid, block, shared memory                               │
+// │  Stream: async execution context                                        │
+// │  Event: timing and synchronization                                      │
+// └─────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// # Usage
+//
+// ```verum
+// mount core.math.gpu.*;
+//
+// // Check GPU availability
+// if has_gpu() {
+//     // Get best device
+//     let device = select_device(DeviceSelector.Best);
+//
+//     // Transfer data to GPU
+//     let gpu_data = to_device(&host_data, device.index);
+//
+//     // Launch kernel
+//     let config = LaunchConfig.for_elements(gpu_data.size, 256);
+//     launch(config, my_kernel, (gpu_data,));
+//
+//     // Transfer back
+//     let result = to_host(&gpu_data);
+// }
+// ```
+//
+// # Context Integration
+//
+// ```verum
+// // GPU operations respect ComputeDevice context
+// provide ComputeDevice = GPUDevice.best_available() {
+//     let tensor = zeros<Float>(&[1024, 1024]);  // Allocated on GPU
+// }
+// ```
+//
+// Spec: docs/architecture/math-spec.md#part-vi-gpu-compute
+// =============================================================================
+
+module core.math.gpu;
+
+mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};
+mount core.maybe.{Maybe, Some, None};
+mount core.list.List;
+mount core.ops.Drop;
+mount core.protocols.{Ord, Eq};
+mount core.ordering.Ordering;
+
+// =============================================================================
+// GPU Backend Types
+// =============================================================================
+
+// Supported GPU backends
+public type GPUBackend is
+    | CUDA       // NVIDIA CUDA
+    | ROCm       // AMD ROCm/HIP
+    | Metal      // Apple Metal
+    | Vulkan     // Vulkan compute
+    | SYCL       // Intel oneAPI/SYCL
+    | None;      // No GPU available
+
+implement Eq for GPUBackend {
+    fn eq(&self, other: &Self) -> Bool {
+        match (self, other) {
+            (GPUBackend.CUDA, GPUBackend.CUDA) => true,
+            (GPUBackend.ROCm, GPUBackend.ROCm) => true,
+            (GPUBackend.Metal, GPUBackend.Metal) => true,
+            (GPUBackend.Vulkan, GPUBackend.Vulkan) => true,
+            (GPUBackend.SYCL, GPUBackend.SYCL) => true,
+            (GPUBackend.None, GPUBackend.None) => true,
+            _ => false,
+        }
+    }
+}
+
+// Hardware vendor for backend selection
+public type Vendor is
+    | Nvidia     // CUDA
+    | Amd        // ROCm/HIP
+    | Intel      // oneAPI
+    | Apple      // Metal
+    | Google     // TPU (future)
+    | Qualcomm   // Adreno (mobile)
+    | Unknown;
+
+implement Eq for Vendor {
+    fn eq(&self, other: &Self) -> Bool {
+        match (self, other) {
+            (Vendor.Nvidia, Vendor.Nvidia) => true,
+            (Vendor.Amd, Vendor.Amd) => true,
+            (Vendor.Intel, Vendor.Intel) => true,
+            (Vendor.Apple, Vendor.Apple) => true,
+            (Vendor.Google, Vendor.Google) => true,
+            (Vendor.Qualcomm, Vendor.Qualcomm) => true,
+            (Vendor.Unknown, Vendor.Unknown) => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Device ID and Encoding
+// =============================================================================
+
+// Device type masks for 16-bit device ID encoding
+// Format: [TYPE:4bits][INDEX:12bits]
+const TYPE_MASK: U16 = 0xF000;
+const INDEX_MASK: U16 = 0x0FFF;
+
+// Well-known device type bases
+const CPU_BASE: U16 = 0x0000;
+const GPU_BASE: U16 = 0x1000;
+const TPU_BASE: U16 = 0x2000;
+
+// Device identifier with type encoding
+public type DeviceId is (U16);
+
+implement DeviceId {
+    // CPU device (always ID 0)
+    public fn cpu() -> Self {
+        DeviceId(CPU_BASE)
+    }
+
+    // GPU device by index
+    public fn gpu(index: U16) -> Self {
+        DeviceId(GPU_BASE | (index & INDEX_MASK))
+    }
+
+    // TPU device by index (future)
+    public fn tpu(index: U16) -> Self {
+        DeviceId(TPU_BASE | (index & INDEX_MASK))
+    }
+
+    // Check if this is a CPU device
+    public fn is_cpu(&self) -> Bool {
+        (self.0 & TYPE_MASK) == CPU_BASE
+    }
+
+    // Check if this is a GPU device
+    public fn is_gpu(&self) -> Bool {
+        (self.0 & TYPE_MASK) == GPU_BASE
+    }
+
+    // Check if this is a TPU device
+    public fn is_tpu(&self) -> Bool {
+        (self.0 & TYPE_MASK) == TPU_BASE
+    }
+
+    // Get device index within type
+    public fn device_index(&self) -> U16 {
+        self.0 & INDEX_MASK
+    }
+
+    // Get raw ID value
+    public fn raw(&self) -> U16 {
+        self.0
+    }
+}
+
+implement Eq for DeviceId {
+    fn eq(&self, other: &Self) -> Bool {
+        self.0 == other.0
+    }
+}
+
+// =============================================================================
+// Compute Capability
+// =============================================================================
+
+// Device compute capability (GPU-specific)
+public type ComputeCapability is {
+    major: U32,
+    minor: U32,
+    tensor_cores: Bool,         // Tensor core / matrix engine support
+    fp16: Bool,                 // FP16 support
+    bf16: Bool,                 // BF16 support
+    int8_dp4a: Bool,            // INT8 dot product accumulate
+    async_copy: Bool,           // Async memory copy (SM >= 80)
+    tma: Bool,                  // Tensor Memory Accelerator (SM >= 90)
+};
+
+implement ComputeCapability {
+    // Create default compute capability (basic)
+    public fn default() -> Self {
+        ComputeCapability {
+            major: 0,
+            minor: 0,
+            tensor_cores: false,
+            fp16: false,
+            bf16: false,
+            int8_dp4a: false,
+            async_copy: false,
+            tma: false,
+        }
+    }
+
+    // Create NVIDIA Volta (SM 7.0) capability
+    public fn volta() -> Self {
+        ComputeCapability {
+            major: 7,
+            minor: 0,
+            tensor_cores: true,
+            fp16: true,
+            bf16: false,
+            int8_dp4a: true,
+            async_copy: false,
+            tma: false,
+        }
+    }
+
+    // Create NVIDIA Ampere (SM 8.0) capability
+    public fn ampere() -> Self {
+        ComputeCapability {
+            major: 8,
+            minor: 0,
+            tensor_cores: true,
+            fp16: true,
+            bf16: true,
+            int8_dp4a: true,
+            async_copy: true,
+            tma: false,
+        }
+    }
+
+    // Create NVIDIA Hopper (SM 9.0) capability
+    public fn hopper() -> Self {
+        ComputeCapability {
+            major: 9,
+            minor: 0,
+            tensor_cores: true,
+            fp16: true,
+            bf16: true,
+            int8_dp4a: true,
+            async_copy: true,
+            tma: true,
+        }
+    }
+
+    // Get SM version as single number (major * 10 + minor)
+    public fn sm_version(&self) -> U32 {
+        self.major * 10 + self.minor
+    }
+
+    // Check if this capability supports a minimum SM version
+    public fn at_least(&self, major: U32, minor: U32) -> Bool {
+        self.major > major || (self.major == major && self.minor >= minor)
+    }
+}
+
+// =============================================================================
+// CPU Information
+// =============================================================================
+
+// Detailed CPU capabilities for SIMD kernel selection
+public type CpuInfo is {
+    vendor: Text,
+    cores: USize,               // Physical cores
+    threads: USize,             // Logical threads (hyperthreading)
+    l1_cache: USize,            // L1 data cache bytes
+    l2_cache: USize,            // L2 cache bytes
+    l3_cache: USize,            // L3 cache bytes
+
+    // x86_64 SIMD capabilities
+    has_sse42: Bool,
+    has_avx: Bool,
+    has_avx2: Bool,
+    has_fma: Bool,              // Fused multiply-add
+    has_avx512f: Bool,
+
+    // ARM capabilities
+    has_neon: Bool,
+};
+
+implement CpuInfo {
+    // Create default CPU info
+    public fn default() -> Self {
+        CpuInfo {
+            vendor: "Unknown",
+            cores: 1,
+            threads: 1,
+            l1_cache: 32 * 1024,
+            l2_cache: 256 * 1024,
+            l3_cache: 8 * 1024 * 1024,
+            has_sse42: false,
+            has_avx: false,
+            has_avx2: false,
+            has_fma: false,
+            has_avx512f: false,
+            has_neon: false,
+        }
+    }
+
+    // Get best SIMD width in bytes for this CPU
+    public fn simd_width(&self) -> USize {
+        if self.has_avx512f { 64 }
+        else if self.has_avx2 || self.has_avx { 32 }
+        else if self.has_neon { 16 }
+        else if self.has_sse42 { 16 }
+        else { 8 }
+    }
+}
+
+// =============================================================================
+// GPU Information
+// =============================================================================
+
+// GPU capabilities for kernel dispatch
+public type GpuInfo is {
+    name: Text,
+    vendor: Vendor,
+    backend: GPUBackend,
+    memory_bytes: USize,
+    compute_capability: ComputeCapability,
+    multiprocessors: U32,           // SM count
+    max_threads_per_block: U32,
+    warp_size: U32,                 // 32 for NVIDIA, 64 for AMD
+    shared_memory_per_block: USize,
+    memory_bandwidth_gbps: F64,
+};
+
+implement GpuInfo {
+    // Check if GPU has tensor cores
+    public fn has_tensor_cores(&self) -> Bool {
+        self.compute_capability.tensor_cores
+    }
+
+    // Check if GPU supports BF16
+    public fn has_bf16(&self) -> Bool {
+        self.compute_capability.bf16
+    }
+
+    // Get maximum threads that can be launched
+    public fn max_threads(&self) -> USize {
+        (self.multiprocessors as USize) * (self.max_threads_per_block as USize)
+    }
+}
+
+// =============================================================================
+// Unified Device Information
+// =============================================================================
+
+// Device information sum type
+public type DeviceInfo is
+    | Cpu(CpuInfo)
+    | Gpu(GpuInfo);
+
+implement DeviceInfo {
+    // Check if device is a GPU
+    public fn is_gpu(&self) -> Bool {
+        match self {
+            DeviceInfo.Gpu(_) => true,
+            _ => false,
+        }
+    }
+
+    // Check if device is a CPU
+    public fn is_cpu(&self) -> Bool {
+        match self {
+            DeviceInfo.Cpu(_) => true,
+            _ => false,
+        }
+    }
+
+    // Get device memory in bytes
+    public fn memory_bytes(&self) -> USize {
+        match self {
+            DeviceInfo.Cpu(_) => 8 * 1024 * 1024 * 1024,  // 8GB default
+            DeviceInfo.Gpu(info) => info.memory_bytes,
+        }
+    }
+
+    // Get device name
+    public fn name(&self) -> Text {
+        match self {
+            DeviceInfo.Cpu(info) => info.vendor,
+            DeviceInfo.Gpu(info) => info.name,
+        }
+    }
+
+    // Get GPU info if this is a GPU device
+    public fn as_gpu(&self) -> Maybe<&GpuInfo> {
+        match self {
+            DeviceInfo.Gpu(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    // Get CPU info if this is a CPU device
+    public fn as_cpu(&self) -> Maybe<&CpuInfo> {
+        match self {
+            DeviceInfo.Cpu(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Device Selection
+// =============================================================================
+
+// Strategy for automatic device selection
+public type DeviceSelection is
+    | FirstGpu          // Use first available GPU
+    | MaxMemoryGpu      // GPU with most memory
+    | MaxComputeGpu     // Highest compute capability
+    | CpuOnly           // Force CPU-only execution
+    | ByIndex(USize);   // Specific device by index
+
+// Device selector with more flexible matching
+public type DeviceSelector is
+    | Best                          // Highest compute capability
+    | ByIndex(USize)                // Specific device index
+    | ByName(Text)                  // Match by name substring
+    | ByMemory(USize)               // Minimum memory requirement
+    | ByBackend(GPUBackend)         // Specific backend
+    | Custom(fn(&DeviceInfo) -> Bool);  // Custom predicate
+
+// =============================================================================
+// Device Registry
+// =============================================================================
+
+// Global registry of detected devices
+public type DeviceRegistry is {
+    devices: List<(DeviceId, DeviceInfo)>,
+    default_device: DeviceId,
+};
+
+implement DeviceRegistry {
+    // Initialize registry with runtime detection
+    public fn init() -> Self {
+        let mut registry = DeviceRegistry {
+            devices: List.new(),
+            default_device: DeviceId.cpu(),
+        };
+
+        // Always detect CPU capabilities
+        registry.detect_cpu();
+
+        // Platform-specific GPU detection
+        @cfg(target_os = "macos") {
+            registry.detect_metal();
+        }
+        @cfg(feature = "cuda") {
+            registry.detect_cuda();
+        }
+        @cfg(feature = "rocm") {
+            registry.detect_rocm();
+        }
+        @cfg(feature = "vulkan") {
+            registry.detect_vulkan();
+        }
+
+        // Select best default device
+        registry.default_device = registry.select_best_device();
+        registry
+    }
+
+    // Detect CPU SIMD capabilities
+    fn detect_cpu(&mut self) {
+        let threads = @intrinsic("available_parallelism");
+        let mut info = CpuInfo {
+            vendor: @intrinsic("cpu_vendor"),
+            cores: threads / 2,
+            threads: threads,
+            l1_cache: 32 * 1024,
+            l2_cache: 256 * 1024,
+            l3_cache: 8 * 1024 * 1024,
+            ..CpuInfo.default()
+        };
+
+        @cfg(target_arch = "x86_64") {
+            info.has_sse42 = @intrinsic("cpu_feature", "sse4.2");
+            info.has_avx = @intrinsic("cpu_feature", "avx");
+            info.has_avx2 = @intrinsic("cpu_feature", "avx2");
+            info.has_fma = @intrinsic("cpu_feature", "fma");
+            info.has_avx512f = @intrinsic("cpu_feature", "avx512f");
+        }
+
+        @cfg(target_arch = "aarch64") {
+            info.has_neon = true;  // Always available on AArch64
+        }
+
+        self.devices.push((DeviceId.cpu(), DeviceInfo.Cpu(info)));
+    }
+
+    // Detect Metal devices (macOS/iOS)
+    @cfg(target_os = "macos")
+    fn detect_metal(&mut self) {
+        @vbc(GPU_ENUMERATE_METAL, |index, name, memory, cores| {
+            let info = GpuInfo {
+                name: name,
+                vendor: Vendor.Apple,
+                backend: GPUBackend.Metal,
+                memory_bytes: memory,
+                compute_capability: ComputeCapability.default(),
+                multiprocessors: cores,
+                max_threads_per_block: 1024,
+                warp_size: 32,
+                shared_memory_per_block: 32 * 1024,
+                memory_bandwidth_gbps: 200.0,  // Approximate
+            };
+            self.devices.push((DeviceId.gpu(index as U16), DeviceInfo.Gpu(info)));
+        })
+    }
+
+    // Detect CUDA devices
+    @cfg(feature = "cuda")
+    fn detect_cuda(&mut self) {
+        @vbc(GPU_ENUMERATE_CUDA, |index, name, memory, sm_major, sm_minor, cores, threads| {
+            let cc = ComputeCapability {
+                major: sm_major,
+                minor: sm_minor,
+                tensor_cores: sm_major >= 7,
+                fp16: sm_major >= 5,
+                bf16: sm_major >= 8,
+                int8_dp4a: sm_major >= 6,
+                async_copy: sm_major >= 8,
+                tma: sm_major >= 9,
+            };
+            let info = GpuInfo {
+                name: name,
+                vendor: Vendor.Nvidia,
+                backend: GPUBackend.CUDA,
+                memory_bytes: memory,
+                compute_capability: cc,
+                multiprocessors: cores,
+                max_threads_per_block: threads,
+                warp_size: 32,
+                shared_memory_per_block: 48 * 1024,
+                memory_bandwidth_gbps: 0.0,  // Query separately
+            };
+            self.devices.push((DeviceId.gpu(index as U16), DeviceInfo.Gpu(info)));
+        })
+    }
+
+    // Detect ROCm devices
+    @cfg(feature = "rocm")
+    fn detect_rocm(&mut self) {
+        @vbc(GPU_ENUMERATE_ROCM, |index, name, memory, gfx_version, cores, threads| {
+            let info = GpuInfo {
+                name: name,
+                vendor: Vendor.Amd,
+                backend: GPUBackend.ROCm,
+                memory_bytes: memory,
+                compute_capability: ComputeCapability.default(),
+                multiprocessors: cores,
+                max_threads_per_block: threads,
+                warp_size: 64,  // AMD wavefront size
+                shared_memory_per_block: 64 * 1024,
+                memory_bandwidth_gbps: 0.0,
+            };
+            self.devices.push((DeviceId.gpu(index as U16), DeviceInfo.Gpu(info)));
+        })
+    }
+
+    // Detect Vulkan compute devices
+    @cfg(feature = "vulkan")
+    fn detect_vulkan(&mut self) {
+        @vbc(GPU_ENUMERATE_VULKAN, |index, name, memory, vendor_id, is_discrete| {
+            let vendor = match vendor_id {
+                0x10DE => Vendor.Nvidia,
+                0x1002 => Vendor.Amd,
+                0x8086 => Vendor.Intel,
+                _ => Vendor.Unknown,
+            };
+            let info = GpuInfo {
+                name: name,
+                vendor: vendor,
+                backend: GPUBackend.Vulkan,
+                memory_bytes: memory,
+                compute_capability: ComputeCapability.default(),
+                multiprocessors: 0,  // Not directly exposed
+                max_threads_per_block: 1024,
+                warp_size: 32,
+                shared_memory_per_block: 32 * 1024,
+                memory_bandwidth_gbps: 0.0,
+            };
+            self.devices.push((DeviceId.gpu(index as U16), DeviceInfo.Gpu(info)));
+        })
+    }
+
+    // Select best available device based on capabilities
+    public fn select_best_device(&self) -> DeviceId {
+        // Prefer GPU with most memory
+        self.devices.iter()
+            .filter(|(_, info)| info.is_gpu())
+            .max_by_key(|(_, info)| info.memory_bytes())
+            .map(|(id, _)| *id)
+            .unwrap_or(DeviceId.cpu())
+    }
+
+    // Get device info by ID
+    public fn get_device(&self, id: DeviceId) -> Maybe<&DeviceInfo> {
+        self.devices.iter()
+            .find(|(dev_id, _)| *dev_id == id)
+            .map(|(_, info)| info)
+    }
+
+    // Check if any GPU is available
+    public fn has_gpu(&self) -> Bool {
+        self.devices.iter().any(|(_, info)| info.is_gpu())
+    }
+
+    // Get all GPU devices
+    public fn gpus(&self) -> List<(DeviceId, &GpuInfo)> {
+        self.devices.iter()
+            .filter_map(|(id, info)| {
+                match info {
+                    DeviceInfo.Gpu(gpu) => Some((*id, gpu)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    // Get CPU device info
+    public fn cpu(&self) -> Maybe<&CpuInfo> {
+        self.devices.iter()
+            .find_map(|(_, info)| {
+                match info {
+                    DeviceInfo.Cpu(cpu) => Some(cpu),
+                    _ => None,
+                }
+            })
+    }
+
+    // Get device count
+    public fn device_count(&self) -> USize {
+        self.devices.len()
+    }
+
+    // Get GPU count
+    public fn gpu_count(&self) -> USize {
+        self.devices.iter().filter(|(_, info)| info.is_gpu()).count()
+    }
+}
+
+// =============================================================================
+// Global Registry Access
+// =============================================================================
+
+// Global singleton (lazy-initialized on first access)
+static REGISTRY: OnceCell<DeviceRegistry> = OnceCell.new();
+
+// Get global device registry
+public fn get_registry() -> DeviceRegistry {
+    REGISTRY.get_or_init(DeviceRegistry.init)
+}
+
+// Get default device for tensor operations
+public fn default_device() -> DeviceId {
+    get_registry().default_device
+}
+
+// Check if GPU acceleration is available
+public fn has_gpu() -> Bool {
+    get_registry().has_gpu()
+}
+
+// Get number of available GPUs
+public fn gpu_count() -> USize {
+    get_registry().gpu_count()
+}
+
+// Get list of available devices
+public fn get_devices() -> &List<(DeviceId, DeviceInfo)> {
+    &get_registry().devices
+}
+
+// =============================================================================
+// Device Selection Functions
+// =============================================================================
+
+// Select device based on selector criteria
+public fn select_device(selector: DeviceSelector) -> Maybe<(DeviceId, &DeviceInfo)> {
+    let registry = get_registry();
+
+    match selector {
+        DeviceSelector.Best => {
+            // Prefer first GPU device, fallback to first device
+            let mut best: Maybe<(DeviceId, &DeviceInfo)> = None;
+            for (id, info) in registry.devices.iter() {
+                if info.is_gpu() {
+                    best = Some((id.clone(), info));
+                    break;
+                }
+            }
+            if best is None {
+                best = registry.devices.first().map(|(id, info)| (id.clone(), info));
+            }
+            best
+        }
+
+        DeviceSelector.ByIndex(idx) => {
+            registry.devices.get(idx).map(|(id, info)| (id.clone(), info))
+        }
+
+        DeviceSelector.ByName(name) => {
+            registry.devices.iter()
+                .find(|(_, info)| info.name().contains(&name))
+                .map(|(id, info)| (id.clone(), info))
+        }
+
+        DeviceSelector.ByMemory(min_mem) => {
+            registry.devices.iter()
+                .find(|(_, info)| info.memory_bytes() >= min_mem)
+                .map(|(id, info)| (id.clone(), info))
+        }
+
+        DeviceSelector.ByBackend(backend) => {
+            let mut found: Maybe<(DeviceId, &DeviceInfo)> = None;
+            for (id, info) in registry.devices.iter() {
+                if info.is_gpu() {
+                    found = Some((id.clone(), info));
+                    break;
+                }
+            }
+            found
+        }
+
+        DeviceSelector.Custom(pred) => {
+            registry.devices.iter()
+                .find(|(_, info)| pred(info))
+                .map(|(id, info)| (id.clone(), info))
+        }
+    }
+}
+
+// =============================================================================
+// Device Context Management
+// =============================================================================
+
+// Get current device
+public fn current_device() -> DeviceId {
+    @vbc(GPU_GET_DEVICE)
+}
+
+// Set current device
+public fn set_device(device: DeviceId) {
+    @vbc(GPU_SET_DEVICE, device.raw())
+}
+
+// Execute function with specific device context
+public fn with_device<T>(device: DeviceId, f: fn() -> T) -> T {
+    let old = current_device();
+    set_device(device);
+    let result = f();
+    set_device(old);
+    result
+}
+
+// =============================================================================
+// Memory Spaces
+// =============================================================================
+
+// GPU memory space types
+public type MemorySpace is
+    | Host              // CPU memory
+    | HostPinned        // Pinned CPU memory (DMA-capable)
+    | Global            // GPU global memory
+    | Shared            // Per-block shared memory
+    | Local             // Per-thread local memory
+    | Constant          // Read-only constant memory
+    | Texture           // Texture memory (cached)
+    | Unified;          // Unified virtual address space
+
+implement MemorySpace {
+    // Check if memory is on device
+    public fn is_device(&self) -> Bool {
+        match self {
+            MemorySpace.Global | MemorySpace.Shared |
+            MemorySpace.Local | MemorySpace.Constant |
+            MemorySpace.Texture => true,
+            _ => false,
+        }
+    }
+
+    // Check if memory is on host
+    public fn is_host(&self) -> Bool {
+        match self {
+            MemorySpace.Host | MemorySpace.HostPinned => true,
+            _ => false,
+        }
+    }
+
+    // Check if memory is accessible from both CPU and GPU
+    public fn is_unified(&self) -> Bool {
+        match self {
+            MemorySpace.Unified => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Device Pointer
+// =============================================================================
+
+// Opaque device pointer type
+public type DevicePtr<T> is (*mut T);
+
+implement<T> DevicePtr<T> {
+    // Create null pointer
+    public fn null() -> Self {
+        DevicePtr(0 as *mut T)
+    }
+
+    // Check if pointer is null
+    public fn is_null(&self) -> Bool {
+        self.0 == (0 as *mut T)
+    }
+
+    // Offset pointer by element count
+    public fn add(&self, count: USize) -> Self {
+        DevicePtr(unsafe { self.0.add(count) })
+    }
+
+    // Get raw pointer
+    public fn as_ptr(&self) -> *mut T {
+        self.0
+    }
+}
+
+// =============================================================================
+// GPU Buffer
+// =============================================================================
+
+// GPU buffer with CBGR tracking
+public type GPUBuffer<T> is {
+    ptr: DevicePtr<T>,
+    size: USize,            // Number of elements
+    space: MemorySpace,
+    device: DeviceId,
+    generation: U64,        // CBGR generation counter
+};
+
+implement<T> GPUBuffer<T> {
+    // Allocate buffer on GPU global memory
+    public fn allocate(size: USize, device: DeviceId) -> Self {
+        Self.allocate_in(size, MemorySpace.Global, device)
+    }
+
+    // Allocate buffer in specific memory space
+    public fn allocate_in(size: USize, space: MemorySpace, device: DeviceId) -> Self {
+        with_device(device, || {
+            let ptr = @vbc(GPU_MALLOC, size * T.size, space);
+            GPUBuffer {
+                ptr,
+                size,
+                space,
+                device,
+                generation: @vbc(CBGR_NEW_GENERATION),
+            }
+        })
+    }
+
+    // Allocate unified memory accessible from CPU and GPU
+    public fn allocate_unified(size: USize) -> Self {
+        let ptr = @vbc(GPU_MALLOC_MANAGED, size * T.size);
+        GPUBuffer {
+            ptr,
+            size,
+            space: MemorySpace.Unified,
+            device: default_device(),
+            generation: @vbc(CBGR_NEW_GENERATION),
+        }
+    }
+
+    // Check if buffer is valid
+    public fn is_valid(&self) -> Bool {
+        !self.ptr.is_null() && self.size > 0
+    }
+
+    // Get buffer size in bytes
+    public fn size_bytes(&self) -> USize {
+        self.size * T.size
+    }
+
+    // Free buffer memory
+    public fn free(self) {
+        if !self.ptr.is_null() {
+            with_device(self.device, || {
+                @vbc(GPU_FREE, self.ptr);
+            });
+            @vbc(CBGR_INVALIDATE, self.generation);
+        }
+    }
+}
+
+implement<T> Drop for GPUBuffer<T> {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            with_device(self.device, || {
+                @vbc(GPU_FREE, self.ptr);
+            });
+            @vbc(CBGR_INVALIDATE, self.generation);
+        }
+    }
+}
+
+// =============================================================================
+// Pinned Memory
+// =============================================================================
+
+// Pinned host memory buffer for efficient DMA transfers
+public type PinnedBuffer<T> is {
+    data: *mut T,
+    size: USize,
+};
+
+// Pin host memory for efficient GPU transfers
+public fn pin_memory<T>(host_data: &mut [T]) -> PinnedBuffer<T> {
+    @vbc(GPU_PIN_MEMORY, host_data.as_mut_ptr(), host_data.len())
+}
+
+// Unpin previously pinned memory
+public fn unpin_memory<T>(buffer: PinnedBuffer<T>) {
+    @vbc(GPU_UNPIN_MEMORY, buffer.data, buffer.size)
+}
+
+// =============================================================================
+// Memory Transfer Direction
+// =============================================================================
+
+// Transfer direction for memory copies
+public type TransferDirection is
+    | HostToDevice
+    | DeviceToHost
+    | DeviceToDevice;
+
+// =============================================================================
+// Memory Transfer Functions
+// =============================================================================
+
+// Transfer host data to device buffer
+public fn to_device<T: Copy>(host_data: &[T], device: DeviceId) -> GPUBuffer<T> {
+    with_device(device, || {
+        let buffer = GPUBuffer.allocate(host_data.len(), device);
+        @vbc(GPU_MEMCPY_H2D, buffer.ptr, host_data.as_ptr(), host_data.len() * T.size);
+        buffer
+    })
+}
+
+// Transfer device buffer to host
+public fn to_host<T: Copy + Default>(device_data: &GPUBuffer<T>) -> List<T> {
+    let mut host_data: List<T> = List.with_capacity(device_data.size);
+    host_data.resize(device_data.size, T.default());
+    @vbc(GPU_MEMCPY_D2H, host_data.as_mut_ptr(), device_data.ptr, device_data.size * T.size);
+    host_data
+}
+
+// Synchronous device-to-device copy
+public fn memcpy<T: Copy>(
+    dst: &mut GPUBuffer<T>,
+    src: &GPUBuffer<T>,
+    size: USize,
+) {
+    assert(size <= dst.size && size <= src.size, "memcpy size exceeds buffer bounds");
+    @vbc(GPU_MEMCPY_D2D, dst.ptr, src.ptr, size * T.size)
+}
+
+// Asynchronous memory copy on stream
+public fn memcpy_async<T: Copy>(
+    dst: &mut GPUBuffer<T>,
+    src: &GPUBuffer<T>,
+    size: USize,
+    stream: &Stream,
+) {
+    assert(size <= dst.size && size <= src.size, "memcpy_async size exceeds buffer bounds");
+    @vbc(GPU_MEMCPY_ASYNC, dst.ptr, src.ptr, size * T.size, stream.handle)
+}
+
+// Prefetch unified memory to device
+public fn prefetch<T>(buffer: &GPUBuffer<T>, device: DeviceId) {
+    assert(buffer.space == MemorySpace.Unified, "prefetch requires unified memory");
+    @vbc(GPU_PREFETCH, buffer.ptr, buffer.size * T.size, device.raw())
+}
+
+// Set memory to value
+public fn memset<T: Copy>(buffer: &mut GPUBuffer<T>, value: U8) {
+    @vbc(GPU_MEMSET, buffer.ptr, value, buffer.size * T.size)
+}
+
+// Async memset on stream
+public fn memset_async<T: Copy>(buffer: &mut GPUBuffer<T>, value: U8, stream: &Stream) {
+    @vbc(GPU_MEMSET_ASYNC, buffer.ptr, value, buffer.size * T.size, stream.handle)
+}
+
+// =============================================================================
+// Grid and Block Dimensions
+// =============================================================================
+
+// 3D grid/block dimensions
+public type Dim3 is { x: U32, y: U32, z: U32 };
+
+implement Dim3 {
+    // Create full 3D dimensions
+    public fn new(x: U32, y: U32, z: U32) -> Self {
+        Dim3 { x, y, z }
+    }
+
+    // Create 1D dimensions
+    public fn d1(x: U32) -> Self {
+        Dim3 { x, y: 1, z: 1 }
+    }
+
+    // Create 2D dimensions
+    public fn d2(x: U32, y: U32) -> Self {
+        Dim3 { x, y, z: 1 }
+    }
+
+    // Get total element count
+    public fn total(&self) -> USize {
+        (self.x as USize) * (self.y as USize) * (self.z as USize)
+    }
+}
+
+// =============================================================================
+// Launch Configuration
+// =============================================================================
+
+// Kernel launch configuration
+public type LaunchConfig is {
+    grid: Dim3,
+    block: Dim3,
+    shared_mem: USize,
+    stream: Maybe<StreamHandle>,
+};
+
+implement LaunchConfig {
+    // Create default configuration
+    public fn default() -> Self {
+        LaunchConfig {
+            grid: Dim3.d1(1),
+            block: Dim3.d1(256),
+            shared_mem: 0,
+            stream: None,
+        }
+    }
+
+    // Auto-configure for 1D workload
+    public fn for_elements(n: USize, block_size: U32) -> Self {
+        let grid_size = ((n as U32) + block_size - 1) / block_size;
+        LaunchConfig {
+            grid: Dim3.d1(grid_size),
+            block: Dim3.d1(block_size),
+            shared_mem: 0,
+            stream: None,
+        }
+    }
+
+    // Auto-configure for 2D workload (e.g., matrix operations)
+    public fn for_matrix(rows: USize, cols: USize, block_x: U32, block_y: U32) -> Self {
+        let grid_x = ((cols as U32) + block_x - 1) / block_x;
+        let grid_y = ((rows as U32) + block_y - 1) / block_y;
+        LaunchConfig {
+            grid: Dim3.d2(grid_x, grid_y),
+            block: Dim3.d2(block_x, block_y),
+            shared_mem: 0,
+            stream: None,
+        }
+    }
+
+    // Auto-configure for 3D workload
+    public fn for_volume(
+        dim_x: USize, dim_y: USize, dim_z: USize,
+        block_x: U32, block_y: U32, block_z: U32,
+    ) -> Self {
+        let grid_x = ((dim_x as U32) + block_x - 1) / block_x;
+        let grid_y = ((dim_y as U32) + block_y - 1) / block_y;
+        let grid_z = ((dim_z as U32) + block_z - 1) / block_z;
+        LaunchConfig {
+            grid: Dim3.new(grid_x, grid_y, grid_z),
+            block: Dim3.new(block_x, block_y, block_z),
+            shared_mem: 0,
+            stream: None,
+        }
+    }
+
+    // Set shared memory size
+    public fn with_shared_mem(self, bytes: USize) -> Self {
+        LaunchConfig { shared_mem: bytes, ..self }
+    }
+
+    // Set execution stream
+    public fn with_stream(self, stream: &Stream) -> Self {
+        LaunchConfig { stream: Some(stream.handle), ..self }
+    }
+
+    // Get total thread count
+    public fn total_threads(&self) -> USize {
+        self.grid.total() * self.block.total()
+    }
+}
+
+// =============================================================================
+// Stream Handle
+// =============================================================================
+
+// Opaque stream handle
+public type StreamHandle is (U64);
+
+// =============================================================================
+// CUDA/HIP Stream
+// =============================================================================
+
+// GPU execution stream for async operations
+public type Stream is {
+    handle: StreamHandle,
+    device: DeviceId,
+};
+
+implement Stream {
+    // Create new stream on current device
+    public fn new() -> Self {
+        Stream {
+            handle: @vbc(GPU_STREAM_CREATE),
+            device: current_device(),
+        }
+    }
+
+    // Create new stream on specific device
+    public fn on_device(device: DeviceId) -> Self {
+        with_device(device, || {
+            Stream {
+                handle: @vbc(GPU_STREAM_CREATE),
+                device,
+            }
+        })
+    }
+
+    // Create stream with priority (-1 = high, 0 = default)
+    public fn with_priority(priority: Int) -> Self {
+        Stream {
+            handle: @vbc(GPU_STREAM_CREATE_PRIO, priority),
+            device: current_device(),
+        }
+    }
+
+    // Synchronize stream (wait for all operations to complete)
+    public fn sync(&self) {
+        @vbc(GPU_SYNC, self.handle)
+    }
+
+    // Query if stream has completed all operations
+    public fn is_complete(&self) -> Bool {
+        @vbc(GPU_STREAM_QUERY, self.handle)
+    }
+
+    // Wait for event on this stream
+    public fn wait_event(&self, event: &Event) {
+        @vbc(GPU_STREAM_WAIT_EVENT, self.handle, event.handle)
+    }
+}
+
+implement Drop for Stream {
+    fn drop(&mut self) {
+        @vbc(GPU_STREAM_DESTROY, self.handle)
+    }
+}
+
+// Synchronize all streams on current device
+public fn device_synchronize() {
+    @vbc(GPU_SYNC_ALL)
+}
+
+// Synchronize all streams on all devices
+public fn all_device_synchronize() {
+    for (id, _) in get_registry().devices.iter() {
+        if id.is_gpu() {
+            with_device(*id, || {
+                @vbc(GPU_SYNC_ALL)
+            });
+        }
+    }
+}
+
+// =============================================================================
+// Event Handle
+// =============================================================================
+
+// Opaque event handle
+public type EventHandle is (U64);
+
+// =============================================================================
+// GPU Event
+// =============================================================================
+
+// GPU event for timing and synchronization
+public type Event is {
+    handle: EventHandle,
+};
+
+implement Event {
+    // Create new event
+    public fn new() -> Self {
+        Event { handle: @vbc(GPU_EVENT_CREATE) }
+    }
+
+    // Create event with timing disabled (lower overhead)
+    public fn new_no_timing() -> Self {
+        Event { handle: @vbc(GPU_EVENT_CREATE_F, 0x02) }  // cudaEventDisableTiming
+    }
+
+    // Record event on stream
+    public fn record(&self, stream: &Stream) {
+        @vbc(GPU_EVENT_RECORD, self.handle, stream.handle)
+    }
+
+    // Synchronize on event (block until complete)
+    public fn sync(&self) {
+        @vbc(GPU_EVENT_SYNC, self.handle)
+    }
+
+    // Query if event has completed
+    public fn is_complete(&self) -> Bool {
+        @vbc(GPU_EVENT_QUERY, self.handle)
+    }
+
+    // Elapsed time between two events in milliseconds
+    public fn elapsed_ms(start: &Event, end: &Event) -> Float {
+        @vbc(GPU_EVENT_ELAPSED, start.handle, end.handle)
+    }
+}
+
+implement Drop for Event {
+    fn drop(&mut self) {
+        @vbc(GPU_EVENT_DESTROY, self.handle)
+    }
+}
+
+// =============================================================================
+// Kernel Launch
+// =============================================================================
+
+// GPU kernel protocol (marker for kernel functions)
+public type GPUKernel is protocol {
+    type Args;
+};
+
+// Launch kernel with configuration
+public fn launch<K: GPUKernel>(config: LaunchConfig, kernel: K, args: K.Args) {
+    @vbc(GPU_LAUNCH,
+         config.grid.x, config.grid.y, config.grid.z,
+         config.block.x, config.block.y, config.block.z,
+         config.shared_mem,
+         config.stream,
+         kernel, args)
+}
+
+// Cooperative kernel launch (grid-wide synchronization)
+public fn launch_cooperative<K: GPUKernel>(config: LaunchConfig, kernel: K, args: K.Args) {
+    @vbc(GPU_LAUNCH_COOP,
+         config.grid.x, config.grid.y, config.grid.z,
+         config.block.x, config.block.y, config.block.z,
+         config.shared_mem,
+         config.stream,
+         kernel, args)
+}
+
+// =============================================================================
+// Profiling Utilities
+// =============================================================================
+
+// Profile a GPU operation and return result with elapsed time
+public fn profile<T>(name: &Text, f: fn() -> T) -> (T, Float) {
+    let stream = Stream.new();
+    let start = Event.new();
+    let end = Event.new();
+
+    start.record(&stream);
+    let result = f();
+    end.record(&stream);
+    stream.sync();
+
+    let elapsed = Event.elapsed_ms(&start, &end);
+    (result, elapsed)
+}
+
+// Push profiling marker (for external profilers like Nsight)
+public fn profiler_push(name: &Text) {
+    @vbc(GPU_MARKER_PUSH, name)
+}
+
+// Pop profiling marker
+public fn profiler_pop() {
+    @vbc(GPU_MARKER_POP)
+}
+
+// Scoped profiling marker
+public fn profiler_scope<T>(name: &Text, f: fn() -> T) -> T {
+    profiler_push(name);
+    let result = f();
+    profiler_pop();
+    result
+}
+
+// =============================================================================
+// CUDA Graph Capture
+// =============================================================================
+
+// CUDA Graph handle for graph-based execution
+public type CudaGraph is {
+    handle: U64,
+    exec_handle: U64,
+};
+
+implement CudaGraph {
+    // Create empty graph
+    public fn new() -> Self {
+        CudaGraph {
+            handle: @vbc(GPU_GRAPH_CREATE),
+            exec_handle: 0,
+        }
+    }
+
+    // Begin capture on stream
+    public fn begin_capture(stream: &Stream) {
+        @vbc(GPU_GRAPH_BEGIN, stream.handle)
+    }
+
+    // End capture and return graph
+    public fn end_capture(stream: &Stream) -> Self {
+        let handle = @vbc(GPU_GRAPH_END, stream.handle);
+        CudaGraph {
+            handle,
+            exec_handle: 0,
+        }
+    }
+
+    // Instantiate graph for execution
+    public fn instantiate(&mut self) {
+        self.exec_handle = @vbc(GPU_GRAPH_INST, self.handle);
+    }
+
+    // Launch instantiated graph
+    public fn launch(&self, stream: &Stream) {
+        assert(self.exec_handle != 0, "Graph not instantiated");
+        @vbc(GPU_GRAPH_LAUNCH, self.exec_handle, stream.handle)
+    }
+
+    // Update graph executable
+    public fn update(&mut self) {
+        @vbc(GPU_GRAPH_EXEC_UPDATE, self.exec_handle, self.handle)
+    }
+}
+
+implement Drop for CudaGraph {
+    fn drop(&mut self) {
+        if self.exec_handle != 0 {
+            @vbc(GPU_GRAPH_EXEC_DESTROY, self.exec_handle)
+        }
+        @vbc(GPU_GRAPH_DESTROY, self.handle)
+    }
+}
+
+// Capture operations to graph
+public fn capture_graph<T>(f: fn() -> T) -> (CudaGraph, T) {
+    let stream = Stream.new();
+    CudaGraph.begin_capture(&stream);
+    let result = f();
+    let mut graph = CudaGraph.end_capture(&stream);
+    graph.instantiate();
+    (graph, result)
+}
+
+// =============================================================================
+// Multi-GPU Operations
+// =============================================================================
+
+// Enable peer access between GPUs
+public fn enable_peer_access(from: DeviceId, to: DeviceId) -> Bool {
+    with_device(from, || {
+        @vbc(GPU_ENABLE_PEER, to.raw())
+    })
+}
+
+// Disable peer access between GPUs
+public fn disable_peer_access(from: DeviceId, to: DeviceId) {
+    with_device(from, || {
+        @vbc(GPU_DISABLE_PEER, to.raw())
+    })
+}
+
+// Check if peer access is possible
+public fn can_access_peer(from: DeviceId, to: DeviceId) -> Bool {
+    with_device(from, || {
+        @vbc(GPU_CAN_PEER, to.raw())
+    })
+}
+
+// Parallel execution across multiple devices
+public fn parallel_devices<T: Send, R: Send>(
+    device_ids: &[DeviceId],
+    data: &[T],
+    f: fn(DeviceId, &T) -> R,
+) -> List<R> {
+    let mut results: List<R> = List.with_capacity(device_ids.len());
+    for i in 0..device_ids.len() {
+        let device_id = device_ids[i];
+        let item = &data[i];
+        results.push(with_device(device_id, || f(device_id, item)));
+    }
+    results
+}
+
+// =============================================================================
+// Memory Info
+// =============================================================================
+
+// Memory information for a device
+public type MemoryInfo is {
+    free: USize,
+    total: USize,
+};
+
+// Get memory info for current device
+public fn get_memory_info() -> MemoryInfo {
+    let (free, total) = @vbc(GPU_MEM_INFO);
+    MemoryInfo { free, total }
+}
+
+// Get memory info for specific device
+public fn get_memory_info_device(device: DeviceId) -> MemoryInfo {
+    with_device(device, || get_memory_info())
+}
+
+// =============================================================================
+// Device Reset
+// =============================================================================
+
+// Reset device (free all allocations, destroy all contexts)
+// WARNING: This invalidates all device memory
+public fn device_reset() {
+    @vbc(GPU_DEVICE_RESET)
+}
+
+// Reset specific device
+public fn device_reset_device(device: DeviceId) {
+    with_device(device, || device_reset())
+}
+
+// =============================================================================
+// ComputeDevice Context (Integration with Context System)
+// =============================================================================
+
+// ComputeDevice context for tensor operations
+// Used with `provide ComputeDevice = ...` syntax
+public context ComputeDevice {
+    // Get current device type
+    fn device_type() -> DeviceId;
+
+    // Get device info
+    fn device_info() -> &DeviceInfo;
+
+    // Check if GPU
+    fn is_gpu() -> Bool;
+}
+
+// CPU-only compute device implementation
+public type CPUDevice is ();
+
+implement ComputeDevice for CPUDevice {
+    fn device_type() -> DeviceId {
+        DeviceId.cpu()
+    }
+
+    fn device_info() -> &DeviceInfo {
+        get_registry().get_device(DeviceId.cpu())
+            .expect("CPU device always exists")
+    }
+
+    fn is_gpu() -> Bool {
+        false
+    }
+}
+
+// GPU compute device implementation
+public type GPUDevice is {
+    device_id: DeviceId,
+};
+
+implement GPUDevice {
+    // Create GPU device for specific device ID
+    public fn new(device_id: DeviceId) -> Self {
+        assert(device_id.is_gpu(), "GPUDevice requires GPU device ID");
+        GPUDevice { device_id }
+    }
+
+    // Get best available GPU (or CPU if no GPU)
+    public fn best_available() -> Self {
+        let registry = get_registry();
+        let device_id = registry.select_best_device();
+        GPUDevice { device_id }
+    }
+
+    // Get first GPU (or CPU if no GPU)
+    public fn first() -> Self {
+        let registry = get_registry();
+        let device_id = registry.devices.iter()
+            .find(|(id, _)| id.is_gpu())
+            .map(|(id, _)| *id)
+            .unwrap_or(DeviceId.cpu());
+        GPUDevice { device_id }
+    }
+
+    // Get GPU by index
+    public fn by_index(index: USize) -> Maybe<Self> {
+        let device_id = DeviceId.gpu(index as U16);
+        if get_registry().get_device(device_id).is_some() {
+            Some(GPUDevice { device_id })
+        } else {
+            None
+        }
+    }
+}
+
+implement ComputeDevice for GPUDevice {
+    fn device_type() -> DeviceId {
+        self.device_id
+    }
+
+    fn device_info() -> &DeviceInfo {
+        get_registry().get_device(self.device_id)
+            .expect("GPU device not found")
+    }
+
+    fn is_gpu() -> Bool {
+        true
+    }
+}
+
+// =============================================================================
+// VBC Opcodes Reference (Documentation)
+// =============================================================================
+//
+// GPU opcodes use 0xF8 (GpuExtended) prefix with sub-opcodes:
+//
+// ┌────────────┬────────────────────────┬─────────────────────────────────────┐
+// │ Sub-Opcode │ Name                   │ Description                         │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x00       │ GPU_LAUNCH             │ Launch kernel                       │
+// │ 0x01       │ GPU_LAUNCH_COOP        │ Cooperative kernel launch           │
+// │ 0x02       │ GPU_LAUNCH_MULTI       │ Multi-device kernel launch          │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x10       │ GPU_SYNC_STREAM        │ Synchronize stream                  │
+// │ 0x11       │ GPU_SYNC_DEVICE        │ Synchronize device                  │
+// │ 0x12       │ GPU_SYNC_EVENT         │ Synchronize on event                │
+// │ 0x13       │ GPU_QUERY_STREAM       │ Query stream completion             │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x20       │ GPU_MEMCPY             │ Generic memcpy (with direction)     │
+// │ 0x21       │ GPU_MEMCPY_ASYNC       │ Async memcpy (with direction)       │
+// │ 0x22       │ GPU_ALLOC              │ Allocate device memory              │
+// │ 0x23       │ GPU_FREE               │ Free device memory                  │
+// │ 0x24       │ GPU_PIN                │ Pin host memory                     │
+// │ 0x25       │ GPU_UNPIN              │ Unpin host memory                   │
+// │ 0x26       │ GPU_PREFETCH           │ Prefetch unified memory             │
+// │ 0x27       │ GPU_MEMSET             │ Set memory to value                 │
+// │ 0x28       │ GPU_MEMSET_ASYNC       │ Async memset                        │
+// │ 0x29       │ GPU_MEMCPY_2D          │ 2D pitched memcpy                   │
+// │ 0x2A       │ GPU_MEMCPY_2D_ASYNC    │ 2D async pitched memcpy             │
+// │ 0x2B       │ GPU_MEMCPY_H2D         │ Host to device copy                 │
+// │ 0x2C       │ GPU_MEMCPY_D2H         │ Device to host copy                 │
+// │ 0x2D       │ GPU_MEMCPY_D2D         │ Device to device copy               │
+// │ 0x2E       │ GPU_MEMCPY_ASYNC_H2D   │ Async host to device                │
+// │ 0x2F       │ GPU_MEMCPY_ASYNC_D2H   │ Async device to host                │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x30       │ GPU_STREAM_CREATE      │ Create stream                       │
+// │ 0x31       │ GPU_STREAM_DESTROY     │ Destroy stream                      │
+// │ 0x32       │ GPU_STREAM_QUERY       │ Query stream completion             │
+// │ 0x33       │ GPU_STREAM_WAIT_EVENT  │ Wait for event on stream            │
+// │ 0x34       │ GPU_STREAM_CREATE_PRIO │ Create stream with priority         │
+// │ 0x35       │ GPU_STREAM_GET_PRIO    │ Get stream priority                 │
+// │ 0x36       │ GPU_STREAM_CREATE_NB   │ Create non-blocking stream          │
+// │ 0x37       │ GPU_STREAM_CALLBACK    │ Add stream callback                 │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x40       │ GPU_EVENT_CREATE       │ Create event                        │
+// │ 0x41       │ GPU_EVENT_DESTROY      │ Destroy event                       │
+// │ 0x42       │ GPU_EVENT_RECORD       │ Record event on stream              │
+// │ 0x43       │ GPU_EVENT_SYNC         │ Synchronize on event                │
+// │ 0x44       │ GPU_EVENT_QUERY        │ Query event completion              │
+// │ 0x45       │ GPU_EVENT_ELAPSED      │ Elapsed time between events         │
+// │ 0x46       │ GPU_EVENT_CREATE_F     │ Create event with flags             │
+// │ 0x47       │ GPU_EVENT_RECORD_F     │ Record event with flags             │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x50       │ GPU_GET_DEVICE         │ Get current device                  │
+// │ 0x51       │ GPU_SET_DEVICE         │ Set current device                  │
+// │ 0x52       │ GPU_DEVICE_COUNT       │ Get device count                    │
+// │ 0x53       │ GPU_DEVICE_PROP        │ Get device properties               │
+// │ 0x54       │ GPU_MEM_INFO           │ Get memory info                     │
+// │ 0x55       │ GPU_CAN_PEER           │ Check peer access capability        │
+// │ 0x56       │ GPU_ENABLE_PEER        │ Enable peer access                  │
+// │ 0x57       │ GPU_DISABLE_PEER       │ Disable peer access                 │
+// │ 0x58       │ GPU_DEVICE_RESET       │ Reset device                        │
+// │ 0x59       │ GPU_SET_FLAGS          │ Set device flags                    │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x60       │ GPU_MALLOC_MANAGED     │ Allocate managed memory             │
+// │ 0x61       │ GPU_MEM_ADVISE         │ Set memory advise hint              │
+// │ 0x62       │ GPU_PREFETCH_ASYNC     │ Async prefetch managed memory       │
+// │ 0x63       │ GPU_MEM_ATTR           │ Get memory attributes               │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x70       │ GPU_GRAPH_CREATE       │ Create graph                        │
+// │ 0x71       │ GPU_GRAPH_BEGIN        │ Begin graph capture                 │
+// │ 0x72       │ GPU_GRAPH_END          │ End graph capture                   │
+// │ 0x73       │ GPU_GRAPH_INST         │ Instantiate graph                   │
+// │ 0x74       │ GPU_GRAPH_LAUNCH       │ Launch graph                        │
+// │ 0x75       │ GPU_GRAPH_DESTROY      │ Destroy graph                       │
+// │ 0x76       │ GPU_GRAPH_EXEC_DESTROY │ Destroy graph executable            │
+// │ 0x77       │ GPU_GRAPH_EXEC_UPDATE  │ Update graph executable             │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x80       │ GPU_PROF_START         │ Start profiling range               │
+// │ 0x81       │ GPU_PROF_END           │ End profiling range                 │
+// │ 0x82       │ GPU_MARKER_PUSH        │ Push profiler marker                │
+// │ 0x83       │ GPU_MARKER_POP         │ Pop profiler marker                 │
+// ├────────────┼────────────────────────┼─────────────────────────────────────┤
+// │ 0x90       │ GPU_ENUM_CUDA          │ Enumerate CUDA devices              │
+// │ 0x91       │ GPU_ENUM_METAL         │ Enumerate Metal devices             │
+// │ 0x92       │ GPU_ENUM_ROCM          │ Enumerate ROCm devices              │
+// │ 0x93       │ GPU_ENUM_VULKAN        │ Enumerate Vulkan devices            │
+// └────────────┴────────────────────────┴─────────────────────────────────────┘
+//
+// =============================================================================
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+public const VERSION: &Text = "0.1.0";

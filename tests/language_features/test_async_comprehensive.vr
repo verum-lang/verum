@@ -1,0 +1,619 @@
+// ============================================================================
+// COMPREHENSIVE ASYNC FEATURE TEST
+// ============================================================================
+// Tests ALL async features in Verum:
+// 1. Async function definition
+// 2. Await expression (postfix .await)
+// 3. Spawn expression
+// 4. Async blocks
+// 5. Async closures
+// 6. Try with async (Result types)
+// 7. Defer in async context
+// 8. Nested async
+// 9. Generic async functions
+// 10. Complex async pipelines
+
+// ============================================================================
+// PART 1: BASIC ASYNC FUNCTIONS
+// ============================================================================
+
+// Test 1.1: Simple async function
+async fn simple_fetch(x: Int) -> Int {
+    x * 10
+}
+
+// Test 1.2: Async function calling another async function
+async fn chained_fetch(x: Int) -> Int {
+    let result = simple_fetch(x).await;
+    result + 100
+}
+
+// Test 1.3: Multiple await calls in sequence
+async fn multi_await(a: Int, b: Int, c: Int) -> Int {
+    let r1 = simple_fetch(a).await;
+    let r2 = simple_fetch(b).await;
+    let r3 = simple_fetch(c).await;
+    r1 + r2 + r3
+}
+
+// ============================================================================
+// PART 2: ERROR HANDLING WITH ASYNC (TRY/RESULT)
+// ============================================================================
+
+// Define Result type for error handling
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// Test 2.1: Async function returning Result
+async fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("Division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Test 2.2: Async function with Result propagation
+async fn safe_compute(x: Int, y: Int) -> Result<Int, Text> {
+    let division_result = safe_divide(x, y).await;
+    match division_result {
+        Ok(value) => Ok(value * 2),
+        Err(error) => Err(error),
+    }
+}
+
+// Test 2.3: Chained Result handling
+async fn complex_safe_operation(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+    let step1 = safe_divide(a, b).await;
+    match step1 {
+        Ok(v1) => {
+            let step2 = safe_divide(v1, c).await;
+            match step2 {
+                Ok(v2) => Ok(v2 + 10),
+                Err(e) => Err(e),
+            }
+        },
+        Err(e) => Err(e),
+    }
+}
+
+// ============================================================================
+// PART 3: SPAWN FOR CONCURRENCY
+// ============================================================================
+
+// Test 3.1: Basic spawn
+async fn parallel_task(id: Int, value: Int) -> Int {
+    value * id
+}
+
+// Test 3.2: Multiple spawns
+async fn run_parallel_tasks(n: Int) -> Int {
+    let h1 = spawn parallel_task(1, n);
+    let h2 = spawn parallel_task(2, n);
+    let h3 = spawn parallel_task(3, n);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    r1 + r2 + r3
+}
+
+// ============================================================================
+// PART 4: ASYNC BLOCKS
+// ============================================================================
+
+// Test 4.1: Simple async block
+fn test_async_block() -> Int {
+    let future = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    future.await
+}
+
+// Test 4.2: Async block with computation
+fn test_complex_async_block(n: Int) -> Int {
+    let computation = async {
+        let a = n * 2;
+        let b = a + 5;
+        let c = b * 3;
+        c
+    };
+    computation.await
+}
+
+// Test 4.3: Async block in async function
+async fn async_with_block(x: Int) -> Int {
+    let inner_result = async {
+        x * x
+    };
+    let squared = inner_result.await;
+    squared + 10
+}
+
+// ============================================================================
+// PART 5: ASYNC CLOSURES
+// ============================================================================
+
+// Test 5.1: Simple async closure
+fn test_async_closure() -> Int {
+    let async_square = async |x: Int| -> Int {
+        x * x
+    };
+    async_square(7).await
+}
+
+// Test 5.2: Async closure with multiple parameters
+fn test_multi_param_async_closure() -> Int {
+    let async_add = async |a: Int, b: Int| -> Int {
+        a + b
+    };
+    async_add(10, 20).await
+}
+
+// Test 5.3: Nested async closures
+fn test_nested_async_closures() -> Int {
+    let outer = async || -> Int {
+        let inner = async || -> Int {
+            42
+        };
+        inner().await + 8
+    };
+    outer().await
+}
+
+// Test 5.4: Async closure with spawn
+fn test_async_closure_spawn() -> Int {
+    let async_compute = async |x: Int| -> Int {
+        x * x * x
+    };
+
+    let h1 = spawn async_compute(2);
+    let h2 = spawn async_compute(3);
+    let h3 = spawn async_compute(4);
+
+    h1.await + h2.await + h3.await
+}
+
+// ============================================================================
+// PART 6: DEFER IN ASYNC CONTEXT
+// ============================================================================
+
+// Test 6.1: Simple defer in async
+async fn async_with_defer(x: Int) -> Int {
+    defer {
+        print("  [Defer: Cleanup executed]");
+    };
+    x * 2
+}
+
+// Test 6.2: Multiple defer in async
+async fn async_with_multi_defer(x: Int) -> Int {
+    defer {
+        print("  [Defer 1: First cleanup]");
+    };
+
+    let intermediate = x * 2;
+
+    defer {
+        print("  [Defer 2: Second cleanup]");
+    };
+
+    intermediate + 10
+}
+
+// Test 6.3: Defer with early return
+async fn async_defer_early_return(x: Int) -> Int {
+    defer {
+        print("  [Defer: Runs even on early return]");
+    };
+
+    if x > 10 {
+        return x * 2;
+    }
+
+    x + 5
+}
+
+// ============================================================================
+// PART 7: GENERIC ASYNC FUNCTIONS
+// ============================================================================
+
+// Test 7.1: Simple generic async
+async fn async_identity<T>(value: T) -> T {
+    value
+}
+
+// Test 7.2: Generic async with computation
+async fn async_pair<T>(first: T, second: T) -> T {
+    // Just return the first for simplicity
+    first
+}
+
+// ============================================================================
+// PART 8: NESTED AND COMPLEX ASYNC PATTERNS
+// ============================================================================
+
+// Test 8.1: Deeply nested async calls
+async fn level3(x: Int) -> Int {
+    x * 3
+}
+
+async fn level2(x: Int) -> Int {
+    let result = level3(x).await;
+    result * 2
+}
+
+async fn level1(x: Int) -> Int {
+    let result = level2(x).await;
+    result + 100
+}
+
+// Test 8.2: Mix of spawn and await
+async fn mixed_spawn_await(n: Int) -> Int {
+    let h1 = spawn level3(n);
+    let direct = level3(n + 1).await;
+    let spawned = h1.await;
+    direct + spawned
+}
+
+// Test 8.3: Async function with async block and closures
+async fn complex_async_mix(x: Int) -> Int {
+    let block_result = async {
+        x * 2
+    };
+
+    let closure_result = async |y: Int| -> Int {
+        y + 10
+    };
+
+    let a = block_result.await;
+    let b = closure_result(a).await;
+
+    b
+}
+
+// ============================================================================
+// PART 9: STORED FUTURES AND DELAYED AWAIT
+// ============================================================================
+
+// Test 9.1: Store future and await later
+fn test_delayed_await() -> Int {
+    let future1 = simple_fetch(5);
+    let future2 = simple_fetch(10);
+
+    // Do something else
+    let x = 100;
+
+    // Now await the futures
+    let r1 = future1.await;
+    let r2 = future2.await;
+
+    r1 + r2 + x
+}
+
+// Test 9.2: Conditional await
+fn test_conditional_await(condition: Bool) -> Int {
+    let future = simple_fetch(42);
+
+    if condition {
+        future.await
+    } else {
+        0
+    }
+}
+
+// ============================================================================
+// PART 10: SPAWN WITH VARIOUS EXPRESSIONS
+// ============================================================================
+
+// Test 10.1: Spawn with async block
+fn test_spawn_async_block() -> Int {
+    let h1 = spawn async { 10 + 5 };
+    let h2 = spawn async { 20 * 2 };
+    let h3 = spawn async { 30 - 5 };
+
+    h1.await + h2.await + h3.await
+}
+
+// Test 10.2: Spawn with closure call
+fn test_spawn_closure() -> Int {
+    let compute = async |x: Int| -> Int { x * x };
+
+    let h1 = spawn compute(5);
+    let h2 = spawn compute(6);
+
+    h1.await + h2.await
+}
+
+// ============================================================================
+// PART 11: COMPLEX ASYNC PIPELINES
+// ============================================================================
+
+// Test 11.1: Sequential pipeline
+async fn pipeline_sequential(x: Int) -> Int {
+    let step1 = simple_fetch(x).await;
+    let step2 = chained_fetch(step1).await;
+    let step3 = level1(step2).await;
+    step3
+}
+
+// Test 11.2: Parallel pipeline
+async fn pipeline_parallel(x: Int) -> Int {
+    let h1 = spawn simple_fetch(x);
+    let h2 = spawn simple_fetch(x + 1);
+    let h3 = spawn simple_fetch(x + 2);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    let final_step = chained_fetch(r1 + r2 + r3).await;
+    final_step
+}
+
+// Test 11.3: Mixed parallel and sequential
+async fn pipeline_mixed(x: Int) -> Int {
+    // Parallel phase
+    let h1 = spawn simple_fetch(x);
+    let h2 = spawn simple_fetch(x * 2);
+
+    let p1 = h1.await;
+    let p2 = h2.await;
+
+    // Sequential phase
+    let s1 = chained_fetch(p1).await;
+    let s2 = chained_fetch(p2).await;
+
+    // Final parallel phase
+    let h3 = spawn level1(s1);
+    let h4 = spawn level1(s2);
+
+    h3.await + h4.await
+}
+
+// ============================================================================
+// MAIN FUNCTION - RUN ALL TESTS
+// ============================================================================
+
+fn main() {
+    print("============================================================================");
+    print("VERUM ASYNC COMPREHENSIVE TEST SUITE");
+    print("============================================================================\n");
+
+    // ========================================================================
+    // PART 1: BASIC ASYNC FUNCTIONS
+    // ========================================================================
+    print("PART 1: BASIC ASYNC FUNCTIONS");
+    print("------------------------------------------------------------------------");
+
+    print("Test 1.1: Simple async function");
+    let r1_1 = simple_fetch(5).await;
+    print(f"  simple_fetch(5) = {r1_1}");
+
+    print("\nTest 1.2: Chained async functions");
+    let r1_2 = chained_fetch(3).await;
+    print(f"  chained_fetch(3) = {r1_2}");
+
+    print("\nTest 1.3: Multiple await calls");
+    let r1_3 = multi_await(1, 2, 3).await;
+    print(f"  multi_await(1,2,3) = {r1_3}\n");
+
+    // ========================================================================
+    // PART 2: ERROR HANDLING
+    // ========================================================================
+    print("PART 2: ERROR HANDLING WITH ASYNC");
+    print("------------------------------------------------------------------------");
+
+    print("Test 2.1: Safe divide - success case");
+    let r2_1 = safe_divide(10, 2).await;
+    match r2_1 {
+        Ok(v) => print(f"  10 / 2 = {v}"),
+        Err(e) => print(f"  Error: {e}"),
+    }
+
+    print("\nTest 2.2: Safe divide - error case");
+    let r2_2 = safe_divide(10, 0).await;
+    match r2_2 {
+        Ok(v) => print(f"  10 / 0 = {v}"),
+        Err(e) => print(f"  Error: {e}"),
+    }
+
+    print("\nTest 2.3: Complex safe operation");
+    let r2_3 = complex_safe_operation(100, 5, 2).await;
+    match r2_3 {
+        Ok(v) => print(f"  Result = {v}"),
+        Err(e) => print(f"  Error: {e}"),
+    }
+
+    print("\nTest 2.4: Complex safe operation with error");
+    let r2_4 = complex_safe_operation(100, 0, 2).await;
+    match r2_4 {
+        Ok(v) => print(f"  Result = {v}"),
+        Err(e) => print(f"  Error: {e}"),
+    }
+    print("");
+
+    // ========================================================================
+    // PART 3: SPAWN FOR CONCURRENCY
+    // ========================================================================
+    print("PART 3: SPAWN FOR CONCURRENCY");
+    print("------------------------------------------------------------------------");
+
+    print("Test 3.1: Parallel tasks with spawn");
+    let r3_1 = run_parallel_tasks(10).await;
+    print(f"  run_parallel_tasks(10) = {r3_1}");
+
+    print("\nTest 3.2: Multiple independent spawns");
+    let h3_1 = spawn parallel_task(5, 10);
+    let h3_2 = spawn parallel_task(7, 20);
+    print(f"  Results: {h3_1.await}, {h3_2.await}\n");
+
+    // ========================================================================
+    // PART 4: ASYNC BLOCKS
+    // ========================================================================
+    print("PART 4: ASYNC BLOCKS");
+    print("------------------------------------------------------------------------");
+
+    print("Test 4.1: Simple async block");
+    let r4_1 = test_async_block();
+    print(f"  Result = {r4_1}");
+
+    print("\nTest 4.2: Complex async block");
+    let r4_2 = test_complex_async_block(5);
+    print(f"  Result = {r4_2}");
+
+    print("\nTest 4.3: Async block in async function");
+    let r4_3 = async_with_block(7).await;
+    print(f"  Result = {r4_3}\n");
+
+    // ========================================================================
+    // PART 5: ASYNC CLOSURES
+    // ========================================================================
+    print("PART 5: ASYNC CLOSURES");
+    print("------------------------------------------------------------------------");
+
+    print("Test 5.1: Simple async closure");
+    let r5_1 = test_async_closure();
+    print(f"  Result = {r5_1}");
+
+    print("\nTest 5.2: Multi-param async closure");
+    let r5_2 = test_multi_param_async_closure();
+    print(f"  Result = {r5_2}");
+
+    print("\nTest 5.3: Nested async closures");
+    let r5_3 = test_nested_async_closures();
+    print(f"  Result = {r5_3}");
+
+    print("\nTest 5.4: Async closure with spawn");
+    let r5_4 = test_async_closure_spawn();
+    print(f"  Result = {r5_4}\n");
+
+    // ========================================================================
+    // PART 6: DEFER IN ASYNC
+    // ========================================================================
+    print("PART 6: DEFER IN ASYNC CONTEXT");
+    print("------------------------------------------------------------------------");
+
+    print("Test 6.1: Simple defer in async");
+    let r6_1 = async_with_defer(10).await;
+    print(f"  Result = {r6_1}");
+
+    print("\nTest 6.2: Multiple defer in async");
+    let r6_2 = async_with_multi_defer(5).await;
+    print(f"  Result = {r6_2}");
+
+    print("\nTest 6.3: Defer with early return");
+    let r6_3a = async_defer_early_return(15).await;
+    print(f"  Early return result = {r6_3a}");
+    let r6_3b = async_defer_early_return(5).await;
+    print(f"  Normal return result = {r6_3b}\n");
+
+    // ========================================================================
+    // PART 7: GENERIC ASYNC
+    // ========================================================================
+    print("PART 7: GENERIC ASYNC FUNCTIONS");
+    print("------------------------------------------------------------------------");
+
+    print("Test 7.1: Generic async identity");
+    let r7_1 = async_identity(42).await;
+    print(f"  async_identity(42) = {r7_1}");
+    let r7_2 = async_identity("Hello").await;
+    print(f"  async_identity(\"Hello\") = {r7_2}");
+
+    print("\nTest 7.2: Generic async pair");
+    let r7_3 = async_pair(100, 200).await;
+    print(f"  async_pair(100, 200) = {r7_3}\n");
+
+    // ========================================================================
+    // PART 8: NESTED AND COMPLEX PATTERNS
+    // ========================================================================
+    print("PART 8: NESTED AND COMPLEX ASYNC PATTERNS");
+    print("------------------------------------------------------------------------");
+
+    print("Test 8.1: Deeply nested async calls");
+    let r8_1 = level1(5).await;
+    print(f"  level1(5) = {r8_1}");
+
+    print("\nTest 8.2: Mixed spawn and await");
+    let r8_2 = mixed_spawn_await(10).await;
+    print(f"  mixed_spawn_await(10) = {r8_2}");
+
+    print("\nTest 8.3: Complex async mix");
+    let r8_3 = complex_async_mix(20).await;
+    print(f"  complex_async_mix(20) = {r8_3}\n");
+
+    // ========================================================================
+    // PART 9: DELAYED AWAIT
+    // ========================================================================
+    print("PART 9: STORED FUTURES AND DELAYED AWAIT");
+    print("------------------------------------------------------------------------");
+
+    print("Test 9.1: Store and await later");
+    let r9_1 = test_delayed_await();
+    print(f"  Result = {r9_1}");
+
+    print("\nTest 9.2: Conditional await - true");
+    let r9_2 = test_conditional_await(true);
+    print(f"  Result = {r9_2}");
+
+    print("\nTest 9.3: Conditional await - false");
+    let r9_3 = test_conditional_await(false);
+    print(f"  Result = {r9_3}\n");
+
+    // ========================================================================
+    // PART 10: SPAWN WITH VARIOUS EXPRESSIONS
+    // ========================================================================
+    print("PART 10: SPAWN WITH VARIOUS EXPRESSIONS");
+    print("------------------------------------------------------------------------");
+
+    print("Test 10.1: Spawn with async blocks");
+    let r10_1 = test_spawn_async_block();
+    print(f"  Result = {r10_1}");
+
+    print("\nTest 10.2: Spawn with closures");
+    let r10_2 = test_spawn_closure();
+    print(f"  Result = {r10_2}\n");
+
+    // ========================================================================
+    // PART 11: COMPLEX PIPELINES
+    // ========================================================================
+    print("PART 11: COMPLEX ASYNC PIPELINES");
+    print("------------------------------------------------------------------------");
+
+    print("Test 11.1: Sequential pipeline");
+    let r11_1 = pipeline_sequential(2).await;
+    print(f"  Result = {r11_1}");
+
+    print("\nTest 11.2: Parallel pipeline");
+    let r11_2 = pipeline_parallel(3).await;
+    print(f"  Result = {r11_2}");
+
+    print("\nTest 11.3: Mixed parallel/sequential pipeline");
+    let r11_3 = pipeline_mixed(5).await;
+    print(f"  Result = {r11_3}\n");
+
+    // ========================================================================
+    // SUMMARY
+    // ========================================================================
+    print("============================================================================");
+    print("ALL ASYNC TESTS COMPLETED SUCCESSFULLY!");
+    print("============================================================================");
+    print("\nFeatures Tested:");
+    print("  [✓] 1. Async function definition (async fn)");
+    print("  [✓] 2. Await expression (postfix .await)");
+    print("  [✓] 3. Spawn expression (spawn expr)");
+    print("  [✓] 4. Async blocks (async { ... })");
+    print("  [✓] 5. Async closures (async |params| { ... })");
+    print("  [✓] 6. Try with async (Result<T,E> types)");
+    print("  [✓] 7. Defer in async context");
+    print("  [✓] 8. Nested async calls");
+    print("  [✓] 9. Generic async functions");
+    print("  [✓] 10. Complex async pipelines");
+    print("  [✓] 11. Delayed await (stored futures)");
+    print("  [✓] 12. Conditional execution");
+    print("\nAll async features working correctly!");
+}

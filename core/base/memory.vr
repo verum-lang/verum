@@ -1,0 +1,1531 @@
+// =============================================================================
+// memory.vr - Memory allocation primitives
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/allocator (CBGR-aware native allocator)
+// =============================================================================
+//
+// This module provides semantic memory types (Heap, Shared, Weak) that use
+// the native CBGR allocator. All memory operations are tracked with generation
+// and epoch for use-after-free detection.
+//
+// Migrated from FFI (verum_bootstrap) to native allocator (mem/allocator.vr)
+// as part of V-LLSI self-hosting initiative.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 12 (Migration Plan)
+// =============================================================================
+
+// Import native CBGR allocator
+
+module core.base.memory;
+mount super.super.mem.allocator.{
+    cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc,
+    get_header_from_ptr, AllocError,
+};
+mount super.super.mem.header.{AllocationHeader};
+
+// Import typed intrinsics from stdlib.intrinsics
+mount core.intrinsics.{
+    ptr_read as intrinsic_ptr_read,
+    ptr_write as intrinsic_ptr_write,
+    ptr_offset as intrinsic_ptr_offset,
+    drop_in_place as intrinsic_drop_in_place,
+    forget as intrinsic_forget,
+    ptr_is_null as intrinsic_ptr_is_null,
+    null_ptr as intrinsic_null_ptr,
+    slice_from_raw_parts as intrinsic_slice_from_raw_parts,
+    slice_from_raw_parts_mut as intrinsic_slice_from_raw_parts_mut,
+    memcpy as intrinsic_memcpy,
+    memmove as intrinsic_memmove,
+    memset as intrinsic_memset,
+    memcmp as intrinsic_memcmp,
+    uninit as intrinsic_uninit,
+    zeroed as intrinsic_zeroed,
+    atomic_load_u32,
+    atomic_store_u32,
+    atomic_fetch_add_u32,
+    atomic_fetch_sub_u32,
+    atomic_cas_u32,
+    atomic_fence,
+};
+
+// =============================================================================
+// Size and Alignment - Use Compile-time Type Properties
+// =============================================================================
+// Use T.size and T.alignment type properties directly.
+// Example: let size = Int.size;  // 8 bytes
+//          let align = MyStruct<T>.alignment;
+// =============================================================================
+
+/// Read value from pointer without ownership transfer.
+///
+/// Delegates to stdlib.intrinsics.ptr_read for typed intrinsic handling.
+@inline(always)
+public unsafe fn ptr_read<T>(ptr: &unsafe T) -> T {
+    intrinsic_ptr_read<T>(ptr as *const T)
+}
+
+/// Write value to pointer without dropping existing value.
+///
+/// Delegates to stdlib.intrinsics.ptr_write for typed intrinsic handling.
+@inline(always)
+public unsafe fn ptr_write<T>(ptr: &unsafe T, value: T) {
+    intrinsic_ptr_write<T>(ptr as *mut T, value)
+}
+
+/// Run destructor for value at pointer.
+///
+/// Delegates to stdlib.intrinsics.drop_in_place for typed intrinsic handling.
+@inline(always)
+public unsafe fn drop_in_place<T>(ptr: &mut T) {
+    intrinsic_drop_in_place<T>(ptr as *mut T)
+}
+
+/// Prevent value from being dropped.
+///
+/// Delegates to stdlib.intrinsics.forget for typed intrinsic handling.
+@inline(always)
+public fn forget<T>(value: T) {
+    intrinsic_forget<T>(value)
+}
+
+/// Explicitly drop a value, running its destructor.
+///
+/// This function takes ownership of the value and lets it go out of scope,
+/// triggering the Drop implementation if present. This is useful when you
+/// want to explicitly control when a value is dropped.
+///
+/// # Example
+/// ```verum
+/// let resource = open_file("data.txt");
+/// // ... use resource ...
+/// drop(resource);  // Explicitly close the file now
+/// // resource is no longer valid here
+/// ```
+@inline(always)
+public fn drop<T>(value: T) {
+    // Value is moved into this function and dropped when it goes out of scope.
+    // The compiler will automatically call the Drop implementation if present.
+}
+
+/// Check if pointer is null.
+///
+/// Delegates to stdlib.intrinsics.ptr_is_null for typed intrinsic handling.
+@inline(always)
+public fn is_null<T>(ptr: &unsafe T) -> Bool {
+    intrinsic_ptr_is_null<T>(ptr as *const T)
+}
+
+/// Get null pointer.
+///
+/// Delegates to stdlib.intrinsics.null_ptr for typed intrinsic handling.
+@inline(always)
+public fn null_ptr<T>() -> &unsafe T {
+    intrinsic_null_ptr<T>() as &unsafe T
+}
+
+/// Pointer offset.
+///
+/// Delegates to stdlib.intrinsics.ptr_offset for typed intrinsic handling.
+@inline(always)
+public unsafe fn ptr_offset<T>(ptr: &unsafe T, count: Int) -> &unsafe T {
+    intrinsic_ptr_offset<T>(ptr as *const T, count) as &unsafe T
+}
+
+// =============================================================================
+// Heap<T> - Unique owned heap allocation
+// =============================================================================
+
+/// Heap-allocated value with unique ownership and CBGR tracking.
+/// Similar to Box<T> in Rust but with generation-based memory safety.
+///
+/// The generation and epoch fields are used for CBGR validation:
+/// - On dereference, the stored generation is compared to the header
+/// - If they don't match, use-after-free is detected at ~15ns cost
+@opaque
+public type Heap<T> is {
+    ptr: &unsafe T,
+    generation: UInt32,
+    epoch: UInt16,
+};
+
+implement<T> Heap<T> {
+    /// Allocate a new value on the heap.
+    ///
+    /// # Panics
+    ///
+    /// Panics if allocation fails (out of memory).
+    public fn new(value: T) -> Heap<T> {
+        let size = T.size;
+        let align = T.alignment;
+
+        let (ptr, gen, epoch) = match cbgr_alloc(size, align) {
+            Ok(result) => result,
+            Err(e) => panic(f"Out of memory: {e.message()}"),
+        };
+
+        let typed_ptr = ptr as &unsafe T;
+
+        // Write the value to allocated memory
+        unsafe {
+            ptr_write(typed_ptr, value);
+        }
+
+        Heap {
+            ptr: typed_ptr,
+            generation: gen,
+            epoch: epoch,
+        }
+    }
+
+    /// Allocate with default value.
+    public fn new_default() -> Heap<T>
+    where T: Default {
+        Heap.new(T.default())
+    }
+
+    /// Allocate zeroed memory (for types where zero bits are valid).
+    ///
+    /// # Safety
+    ///
+    /// The type T must be valid when all bits are zero. This is
+    /// typically true for primitive types and simple aggregates.
+    public fn new_zeroed() -> Heap<T> {
+        let size = T.size;
+        let align = T.alignment;
+
+        let (ptr, gen, epoch) = match cbgr_alloc_zeroed(size, align) {
+            Ok(result) => result,
+            Err(e) => panic(f"Out of memory: {e.message()}"),
+        };
+
+        Heap {
+            ptr: ptr as &unsafe T,
+            generation: gen,
+            epoch: epoch,
+        }
+    }
+
+    /// Try to allocate a new value, returning error on failure.
+    ///
+    /// This is the non-panicking version of `new`.
+    public fn try_new(value: T) -> Result<Heap<T>, AllocError> {
+        let size = T.size;
+        let align = T.alignment;
+
+        let (ptr, gen, epoch) = cbgr_alloc(size, align)?;
+        let typed_ptr = ptr as &unsafe T;
+
+        unsafe {
+            ptr_write(typed_ptr, value);
+        }
+
+        Ok(Heap {
+            ptr: typed_ptr,
+            generation: gen,
+            epoch: epoch,
+        })
+    }
+
+    /// Get immutable reference to the value.
+    ///
+    /// Performs CBGR generation validation to detect use-after-free.
+    /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
+    public fn as_ref(&self) -> &T {
+        self.validate_cbgr();
+        unsafe { &*self.ptr }
+    }
+
+    /// Get mutable reference to the value.
+    ///
+    /// Performs CBGR generation validation to detect use-after-free.
+    /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
+    public fn as_mut(&mut self) -> &mut T {
+        self.validate_cbgr();
+        unsafe { &mut *self.ptr }
+    }
+
+    /// Validate CBGR generation and epoch against the allocation header.
+    ///
+    /// The allocation header is 32 bytes before the user pointer:
+    ///   offset 0: generation (UInt32, atomic)
+    ///   offset 4: epoch_and_caps (UInt16 epoch + UInt16 caps, atomic)
+    ///
+    /// Uses atomic loads with Acquire ordering to ensure visibility across
+    /// threads. Panics on mismatch (use-after-free detected). Cost: ~15ns.
+    @inline(always)
+    fn validate_cbgr(&self) {
+        let header_addr = self.ptr as Int - 32;
+        // Atomic load of generation counter (Acquire ordering for cross-thread visibility)
+        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        if actual_gen != self.generation {
+            panic(f"CBGR use-after-free detected in Heap<T>: expected generation {self.generation}, found {actual_gen}");
+        }
+        // Atomic load of epoch_and_caps field, extract epoch (low 16 bits)
+        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        let actual_epoch = (epoch_and_caps & 0xFFFF) as UInt16;
+        if actual_epoch != self.epoch {
+            panic(f"CBGR epoch mismatch in Heap<T>: expected epoch {self.epoch}, found {actual_epoch}");
+        }
+    }
+
+    /// Consume and return the inner value.
+    ///
+    /// This moves the value out of the heap allocation and frees
+    /// the memory. The Heap wrapper is consumed.
+    public fn into_inner(self) -> T {
+        let value = unsafe { ptr_read(self.ptr) };
+
+        // Deallocate the memory (increments generation for CBGR)
+        match cbgr_dealloc(self.ptr as &unsafe Byte) {
+            Ok(()) => {}
+            Err(e) => panic(f"Deallocation failed: {e.message()}"),
+        }
+
+        // Prevent Heap's drop from running
+        forget(self);
+
+        value
+    }
+
+    /// Convert to raw pointer (leaks memory if not properly handled).
+    ///
+    /// # Safety
+    ///
+    /// The caller is responsible for eventually freeing the memory
+    /// by calling `from_raw` and then dropping it or calling `into_inner`.
+    public fn into_raw(self) -> &unsafe T {
+        let ptr = self.ptr;
+        forget(self);
+        ptr
+    }
+
+    /// Reconstruct from raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must have been obtained from `into_raw` on a Heap<T>.
+    /// The generation and epoch are read from the allocation header.
+    public unsafe fn from_raw(ptr: &unsafe T) -> Heap<T> {
+        let header = get_header_from_ptr(ptr as &unsafe Byte);
+        let gen = header.load_generation();
+        let epoch = header.load_epoch();
+
+        Heap {
+            ptr: ptr,
+            generation: gen,
+            epoch: epoch,
+        }
+    }
+
+    /// Get the stored generation (for debugging/testing).
+    public fn generation(&self) -> UInt32 {
+        self.generation
+    }
+
+    /// Get the stored epoch (for debugging/testing).
+    public fn epoch(&self) -> UInt16 {
+        self.epoch
+    }
+
+    /// Validate CBGR (explicit check for debugging).
+    ///
+    /// Returns true if the reference is still valid (no use-after-free).
+    public fn is_valid(&self) -> Bool {
+        let header = get_header_from_ptr(self.ptr as &unsafe Byte);
+        let actual_gen = header.load_generation();
+        let actual_epoch = header.load_epoch();
+        self.generation == actual_gen && self.epoch == actual_epoch
+    }
+
+    /// Consume the Heap, returning a raw pointer without deallocating.
+    ///
+    /// The caller is responsible for eventually freeing the memory.
+    /// This is useful for creating static references or transferring
+    /// ownership to FFI code.
+    public fn leak(self) -> &mut T {
+        let ptr = self.ptr;
+        forget(self);
+        unsafe { &mut (*ptr).value }
+    }
+
+    /// Get the CBGR generation counter from the allocation header.
+    ///
+    /// This reads the actual generation from the heap header (not the cached
+    /// value stored in the Heap struct). Useful for CBGR introspection tests.
+    public fn header_generation(&self) -> UInt32 {
+        let header_addr = self.ptr as Int - 32;
+        atomic_load_u32(header_addr, ORDERING_ACQUIRE)
+    }
+
+    /// Get the current CBGR epoch from the allocation header.
+    ///
+    /// This reads the actual epoch from the heap header. The epoch tracks
+    /// the allocation era for generational memory safety.
+    public fn current_epoch(&self) -> UInt16 {
+        let header_addr = self.ptr as Int - 32;
+        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        (epoch_and_caps & 0xFFFF) as UInt16
+    }
+
+    /// Check if this allocation is still valid (not freed).
+    ///
+    /// A generation of 0 indicates the memory has been freed. This is
+    /// a lightweight check that does not validate epoch consistency.
+    public fn is_allocated(&self) -> Bool {
+        let header_addr = self.ptr as Int - 32;
+        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        actual_gen != 0
+    }
+
+    /// Check if this allocation has been freed.
+    ///
+    /// Returns true if the generation in the heap header has been incremented
+    /// past the stored generation value, indicating the memory was freed and
+    /// potentially reused.
+    public fn is_freed(&self) -> Bool {
+        let header_addr = self.ptr as Int - 32;
+        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        actual_gen != self.generation
+    }
+
+    /// Get the CBGR epoch from the allocation header.
+    ///
+    /// Alias for `current_epoch()` — provided for symmetry with `header_generation()`.
+    public fn header_epoch(&self) -> UInt32 {
+        let header_addr = self.ptr as Int - 32;
+        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        epoch_and_caps & 0xFFFF
+    }
+
+    /// Return the CBGR header size in bytes.
+    ///
+    /// Every heap allocation is preceded by a 32-byte CBGR header containing
+    /// generation, epoch, capability flags, and bookkeeping metadata.
+    /// Return the CBGR header size in bytes (32).
+    public fn header_size(&self) -> Int {
+        32
+    }
+
+    /// Check if this allocation has been freed.
+    ///
+    /// Compares the stored generation against the current header generation.
+    /// If they differ, the allocation was freed and the slot potentially reused.
+    public fn is_freed(&self) -> Bool {
+        let header_addr = self.ptr as Int - 32;
+        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        actual_gen != self.generation
+    }
+
+    /// Get the CBGR capability flags from the allocation header.
+    public fn capabilities(&self) -> UInt16 {
+        let header_addr = self.ptr as Int - 32;
+        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        ((epoch_and_caps >> 16) & 0xFFFF) as UInt16
+    }
+}
+
+// Automatic dereference
+implement<T> Deref for Heap<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.as_ref()
+    }
+}
+
+implement<T> DerefMut for Heap<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.as_mut()
+    }
+}
+
+// Drop to free memory
+implement<T> Drop for Heap<T> {
+    fn drop(&mut self) {
+        unsafe {
+            // Run destructor for the contained value
+            drop_in_place(&mut *self.ptr);
+            // Free the memory (increments generation for CBGR invalidation)
+            match cbgr_dealloc(self.ptr as &unsafe Byte) {
+                Ok(()) => {}
+                Err(_) => {
+                    // Deallocation failure in drop is problematic
+                    // In production, we might log this but not panic
+                }
+            }
+        }
+    }
+}
+
+// Clone if T is Clone
+implement<T: Clone> Clone for Heap<T> {
+    fn clone(&self) -> Heap<T> {
+        Heap.new((**self).clone())
+    }
+}
+
+// Debug if T is Debug
+implement<T: Debug> Debug for Heap<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Heap(")?;
+        (**self).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// Eq if T is Eq
+implement<T: Eq> Eq for Heap<T> {
+    fn eq(&self, other: &Heap<T>) -> Bool {
+        **self == **other
+    }
+}
+
+// Ord if T is Ord
+implement<T: Ord> Ord for Heap<T> {
+    fn cmp(&self, other: &Heap<T>) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
+
+// Hash if T is Hash
+implement<T: Hash> Hash for Heap<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        (**self).hash(hasher);
+    }
+}
+
+// Default if T is Default
+implement<T: Default> Default for Heap<T> {
+    fn default() -> Heap<T> {
+        Heap.new(T.default())
+    }
+}
+
+// =============================================================================
+// Shared<T> - Reference-counted shared ownership
+// =============================================================================
+
+/// Reference-counted shared value with CBGR tracking.
+/// Multiple Shared<T> can point to the same value.
+/// The value is deallocated when the last reference is dropped.
+///
+/// The reference counts use atomic operations for thread safety.
+@opaque
+public type Shared<T> is {
+    ptr: &unsafe SharedInner<T>,
+    generation: UInt32,
+    epoch: UInt16,
+};
+
+/// Internal representation with reference counts.
+type SharedInner<T> is {
+    strong_count: UInt32,  // Atomic strong reference count
+    weak_count: UInt32,    // Atomic weak reference count
+    value: T,
+};
+
+implement<T> Shared<T> {
+    /// Create a new shared value.
+    public fn new(value: T) -> Shared<T> {
+        let inner = SharedInner {
+            strong_count: 1,
+            weak_count: 0,
+            value: value,
+        };
+
+        // Allocate the inner structure
+        let size = SharedInner<T>.size;
+        let align = SharedInner<T>.alignment;
+
+        let (ptr, gen, epoch) = match cbgr_alloc(size, align) {
+            Ok(result) => result,
+            Err(e) => panic(f"Out of memory: {e.message()}"),
+        };
+
+        let typed_ptr = ptr as &unsafe SharedInner<T>;
+
+        unsafe {
+            ptr_write(typed_ptr, inner);
+        }
+
+        Shared {
+            ptr: typed_ptr,
+            generation: gen,
+            epoch: epoch,
+        }
+    }
+
+    /// Try to create a new shared value, returning error on failure.
+    public fn try_new(value: T) -> Result<Shared<T>, AllocError> {
+        let inner = SharedInner {
+            strong_count: 1,
+            weak_count: 0,
+            value: value,
+        };
+
+        let size = SharedInner<T>.size;
+        let align = SharedInner<T>.alignment;
+
+        let (ptr, gen, epoch) = cbgr_alloc(size, align)?;
+        let typed_ptr = ptr as &unsafe SharedInner<T>;
+
+        unsafe {
+            ptr_write(typed_ptr, inner);
+        }
+
+        Ok(Shared {
+            ptr: typed_ptr,
+            generation: gen,
+            epoch: epoch,
+        })
+    }
+
+    /// Create with default value.
+    public fn new_default() -> Shared<T>
+    where T: Default {
+        Shared.new(T.default())
+    }
+
+    /// Get the current strong reference count.
+    public fn strong_count(&self) -> Int {
+        unsafe {
+            atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE) as Int
+        }
+    }
+
+    /// Get the current weak reference count.
+    public fn weak_count(&self) -> Int {
+        unsafe {
+            atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_ACQUIRE) as Int
+        }
+    }
+
+    /// Check if this is the only strong reference.
+    public fn is_unique(&self) -> Bool {
+        self.strong_count() == 1
+    }
+
+    /// Try to get mutable reference (only if unique and no weak refs).
+    public fn get_mut(&mut self) -> Maybe<&mut T> {
+        if self.is_unique() && self.weak_count() == 0 {
+            Some(unsafe { &mut (*self.ptr).value })
+        } else {
+            None
+        }
+    }
+
+    /// Make the value unique by cloning if shared.
+    public fn make_unique(&mut self) -> &mut T
+    where T: Clone {
+        if !self.is_unique() {
+            // Clone the value
+            let new_value = unsafe { (*self.ptr).value.clone() };
+
+            // Decrement old count (atomic)
+            unsafe {
+                atomic_fetch_sub_u32(&(*self.ptr).strong_count as *mut UInt32, 1, ORDERING_RELEASE);
+            }
+
+            // Create new allocation
+            *self = Shared.new(new_value);
+        }
+        unsafe { &mut (*self.ptr).value }
+    }
+
+    /// Try to unwrap if this is the only reference.
+    public fn try_unwrap(self) -> Result<T, Shared<T>> {
+        // Check if we're the only strong reference
+        // Use acquire to synchronize with other threads' releases
+        if self.strong_count() == 1 {
+            // We need to ensure no other thread incremented while we checked
+            // Try CAS to set count to 0
+            unsafe {
+                let result = atomic_cas_u32(
+                    &(*self.ptr).strong_count as *mut UInt32,
+                    1,
+                    0,
+                    ORDERING_ACQ_REL,
+                    ORDERING_ACQUIRE
+                );
+
+                if result.1 {
+                    // Success - we're the only owner
+                    let value = ptr_read(&(*self.ptr).value);
+
+                    // If no weak references, free memory
+                    if atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_ACQUIRE) == 0 {
+                        match cbgr_dealloc(self.ptr as &unsafe Byte) {
+                            Ok(()) => {}
+                            Err(_) => {}
+                        }
+                    }
+
+                    forget(self);
+                    return Ok(value);
+                }
+            }
+        }
+
+        Err(self)
+    }
+
+    /// Create a weak reference.
+    public fn downgrade(&self) -> Weak<T> {
+        unsafe {
+            atomic_fetch_add_u32(&(*self.ptr).weak_count as *mut UInt32, 1, ORDERING_RELAXED);
+        }
+        Weak {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch: self.epoch,
+        }
+    }
+
+    /// Get the stored generation (for debugging/testing).
+    public fn generation(&self) -> UInt32 {
+        self.generation
+    }
+
+    /// Get the stored epoch (for debugging/testing).
+    public fn epoch(&self) -> UInt16 {
+        self.epoch
+    }
+
+    /// Get an immutable reference to the inner value.
+    /// This is equivalent to using the Deref implementation.
+    public fn borrow(&self) -> &T {
+        unsafe { &(*self.ptr).value }
+    }
+
+    /// Get a mutable reference to the inner value.
+    /// SAFETY: Caller must ensure no concurrent mutable borrows exist.
+    /// This provides interior mutability without runtime checks.
+    /// For thread-safe interior mutability, use Mutex<T> or RwLock<T>.
+    public fn borrow_mut(&self) -> &mut T {
+        unsafe { &mut (*self.ptr).value }
+    }
+
+    /// Get an immutable reference to the inner value.
+    ///
+    /// Convenience accessor equivalent to `Deref` — useful when an explicit
+    /// method call is clearer than operator overloading.
+    public fn get(&self) -> &T {
+        unsafe { &(*self.ptr).value }
+    }
+
+    /// Check if two Shared pointers point to the same allocation.
+    ///
+    /// This compares pointer identity, not value equality.
+    public fn ptr_eq(&self, other: &Shared<T>) -> Bool {
+        self.ptr == other.ptr
+    }
+}
+
+implement<T> Clone for Shared<T> {
+    fn clone(&self) -> Shared<T> {
+        // Atomically increment strong count
+        unsafe {
+            atomic_fetch_add_u32(&(*self.ptr).strong_count as *mut UInt32, 1, ORDERING_RELAXED);
+        }
+        Shared {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch: self.epoch,
+        }
+    }
+}
+
+implement<T> Drop for Shared<T> {
+    fn drop(&mut self) {
+        unsafe {
+            // Atomically decrement strong count
+            let old_count = atomic_fetch_sub_u32(&(*self.ptr).strong_count as *mut UInt32, 1, ORDERING_RELEASE);
+
+            if old_count == 1 {
+                // We were the last strong reference
+                // Need acquire fence to synchronize with other threads' releases
+                atomic_fence(ORDERING_ACQUIRE);
+
+                // Drop the value
+                drop_in_place(&mut (*self.ptr).value);
+
+                // If no weak references, free memory
+                if atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_RELAXED) == 0 {
+                    match cbgr_dealloc(self.ptr as &unsafe Byte) {
+                        Ok(()) => {}
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+implement<T> Deref for Shared<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &(*self.ptr).value }
+    }
+}
+
+implement<T: Debug> Debug for Shared<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Shared(")?;
+        (**self).fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+implement<T: Eq> Eq for Shared<T> {
+    fn eq(&self, other: &Shared<T>) -> Bool {
+        **self == **other
+    }
+}
+
+implement<T: Ord> Ord for Shared<T> {
+    fn cmp(&self, other: &Shared<T>) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
+
+implement<T: Hash> Hash for Shared<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        (**self).hash(hasher);
+    }
+}
+
+implement<T: Default> Default for Shared<T> {
+    fn default() -> Shared<T> {
+        Shared.new(T.default())
+    }
+}
+
+// =============================================================================
+// Weak<T> - Weak reference
+// =============================================================================
+
+/// Weak reference that doesn't keep the value alive.
+/// Can be upgraded to Shared<T> if the value is still alive.
+@opaque
+public type Weak<T> is {
+    ptr: &unsafe SharedInner<T>,
+    generation: UInt32,
+    epoch: UInt16,
+};
+
+implement<T> Weak<T> {
+    /// Try to upgrade to a strong reference.
+    ///
+    /// Returns Some if the value is still alive, None otherwise.
+    public fn upgrade(&self) -> Maybe<Shared<T>> {
+        unsafe {
+            loop {
+                let count = atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE);
+
+                if count == 0 {
+                    // Value has been dropped
+                    return None;
+                }
+
+                // Try to increment
+                let result = atomic_cas_u32(
+                    &(*self.ptr).strong_count as *mut UInt32,
+                    count,
+                    count + 1,
+                    ORDERING_ACQ_REL,
+                    ORDERING_ACQUIRE
+                );
+
+                if result.1 {
+                    return Some(Shared {
+                        ptr: self.ptr,
+                        generation: self.generation,
+                        epoch: self.epoch,
+                    });
+                }
+                // Retry on failure
+            }
+        }
+    }
+
+    /// Get the strong count (may be zero).
+    public fn strong_count(&self) -> Int {
+        unsafe {
+            atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE) as Int
+        }
+    }
+
+    /// Check if the value is still alive.
+    public fn is_alive(&self) -> Bool {
+        self.strong_count() > 0
+    }
+
+    /// Get the weak count.
+    public fn weak_count(&self) -> Int {
+        unsafe {
+            atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_ACQUIRE) as Int
+        }
+    }
+}
+
+implement<T> Weak<T> {
+    /// Create a Weak reference from a Shared reference.
+    ///
+    /// This is the static counterpart of `Shared.downgrade()`.
+    public fn from(shared: &Shared<T>) -> Weak<T> {
+        shared.downgrade()
+    }
+}
+
+implement<T> Clone for Weak<T> {
+    fn clone(&self) -> Weak<T> {
+        unsafe {
+            atomic_fetch_add_u32(&(*self.ptr).weak_count as *mut UInt32, 1, ORDERING_RELAXED);
+        }
+        Weak {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch: self.epoch,
+        }
+    }
+}
+
+implement<T> Drop for Weak<T> {
+    fn drop(&mut self) {
+        unsafe {
+            let old_weak = atomic_fetch_sub_u32(&(*self.ptr).weak_count as *mut UInt32, 1, ORDERING_RELEASE);
+
+            // If this was the last weak ref AND strong count is 0, free memory
+            if old_weak == 1 {
+                let strong = atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE);
+                if strong == 0 {
+                    match cbgr_dealloc(self.ptr as &unsafe Byte) {
+                        Ok(()) => {}
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+implement<T> Debug for Weak<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Weak")
+    }
+}
+
+// =============================================================================
+// Slice utilities
+// =============================================================================
+
+/// Create a slice from raw parts.
+///
+/// Delegates to stdlib.intrinsics.slice_from_raw_parts for typed intrinsic handling.
+///
+/// # Safety
+///
+/// The pointer must be valid for reading `len` elements of type T.
+@inline(always)
+public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
+    intrinsic_slice_from_raw_parts<T>(ptr as *const T, len)
+}
+
+/// Create a mutable slice from raw parts.
+///
+/// Delegates to stdlib.intrinsics.slice_from_raw_parts_mut for typed intrinsic handling.
+///
+/// # Safety
+///
+/// The pointer must be valid for reading and writing `len` elements of type T.
+@inline(always)
+public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
+    intrinsic_slice_from_raw_parts_mut<T>(ptr as *mut T, len)
+}
+
+// =============================================================================
+// Memory manipulation functions
+// =============================================================================
+
+/// Copy memory between non-overlapping regions.
+///
+/// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
+///
+/// # Safety
+///
+/// The source and destination must not overlap. Use `copy` for overlapping regions.
+@inline(always)
+public unsafe fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: Int) {
+    let size = T.size * count;
+    intrinsic_memcpy(dst as *mut Byte, src as *const Byte, size);
+}
+
+/// Copy memory that may overlap.
+///
+/// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
+///
+/// This is safe for overlapping regions but slower than `copy_nonoverlapping`.
+@inline(always)
+public unsafe fn copy<T>(src: &T, dst: &mut T, count: Int) {
+    let size = T.size * count;
+    intrinsic_memmove(dst as *mut Byte, src as *const Byte, size);
+}
+
+/// Fill memory with a byte value.
+///
+/// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
+@inline(always)
+public unsafe fn fill<T>(ptr: &mut T, val: Byte, count: Int) {
+    let size = T.size * count;
+    intrinsic_memset(ptr as *mut Byte, val, size);
+}
+
+/// Zero memory.
+public fn zero<T>(ptr: &mut T, count: Int) {
+    fill(ptr, 0, count);
+}
+
+/// Swap two values in place.
+public fn swap<T>(a: &mut T, b: &mut T) {
+    unsafe {
+        let tmp = ptr_read(a as &unsafe T);
+        ptr_write(a as &unsafe T, ptr_read(b as &unsafe T));
+        ptr_write(b as &unsafe T, tmp);
+    }
+}
+
+/// Replace a value, returning the old one.
+public fn replace<T>(dest: &mut T, src: T) -> T {
+    unsafe {
+        let old = ptr_read(dest as &unsafe T);
+        ptr_write(dest as &unsafe T, src);
+        old
+    }
+}
+
+/// Take a value, leaving the default in its place.
+public fn take<T: Default>(dest: &mut T) -> T {
+    replace(dest, T.default())
+}
+
+/// Compare memory regions.
+///
+/// Delegates to stdlib.intrinsics.memcmp for typed intrinsic handling.
+///
+/// Returns 0 if equal, negative if a < b, positive if a > b.
+@inline(always)
+public fn memcmp<T>(a: &T, b: &T, count: Int) -> Int {
+    let size = T.size * count;
+    intrinsic_memcmp(a as *const Byte, b as *const Byte, size)
+}
+
+// =============================================================================
+// ManuallyDrop<T> - Prevent automatic drop
+// =============================================================================
+
+/// Wrapper that prevents the contained value from being dropped.
+///
+/// Use this when you need to control exactly when destruction happens,
+/// or when transferring ownership across FFI boundaries.
+@opaque
+public type ManuallyDrop<T> is { value: T };
+
+implement<T> ManuallyDrop<T> {
+    /// Create a new ManuallyDrop wrapper.
+    public fn new(value: T) -> ManuallyDrop<T> {
+        ManuallyDrop { value: value }
+    }
+
+    /// Get the inner value, consuming the wrapper.
+    public fn into_inner(self) -> T {
+        let value = unsafe { ptr_read(&self.value as &unsafe T) };
+        forget(self);
+        value
+    }
+
+    /// Manually drop the inner value.
+    ///
+    /// # Safety
+    ///
+    /// Must not be called more than once. After calling this,
+    /// the contained value is no longer valid.
+    public unsafe fn drop(&mut self) {
+        drop_in_place(&mut self.value);
+    }
+}
+
+implement<T> Deref for ManuallyDrop<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.value }
+}
+
+implement<T> DerefMut for ManuallyDrop<T> {
+    fn deref_mut(&mut self) -> &mut T { &mut self.value }
+}
+
+// No Drop implementation - that's the point!
+
+implement<T: Clone> Clone for ManuallyDrop<T> {
+    fn clone(&self) -> ManuallyDrop<T> {
+        ManuallyDrop { value: self.value.clone() }
+    }
+}
+
+implement<T: Debug> Debug for ManuallyDrop<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("ManuallyDrop(")?;
+        self.value.fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// MaybeUninit<T> - Uninitialized memory
+// =============================================================================
+
+/// A wrapper for potentially uninitialized memory.
+///
+/// This type is used when you need to allocate memory for a value
+/// but initialize it later. Reading from uninitialized memory is UB.
+@opaque
+public type MaybeUninit<T> is { value: T };
+
+implement<T> MaybeUninit<T> {
+    /// Create uninitialized memory.
+    ///
+    /// The memory contents are undefined. Reading before initialization is UB.
+    public fn uninit() -> MaybeUninit<T> {
+        unsafe { intrinsic_uninit<MaybeUninit<T>>() }
+    }
+
+    /// Create zeroed memory.
+    ///
+    /// All bytes are set to zero. This may or may not be a valid value for T.
+    public fn zeroed() -> MaybeUninit<T> {
+        unsafe { intrinsic_zeroed<MaybeUninit<T>>() }
+    }
+
+    /// Create from an initialized value.
+    public fn new(value: T) -> MaybeUninit<T> {
+        MaybeUninit { value: value }
+    }
+
+    /// Write a value to the memory.
+    ///
+    /// Returns a mutable reference to the now-initialized value.
+    public fn write(&mut self, value: T) -> &mut T {
+        unsafe {
+            ptr_write(&self.value as &unsafe T, value);
+        }
+        &mut self.value
+    }
+
+    /// Assume the memory is initialized and get the value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the memory has been properly initialized.
+    public unsafe fn assume_init(self) -> T {
+        let value = ptr_read(&self.value as &unsafe T);
+        forget(self);
+        value
+    }
+
+    /// Get a reference to the value assuming it's initialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the memory has been properly initialized.
+    public unsafe fn assume_init_ref(&self) -> &T {
+        &self.value
+    }
+
+    /// Get a mutable reference to the value assuming it's initialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the memory has been properly initialized.
+    public unsafe fn assume_init_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
+    /// Get a raw pointer to the memory.
+    public fn as_ptr(&self) -> &unsafe T {
+        &self.value as &unsafe T
+    }
+
+    /// Get a mutable raw pointer to the memory.
+    public fn as_mut_ptr(&mut self) -> &unsafe T {
+        &mut self.value as &unsafe T
+    }
+}
+
+// No Drop - dropping uninitialized memory is UB
+
+// =============================================================================
+// Cow<T> - Clone on Write
+// =============================================================================
+
+/// Clone-on-Write smart pointer.
+///
+/// `Cow<T>` can hold either a borrowed reference or an owned value.
+/// When mutable access is requested, the borrowed value is cloned
+/// into an owned copy, enabling efficient "copy only when needed" patterns.
+///
+/// # Variants
+///
+/// - `Borrowed(&T)` — holds a reference, zero overhead read access
+/// - `Owned(T)` — holds an owned clone, allows mutation
+///
+/// # Example
+/// ```verum
+/// let text = "hello";
+/// let cow: Cow<Text> = Cow.Borrowed(&text);
+/// // No allocation yet
+///
+/// let owned: Cow<Text> = cow.into_owned();
+/// // Now we have an owned copy
+/// ```
+public type Cow<T> is Borrowed(&T) | Owned(T);
+
+implement<T: Clone> Cow<T> {
+    /// Returns true if this is a borrowed value.
+    public fn is_borrowed(&self) -> Bool {
+        match self {
+            Borrowed(_) => true,
+            Owned(_) => false,
+        }
+    }
+
+    /// Returns true if this is an owned value.
+    public fn is_owned(&self) -> Bool {
+        match self {
+            Borrowed(_) => false,
+            Owned(_) => true,
+        }
+    }
+
+    /// Get an immutable reference to the contained value.
+    public fn as_ref(&self) -> &T {
+        match self {
+            Borrowed(r) => *r,
+            Owned(v) => v,
+        }
+    }
+
+    /// Convert to an owned value, cloning if necessary.
+    ///
+    /// If already owned, returns the value directly.
+    /// If borrowed, clones the referenced value.
+    public fn into_owned(self) -> T {
+        match self {
+            Borrowed(r) => r.clone(),
+            Owned(v) => v,
+        }
+    }
+
+    /// Get a mutable reference, cloning the value if currently borrowed.
+    ///
+    /// After this call, the Cow is guaranteed to be in the Owned state.
+    public fn to_mut(&mut self) -> &mut T {
+        match self {
+            Borrowed(r) => {
+                let cloned = r.clone();
+                *self = Owned(cloned);
+                match self {
+                    Owned(v) => v,
+                    Borrowed(_) => unreachable("just set to Owned"),
+                }
+            }
+            Owned(v) => v,
+        }
+    }
+}
+
+implement<T: Clone + Eq> Eq for Cow<T> {
+    fn eq(&self, other: &Cow<T>) -> Bool {
+        *self.as_ref() == *other.as_ref()
+    }
+}
+
+implement<T: Clone + Ord> Ord for Cow<T> {
+    fn cmp(&self, other: &Cow<T>) -> Ordering {
+        self.as_ref().cmp(other.as_ref())
+    }
+}
+
+implement<T: Clone> Clone for Cow<T> {
+    fn clone(&self) -> Cow<T> {
+        match self {
+            Borrowed(r) => Borrowed(*r),
+            Owned(v) => Owned(v.clone()),
+        }
+    }
+}
+
+implement<T: Clone + Debug> Debug for Cow<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Borrowed(r) => {
+                f.write_str("Borrowed(")?;
+                (*r).fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Owned(v) => {
+                f.write_str("Owned(")?;
+                v.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+implement<T: Clone + Hash> Hash for Cow<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.as_ref().hash(hasher);
+    }
+}
+
+implement<T: Clone + Default> Default for Cow<T> {
+    fn default() -> Cow<T> {
+        Owned(T.default())
+    }
+}
+
+// =============================================================================
+// Pin<T> - Pinned value wrapper
+// =============================================================================
+
+/// A wrapper that guarantees the pinned value will not be moved.
+///
+/// `Pin<T>` prevents a value from being moved to a different memory address,
+/// which is critical for self-referential types and async futures. Once a
+/// value is pinned, its address remains stable until the Pin is dropped.
+///
+/// For types that implement `Unpin`, pinning has no effect and the value
+/// can be freely moved in and out. For non-Unpin types, pinning guarantees
+/// address stability.
+///
+/// # Example
+/// ```verum
+/// let pinned = Pin.new(42);
+/// let r = pinned.get_ref();  // &Int pointing to stable address
+/// assert_eq(*r, 42);
+/// ```
+public type Pin<T> is { pointer: T };
+
+implement<T> Pin<T> {
+    /// Create a new pinned value.
+    ///
+    /// For Unpin types, this is always safe. For non-Unpin types,
+    /// the caller must ensure the value will not be moved after pinning.
+    public fn new(pointer: T) -> Pin<T> {
+        Pin { pointer: pointer }
+    }
+
+    /// Get an immutable reference to the pinned value.
+    ///
+    /// This is always safe because we only provide read access.
+    public fn get_ref(&self) -> &T {
+        &self.pointer
+    }
+
+    /// Get a mutable reference to the pinned value.
+    ///
+    /// For Unpin types, this is safe because they can be freely moved.
+    /// For non-Unpin types, the caller must ensure the structural
+    /// invariants of pinning are maintained.
+    public fn get_mut(&mut self) -> &mut T {
+        &mut self.pointer
+    }
+
+    /// Consume the Pin and return the inner value.
+    ///
+    /// For Unpin types, this is safe because they can be freely moved.
+    /// For non-Unpin types, this violates pinning guarantees and
+    /// should only be used with care.
+    public fn into_inner(self) -> T {
+        self.pointer
+    }
+
+    /// Replace the pinned value, returning the old value.
+    ///
+    /// This is safe for Unpin types.
+    public fn set(&mut self, value: T) {
+        self.pointer = value;
+    }
+
+    /// Get an immutable reference to the inner value.
+    ///
+    /// Equivalent to `*pin` via Deref.
+    public fn as_ref(&self) -> &T {
+        &self.pointer
+    }
+
+    /// Transform the pinned value into a new Pin with a different type.
+    ///
+    /// Applies the function to the inner value and wraps the result.
+    public fn map<U>(self, f: fn(T) -> U) -> Pin<U> {
+        Pin { pointer: f(self.pointer) }
+    }
+}
+
+implement<T> Deref for Pin<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.pointer
+    }
+}
+
+implement<T> DerefMut for Pin<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.pointer
+    }
+}
+
+implement<T: Eq> Eq for Pin<T> {
+    fn eq(&self, other: &Pin<T>) -> Bool {
+        self.pointer == other.pointer
+    }
+}
+
+implement<T: Ord> Ord for Pin<T> {
+    fn cmp(&self, other: &Pin<T>) -> Ordering {
+        self.pointer.cmp(&other.pointer)
+    }
+}
+
+implement<T: Clone> Clone for Pin<T> {
+    fn clone(&self) -> Pin<T> {
+        Pin { pointer: self.pointer.clone() }
+    }
+}
+
+implement<T: Debug> Debug for Pin<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Pin(")?;
+        self.pointer.fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+implement<T: Hash> Hash for Pin<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.pointer.hash(hasher);
+    }
+}
+
+implement<T: Default> Default for Pin<T> {
+    fn default() -> Pin<T> {
+        Pin { pointer: T.default() }
+    }
+}
+
+// =============================================================================
+// Simple Allocation Functions for Collections
+// =============================================================================
+// These functions provide a simpler interface for collections that don't need
+// the full CBGR tracking (generation/epoch). The underlying CBGR allocator is
+// still used, but the tracking info is discarded.
+// =============================================================================
+
+/// Allocate memory with given size and alignment.
+///
+/// Returns a raw pointer to the allocated memory, or panics on failure.
+/// Use for collections that manage their own CBGR tracking.
+public fn alloc(size: Int, align: Int) -> &unsafe Byte {
+    match cbgr_alloc(size, align) {
+        Ok((ptr, _, _)) => ptr,
+        Err(e) => panic(f"alloc failed: {e.message()}"),
+    }
+}
+
+/// Allocate zeroed memory with given size and alignment.
+///
+/// Returns a raw pointer to the allocated memory, or panics on failure.
+public fn alloc_zeroed(size: Int, align: Int) -> &unsafe Byte {
+    match cbgr_alloc_zeroed(size, align) {
+        Ok((ptr, _, _)) => ptr,
+        Err(e) => panic(f"alloc_zeroed failed: {e.message()}"),
+    }
+}
+
+/// Deallocate memory previously allocated with alloc/alloc_zeroed.
+///
+/// # Safety
+///
+/// The pointer must have been allocated by alloc/alloc_zeroed.
+public fn dealloc(ptr: &unsafe Byte, _size: Int, _align: Int) {
+    match cbgr_dealloc(ptr) {
+        Ok(()) => {}
+        Err(_) => {
+            // Deallocation failure - log but don't panic
+        }
+    }
+}
+
+/// Reallocate memory to a new size.
+///
+/// Returns a raw pointer to the new allocation.
+/// The old content is copied (up to min(old_size, new_size) bytes).
+public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -> &unsafe Byte {
+    if new_size == 0 {
+        dealloc(ptr, old_size, align);
+        return null_ptr<Byte>();
+    }
+
+    // Use CBGR-aware realloc which preserves generation tracking
+    // and invalidates the old allocation's generation counter.
+    match cbgr_realloc(ptr, old_size, new_size, align) {
+        Ok((new_ptr, _, _)) => new_ptr,
+        Err(_) => {
+            // Fallback: alloc + copy + dealloc
+            let new_ptr = alloc(new_size, align);
+            if !is_null(ptr) && old_size > 0 {
+                let copy_size = if old_size < new_size { old_size } else { new_size };
+                unsafe {
+                    intrinsic_memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
+                }
+                dealloc(ptr, old_size, align);
+            }
+            new_ptr
+        }
+    }
+}
+
+/// Copy memory between non-overlapping regions (raw bytes version).
+///
+/// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
+@inline(always)
+public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
+    intrinsic_memcpy(dst as *mut Byte, src as *const Byte, len);
+}
+
+/// Copy memory that may overlap (raw bytes version).
+///
+/// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
+@inline(always)
+public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
+    intrinsic_memmove(dst as *mut Byte, src as *const Byte, len);
+}
+
+/// Compare memory regions (raw bytes version).
+///
+/// Delegates to stdlib.intrinsics.memcmp for typed intrinsic handling.
+///
+/// Returns 0 if equal, negative if a < b, positive if a > b.
+@inline(always)
+public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
+    intrinsic_memcmp(a as *const Byte, b as *const Byte, len)
+}
+
+/// Fill memory with a byte value (raw bytes version).
+///
+/// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
+@inline(always)
+public unsafe fn memset(dst: &unsafe Byte, val: Byte, len: Int) {
+    intrinsic_memset(dst as *mut Byte, val, len);
+}

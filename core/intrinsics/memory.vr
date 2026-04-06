@@ -1,0 +1,250 @@
+// =============================================================================
+// core/intrinsics/memory.vr - Memory Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides memory operation intrinsics that map directly to
+// LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Bulk memory: memcpy, memmove, memset, memcmp
+// - Typed operations: copy, swap, replace, forget
+// - Pointer operations: ptr_read, ptr_write, ptr_offset
+// - Slice operations: slice_from_raw_parts, slice_len, slice_as_ptr
+// - Uninitialized memory: uninit, zeroed
+// - Volatile operations: volatile_load, volatile_store
+//
+// # Safety
+//
+// Most operations in this module are unsafe as they manipulate raw memory.
+// Care must be taken to ensure memory validity, alignment, and lifetime.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.memory;
+
+mount core.intrinsics.type_info.{size_of};
+
+// =============================================================================
+// SECTION 1: Bulk Memory Operations
+// =============================================================================
+
+/// Copy memory (may overlap, like memmove)
+public fn memmove(dst: &mut Byte, src: &Byte, count: USize) { @intrinsic("memmove", dst, src, count) }
+
+/// Copy memory (must not overlap, like memcpy)
+public fn memcpy(dst: &mut Byte, src: &Byte, count: USize) { @intrinsic("memcpy", dst, src, count) }
+
+/// Fill memory with byte
+public fn memset(dst: &mut Byte, val: Byte, count: USize) { @intrinsic("memset", dst, val, count) }
+
+/// Compare memory regions
+public fn memcmp(a: &Byte, b: &Byte, count: USize) -> Int { @intrinsic("memcmp", a, b, count) }
+
+// =============================================================================
+// SECTION 2: Typed Memory Operations
+// =============================================================================
+
+/// Copy typed value
+public fn copy<T>(src: &T, dst: &mut T) { @intrinsic("memcpy", dst, src, T.size) }
+
+/// Copy count typed values (non-overlapping)
+public fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: USize) {
+    @intrinsic("memcpy", dst, src, count * T.size)
+}
+
+/// Swap two values
+public fn swap<T>(a: &mut T, b: &mut T) { @intrinsic("swap", a, b) }
+
+/// Replace value, returning old
+public fn replace<T>(dest: &mut T, src: T) -> T { @intrinsic("replace", dest, src) }
+
+/// Forget value without running destructor
+public fn forget<T>(value: T) { @intrinsic("forget", value) }
+
+/// Transmute between types of same size (unsafe, use with care)
+public fn transmute<S, D>(value: S) -> D { @intrinsic("transmute", value) }
+
+// =============================================================================
+// SECTION 3: Pointer Operations
+// =============================================================================
+
+/// Read value from pointer (potentially unaligned)
+public unsafe fn ptr_read<T>(ptr: *const T) -> T { @intrinsic("ptr_read", ptr) }
+
+/// Read value from pointer (unaligned OK)
+public unsafe fn ptr_read_unaligned<T>(ptr: *const T) -> T { @intrinsic("ptr_read_unaligned", ptr) }
+
+/// Read value from pointer (volatile, not optimized away)
+public unsafe fn ptr_read_volatile<T>(ptr: *const T) -> T { @intrinsic("ptr_read_volatile", ptr) }
+
+/// Write value to pointer
+public unsafe fn ptr_write<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write", ptr, value) }
+
+/// Write value to pointer (unaligned OK)
+public unsafe fn ptr_write_unaligned<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write_unaligned", ptr, value) }
+
+/// Write value to pointer (volatile, not optimized away)
+public unsafe fn ptr_write_volatile<T>(ptr: *mut T, value: T) { @intrinsic("ptr_write_volatile", ptr, value) }
+
+/// Write bytes to uninitialized memory
+public unsafe fn ptr_write_bytes<T>(ptr: *mut T, val: Byte, count: USize) {
+    @intrinsic("memset", ptr, val, count * T.size)
+}
+
+/// Offset pointer by count elements
+public unsafe fn ptr_offset<T>(ptr: *const T, count: ISize) -> *const T { @intrinsic("ptr_offset", ptr, count) }
+
+/// Offset mutable pointer by count elements
+public unsafe fn ptr_offset_mut<T>(ptr: *mut T, count: ISize) -> *mut T { @intrinsic("ptr_offset_mut", ptr, count) }
+
+/// Add unsigned offset to pointer
+public unsafe fn ptr_add<T>(ptr: *const T, count: USize) -> *const T { @intrinsic("ptr_add", ptr, count) }
+
+/// Subtract unsigned offset from pointer
+public unsafe fn ptr_sub<T>(ptr: *const T, count: USize) -> *const T { @intrinsic("ptr_sub", ptr, count) }
+
+/// Get null pointer of type T
+public fn null_ptr<T>() -> *const T { @intrinsic("null_ptr") }
+
+/// Get null mutable pointer of type T
+public fn null_ptr_mut<T>() -> *mut T { @intrinsic("null_ptr_mut") }
+
+/// Check if pointer is null
+public fn ptr_is_null<T>(ptr: *const T) -> Bool { @intrinsic("ptr_is_null", ptr) }
+
+/// Check if pointer is aligned
+public fn ptr_is_aligned<T>(ptr: *const T) -> Bool { @intrinsic("ptr_is_aligned", ptr) }
+
+/// Check if pointer is aligned to given alignment
+public fn ptr_is_aligned_to<T>(ptr: *const T, align: USize) -> Bool { @intrinsic("ptr_is_aligned_to", ptr, align) }
+
+/// Run destructor for value at pointer without deallocating
+public unsafe fn drop_in_place<T>(ptr: *mut T) { @intrinsic("drop_in_place", ptr) }
+
+// =============================================================================
+// SECTION 4: Slice Operations
+// =============================================================================
+
+/// Create slice from raw parts (ptr, len)
+public unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: USize) -> &[T] {
+    @intrinsic("slice_from_raw_parts", ptr, len)
+}
+
+/// Create mutable slice from raw parts
+public unsafe fn slice_from_raw_parts_mut<T>(ptr: *mut T, len: USize) -> &mut [T] {
+    @intrinsic("slice_from_raw_parts_mut", ptr, len)
+}
+
+/// Get length of slice
+public fn slice_len<T>(slice: &[T]) -> USize { @intrinsic("slice_len", slice) }
+
+/// Get raw pointer to slice data
+public fn slice_as_ptr<T>(slice: &[T]) -> *const T { @intrinsic("slice_as_ptr", slice) }
+
+/// Get mutable raw pointer to slice data
+public fn slice_as_mut_ptr<T>(slice: &mut [T]) -> *mut T { @intrinsic("slice_as_mut_ptr", slice) }
+
+/// Get element at index without bounds checking
+public unsafe fn slice_get_unchecked<T>(slice: &[T], idx: USize) -> &T {
+    @intrinsic("slice_get_unchecked", slice, idx)
+}
+
+/// Get mutable element at index without bounds checking
+public unsafe fn slice_get_unchecked_mut<T>(slice: &mut [T], idx: USize) -> &mut T {
+    @intrinsic("slice_get_unchecked_mut", slice, idx)
+}
+
+// =============================================================================
+// SECTION 5: Uninitialized Memory
+// =============================================================================
+
+/// Create uninitialized memory for type T
+/// Safety: Reading from the result is undefined behavior until initialized.
+public unsafe fn uninit<T>() -> T { @intrinsic("uninit") }
+
+/// Create zeroed memory for type T
+/// Safety: Zero bits may not be valid for all types.
+public unsafe fn zeroed<T>() -> T { @intrinsic("zeroed") }
+
+/// Check if memory is definitely initialized
+/// Note: This is conservative - may return false for initialized memory.
+public fn maybe_uninit_is_init<T>(val: &T) -> Bool { @intrinsic("maybe_uninit_is_init", val) }
+
+// =============================================================================
+// SECTION 6: Volatile Operations
+// =============================================================================
+
+/// Volatile load (not optimized away, for memory-mapped I/O)
+public fn volatile_load<T>(ptr: *const T) -> T { @intrinsic("volatile_load", ptr) }
+
+/// Volatile store (not optimized away, for memory-mapped I/O)
+public fn volatile_store<T>(ptr: *mut T, val: T) { @intrinsic("volatile_store", ptr, val) }
+
+/// Volatile copy memory
+public fn volatile_copy<T>(src: *const T, dst: *mut T, count: USize) {
+    @intrinsic("volatile_copy", src, dst, count)
+}
+
+/// Volatile set memory
+public fn volatile_set<T>(dst: *mut T, val: T, count: USize) {
+    @intrinsic("volatile_set", dst, val, count)
+}
+
+// =============================================================================
+// SECTION 7: Pointer Conversion
+// =============================================================================
+
+/// Convert raw pointer to immutable reference
+/// Safety: Pointer must be valid, aligned, and point to initialized data.
+public unsafe fn ptr_to_ref<T>(ptr: *const T) -> &T { @intrinsic("ptr_to_ref", ptr) }
+
+/// Convert raw pointer to mutable reference
+/// Safety: Pointer must be valid, aligned, point to initialized data, and be unique.
+public unsafe fn ptr_to_mut_ref<T>(ptr: *mut T) -> &mut T { @intrinsic("ptr_to_mut_ref", ptr) }
+
+/// Read value from raw pointer
+public unsafe fn ptr_read<T>(ptr: *const T) -> T { @intrinsic("ptr_read", ptr) }
+
+/// Write value to raw pointer
+public unsafe fn ptr_write<T>(ptr: *mut T, val: T) { @intrinsic("ptr_write", ptr, val) }
+
+/// Offset a raw const pointer by n elements
+public unsafe fn ptr_offset<T>(ptr: *const T, n: Int) -> *const T { @intrinsic("ptr_offset", ptr, n) }
+
+/// Offset a raw mut pointer by n elements
+public unsafe fn ptr_offset_mut<T>(ptr: *mut T, n: Int) -> *mut T { @intrinsic("ptr_offset_mut", ptr, n) }
+
+/// Drop value in place
+public unsafe fn drop_in_place<T>(ptr: *mut T) { @intrinsic("drop_in_place", ptr) }
+
+/// Create a slice from raw parts
+public unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: USize) -> &[T] { @intrinsic("slice_from_raw_parts", ptr, len) }
+
+/// Create a mutable slice from raw parts
+public unsafe fn slice_from_raw_parts_mut<T>(ptr: *mut T, len: USize) -> &mut [T] { @intrinsic("slice_from_raw_parts_mut", ptr, len) }
+
+// =============================================================================
+// SECTION 8: Slice Operations
+// =============================================================================
+
+/// Get unchecked element from slice
+public unsafe fn slice_get_unchecked<T>(slice: &[T], index: USize) -> &T { @intrinsic("slice_get_unchecked", slice, index) }
+
+/// Get unchecked mutable element from slice
+public unsafe fn slice_get_unchecked_mut<T>(slice: &mut [T], index: USize) -> &mut T { @intrinsic("slice_get_unchecked_mut", slice, index) }
+
+/// Get subslice (start..end)
+public fn slice_subslice<T>(slice: &[T], start: USize, end: USize) -> &[T] { @intrinsic("slice_subslice", slice, start, end) }
+
+/// Get mutable subslice (start..end)
+public fn slice_subslice_mut<T>(slice: &mut [T], start: USize, end: USize) -> &mut [T] { @intrinsic("slice_subslice_mut", slice, start, end) }
+
+/// Split slice at index
+public fn slice_split_at<T>(slice: &[T], mid: USize) -> (&[T], &[T]) { @intrinsic("slice_split_at", slice, mid) }
+
+/// Split mutable slice at index
+public fn slice_split_at_mut<T>(slice: &mut [T], mid: USize) -> (&mut [T], &mut [T]) { @intrinsic("slice_split_at_mut", slice, mid) }

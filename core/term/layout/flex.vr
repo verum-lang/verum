@@ -1,0 +1,586 @@
+// =============================================================================
+// flex.vr - CSS Flexbox Level 1 for terminals
+// =============================================================================
+// Full implementation of CSS Flexbox Level 1 (Section 9) adapted for terminal
+// cell grids. Supports row/column directions, wrapping, grow/shrink factors,
+// justify-content, align-items, and align-content.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#8.3
+// =============================================================================
+
+module flex;
+
+mount super.rect.Rect;
+
+/// Flexbox container properties.
+public type FlexLayout is {
+    direction: FlexDirection,
+    wrap: FlexWrap,
+    justify_content: JustifyContent,
+    align_items: AlignItems,
+    align_content: AlignContent,
+    gap: Int,
+};
+
+/// Main axis direction.
+public type FlexDirection is Row | RowReverse | Column | ColumnReverse;
+
+/// Wrapping behavior when items overflow the main axis.
+public type FlexWrap is NoWrap | Wrap | WrapReverse;
+
+/// Distribution of free space along the main axis.
+public type JustifyContent is
+    | FlexStart
+    | FlexEnd
+    | Center
+    | SpaceBetween
+    | SpaceAround
+    | SpaceEvenly;
+
+/// Alignment of items along the cross axis.
+public type AlignItems is Stretch | FlexStart | FlexEnd | Center | Baseline;
+
+/// Alignment of flex lines when there is extra space on the cross axis.
+public type AlignContent is
+    | FlexStart
+    | FlexEnd
+    | Center
+    | Stretch
+    | SpaceBetween
+    | SpaceAround;
+
+/// Properties of a flex child item.
+public type FlexItem is {
+    basis: FlexBasis,
+    grow: Float,
+    shrink: Float,
+    min_size: Maybe<Int>,
+    max_size: Maybe<Int>,
+    align_self: Maybe<AlignItems>,
+};
+
+/// How the flex base size is determined.
+public type FlexBasis is Auto | Fixed(Int) | Percentage(Int);
+
+implement FlexItem {
+    /// Create a default flex item (auto basis, no grow, shrink=1).
+    public fn new() -> FlexItem {
+        FlexItem {
+            basis: FlexBasis.Auto,
+            grow: 0.0,
+            shrink: 1.0,
+            min_size: None,
+            max_size: None,
+            align_self: None,
+        }
+    }
+
+    /// Set flex-grow factor.
+    public fn grow(self, grow: Float) -> FlexItem {
+        FlexItem { grow: grow, ..self }
+    }
+
+    /// Set flex-shrink factor.
+    public fn shrink(self, shrink: Float) -> FlexItem {
+        FlexItem { shrink: shrink, ..self }
+    }
+
+    /// Set flex-basis to a fixed size.
+    public fn fixed(self, size: Int) -> FlexItem {
+        FlexItem { basis: FlexBasis.Fixed(size), ..self }
+    }
+
+    /// Set flex-basis to a percentage.
+    public fn percentage(self, pct: Int) -> FlexItem {
+        FlexItem { basis: FlexBasis.Percentage(pct), ..self }
+    }
+
+    /// Set minimum size constraint.
+    public fn min(self, size: Int) -> FlexItem {
+        FlexItem { min_size: Some(size), ..self }
+    }
+
+    /// Set maximum size constraint.
+    public fn max(self, size: Int) -> FlexItem {
+        FlexItem { max_size: Some(size), ..self }
+    }
+
+    /// Override alignment for this item.
+    public fn align(self, alignment: AlignItems) -> FlexItem {
+        FlexItem { align_self: Some(alignment), ..self }
+    }
+}
+
+implement FlexLayout {
+    /// Create a row-direction flex container with defaults.
+    public fn row() -> FlexLayout {
+        FlexLayout {
+            direction: FlexDirection.Row,
+            wrap: FlexWrap.NoWrap,
+            justify_content: JustifyContent.FlexStart,
+            align_items: AlignItems.Stretch,
+            align_content: AlignContent.Stretch,
+            gap: 0,
+        }
+    }
+
+    /// Create a column-direction flex container with defaults.
+    public fn column() -> FlexLayout {
+        FlexLayout { direction: FlexDirection.Column, ..FlexLayout.row() }
+    }
+
+    /// Set wrapping mode.
+    public fn wrap(self, wrap: FlexWrap) -> FlexLayout {
+        FlexLayout { wrap: wrap, ..self }
+    }
+
+    /// Set justify-content (main axis distribution).
+    public fn justify(self, justify: JustifyContent) -> FlexLayout {
+        FlexLayout { justify_content: justify, ..self }
+    }
+
+    /// Set align-items (cross axis alignment).
+    public fn align_items(self, align: AlignItems) -> FlexLayout {
+        FlexLayout { align_items: align, ..self }
+    }
+
+    /// Set align-content (multi-line cross axis distribution).
+    public fn align_content(self, align: AlignContent) -> FlexLayout {
+        FlexLayout { align_content: align, ..self }
+    }
+
+    /// Set gap between items (in cells).
+    public fn gap(self, gap: Int) -> FlexLayout {
+        FlexLayout { gap: gap, ..self }
+    }
+
+    /// Compute flex layout positions and sizes for child items.
+    /// Implements CSS Flexbox Level 1, Section 9: Flex Layout Algorithm.
+    ///
+    /// Steps:
+    ///   1. Determine available main/cross sizes
+    ///   2. Determine flex base sizes (hypothetical main sizes)
+    ///   3. Collect items into flex lines (wrapping)
+    ///   4. Resolve flexible lengths (grow/shrink with freeze)
+    ///   5. Align items on cross axis
+    ///   6. Distribute remaining space per justify_content
+    public fn compute(&self, container: Rect, items: &List<FlexItem>) -> List<Rect> {
+        let n = items.len();
+        if n == 0 { return List.new(); }
+
+        let is_row = match self.direction {
+            Row | RowReverse => true,
+            _ => false,
+        };
+
+        let main_size = if is_row { container.width } else { container.height };
+        let cross_size = if is_row { container.height } else { container.width };
+
+        // =====================================================================
+        // Phase 1: Determine hypothetical main sizes (flex base sizes)
+        // =====================================================================
+        let mut hyp_sizes = List.with_capacity(n);
+        for i in 0..n {
+            let item = items[i];
+            let base = match item.basis {
+                Auto => 0,
+                Fixed(v) => v,
+                Percentage(p) => main_size * p / 100,
+            };
+            let clamped = clamp_size(base, item.min_size, item.max_size);
+            hyp_sizes.push(clamped);
+        }
+
+        // =====================================================================
+        // Phase 2: Collect items into flex lines
+        // =====================================================================
+        // Each line is a (start_index, end_index_exclusive) pair.
+        let mut lines = List.new();
+        let can_wrap = match self.wrap {
+            NoWrap => false,
+            _ => true,
+        };
+
+        if can_wrap {
+            let mut line_start = 0;
+            let mut line_main = 0;
+            for i in 0..n {
+                let item_main = hyp_sizes[i];
+                let gap_cost = if i > line_start { self.gap } else { 0 };
+                if line_main + gap_cost + item_main > main_size && i > line_start {
+                    // Start a new line
+                    lines.push((line_start, i));
+                    line_start = i;
+                    line_main = item_main;
+                } else {
+                    line_main = line_main + gap_cost + item_main;
+                }
+            }
+            lines.push((line_start, n));
+        } else {
+            lines.push((0, n));
+        }
+
+        let num_lines = lines.len();
+
+        // =====================================================================
+        // Phase 3: Resolve flexible lengths per line (grow/shrink with freeze)
+        // =====================================================================
+        let mut final_sizes = List.with_capacity(n);
+        for i in 0..n {
+            final_sizes.push(hyp_sizes[i]);
+        }
+
+        for line_idx in 0..num_lines {
+            let (ls, le) = lines[line_idx];
+            let line_count = le - ls;
+
+            // Calculate gaps for this line
+            let gaps_total = if line_count > 1 { self.gap * (line_count - 1) } else { 0 };
+
+            // Sum of hypothetical sizes in this line
+            let mut used = 0;
+            for i in ls..le {
+                used = used + hyp_sizes[i];
+            }
+            used = used + gaps_total;
+            let free_space = main_size - used;
+
+            if free_space > 0 {
+                // Grow: distribute extra space by flex-grow factor
+                // Use iterative freeze algorithm from CSS spec
+                let mut frozen = List.with_capacity(line_count);
+                for _ in 0..line_count { frozen.push(false); }
+
+                let mut iterations = 0;
+                let max_iterations = line_count + 1;
+                while iterations < max_iterations {
+                    iterations = iterations + 1;
+
+                    // Calculate total grow factor for unfrozen items
+                    let mut grow_total = 0.0;
+                    let mut unfrozen_count = 0;
+                    for i in 0..line_count {
+                        if !frozen[i] {
+                            grow_total = grow_total + items[ls + i].grow;
+                            unfrozen_count = unfrozen_count + 1;
+                        }
+                    }
+
+                    if unfrozen_count == 0 || grow_total <= 0.0 { break; }
+
+                    // Recalculate free space for unfrozen items
+                    let mut current_used = gaps_total;
+                    for i in 0..line_count {
+                        current_used = current_used + final_sizes[ls + i];
+                    }
+                    let current_free = (main_size - current_used).max(0);
+                    if current_free == 0 { break; }
+
+                    // Distribute and check for freeze violations
+                    let mut any_frozen = false;
+                    for i in 0..line_count {
+                        if frozen[i] { continue; }
+                        let item = items[ls + i];
+                        if item.grow <= 0.0 {
+                            frozen[i] = true;
+                            any_frozen = true;
+                            continue;
+                        }
+                        let extra = (current_free as Float * item.grow / grow_total) as Int;
+                        let new_size = final_sizes[ls + i] + extra;
+                        let clamped = clamp_size(new_size, item.min_size, item.max_size);
+                        if clamped != new_size {
+                            // Item hit a min/max bound: freeze it
+                            final_sizes[ls + i] = clamped;
+                            frozen[i] = true;
+                            any_frozen = true;
+                        } else {
+                            final_sizes[ls + i] = new_size;
+                        }
+                    }
+
+                    if !any_frozen { break; }
+                }
+            } else if free_space < 0 {
+                // Shrink: reduce items by flex-shrink weighted by base size
+                let mut frozen = List.with_capacity(line_count);
+                for _ in 0..line_count { frozen.push(false); }
+
+                let mut iterations = 0;
+                let max_iterations = line_count + 1;
+                while iterations < max_iterations {
+                    iterations = iterations + 1;
+
+                    // Compute scaled shrink factor sum for unfrozen items
+                    let mut shrink_total = 0.0;
+                    let mut unfrozen_count = 0;
+                    for i in 0..line_count {
+                        if !frozen[i] {
+                            shrink_total = shrink_total + items[ls + i].shrink * (hyp_sizes[ls + i] as Float);
+                            unfrozen_count = unfrozen_count + 1;
+                        }
+                    }
+
+                    if unfrozen_count == 0 || shrink_total <= 0.0 { break; }
+
+                    // Recalculate overflow for unfrozen items
+                    let mut current_used = gaps_total;
+                    for i in 0..line_count {
+                        current_used = current_used + final_sizes[ls + i];
+                    }
+                    let overflow = (current_used - main_size).max(0);
+                    if overflow == 0 { break; }
+
+                    // Distribute shrinkage
+                    let mut any_frozen = false;
+                    for i in 0..line_count {
+                        if frozen[i] { continue; }
+                        let item = items[ls + i];
+                        if item.shrink <= 0.0 {
+                            frozen[i] = true;
+                            any_frozen = true;
+                            continue;
+                        }
+                        let scaled = item.shrink * (hyp_sizes[ls + i] as Float);
+                        let reduction = (overflow as Float * scaled / shrink_total) as Int;
+                        let new_size = (final_sizes[ls + i] - reduction).max(0);
+                        let clamped = clamp_size(new_size, item.min_size, item.max_size);
+                        if clamped != new_size {
+                            final_sizes[ls + i] = clamped;
+                            frozen[i] = true;
+                            any_frozen = true;
+                        } else {
+                            final_sizes[ls + i] = new_size;
+                        }
+                    }
+
+                    if !any_frozen { break; }
+                }
+            }
+        }
+
+        // =====================================================================
+        // Phase 4: Determine cross sizes per line
+        // =====================================================================
+        let mut line_cross_sizes = List.with_capacity(num_lines);
+        if num_lines == 1 {
+            // Single line: cross size is the full container cross size
+            line_cross_sizes.push(cross_size);
+        } else {
+            // Multi-line: distribute cross space according to align-content
+            let base_line_cross = cross_size / num_lines;
+            let cross_remainder = cross_size - base_line_cross * num_lines;
+            for i in 0..num_lines {
+                // Give extra pixel to first lines for remainder
+                let extra = if i < cross_remainder { 1 } else { 0 };
+                line_cross_sizes.push(base_line_cross + extra);
+            }
+        }
+
+        // Apply align-content to adjust line cross positions
+        let mut line_cross_positions = List.with_capacity(num_lines);
+        let total_line_cross = sum_int_list(&line_cross_sizes);
+        let cross_remaining = (cross_size - total_line_cross).max(0);
+
+        match self.align_content {
+            AlignContent.FlexStart => {
+                let mut pos = 0;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    pos = pos + line_cross_sizes[i];
+                }
+            }
+            AlignContent.FlexEnd => {
+                let mut pos = cross_remaining;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    pos = pos + line_cross_sizes[i];
+                }
+            }
+            AlignContent.Center => {
+                let mut pos = cross_remaining / 2;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    pos = pos + line_cross_sizes[i];
+                }
+            }
+            AlignContent.Stretch => {
+                // Distribute extra space equally among lines
+                let extra_per_line = if num_lines > 0 { cross_remaining / num_lines } else { 0 };
+                let mut pos = 0;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    line_cross_sizes[i] = line_cross_sizes[i] + extra_per_line;
+                    pos = pos + line_cross_sizes[i];
+                }
+            }
+            AlignContent.SpaceBetween => {
+                let gap = if num_lines > 1 { cross_remaining / (num_lines - 1) } else { 0 };
+                let mut pos = 0;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    pos = pos + line_cross_sizes[i] + gap;
+                }
+            }
+            AlignContent.SpaceAround => {
+                let space = if num_lines > 0 { cross_remaining / num_lines } else { 0 };
+                let mut pos = space / 2;
+                for i in 0..num_lines {
+                    line_cross_positions.push(pos);
+                    pos = pos + line_cross_sizes[i] + space;
+                }
+            }
+        }
+
+        // =====================================================================
+        // Phase 5: Position items along main axis (justify-content) per line
+        // =====================================================================
+        let mut main_positions = List.with_capacity(n);
+        for _ in 0..n { main_positions.push(0); }
+
+        for line_idx in 0..num_lines {
+            let (ls, le) = lines[line_idx];
+            let line_count = le - ls;
+            let gaps_total = if line_count > 1 { self.gap * (line_count - 1) } else { 0 };
+
+            let mut line_used = 0;
+            for i in ls..le {
+                line_used = line_used + final_sizes[i];
+            }
+            line_used = line_used + gaps_total;
+            let line_remaining = (main_size - line_used).max(0);
+
+            let start_offset = match self.justify_content {
+                JustifyContent.FlexStart => 0,
+                JustifyContent.FlexEnd => line_remaining,
+                JustifyContent.Center => line_remaining / 2,
+                JustifyContent.SpaceBetween => 0,
+                JustifyContent.SpaceAround => {
+                    if line_count > 0 { line_remaining / line_count / 2 } else { 0 }
+                }
+                JustifyContent.SpaceEvenly => {
+                    line_remaining / (line_count + 1)
+                }
+            };
+
+            let between_gap = match self.justify_content {
+                JustifyContent.FlexStart => self.gap,
+                JustifyContent.FlexEnd => self.gap,
+                JustifyContent.Center => self.gap,
+                JustifyContent.SpaceBetween => {
+                    if line_count > 1 { line_remaining / (line_count - 1) + self.gap } else { 0 }
+                }
+                JustifyContent.SpaceAround => {
+                    let space = if line_count > 0 { line_remaining / line_count } else { 0 };
+                    space + self.gap
+                }
+                JustifyContent.SpaceEvenly => {
+                    let space = line_remaining / (line_count + 1);
+                    space + self.gap
+                }
+            };
+
+            let mut pos = start_offset;
+            for i in ls..le {
+                main_positions[i] = pos;
+                pos = pos + final_sizes[i] + between_gap;
+            }
+        }
+
+        // =====================================================================
+        // Phase 6: Build output Rects with cross-axis alignment
+        // =====================================================================
+        let is_reversed = match self.direction {
+            RowReverse | ColumnReverse => true,
+            _ => false,
+        };
+        let is_wrap_reversed = match self.wrap {
+            WrapReverse => true,
+            _ => false,
+        };
+
+        let mut result = List.with_capacity(n);
+        // Pre-fill so we can index directly
+        for _ in 0..n {
+            result.push(Rect.new(0, 0, 0, 0));
+        }
+
+        for line_idx in 0..num_lines {
+            let actual_line_idx = if is_wrap_reversed { num_lines - 1 - line_idx } else { line_idx };
+            let cross_pos = line_cross_positions[actual_line_idx];
+            let line_cross = line_cross_sizes[actual_line_idx];
+
+            let (ls, le) = lines[line_idx];
+            let line_count = le - ls;
+
+            for i in ls..le {
+                let item_idx = if is_reversed { ls + (le - 1 - i) } else { i };
+                let main_pos = main_positions[i];
+                let item_main = final_sizes[i];
+
+                // Determine cross-axis alignment for this item
+                let align = match items[item_idx].align_self {
+                    Some(a) => a,
+                    None => self.align_items,
+                };
+
+                // Compute cross position and size based on alignment
+                let item_cross = match align {
+                    Stretch => line_cross,
+                    _ => line_cross,  // In terminal cells, we default to stretch
+                };
+                let item_cross_pos = match align {
+                    AlignItems.FlexStart | AlignItems.Baseline => cross_pos,
+                    AlignItems.FlexEnd => cross_pos + line_cross - item_cross,
+                    AlignItems.Center => cross_pos + (line_cross - item_cross) / 2,
+                    AlignItems.Stretch => cross_pos,
+                };
+
+                // Map (main, cross) to (x, y, width, height) based on direction
+                let rect = if is_row {
+                    Rect.new(
+                        container.x + main_pos,
+                        container.y + item_cross_pos,
+                        item_main,
+                        item_cross,
+                    )
+                } else {
+                    Rect.new(
+                        container.x + item_cross_pos,
+                        container.y + main_pos,
+                        item_cross,
+                        item_main,
+                    )
+                };
+
+                result[item_idx] = rect;
+            }
+        }
+
+        result
+    }
+}
+
+/// Clamp a size value between optional min and max bounds.
+fn clamp_size(value: Int, min_size: Maybe<Int>, max_size: Maybe<Int>) -> Int {
+    let mut result = value;
+    match min_size {
+        Some(m) => { if result < m { result = m; } }
+        None => {}
+    }
+    match max_size {
+        Some(m) => { if result > m { result = m; } }
+        None => {}
+    }
+    result.max(0)
+}
+
+/// Sum all elements in a list of integers.
+fn sum_int_list(list: &List<Int>) -> Int {
+    let mut total = 0;
+    for i in 0..list.len() {
+        total = total + list[i];
+    }
+    total
+}

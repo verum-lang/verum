@@ -1,0 +1,255 @@
+// =============================================================================
+// mod.vr - Verum Standard Library Root
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Verum Standard Library
+//
+// The standard library follows a layered architecture where each layer
+// depends only on lower layers:
+//
+// ```
+// Layer 6: Cognitive (GPU, Tensors, Autodiff, Neural)
+// Layer 5: Network (TCP, HTTP, TLS, WebSocket)
+// Layer 4: Async (Future, Task, Channel, Select)
+// Layer 3: I/O (File, Path, Read, Write, Buffer)
+// Layer 2: Collections (List, Map, Set, Deque, Tree)
+// Layer 1: Text (Text, Char, Format, Regex)
+// Layer 0: Core (Primitives, Maybe, Result, Ordering, Iterator, Memory)
+// ═══════════════════════════════════════════════════════════════════
+// Kernel: V-LLSI Native (sys/, mem/) - Memory CBGR, TLS, Syscalls, I/O
+// ═══════════════════════════════════════════════════════════════════
+// Layer M: Meta (Compile-time) - Code Generation, Reflection, Macros
+// ```
+//
+// # V-LLSI Migration Status
+//
+// As of V-LLSI migration, the stdlib no longer depends on Rust FFI
+// (verum_bootstrap, verum_runtime). All operations use native implementations:
+//
+// - Memory: Native CBGR allocator (mem/allocator.vr)
+// - Panic: Native sys/init.vr panic handler
+// - Context: Native TLS context system (sys/common.vr)
+// - Async: Native completion-based I/O (io_uring/kqueue/IOCP)
+// - Time: Native platform syscalls (sys/{linux,darwin,windows}/time.vr)
+//
+// Spec: docs/architecture/new-arch-spec.md
+//
+// # Usage
+//
+// ```verum
+// mount core.base.*;           // Core types and protocols
+// mount core.collections.*;    // List, Map, Set
+// mount core.io.*;             // File operations
+// mount core.async.*;          // Async/await support
+// ```
+//
+// # Design Principles
+//
+// 1. **Semantic Honesty**: Types describe meaning (List, Text, Map),
+//    not implementation (Vec, String, HashMap)
+// 2. **No Magic**: All dependencies explicit via `mount`
+// 3. **Gradual Safety**: Three-tier references (Tier0/1/2)
+// 4. **Zero-Cost Abstractions**: CBGR enables memory safety at ~15ns
+//
+// =============================================================================
+
+module core;
+
+// =============================================================================
+// V-LLSI Kernel Layer (sys/, mem/)
+// =============================================================================
+
+// Low-level system layer - direct syscalls, TLS, platform abstractions.
+// Provides: OSError, FileDesc, IOVec, Context system, IOEngine protocol.
+public module sys;
+
+// Memory management layer - CBGR allocator, epoch management, hazard pointers.
+// Provides: cbgr_alloc, AllocationHeader, ThinRef, FatRef, Epoch.
+public module mem;
+
+// Compiler intrinsics - low-level operations that map to CPU instructions.
+// Provides: arithmetic, bitwise, float, memory, atomic, simd, platform.
+// Architecture-specific: lowlevel/x86_64, lowlevel/aarch64.
+public module intrinsics;
+
+// =============================================================================
+// Layer 0: Base (Depends on: sys, mem)
+// =============================================================================
+
+// Base types and protocols - the foundation of the standard library.
+// Provides: Maybe, Result, Ordering, Heap, Shared, Iterator, protocols.
+public module base;
+
+// SIMD types and operations - portable vectorized computation.
+// Provides: Vec<T,N>, Mask<N>, gather, scatter, reduce, shuffle.
+public module simd;
+
+// =============================================================================
+// Layer 0.5: Mathematics (Depends on: base, intrinsics, simd)
+// =============================================================================
+
+// Mathematical computing - from IEEE 754 to linear algebra.
+// Layer 0: Foundation (IEEE 754, integers, bits, checked arithmetic)
+// Layer 1: Scalar (elementary, hyperbolic, special functions)
+// Layer 2: Linear (vectors, matrices, BLAS, decompositions)
+// Layer 3: Analysis (differentiation, integration, ODEs, optimization)
+// Provides: sin, cos, exp, log, sqrt, Matrix, Vector, solve, etc.
+// Spec: docs/architecture/math-spec.md
+public module math;
+
+// =============================================================================
+// Layer 1: Text (Depends on: core)
+// =============================================================================
+
+// Text processing: UTF-8 strings, formatting, character utilities.
+public module text;
+
+// =============================================================================
+// Layer 2: Collections (Depends on: core, text)
+// =============================================================================
+
+// Data structures: List, Map, Set, Deque, BTree, PriorityQueue.
+public module collections;
+
+// =============================================================================
+// Layer 2.5: Context (Depends on: base, collections, runtime)
+// =============================================================================
+
+// Context system: DI scope types, error types, provider utilities.
+// Level 1 (@injectable/@inject): compile-time static DI, 0ns overhead.
+// Level 2 (provide/using): runtime DI via task-local storage, ~5-30ns.
+// Spec: docs/detailed/16-context-system.md
+public module context;
+
+// =============================================================================
+// Layer 3: I/O (Depends on: core, text, collections)
+// =============================================================================
+
+// Input/output: Files, paths, streams, buffered I/O.
+public module io;
+
+// =============================================================================
+// Layer 3.5: Time (Depends on: core)
+// =============================================================================
+
+// Time && duration: Duration, Instant, SystemTime.
+public module time;
+
+// =============================================================================
+// Layer 3.5: Sync (Depends on: core, collections)
+// =============================================================================
+
+// Synchronization primitives: Mutex, RwLock, atomics, barriers.
+// Note: Placed between I/O && Async as async depends on sync primitives.
+public module sync;
+
+// =============================================================================
+// Layer 4: Async (Depends on: core, collections, io, sync)
+// =============================================================================
+
+// Asynchronous programming: Futures, tasks, channels, executors.
+public module async;
+
+// =============================================================================
+// Layer 4.5: Runtime (Depends on: core, collections, async, sync)
+// =============================================================================
+
+// Runtime system: supervisors, task spawning, execution environment, recovery.
+public module runtime;
+
+// =============================================================================
+// Layer 3.5: Terminal (Depends on: core, text, collections, io, sync, time)
+// =============================================================================
+
+// Terminal I/O and TUI framework: raw terminal, events, styles, rendering,
+// layout engine, widget library, application framework (Elm Architecture).
+// 7-layer architecture from raw termios to full TUI apps.
+// Spec: docs/detailed/40-terminal-tui-architecture.md
+public module term;
+
+// =============================================================================
+// Layer 5: Network (Depends on: core, text, collections, io, async)
+// =============================================================================
+
+// Networking: TCP, UDP, HTTP, WebSocket, TLS.
+public module net;
+
+// =============================================================================
+// Layer 6: Cognitive (Depends on: all previous + MLIR GPU backend)
+// =============================================================================
+
+// Cognitive computing: Tensors, GPU, autodiff, neural networks.
+// Deferred: GPU/tensor compute requires hardware-specific backends.
+// See core/math/ for CPU-based tensor, linear algebra, and ML operations.
+// public module cognitive;
+
+// =============================================================================
+// Layer M: Meta (Compile-time, no runtime dependencies)
+// =============================================================================
+
+// Meta-programming: Code generation, type reflection, quasi-quotation.
+// Operates entirely at compile-time with zero runtime overhead.
+// Provides: TokenStream, TypeInfo, BuildAssets, quote { }, @derive.
+// Spec: docs/architecture/meta-audit.md
+public module meta;
+
+// =============================================================================
+// Prelude - commonly used items automatically available
+// =============================================================================
+
+// The prelude is automatically imported in every Verum module.
+// It contains the most fundamental types && functions.
+public module prelude {
+    // From base (fundamental types and protocols)
+    public mount super.base.*;
+
+    // From collections (common types)
+    public mount super.collections.List;
+    public mount super.collections.Map;
+    public mount super.collections.Set;
+
+    // From io (common functions)
+    public mount super.io.print;
+    public mount super.io.println;
+    public mount super.io.eprint;
+    public mount super.io.eprintln;
+    public mount super.io.File;
+    public mount super.io.read_to_string;
+
+    // From sync (common primitives)
+    public mount super.sync.Mutex;
+    public mount super.sync.RwLock;
+    public mount super.sync.AtomicInt;
+    public mount super.sync.AtomicBool;
+
+    // From time (common types)
+    public mount super.time.Duration;
+    public mount super.time.Instant;
+    public mount super.time.Time;
+
+    // From math (common functions and types)
+    public mount super.math.{
+        // Constants
+        PI, E, TAU, INFINITY, NAN,
+        // Elementary functions
+        sin, cos, tan, asin, acos, atan, atan2,
+        exp, log, log10, log2,
+        sqrt, cbrt, pow, abs,
+        floor, ceil, round,
+        min, max, clamp,
+        // Linear algebra
+        Vector, Matrix,
+    };
+}
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+// Standard library version
+public const VERSION: &Text = "0.1.0";
+
+// Standard library version tuple
+public const VERSION_INFO: (Int, Int, Int) = (0, 1, 0);

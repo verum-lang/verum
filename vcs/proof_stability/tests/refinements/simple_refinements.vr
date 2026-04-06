@@ -1,0 +1,466 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, refinements, simple
+// @timeout: 10000
+// @expected-proof-time: <30ms
+
+/// Description: Tests SMT stability for simple refinement type proofs
+/// Regression Detection: Simple refinements should prove instantly (<30ms).
+/// These are baseline tests - if these fail or slow down, there is a fundamental SMT issue.
+
+// ============================================================================
+// Basic Type Refinements
+// ============================================================================
+
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type Negative is Int{< 0};
+type NonPositive is Int{<= 0};
+type NonZero is Int{!= 0};
+
+/// Positive is positive
+@verify(proof)
+fn positive_is_positive(x: Positive) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x > 0;
+    "
+    x > 0
+}
+
+/// Non-negative is non-negative
+@verify(proof)
+fn nonneg_is_nonneg(x: NonNegative) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x >= 0;
+    "
+    x >= 0
+}
+
+/// Negative is negative
+@verify(proof)
+fn negative_is_negative(x: Negative) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x < 0;
+    "
+    x < 0
+}
+
+/// Non-zero is not zero
+@verify(proof)
+fn nonzero_is_nonzero(x: NonZero) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x != 0;
+    "
+    x != 0
+}
+
+// ============================================================================
+// Subtype Relationships
+// ============================================================================
+
+/// Positive implies Non-negative
+@verify(proof)
+fn positive_implies_nonneg(x: Positive) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+    "
+    x  // Positive (> 0) is subtype of NonNegative (>= 0)
+}
+
+/// Negative implies Non-positive
+@verify(proof)
+fn negative_implies_nonpos(x: Negative) -> NonPositive {
+    contract#"
+        ensures result <= 0;
+    "
+    x  // Negative (< 0) is subtype of NonPositive (<= 0)
+}
+
+/// Positive implies Non-zero
+@verify(proof)
+fn positive_implies_nonzero(x: Positive) -> NonZero {
+    contract#"
+        ensures result != 0;
+    "
+    x  // Positive (> 0) implies != 0
+}
+
+/// Negative implies Non-zero
+@verify(proof)
+fn negative_implies_nonzero(x: Negative) -> NonZero {
+    contract#"
+        ensures result != 0;
+    "
+    x  // Negative (< 0) implies != 0
+}
+
+// ============================================================================
+// Refinement Narrowing
+// ============================================================================
+
+/// Check narrows to Positive
+@verify(proof)
+fn check_narrows_positive(x: Int) -> Maybe<Positive> {
+    contract#"
+        ensures match result {
+            Some(p) => p > 0,
+            None => x <= 0
+        };
+    "
+    if x > 0 {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+/// Check narrows to NonNegative
+@verify(proof)
+fn check_narrows_nonneg(x: Int) -> Maybe<NonNegative> {
+    contract#"
+        ensures match result {
+            Some(n) => n >= 0,
+            None => x < 0
+        };
+    "
+    if x >= 0 {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+/// Absolute value produces NonNegative
+@verify(proof)
+fn abs_produces_nonneg(x: Int) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result == x || result == -x;
+    "
+    if x >= 0 { x } else { -x }
+}
+
+// ============================================================================
+// Range Refinements
+// ============================================================================
+
+type Percentage is Int{>= 0 && <= 100};
+type Byte is Int{>= 0 && <= 255};
+type Digit is Int{>= 0 && <= 9};
+
+/// Percentage bounds
+@verify(proof)
+fn percentage_bounds(p: Percentage) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures p >= 0 && p <= 100;
+    "
+    p >= 0 && p <= 100
+}
+
+/// Byte bounds
+@verify(proof)
+fn byte_bounds(b: Byte) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures b >= 0 && b <= 255;
+    "
+    b >= 0 && b <= 255
+}
+
+/// Digit bounds
+@verify(proof)
+fn digit_bounds(d: Digit) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures d >= 0 && d <= 9;
+    "
+    d >= 0 && d <= 9
+}
+
+/// Clamp to percentage
+@verify(proof)
+fn clamp_to_percentage(x: Int) -> Percentage {
+    contract#"
+        ensures result >= 0 && result <= 100;
+    "
+    if x < 0 { 0 }
+    else if x > 100 { 100 }
+    else { x }
+}
+
+/// Clamp to byte
+@verify(proof)
+fn clamp_to_byte(x: Int) -> Byte {
+    contract#"
+        ensures result >= 0 && result <= 255;
+    "
+    if x < 0 { 0 }
+    else if x > 255 { 255 }
+    else { x }
+}
+
+// ============================================================================
+// Equality Refinements
+// ============================================================================
+
+type Zero is Int{== 0};
+type One is Int{== 1};
+type Ten is Int{== 10};
+
+/// Zero is zero
+@verify(proof)
+fn zero_is_zero(x: Zero) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x == 0;
+    "
+    x == 0
+}
+
+/// One is one
+@verify(proof)
+fn one_is_one(x: One) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x == 1;
+    "
+    x == 1
+}
+
+/// Zero is NonNegative
+@verify(proof)
+fn zero_is_nonneg(x: Zero) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+    "
+    x
+}
+
+/// One is Positive
+@verify(proof)
+fn one_is_positive(x: One) -> Positive {
+    contract#"
+        ensures result > 0;
+    "
+    x
+}
+
+// ============================================================================
+// Arithmetic Refinement Preservation
+// ============================================================================
+
+/// Sum of positives is positive
+@verify(proof)
+fn sum_positives(a: Positive, b: Positive) -> Positive {
+    contract#"
+        ensures result > 0;
+        ensures result == a + b;
+    "
+    a + b
+}
+
+/// Sum of non-negatives is non-negative
+@verify(proof)
+fn sum_nonneg(a: NonNegative, b: NonNegative) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result == a + b;
+    "
+    a + b
+}
+
+/// Product of positives is positive
+@verify(proof)
+fn product_positives(a: Positive, b: Positive) -> Positive {
+    contract#"
+        ensures result > 0;
+        ensures result == a * b;
+    "
+    a * b
+}
+
+/// Product of non-negatives is non-negative
+@verify(proof)
+fn product_nonneg(a: NonNegative, b: NonNegative) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result == a * b;
+    "
+    a * b
+}
+
+/// Square is non-negative
+@verify(proof)
+fn square_is_nonneg(x: Int) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result == x * x;
+    "
+    x * x
+}
+
+// ============================================================================
+// Division Refinements
+// ============================================================================
+
+/// Division by positive yields same sign
+@verify(proof)
+fn div_positive_sign(a: Positive, b: Positive) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+    "
+    a / b
+}
+
+/// Division by nonzero is safe
+@verify(proof)
+fn div_nonzero_safe(a: Int, b: NonZero) -> Int {
+    contract#"
+        requires b != 0;
+    "
+    a / b
+}
+
+/// Modulo by positive is non-negative
+@verify(proof)
+fn mod_positive_nonneg(a: Int, b: Positive) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result < b;
+    "
+    a % b
+}
+
+// ============================================================================
+// Comparison Refinements
+// ============================================================================
+
+/// Max of non-negatives is non-negative
+@verify(proof)
+fn max_nonneg(a: NonNegative, b: NonNegative) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+        ensures result >= a && result >= b;
+    "
+    if a >= b { a } else { b }
+}
+
+/// Min of positives is positive
+@verify(proof)
+fn min_positive(a: Positive, b: Positive) -> Positive {
+    contract#"
+        ensures result > 0;
+        ensures result <= a && result <= b;
+    "
+    if a <= b { a } else { b }
+}
+
+/// Max is greater or equal to both
+@verify(proof)
+fn max_ge_both(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result >= a;
+        ensures result >= b;
+    "
+    if a >= b { a } else { b }
+}
+
+/// Min is less or equal to both
+@verify(proof)
+fn min_le_both(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result <= a;
+        ensures result <= b;
+    "
+    if a <= b { a } else { b }
+}
+
+// ============================================================================
+// Conditional Refinements
+// ============================================================================
+
+/// Guard refines type
+@verify(proof)
+fn guard_refines(x: Int) -> NonNegative {
+    contract#"
+        ensures result >= 0;
+    "
+    if x >= 0 {
+        x  // x is refined to NonNegative in this branch
+    } else {
+        0  // 0 is NonNegative
+    }
+}
+
+/// Match refines type
+@verify(proof)
+fn match_refines(x: Int) -> Positive {
+    contract#"
+        ensures result > 0;
+    "
+    match x {
+        n if n > 0 => n,  // n is refined to Positive
+        _ => 1            // 1 is Positive
+    }
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Basic refinements
+    assert(positive_is_positive(5));
+    assert(nonneg_is_nonneg(0));
+    assert(negative_is_negative(-3));
+    assert(nonzero_is_nonzero(-1));
+
+    // Subtype relationships
+    assert(positive_implies_nonneg(10) >= 0);
+    assert(negative_implies_nonpos(-5) <= 0);
+    assert(positive_implies_nonzero(7) != 0);
+
+    // Refinement narrowing
+    assert(check_narrows_positive(5) == Some(5));
+    assert(check_narrows_positive(-3) == None);
+    assert(abs_produces_nonneg(-42) >= 0);
+
+    // Range refinements
+    assert(percentage_bounds(50));
+    assert(byte_bounds(128));
+    assert(digit_bounds(7));
+    assert(clamp_to_percentage(150) == 100);
+    assert(clamp_to_byte(-10) == 0);
+
+    // Equality refinements
+    assert(zero_is_zero(0));
+    assert(one_is_one(1));
+
+    // Arithmetic preservation
+    assert(sum_positives(3, 5) == 8);
+    assert(sum_nonneg(0, 10) == 10);
+    assert(product_positives(4, 5) == 20);
+    assert(square_is_nonneg(-7) == 49);
+
+    // Division refinements
+    assert(div_positive_sign(10, 3) >= 0);
+    assert(mod_positive_nonneg(-7, 3) >= 0);
+
+    // Comparison refinements
+    assert(max_nonneg(5, 10) == 10);
+    assert(min_positive(3, 7) == 3);
+
+    // Conditional refinements
+    assert(guard_refines(-5) == 0);
+    assert(guard_refines(5) == 5);
+    assert(match_refines(-10) == 1);
+    assert(match_refines(10) == 10);
+
+    println("All simple refinement tests verified successfully!");
+}

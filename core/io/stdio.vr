@@ -1,0 +1,415 @@
+// =============================================================================
+// stdio.vr - Standard I/O (stdin, stdout, stderr)
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, io/protocols, sys/{linux,darwin,windows}/syscall
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI system interfaces:
+// - Linux: Uses sys/linux/syscall.{read, write} direct syscalls
+// - macOS: Uses sys/darwin/libsystem.{safe_read, safe_write} via libSystem.B.dylib
+// - Windows: Uses sys/windows/kernel32.{ReadFile, WriteFile} via kernel32.dll
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// This module provides access to standard input/output/error streams.
+//
+// =============================================================================
+
+module core.io.stdio;
+mount core.*;
+mount io.protocols.*;
+
+// =============================================================================
+// V-LLSI Native I/O Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{
+    read as sys_read,
+    write as sys_write,
+    FileDesc,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{
+    safe_read as sys_read,
+    safe_write as sys_write,
+};
+@cfg(target_os = "macos")
+mount sys.common.FileDesc;
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{
+    read as sys_read,
+    write as sys_write,
+};
+@cfg(target_os = "windows")
+mount sys.common.FileDesc;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const STDIN_FD: Int = 0;
+const STDOUT_FD: Int = 1;
+const STDERR_FD: Int = 2;
+
+const STDIN_BUFFER_SIZE: Int = 1024;
+
+// =============================================================================
+// Stdin
+// =============================================================================
+
+// Standard input handle.
+public type Stdin is {
+    // Internal buffer for buffered reading
+    buffer: List<Byte>,
+    buf_pos: Int,
+};
+
+implement Stdin {
+    // Create stdin handle.
+    fn new() -> Stdin {
+        Stdin {
+            buffer: List.new(),
+            buf_pos: 0,
+        }
+    }
+
+    // Lock stdin for exclusive access.
+    public fn lock(&self) -> StdinLock {
+        StdinLock {
+            buffer: List.new(),
+            buf_pos: 0,
+        }
+    }
+
+    // Read line.
+    // Reads bytes until a newline is encountered or buffer is full.
+    public fn read_line(&mut self, buf: &mut Text) -> IoResult<Int> {
+        let mut bytes = [0_u8; 4096];
+        let mut total = 0;
+
+        // Read one byte at a time until newline (simple implementation)
+        loop {
+            if total >= 4096 {
+                break;
+            }
+
+            let fd = FileDesc.from_raw(STDIN_FD);
+            match sys_read(fd, &mut bytes[total..total+1]) {
+                Ok(0) => break,  // EOF
+                Ok(1) => {
+                    total = total + 1;
+                    if bytes[total - 1] == '\n' as Byte {
+                        break;
+                    }
+                }
+                Ok(_) => break,
+                Err(_) => return Err(StreamError.new(IoErrorKind.Other)),
+            }
+        }
+
+        if total == 0 {
+            return Ok(0);
+        }
+
+        match Text.from_utf8(&bytes[..total]) {
+            Ok(s) => {
+                buf.push_str(&s);
+                Ok(total)
+            }
+            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+        }
+    }
+
+    // Iterator over lines.
+    public fn lines(&mut self) -> StdinLines {
+        StdinLines { stdin: self }
+    }
+}
+
+implement Read for Stdin {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDIN_FD);
+        match sys_read(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+}
+
+// Locked stdin handle for synchronized access.
+public type StdinLock is {
+    buffer: List<Byte>,
+    buf_pos: Int,
+};
+
+implement Read for StdinLock {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDIN_FD);
+        match sys_read(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+}
+
+implement BufRead for StdinLock {
+    fn fill_buf(&mut self) -> IoResult<&[Byte]> {
+        if self.buf_pos >= self.buffer.len() {
+            // Need to read more
+            self.buffer.clear();
+            self.buf_pos = 0;
+
+            let mut tmp = [0_u8; STDIN_BUFFER_SIZE];
+            let fd = FileDesc.from_raw(STDIN_FD);
+            match sys_read(fd, &mut tmp) {
+                Ok(n) => {
+                    if n > 0 {
+                        self.buffer.extend_from_slice(&tmp[..n]);
+                    }
+                }
+                Err(e) => return Err(StreamError.from_raw_os_error(e.code)),
+            }
+        }
+
+        Ok(&self.buffer.as_slice()[self.buf_pos..])
+    }
+
+    fn consume(&mut self, amt: Int) {
+        self.buf_pos = (self.buf_pos + amt).min(self.buffer.len());
+    }
+}
+
+// Iterator over stdin lines.
+public type StdinLines is {
+    stdin: &mut Stdin,
+};
+
+implement Iterator for StdinLines {
+    type Item = IoResult<Text>;
+
+    fn next(&mut self) -> Maybe<IoResult<Text>> {
+        let mut line = Text.new();
+        match self.stdin.read_line(&mut line) {
+            Ok(0) => None,
+            Ok(_) => {
+                // Remove trailing newline
+                if line.ends_with("\n") {
+                    line.pop();
+                    if line.ends_with("\r") {
+                        line.pop();
+                    }
+                }
+                Some(Ok(line))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+// =============================================================================
+// Stdout
+// =============================================================================
+
+// Standard output handle.
+public type Stdout is ();
+
+implement Stdout {
+    // Create stdout handle.
+    fn new() -> Stdout {
+        Stdout {}
+    }
+
+    // Lock stdout for exclusive access.
+    public fn lock(&self) -> StdoutLock {
+        StdoutLock {}
+    }
+}
+
+implement Write for Stdout {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDOUT_FD);
+        match sys_write(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // stdout is typically line-buffered or unbuffered at the kernel level
+        // No explicit flush syscall needed for standard output
+        Ok(())
+    }
+}
+
+// Locked stdout handle.
+public type StdoutLock is ();
+
+implement Write for StdoutLock {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDOUT_FD);
+        match sys_write(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // stdout is typically line-buffered or unbuffered at the kernel level
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Stderr
+// =============================================================================
+
+// Standard error handle.
+public type Stderr is ();
+
+implement Stderr {
+    // Create stderr handle.
+    fn new() -> Stderr {
+        Stderr {}
+    }
+
+    // Lock stderr for exclusive access.
+    public fn lock(&self) -> StderrLock {
+        StderrLock {}
+    }
+}
+
+implement Write for Stderr {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDERR_FD);
+        match sys_write(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // stderr is typically unbuffered at the kernel level
+        Ok(())
+    }
+}
+
+// Locked stderr handle.
+public type StderrLock is ();
+
+implement Write for StderrLock {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        let fd = FileDesc.from_raw(STDERR_FD);
+        match sys_write(fd, buf) {
+            Ok(n) => Ok(n),
+            Err(e) => Err(StreamError.from_raw_os_error(e.code)),
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // stderr is typically unbuffered at the kernel level
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Global Access Functions
+// =============================================================================
+
+// Get stdin handle.
+public fn stdin() -> Stdin {
+    Stdin.new()
+}
+
+// Get stdout handle.
+public fn stdout() -> Stdout {
+    Stdout.new()
+}
+
+// Get stderr handle.
+public fn stderr() -> Stderr {
+    Stderr.new()
+}
+
+// =============================================================================
+// Convenience Print Functions
+// =============================================================================
+
+// Print text to stdout.
+public fn print(s: &Text) {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, s.as_bytes());
+}
+
+// Print text to stdout with newline.
+public fn println(s: &Text) {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, s.as_bytes());
+    let _ = sys_write(fd, b"\n");
+}
+
+// Print empty line.
+public fn println_empty() {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, b"\n");
+}
+
+// Print text to stderr.
+public fn eprint(s: &Text) {
+    let fd = FileDesc.from_raw(STDERR_FD);
+    let _ = sys_write(fd, s.as_bytes());
+}
+
+// Print text to stderr with newline.
+public fn eprintln(s: &Text) {
+    let fd = FileDesc.from_raw(STDERR_FD);
+    let _ = sys_write(fd, s.as_bytes());
+    let _ = sys_write(fd, b"\n");
+}
+
+// =============================================================================
+// Input Functions
+// =============================================================================
+
+// Read a line from stdin, trimmed of newline.
+public fn read_line() -> IoResult<Text> {
+    let mut s = stdin();
+    let mut line = Text.new();
+    s.read_line(&mut line)?;
+
+    // Remove trailing newline
+    if line.ends_with("\n") {
+        line.pop();
+        if line.ends_with("\r") {
+            line.pop();
+        }
+    }
+
+    Ok(line)
+}
+
+// Read integer from stdin.
+public fn read_int() -> IoResult<Int> {
+    let line = read_line()?;
+    match line.trim().parse<Int>() {
+        Ok(n) => Ok(n),
+        Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+    }
+}
+
+// Read float from stdin.
+public fn read_float() -> IoResult<Float> {
+    let line = read_line()?;
+    match line.trim().parse<Float>() {
+        Ok(f) => Ok(f),
+        Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+    }
+}

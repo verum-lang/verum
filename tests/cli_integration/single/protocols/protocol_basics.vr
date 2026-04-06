@@ -1,0 +1,67 @@
+// Test: PR-001 through PR-008 - Protocols
+// Priority: Critical/High
+// Expected output: Protocol implementations
+
+// Basic protocol definition
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+// Protocol with default method
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+// Record type
+type Point is { x: Int, y: Int };
+
+// Implement Display for Point
+implement Display for Point {
+    fn fmt(&self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Implement Eq for Point
+implement Eq for Point {
+    fn eq(&self, other: &Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+// Inherent implementation
+type Counter is { value: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+}
+
+// Generic function with protocol bound
+fn print_formatted<T>(item: T) where type T: Display {
+    print(f"{item.fmt()}");
+}
+
+fn main() {
+    let p = Point { x: 10, y: 20 };
+    print(f"{p.fmt()}");
+
+    let p2 = Point { x: 10, y: 20 };
+    print(f"Equal: {p.eq(&p2)}");
+    print(f"Not equal: {p.ne(&p2)}");
+
+    let mut c = Counter.new();
+    c.increment();
+    print(f"Counter: {c.value}");
+
+    print_formatted(p);
+}

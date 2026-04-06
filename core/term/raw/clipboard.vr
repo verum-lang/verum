@@ -1,0 +1,83 @@
+// =============================================================================
+// raw/clipboard.vr - OSC 52 Clipboard Access
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.io, escape.vr
+// =============================================================================
+//
+// Read/write the system clipboard via OSC 52 escape sequences.
+// Supported by most modern terminals (kitty, iTerm2, foot, wezterm, etc.).
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.2
+// =============================================================================
+
+module clipboard;
+
+mount core.io.IoResult;
+mount super.escape.EscapeWriter;
+
+// =============================================================================
+// Clipboard Operations
+// =============================================================================
+
+/// Write text to the system clipboard via OSC 52.
+/// Encodes the text as base64 and sends: OSC 52 ; c ; <base64> ST
+public fn clipboard_set(writer: &mut (dyn EscapeWriter), text: &Text) -> IoResult<()> {
+    let encoded = base64_encode(text.as_bytes());
+    writer.write_osc(52, &f"c;{encoded}")
+}
+
+/// Request clipboard contents via OSC 52.
+/// Sends: OSC 52 ; c ; ? ST
+/// The response will arrive as an input event (OSC 52;c;<base64>)
+/// that should be parsed by the InputParser.
+public fn clipboard_get(writer: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    writer.write_osc(52, "c;?")
+}
+
+// =============================================================================
+// Base64 Encoding
+// =============================================================================
+
+/// Base64 encode a byte slice to Text (RFC 4648).
+fn base64_encode(data: &[Byte]) -> Text {
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let alpha_bytes = alphabet.as_bytes();
+    let mut result: List<Byte> = List.new();
+    let len = data.len();
+    let mut i = 0;
+
+    // Process 3-byte groups
+    while i + 2 < len {
+        let a = data[i] as Int;
+        let b = data[i + 1] as Int;
+        let c = data[i + 2] as Int;
+        let triple = (a << 16) | (b << 8) | c;
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push(alpha_bytes[(triple >> 6) & 63]);
+        result.push(alpha_bytes[triple & 63]);
+        i = i + 3;
+    }
+
+    // Handle remaining bytes
+    let remaining = len - i;
+    if remaining == 1 {
+        let a = data[i] as Int;
+        let triple = a << 16;
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push('=' as Byte);
+        result.push('=' as Byte);
+    } else if remaining == 2 {
+        let a = data[i] as Int;
+        let b = data[i + 1] as Int;
+        let triple = (a << 16) | (b << 8);
+        result.push(alpha_bytes[(triple >> 18) & 63]);
+        result.push(alpha_bytes[(triple >> 12) & 63]);
+        result.push(alpha_bytes[(triple >> 6) & 63]);
+        result.push('=' as Byte);
+    }
+
+    Text.from_utf8_unchecked(&result)
+}

@@ -1,0 +1,24 @@
+// Test context injection in closures
+
+// Simple context for testing
+context Logger {
+    fn log(message: Text);
+}
+
+fn main() {
+    print("=== Test 1: Closure with context ===");
+
+    // Provide context implementation
+    provide Logger = {
+        fn log(message: Text) {
+            print(f"[LOG] {message}");
+        }
+    };
+
+    // Note: Context usage in closures syntax needs verification
+    // The parser supports: |params| using [Context] body
+    // But the full semantics may not be implemented yet
+
+    print("Context syntax in closures requires further testing");
+    print("Parser supports: |x: Int| using [Logger] -> Int { ... }");
+}

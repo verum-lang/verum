@@ -1,0 +1,19 @@
+// Factorial computation with type safety
+// Spec: 03-type-system.md#1.2.1 (Positive refinement type)
+
+fn main() {
+    // Calculate factorial(5)
+    let result = factorial(5);
+    print(f"factorial(5) = {result}");
+}
+
+// Factorial with positive refinement
+fn factorial(n: Int) -> Int {
+    if n <= 0 {
+        1
+    } else if n == 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}

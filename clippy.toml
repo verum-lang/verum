@@ -1,0 +1,42 @@
+# Verum Language Platform - Clippy Configuration
+# Spec: CLAUDE.md v6.0-BALANCED - Semantic Type Enforcement
+
+# NOTE: The disallowed-types rule is commented out because the Verum compiler
+# infrastructure legitimately needs to use Rust std types internally.
+# The semantic types (List, Text, Map, etc.) are for Verum user code,
+# not the Rust code implementing the Verum compiler itself.
+#
+# When building user-facing Verum tooling (not the compiler), these rules
+# can be re-enabled for those specific crates.
+
+# disallowed-types = [
+#     # Vector types - use List<T> from verum_core
+#     { path = "std::vec::Vec", reason = "Use verum_core::List instead" },
+#     { path = "alloc::vec::Vec", reason = "Use verum_core::List instead" },
+#
+#     # String types - use Text from verum_core
+#     { path = "std::string::String", reason = "Use verum_core::Text instead" },
+#     { path = "alloc::string::String", reason = "Use verum_core::Text instead" },
+#
+#     # HashMap types - use Map<K,V> from verum_core
+#     { path = "std::collections::HashMap", reason = "Use verum_core::Map instead" },
+#     { path = "std::collections::hash_map::HashMap", reason = "Use verum_core::Map instead" },
+#
+#     # HashSet types - use Set<T> from verum_core
+#     { path = "std::collections::HashSet", reason = "Use verum_core::Set instead" },
+#     { path = "std::collections::hash_set::HashSet", reason = "Use verum_core::Set instead" },
+#
+#     # BTreeMap types - use OrderedMap<K,V> from verum_core
+#     { path = "std::collections::BTreeMap", reason = "Use verum_core::OrderedMap instead" },
+#     { path = "std::collections::btree_map::BTreeMap", reason = "Use verum_core::OrderedMap instead" },
+#
+#     # BTreeSet types - use OrderedSet<T> from verum_core
+#     { path = "std::collections::BTreeSet", reason = "Use verum_core::OrderedSet instead" },
+#     { path = "std::collections::btree_set::BTreeSet", reason = "Use verum_core::OrderedSet instead" },
+#
+#     # Box types - use Heap<T> from verum_core
+#     { path = "std::boxed::Box", reason = "Use verum_core::Heap instead" },
+#     { path = "alloc::boxed::Box", reason = "Use verum_core::Heap instead" },
+# ]
+
+allow-mixed-uninlined-format-args = false

@@ -1,0 +1,8 @@
+type Color is
+    | Red
+    | Green;
+
+fn main() {
+    let c1 = Color.Red;
+    print(f"Unit variant created!");
+}

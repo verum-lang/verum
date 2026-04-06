@@ -1,0 +1,11 @@
+[package]
+name = "test_multimodule"
+version = "0.1.0"
+authors = ["Test Author <test@example.com>"]
+description = "Multi-module test project"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"

@@ -1,0 +1,158 @@
+// =============================================================================
+// mem/raw_ops.vr - Raw Memory Operations (replaces libc memcpy/memset/strlen)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// Pure Verum implementations of fundamental memory operations.
+// These use @intrinsic annotations so LLVM can lower them to optimal
+// hardware-specific instructions (e.g., rep movsb, NEON, SVE).
+//
+// Performance: LLVM's MemCpy/MemSet intrinsics are used, which generate
+// code equivalent to or better than libc on modern hardware.
+//
+// =============================================================================
+
+module raw_ops;
+
+// =============================================================================
+// memcpy — Uses LLVM's llvm.memcpy intrinsic for maximum performance
+// =============================================================================
+
+/// Copy n bytes from src to dst. Regions must not overlap.
+/// This is lowered to llvm.memcpy.p0.p0.i64 which generates
+/// optimal code (rep movsb on x86, NEON loads on ARM).
+@intrinsic("memcpy")
+public fn memcpy(dst: Int, src: Int, n: Int) -> Int {
+    // Fallback for interpreter: byte-by-byte copy
+    let mut i = 0;
+    while i < n {
+        let byte = __load_byte(src + i);
+        __store_byte(dst + i, byte);
+        i = i + 1;
+    }
+    dst
+}
+
+/// Copy n bytes, handling overlapping regions correctly.
+/// Like memmove. Copies backwards if dst > src.
+@intrinsic("memmove")
+public fn memmove(dst: Int, src: Int, n: Int) -> Int {
+    if dst == src { return dst; }
+    if dst < src {
+        // Forward copy (same as memcpy)
+        memcpy(dst, src, n)
+    } else {
+        // Backward copy to handle overlap
+        let mut i = n - 1;
+        while i >= 0 {
+            let byte = __load_byte(src + i);
+            __store_byte(dst + i, byte);
+            i = i - 1;
+        }
+        dst
+    }
+}
+
+// =============================================================================
+// memset — Uses LLVM's llvm.memset intrinsic
+// =============================================================================
+
+/// Fill n bytes at dst with value (0-255).
+/// Lowered to llvm.memset.p0.i64.
+@intrinsic("memset")
+public fn memset(dst: Int, value: Int, n: Int) -> Int {
+    // Fallback for interpreter
+    let byte = value % 256;
+    let mut i = 0;
+    while i < n {
+        __store_byte(dst + i, byte);
+        i = i + 1;
+    }
+    dst
+}
+
+/// Zero n bytes at dst.
+public fn memzero(dst: Int, n: Int) -> Int {
+    memset(dst, 0, n)
+}
+
+// =============================================================================
+// memcmp — Byte comparison
+// =============================================================================
+
+/// Compare n bytes. Returns 0 if equal, <0 if a<b, >0 if a>b.
+@intrinsic("memcmp")
+public fn memcmp(a: Int, b: Int, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let ba = __load_byte(a + i);
+        let bb = __load_byte(b + i);
+        if ba != bb {
+            return ba - bb;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// =============================================================================
+// strlen / strcmp — String operations
+// =============================================================================
+
+/// Length of null-terminated C string.
+@intrinsic("strlen")
+public fn strlen(s: Int) -> Int {
+    let mut len = 0;
+    while __load_byte(s + len) != 0 {
+        len = len + 1;
+    }
+    len
+}
+
+/// Compare two null-terminated C strings.
+@intrinsic("strcmp")
+public fn strcmp(a: Int, b: Int) -> Int {
+    let mut i = 0;
+    while true {
+        let ca = __load_byte(a + i);
+        let cb = __load_byte(b + i);
+        if ca != cb {
+            return ca - cb;
+        }
+        if ca == 0 {
+            return 0;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// =============================================================================
+// Raw byte load/store intrinsics
+// =============================================================================
+
+/// Load a single byte from memory address.
+@intrinsic("load_byte")
+fn __load_byte(addr: Int) -> Int { 0 }
+
+/// Store a single byte to memory address.
+@intrinsic("store_byte")
+fn __store_byte(addr: Int, value: Int) -> Int { 0 }
+
+/// Load an i64 from memory address.
+@intrinsic("load_i64")
+public fn load_i64(addr: Int) -> Int { 0 }
+
+/// Store an i64 to memory address.
+@intrinsic("store_i64")
+public fn store_i64(addr: Int, value: Int) -> Int { 0 }
+
+/// Load an i32 from memory address.
+@intrinsic("load_i32")
+public fn load_i32(addr: Int) -> Int { 0 }
+
+/// Store an i32 to memory address.
+@intrinsic("store_i32")
+public fn store_i32(addr: Int, value: Int) -> Int { 0 }

@@ -1,0 +1,126 @@
+// Test: Generic Associated Types (GATs) - Syntax Test
+// Priority: Advanced
+// Expected output: Demonstrates GAT syntax parses correctly
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// ========== Basic Iterator Protocol with Associated Type ==========
+
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// ========== Container Protocol with Associated Type ==========
+
+type Container is protocol {
+    type Item;
+
+    fn get(&self) -> Maybe<Self.Item>;
+};
+
+// ========== Display Protocol ==========
+
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+// ========== Functor Protocol with GAT (Generic Associated Type) ==========
+
+type Functor is protocol {
+    type Mapped<U>;
+
+    fn map<U>(self, f: fn(Self) -> U) -> Self.Mapped<U>;
+};
+
+// ========== Monad Protocol with GAT ==========
+
+type Monad is protocol {
+    type Wrapped<T>;
+
+    fn pure<T>(value: T) -> Self.Wrapped<T>;
+    fn bind<T, U>(self: Self.Wrapped<T>, f: fn(T) -> Self.Wrapped<U>) -> Self.Wrapped<U>;
+};
+
+// ========== Collection Protocol with Multiple Associated Types ==========
+
+type Collection is protocol {
+    type Element;
+    type Iter;
+
+    fn iter(&self) -> Self.Iter;
+    fn len(&self) -> Int;
+};
+
+// ========== Test Functions ==========
+
+fn test_maybe_basic() {
+    print(f"=== Maybe Basic ===");
+
+    let m1: Maybe<Int> = Maybe.Some(10);
+
+    match m1 {
+        Maybe.Some(x) => print(f"Value: {x}"),
+        Maybe.None => print(f"None"),
+    }
+
+    let m2: Maybe<Int> = Maybe.None;
+    match m2 {
+        Maybe.Some(x) => print(f"Value: {x}"),
+        Maybe.None => print(f"Empty!"),
+    }
+}
+
+fn test_nested_maybe() {
+    print(f"=== Nested Maybe ===");
+
+    // Nested Maybe types work
+    let inner_val: Maybe<Int> = Maybe.Some(42);
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(inner_val);
+
+    match nested {
+        Maybe.Some(inner_maybe) => {
+            print(f"Outer Some!");
+            // Note: Nested pattern matching has some type inference limitations
+            // This demonstrates the nested type works
+        },
+        Maybe.None => print(f"Outer none"),
+    }
+}
+
+fn test_gat_syntax() {
+    print(f"=== GAT Syntax Demonstration ===");
+    print(f"This test demonstrates that GAT syntax parses correctly:");
+    print(f"");
+    print(f"1. Simple associated type:");
+    print(f"   type Iterator is protocol {{ type Item; ... }}");
+    print(f"");
+    print(f"2. Generic associated type (GAT):");
+    print(f"   type Functor is protocol {{ type Mapped<U>; ... }}");
+    print(f"");
+    print(f"3. Multiple associated types:");
+    print(f"   type Collection is protocol {{ type Element; type Iter; ... }}");
+    print(f"");
+    print(f"4. GAT with multiple type parameters:");
+    print(f"   type Monad is protocol {{ type Wrapped<T>; ... }}");
+    print(f"");
+    print(f"5. Self.Item references in protocol method signatures");
+    print(f"   fn next(&mut self) -> Maybe<Self.Item>");
+}
+
+fn main() {
+    print(f"Starting GAT syntax tests...");
+    print(f"");
+
+    test_maybe_basic();
+    print(f"");
+    test_nested_maybe();
+    print(f"");
+    test_gat_syntax();
+    print(f"");
+
+    print(f"All GAT syntax tests complete!");
+}

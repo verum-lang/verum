@@ -1,0 +1,7 @@
+// Hello World - The classic first program
+// Spec: 02-introduction.md#2.1
+
+@main
+fn main() {
+    print(f"Hello, World!");
+}

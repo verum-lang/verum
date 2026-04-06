@@ -1,0 +1,250 @@
+// =============================================================================
+// raw/wincon.vr - Windows Console API implementation
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.sys.windows.kernel32, super (raw/mod.vr)
+// Platform: Windows
+// =============================================================================
+//
+// Windows Console API backend for RawTerminal.
+// Uses Virtual Terminal Processing (VTP) for ANSI escape support on
+// Windows 10 1607+ and falls back to native Console API otherwise.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
+// =============================================================================
+
+@cfg(target_os = "windows")
+module wincon;
+
+mount core.sys.windows.kernel32.{
+    GetStdHandle, GetConsoleMode, SetConsoleMode, GetConsoleScreenBufferInfo,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    ENABLE_PROCESSED_INPUT, ENABLE_LINE_INPUT, ENABLE_ECHO_INPUT,
+    ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+    ENABLE_WINDOW_INPUT, ENABLE_MOUSE_INPUT,
+    ENABLE_PROCESSED_OUTPUT, ENABLE_WRAP_AT_EOL_OUTPUT,
+    DISABLE_NEWLINE_AUTO_RETURN,
+    ConsoleScreenBufferInfo, Coord,
+    Handle,
+};
+mount core.sys.windows.ntdll.Handle;
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount super.{TerminalMode, TermiosState, TerminalSize, RawTerminal, CursorShape};
+
+// =============================================================================
+// WindowsTerminal
+// =============================================================================
+
+/// Windows Console API terminal implementation.
+/// Saves and restores console mode flags for RAII safety.
+public type WindowsTerminal is {
+    mode: TerminalMode,
+    input_handle: Handle,
+    output_handle: Handle,
+    write_buf: List<Byte>,
+};
+
+implement WindowsTerminal {
+    /// Create a new WindowsTerminal.
+    /// Saves current console input and output modes for later restoration.
+    public fn new() -> IoResult<WindowsTerminal> {
+        let input_handle = GetStdHandle(STD_INPUT_HANDLE);
+        let output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+        let mut input_mode: UInt32 = 0;
+        let mut output_mode: UInt32 = 0;
+
+        if !GetConsoleMode(input_handle, &mut input_mode) {
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+        if !GetConsoleMode(output_handle, &mut output_mode) {
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+
+        Ok(WindowsTerminal {
+            mode: TerminalMode {
+                original: TermiosState {
+                    input_mode: input_mode,
+                    output_mode: output_mode,
+                },
+                fd: FileDesc(0),
+                is_raw: false,
+                is_alternate: false,
+            },
+            input_handle: input_handle,
+            output_handle: output_handle,
+            write_buf: List.new(),
+        })
+    }
+}
+
+implement RawTerminal for WindowsTerminal {
+    fn enable_raw_mode(&mut self) -> IoResult<()> {
+        // Raw input: disable line input, echo, processed input; enable VT input
+        let raw_input = ENABLE_WINDOW_INPUT
+            | ENABLE_MOUSE_INPUT
+            | ENABLE_VIRTUAL_TERMINAL_INPUT;
+
+        // Raw output: enable VT processing, disable newline auto-return
+        let raw_output = ENABLE_PROCESSED_OUTPUT
+            | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            | DISABLE_NEWLINE_AUTO_RETURN;
+
+        if !SetConsoleMode(self.input_handle, raw_input) {
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+        if !SetConsoleMode(self.output_handle, raw_output) {
+            // Try to restore input mode on failure
+            let _ = SetConsoleMode(self.input_handle, self.mode.original.input_mode);
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+
+        self.mode.is_raw = true;
+        Ok(())
+    }
+
+    fn disable_raw_mode(&mut self) -> IoResult<()> {
+        let ok_in = SetConsoleMode(self.input_handle, self.mode.original.input_mode);
+        let ok_out = SetConsoleMode(self.output_handle, self.mode.original.output_mode);
+        if !ok_in || !ok_out {
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+        self.mode.is_raw = false;
+        Ok(())
+    }
+
+    fn enter_alternate_screen(&mut self) -> IoResult<()> {
+        // Windows 10+ supports ANSI escape for alternate screen
+        self.write_str("\x1b[?1049h")?;
+        self.flush()?;
+        self.mode.is_alternate = true;
+        Ok(())
+    }
+
+    fn leave_alternate_screen(&mut self) -> IoResult<()> {
+        self.write_str("\x1b[?1049l")?;
+        self.flush()?;
+        self.mode.is_alternate = false;
+        Ok(())
+    }
+
+    fn size(&self) -> IoResult<TerminalSize> {
+        let mut info = ConsoleScreenBufferInfo {
+            size: Coord { x: 0, y: 0 },
+            cursor_position: Coord { x: 0, y: 0 },
+            attributes: 0,
+            window: SmallRect { left: 0, top: 0, right: 0, bottom: 0 },
+            maximum_window_size: Coord { x: 0, y: 0 },
+        };
+        if !GetConsoleScreenBufferInfo(self.output_handle, &mut info) {
+            return Err(StreamError.new(IoErrorKind.Other));
+        }
+        Ok(TerminalSize {
+            columns: (info.window.right - info.window.left + 1) as Int,
+            rows: (info.window.bottom - info.window.top + 1) as Int,
+            pixel_width: None,
+            pixel_height: None,
+        })
+    }
+
+    fn is_tty(&self) -> Bool {
+        let mut mode: UInt32 = 0;
+        GetConsoleMode(self.output_handle, &mut mode)
+    }
+
+    fn set_mouse_capture(&mut self, enable: Bool) -> IoResult<()> {
+        // Use ANSI escapes (Windows 10+ VTP)
+        if enable {
+            self.write_str("\x1b[?1000h\x1b[?1003h\x1b[?1006h")?;
+        } else {
+            self.write_str("\x1b[?1006l\x1b[?1003l\x1b[?1000l")?;
+        }
+        self.flush()
+    }
+
+    fn set_focus_events(&mut self, enable: Bool) -> IoResult<()> {
+        if enable {
+            self.write_str("\x1b[?1004h")?;
+        } else {
+            self.write_str("\x1b[?1004l")?;
+        }
+        self.flush()
+    }
+
+    fn set_bracketed_paste(&mut self, enable: Bool) -> IoResult<()> {
+        if enable {
+            self.write_str("\x1b[?2004h")?;
+        } else {
+            self.write_str("\x1b[?2004l")?;
+        }
+        self.flush()
+    }
+
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> IoResult<()> {
+        let code = match shape {
+            BlinkingBlock => 1,
+            SteadyBlock => 2,
+            BlinkingUnderline => 3,
+            SteadyUnderline => 4,
+            BlinkingBar => 5,
+            SteadyBar => 6,
+        };
+        self.write_str(f"\x1b[{code} q")?;
+        self.flush()
+    }
+
+    fn set_cursor_visible(&mut self, visible: Bool) -> IoResult<()> {
+        if visible {
+            self.write_str("\x1b[?25h")?;
+        } else {
+            self.write_str("\x1b[?25l")?;
+        }
+        self.flush()
+    }
+}
+
+implement Drop for WindowsTerminal {
+    fn drop(&mut self) {
+        if self.mode.is_alternate {
+            let _ = self.leave_alternate_screen();
+        }
+        if self.mode.is_raw {
+            let _ = self.disable_raw_mode();
+        }
+    }
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+implement WindowsTerminal {
+    fn write_str(&mut self, s: &Text) -> IoResult<()> {
+        let bytes = s.as_bytes();
+        for i in 0..bytes.len() {
+            self.write_buf.push(bytes[i]);
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // Write via VTP-enabled console output
+        if self.write_buf.len() == 0 {
+            return Ok(());
+        }
+        let mut written: UInt32 = 0;
+        let ok = kernel32.WriteFile(
+            self.output_handle,
+            &self.write_buf[0] as &unsafe Byte,
+            self.write_buf.len() as UInt32,
+            &mut written,
+            0 as &mut kernel32.Overlapped,
+        );
+        self.write_buf.clear();
+        if !ok {
+            Err(StreamError.new(IoErrorKind.Other))
+        } else {
+            Ok(())
+        }
+    }
+}

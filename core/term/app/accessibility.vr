@@ -1,0 +1,63 @@
+// =============================================================================
+// accessibility.vr - OSC 133 semantic zones and screen reader hints
+// =============================================================================
+module accessibility;
+
+mount core.io.IoResult;
+mount super.super.raw.EscapeWriter;
+
+/// Semantic zone for OSC 133 + future ARIA-like extensions.
+public type SemanticZone is
+    | Prompt                                  // OSC 133;A
+    | CommandInput                            // OSC 133;B
+    | CommandOutput                           // OSC 133;C
+    | CommandEnd { exit_code: Int }           // OSC 133;D
+    | Region { role: Text, label: Text }      // Future extension
+    | Live { politeness: Politeness };        // Future: live regions
+
+/// Politeness level for live regions.
+public type Politeness is Off | Polite | Assertive;
+
+/// Write semantic zone markers to the output stream.
+public fn write_semantic_zone(
+    writer: &mut (dyn EscapeWriter),
+    zone: SemanticZone,
+) -> IoResult<()> {
+    match zone {
+        Prompt => writer.write_osc(133, "A"),
+        CommandInput => writer.write_osc(133, "B"),
+        CommandOutput => writer.write_osc(133, "C"),
+        CommandEnd { exit_code } => writer.write_osc(133, &f"D;{exit_code}"),
+        Region { role, label } => {
+            writer.write_osc(133, &f"R;role={role};label={label}")
+        }
+        Live { politeness } => {
+            let p = match politeness {
+                Off => "off",
+                Polite => "polite",
+                Assertive => "assertive",
+            };
+            writer.write_osc(133, &f"L;{p}")
+        }
+    }
+}
+
+/// Emit a prompt start marker (for shells and terminal emulators).
+public fn mark_prompt_start(writer: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    write_semantic_zone(writer, SemanticZone.Prompt)
+}
+
+/// Emit a command input marker.
+public fn mark_command_input(writer: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    write_semantic_zone(writer, SemanticZone.CommandInput)
+}
+
+/// Emit a command output marker.
+public fn mark_command_output(writer: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    write_semantic_zone(writer, SemanticZone.CommandOutput)
+}
+
+/// Emit a command end marker with exit code.
+public fn mark_command_end(writer: &mut (dyn EscapeWriter), exit_code: Int) -> IoResult<()> {
+    write_semantic_zone(writer, SemanticZone.CommandEnd { exit_code: exit_code })
+}

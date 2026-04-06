@@ -1,0 +1,11 @@
+{
+  "key": "key1",
+  "result": "Proved",
+  "metadata": {
+    "cached_at": 1774659551,
+    "verum_version": "0.4.0",
+    "solver_version": "4.15.4.0",
+    "signature": null,
+    "original_time_ms": 100
+  }
+}

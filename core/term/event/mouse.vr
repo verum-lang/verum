@@ -1,0 +1,92 @@
+// =============================================================================
+// event/mouse.vr - Mouse Protocol Helpers
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: types.vr, keys.vr
+// =============================================================================
+//
+// Mouse event parsing for SGR extended mode (CSI < Pb ; Px ; Py M/m) and
+// enable/disable escape sequences for mouse tracking modes.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
+// =============================================================================
+
+module mouse;
+
+mount super.types.{MouseEvent, MouseEventKind, MouseButton};
+mount super.keys.Modifiers;
+
+// =============================================================================
+// SGR Mouse Parsing
+// =============================================================================
+
+/// Parse SGR mouse parameters into a MouseEvent.
+/// SGR format: CSI < Pb ; Px ; Py M  (press) or CSI < Pb ; Px ; Py m (release)
+/// Pb encodes button and modifiers, Px/Py are 1-indexed coordinates.
+public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEvent> {
+    if params.len() < 3 {
+        return None;
+    }
+
+    let pb = params[0];
+    let px = params[1] - 1;  // Convert to 0-indexed
+    let py = params[2] - 1;
+
+    let is_release = final_byte == ('m' as Int);
+
+    // Extract modifier flags from Pb
+    let mut mods = Modifiers.NONE;
+    if (pb & 4) != 0 { mods = mods.union(Modifiers.SHIFT); }
+    if (pb & 8) != 0 { mods = mods.union(Modifiers.ALT); }
+    if (pb & 16) != 0 { mods = mods.union(Modifiers.CTRL); }
+
+    // Determine button and event kind from low bits + motion flag
+    let button_bits = pb & 3;
+    let is_motion = (pb & 32) != 0;
+    let is_scroll = (pb & 64) != 0;
+
+    let kind = if is_scroll {
+        match button_bits {
+            0 => MouseEventKind.ScrollUp,
+            1 => MouseEventKind.ScrollDown,
+            2 => MouseEventKind.ScrollLeft,
+            3 => MouseEventKind.ScrollRight,
+            _ => MouseEventKind.ScrollUp,
+        }
+    } else {
+        let button = match button_bits {
+            0 => MouseButton.Left,
+            1 => MouseButton.Middle,
+            2 => MouseButton.Right,
+            _ => MouseButton.Left,
+        };
+        if is_release {
+            MouseEventKind.Up(button)
+        } else if is_motion {
+            MouseEventKind.Drag(button)
+        } else {
+            MouseEventKind.Down(button)
+        }
+    };
+
+    Some(MouseEvent {
+        kind: kind,
+        column: px,
+        row: py,
+        modifiers: mods,
+    })
+}
+
+// =============================================================================
+// Mouse Enable/Disable Sequences
+// =============================================================================
+
+/// Escape sequence to enable mouse tracking (X10 + Any-event + SGR extended).
+public fn mouse_enable_sequence() -> Text {
+    "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
+}
+
+/// Escape sequence to disable mouse tracking (reverse order).
+public fn mouse_disable_sequence() -> Text {
+    "\x1b[?1006l\x1b[?1003l\x1b[?1000l"
+}

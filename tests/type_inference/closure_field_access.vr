@@ -1,0 +1,162 @@
+// Test: Closure Field Access - Type inference for field access inside lambda closures
+// Priority: Critical
+// Expected: Closures should correctly infer parameter types from method context
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+type Product is {
+    name: Text,
+    price: Float,
+    stock: Int,
+    category: Text,
+};
+
+// Test 1: Filter with field comparison
+fn test_filter_field_comparison() {
+    let people: List<Person> = List.new();
+
+    // Field access in closure - age field
+    let adults = people.filter(|p| p.age >= 18);
+
+    // Field access in closure - active field
+    let active_users = people.filter(|p| p.active);
+
+    // Field access with external variable capture
+    let min_age = 21;
+    let filtered = people.filter(|p| p.age >= min_age);
+}
+
+// Test 2: Filter with field equality
+fn test_filter_field_equality() {
+    let products: List<Product> = List.new();
+
+    // Filter by category
+    let electronics = products.filter(|p| p.category == "electronics");
+
+    // Filter with captured variable
+    let target_category = "books";
+    let books = products.filter(|p| p.category == target_category);
+}
+
+// Test 3: Filter with numeric field comparison
+fn test_filter_numeric_fields() {
+    let products: List<Product> = List.new();
+
+    // Filter by price
+    let affordable = products.filter(|p| p.price < 50.0);
+
+    // Filter by stock
+    let in_stock = products.filter(|p| p.stock > 0);
+
+    // Combined filters with field access
+    let min_price = 10.0;
+    let max_price = 100.0;
+    let in_range = products.filter(|p| p.price >= min_price && p.price <= max_price);
+}
+
+// Test 4: Map with field access
+fn test_map_field_access() {
+    let people: List<Person> = List.new();
+
+    // Extract name field
+    let names = people.map(|p| p.name);
+
+    // Extract and transform age field
+    let ages_next_year = people.map(|p| p.age + 1);
+}
+
+// Test 5: Find with field access
+fn test_find_field_access() {
+    let products: List<Product> = List.new();
+
+    // Find by name
+    let result = products.find(|p| p.name == "Widget");
+
+    // Find with complex condition
+    let expensive = products.find(|p| p.price > 1000.0 && p.stock > 0);
+}
+
+// Test 6: Any/All with field access
+fn test_any_all_field_access() {
+    let people: List<Person> = List.new();
+
+    // Check if any person is active
+    let has_active = people.any(|p| p.active);
+
+    // Check if all are adults
+    let all_adults = people.all(|p| p.age >= 18);
+}
+
+// Test 7: Nested field access patterns
+fn test_nested_patterns() {
+    let products: List<Product> = List.new();
+
+    // Chain multiple filters with field access
+    let result = products
+        .filter(|p| p.price > 0.0)
+        .filter(|p| p.stock > 0)
+        .filter(|p| p.category == "electronics");
+}
+
+// Test 8: Field access with method calls
+type Item is {
+    value: Int,
+    valid: Bool,
+};
+
+implement Item {
+    pub fn is_valid(self) -> Bool {
+        self.valid && self.value > 0
+    }
+}
+
+fn test_field_and_method_access() {
+    let items: List<Item> = List.new();
+
+    // Direct field access
+    let valid_items = items.filter(|item| item.valid);
+
+    // Method call on closure parameter
+    let validated = items.filter(|item| item.is_valid());
+
+    // Mixed field access and method call
+    let high_value = items.filter(|item| item.value > 100 && item.is_valid());
+}
+
+// Test 9: Complex record types
+type SearchResult is {
+    title: Text,
+    score: Float,
+    downloads: Int,
+    license: Text,
+};
+
+fn test_complex_filtering() {
+    let results: List<SearchResult> = List.new();
+    let license_filter = "MIT";
+
+    // Multiple field comparisons
+    let filtered = results.filter(|r|
+        r.score > 0.5 &&
+        r.downloads > 1000 &&
+        r.license == license_filter
+    );
+}
+
+async fn main() {
+    test_filter_field_comparison();
+    test_filter_field_equality();
+    test_filter_numeric_fields();
+    test_map_field_access();
+    test_find_field_access();
+    test_any_all_field_access();
+    test_nested_patterns();
+    test_field_and_method_access();
+    test_complex_filtering();
+
+    print("All closure field access tests completed successfully!");
+}

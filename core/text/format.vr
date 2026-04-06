@@ -1,0 +1,1193 @@
+// =============================================================================
+// format.vr - Formatting system
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core (protocols, maybe, result, primitives), sys/
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI system interfaces:
+// - Linux: Uses sys/linux/syscall.write direct syscalls
+// - macOS: Uses sys/darwin/libsystem.safe_write via libSystem.B.dylib
+// - Windows: Uses sys/windows/kernel32.write via kernel32.dll
+// - Native integer/float to string conversion (no FFI)
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// This module provides the formatting infrastructure for Verum:
+// - Extended Formatter with width, precision, alignment options
+// - Write protocol for output targets
+// - print/println/eprint/eprintln functions
+// - Debug && Display helper implementations
+//
+// =============================================================================
+
+module core.text.format;
+mount core.*;
+
+// =============================================================================
+// V-LLSI Native I/O Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{
+    write as sys_write,
+    FileDesc,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{
+    safe_write as sys_write,
+};
+@cfg(target_os = "macos")
+mount sys.common.FileDesc;
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{
+    write as sys_write,
+};
+@cfg(target_os = "windows")
+mount sys.common.FileDesc;
+
+// Standard file descriptors
+const STDOUT_FD: Int = 1;
+const STDERR_FD: Int = 2;
+
+// =============================================================================
+// Native Number-to-String Conversion
+// =============================================================================
+
+/// Convert an integer to decimal string representation.
+/// Returns the number of bytes written to the buffer.
+@inline
+fn int_to_string(value: Int, buf: &mut [Byte]) -> Int {
+    if buf.len() == 0 {
+        return 0;
+    }
+
+    // Handle zero case
+    if value == 0 {
+        buf[0] = '0' as Byte;
+        return 1;
+    }
+
+    let negative = value < 0;
+    let mut val = if negative { -value } else { value };
+
+    // Write digits in reverse order
+    let mut pos = 0;
+    while val > 0 && pos < buf.len() {
+        let digit = (val % 10) as Byte;
+        buf[pos] = '0' as Byte + digit;
+        val = val / 10;
+        pos = pos + 1;
+    }
+
+    // Add sign if negative
+    if negative && pos < buf.len() {
+        buf[pos] = '-' as Byte;
+        pos = pos + 1;
+    }
+
+    // Reverse the buffer in place
+    let mut i = 0;
+    let mut j = pos - 1;
+    while i < j {
+        let tmp = buf[i];
+        buf[i] = buf[j];
+        buf[j] = tmp;
+        i = i + 1;
+        j = j - 1;
+    }
+
+    pos
+}
+
+/// Convert a float to string representation.
+/// Returns the number of bytes written to the buffer.
+fn float_to_string(value: Float, buf: &mut [Byte], precision: Int) -> Int {
+    if buf.len() < 2 {
+        return 0;
+    }
+
+    let mut pos = 0;
+
+    // Handle special cases
+    if value.is_nan() {
+        if buf.len() >= 3 {
+            buf[0] = 'N' as Byte;
+            buf[1] = 'a' as Byte;
+            buf[2] = 'N' as Byte;
+            return 3;
+        }
+        return 0;
+    }
+
+    if value.is_infinite() {
+        let negative = value < 0.0;
+        if negative {
+            if buf.len() >= 4 {
+                buf[0] = '-' as Byte;
+                buf[1] = 'i' as Byte;
+                buf[2] = 'n' as Byte;
+                buf[3] = 'f' as Byte;
+                return 4;
+            }
+        } else {
+            if buf.len() >= 3 {
+                buf[0] = 'i' as Byte;
+                buf[1] = 'n' as Byte;
+                buf[2] = 'f' as Byte;
+                return 3;
+            }
+        }
+        return 0;
+    }
+
+    // Handle negative numbers
+    let negative = value < 0.0;
+    let val = if negative { -value } else { value };
+
+    if negative {
+        buf[pos] = '-' as Byte;
+        pos = pos + 1;
+    }
+
+    // Extract integer part
+    let int_part = val.floor() as Int;
+
+    // Write integer part
+    let int_len = int_to_string(int_part, &mut buf[pos..]);
+    pos = pos + int_len;
+
+    // Write decimal point and fractional part
+    if precision > 0 && pos < buf.len() {
+        buf[pos] = '.' as Byte;
+        pos = pos + 1;
+
+        // Extract fractional part
+        let mut frac = val - (int_part as Float);
+        let mut digits_written = 0;
+
+        while digits_written < precision && pos < buf.len() {
+            frac = frac * 10.0;
+            let digit = frac.floor() as Int;
+            buf[pos] = ('0' as Byte) + (digit as Byte);
+            frac = frac - (digit as Float);
+            pos = pos + 1;
+            digits_written = digits_written + 1;
+        }
+    }
+
+    pos
+}
+
+// =============================================================================
+// Write Protocol
+// =============================================================================
+
+// Protocol for types that can receive formatted output.
+public type Write is protocol {
+    // Write a byte slice.
+    fn write(&mut self, bytes: &[Byte]) -> Result<Int, WriteError>;
+
+    // Write a string.
+    fn write_str(&mut self, s: &Text) -> Result<(), WriteError> {
+        self.write(s.as_bytes())?;
+        Ok(())
+    }
+
+    // Write a single character.
+    fn write_char(&mut self, c: Char) -> Result<(), WriteError> {
+        let mut buf = [0_u8; 4];
+        let len = c.encode_utf8(&mut buf);
+        self.write(slice_from_raw_parts(&buf[0], len))?;
+        Ok(())
+    }
+
+    // Flush output.
+    fn flush(&mut self) -> Result<(), WriteError>;
+};
+
+// Write error type.
+public type WriteError is {
+    kind: WriteErrorKind,
+};
+
+// Write error kinds.
+public type WriteErrorKind is
+    | Io              // I/O error
+    | BufferFull      // Buffer capacity exceeded
+    | Encoding;       // Encoding error
+
+implement WriteError {
+    fn io() -> WriteError {
+        WriteError { kind: Io }
+    }
+
+    fn buffer_full() -> WriteError {
+        WriteError { kind: BufferFull }
+    }
+}
+
+implement Debug for WriteError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self.kind {
+            Io => f.write_str("WriteError.Io"),
+            BufferFull => f.write_str("WriteError.BufferFull"),
+            Encoding => f.write_str("WriteError.Encoding"),
+        }
+    }
+}
+
+// =============================================================================
+// FormatResult - Standard formatting result type
+// =============================================================================
+
+/// Result type for formatting operations.
+/// This is the standard return type for Display::fmt and similar methods.
+public type FormatResult is Result<(), FormatError>;
+
+// =============================================================================
+// Alignment
+// =============================================================================
+
+// Text alignment in formatted output.
+public type Alignment is
+    | Left      // Left-align (default)
+    | Center    // Center-align
+    | Right;    // Right-align
+
+implement Default for Alignment {
+    fn default() -> Alignment {
+        Left
+    }
+}
+
+// =============================================================================
+// Sign Handling
+// =============================================================================
+
+// Sign display mode for numeric formatting.
+public type Sign is
+    | Minus     // Only show '-' for negatives (default)
+    | Plus      // Show '+' for positives, '-' for negatives
+    | Space;    // Show ' ' for positives, '-' for negatives
+
+implement Default for Sign {
+    fn default() -> Sign {
+        Minus
+    }
+}
+
+// =============================================================================
+// Format Spec
+// =============================================================================
+
+// Formatting specification (parsed from format strings).
+public type FormatSpec is {
+    // Fill character for padding
+    fill: Char,
+    // Alignment mode
+    align: Alignment,
+    // Sign handling for numbers
+    sign: Sign,
+    // Minimum width
+    width: Maybe<Int>,
+    // Precision for floats/strings
+    precision: Maybe<Int>,
+    // Use alternate form (e.g., 0x for hex)
+    alternate: Bool,
+    // Type specifier (b=binary, o=octal, x=hex, X=HEX, e=exp, f=fixed)
+    format_type: Maybe<Char>,
+};
+
+implement FormatSpec {
+    // Create default format spec.
+    fn new() -> FormatSpec {
+        FormatSpec {
+            fill: ' ',
+            align: Left,
+            sign: Minus,
+            width: None,
+            precision: None,
+            alternate: false,
+            format_type: None,
+        }
+    }
+
+    // Set width.
+    fn with_width(mut self, w: Int) -> FormatSpec {
+        self.width = Some(w);
+        self
+    }
+
+    // Set precision.
+    fn with_precision(mut self, p: Int) -> FormatSpec {
+        self.precision = Some(p);
+        self
+    }
+
+    // Set alignment.
+    fn with_align(mut self, a: Alignment) -> FormatSpec {
+        self.align = a;
+        self
+    }
+
+    // Set fill character.
+    fn with_fill(mut self, c: Char) -> FormatSpec {
+        self.fill = c;
+        self
+    }
+
+    // Enable alternate form.
+    fn alternate_form(mut self) -> FormatSpec {
+        self.alternate = true;
+        self
+    }
+
+    // Enable zero padding (sets fill='0' and align=Right).
+    fn zero_padded(mut self) -> FormatSpec {
+        self.fill = '0';
+        self.align = Right;
+        self
+    }
+
+    // Check if zero padding is enabled (fill='0' and right-aligned).
+    fn is_zero_padded(&self) -> Bool {
+        self.fill == '0' && self.align == Right
+    }
+
+    // Set type specifier.
+    fn with_type(mut self, t: Char) -> FormatSpec {
+        self.format_type = Some(t);
+        self
+    }
+}
+
+implement Default for FormatSpec {
+    fn default() -> FormatSpec {
+        FormatSpec.new()
+    }
+}
+
+// =============================================================================
+// Extended Formatter
+// =============================================================================
+
+// Extended formatter with formatting options.
+// Used by format strings && Debug/Display implementations.
+public type Formatter is {
+    // Output buffer
+    buffer: &mut Text,
+    // Current format specification
+    spec: FormatSpec,
+};
+
+implement Formatter {
+    // Create a new formatter writing to a buffer.
+    public fn new(buffer: &mut Text) -> Formatter {
+        Formatter {
+            buffer: buffer,
+            spec: FormatSpec.new(),
+        }
+    }
+
+    // Create formatter with spec.
+    public fn with_spec(buffer: &mut Text, spec: FormatSpec) -> Formatter {
+        Formatter {
+            buffer: buffer,
+            spec: spec,
+        }
+    }
+
+    // =========================================================================
+    // Basic Output
+    // =========================================================================
+
+    // Write a string to output.
+    public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
+        // Apply width/precision if specified
+        let s = match self.spec.precision {
+            Some(p) if s.char_count() > p => {
+                // Truncate to precision characters
+                let mut res = Text.new();
+                let mut count = 0;
+                for ch in s.chars() {
+                    if count >= p {
+                        break;
+                    }
+                    res.push(ch);
+                    count = count + 1;
+                }
+                res
+            }
+            _ => s.clone(),
+        };
+
+        match self.spec.width {
+            Some(w) if s.char_count() < w => {
+                let padding = w - s.char_count();
+                self.write_padded(&s, padding)
+            }
+            _ => {
+                self.buffer.push_str(&s);
+                Ok(())
+            }
+        }
+    }
+
+    // Write with padding based on alignment.
+    fn write_padded(&mut self, s: &Text, padding: Int) -> Result<(), FormatError> {
+        let fill = self.spec.fill;
+
+        match self.spec.align {
+            Left => {
+                self.buffer.push_str(s);
+                for _ in range(0, padding) {
+                    self.buffer.push(fill);
+                }
+            }
+            Right => {
+                for _ in range(0, padding) {
+                    self.buffer.push(fill);
+                }
+                self.buffer.push_str(s);
+            }
+            Center => {
+                let left = padding / 2;
+                let right = padding - left;
+                for _ in range(0, left) {
+                    self.buffer.push(fill);
+                }
+                self.buffer.push_str(s);
+                for _ in range(0, right) {
+                    self.buffer.push(fill);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Write a single character.
+    public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
+        self.buffer.push(c);
+        Ok(())
+    }
+
+    // Write formatted bytes.
+    public fn write_bytes(&mut self, bytes: &[Byte]) -> Result<(), FormatError> {
+        for b in bytes {
+            self.buffer.push(*b as Char);
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Integer Formatting
+    // =========================================================================
+
+    // Format an integer.
+    public fn write_int(&mut self, n: Int) -> Result<(), FormatError> {
+        let ty = self.spec.format_type.unwrap_or('d');
+
+        match ty {
+            'b' => self.write_int_base(n, 2, false),
+            'o' => self.write_int_base(n, 8, false),
+            'x' => self.write_int_base(n, 16, false),
+            'X' => self.write_int_base(n, 16, true),
+            _ => self.write_int_decimal(n),
+        }
+    }
+
+    // Format integer as decimal.
+    fn write_int_decimal(&mut self, n: Int) -> Result<(), FormatError> {
+        let mut buf = [0_u8; 32];
+        let len = int_to_string(n, &mut buf);
+
+        let s = unsafe {
+            Text.from_utf8_unchecked(&buf[..len])
+        };
+
+        // Handle sign
+        let (sign_str, value_str) = if n < 0 {
+            ("-", s.slice(1, s.len()))
+        } else {
+            match self.spec.sign {
+                Plus => ("+", s),
+                Space => (" ", s),
+                Minus => ("", s),
+            }
+        };
+
+        self.write_with_sign(&sign_str, &value_str)
+    }
+
+    // Format integer in specified base.
+    fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
+        let negative = n < 0;
+        let mut val = if negative { -n } else { n };
+
+        if val == 0 {
+            return self.write_str("0");
+        }
+
+        let digits = if uppercase {
+            "0123456789ABCDEF"
+        } else {
+            "0123456789abcdef"
+        };
+
+        let mut buf = Text.new();
+        while val > 0 {
+            let digit = (val % base) as Int;
+            buf.push(digits.nth_char(digit).unwrap());
+            val = val / base;
+        }
+
+        // Reverse
+        let mut res = Text.new();
+        for ch in buf.chars().collect<List<_>>().into_iter().rev() {
+            res.push(ch);
+        }
+
+        // Add prefix for alternate form
+        let prefix = if self.spec.alternate {
+            match base {
+                2 => "0b",
+                8 => "0o",
+                16 => if uppercase { "0X" } else { "0x" },
+                _ => "",
+            }
+        } else {
+            ""
+        };
+
+        let sign = if negative { "-" } else {
+            match self.spec.sign {
+                Plus => "+",
+                Space => " ",
+                Minus => "",
+            }
+        };
+
+        // Combine: sign + prefix + number
+        let full = sign + prefix + &res;
+        self.write_str(&full)
+    }
+
+    // Write value with sign, handling zero padding.
+    fn write_with_sign(&mut self, sign: &Text, value: &Text) -> Result<(), FormatError> {
+        let total_len = sign.len() + value.len();
+
+        match self.spec.width {
+            Some(w) if total_len < w => {
+                if self.spec.is_zero_padded() {
+                    // Sign, then zeros, then value
+                    self.buffer.push_str(sign);
+                    for _ in range(0, w - total_len) {
+                        self.buffer.push('0');
+                    }
+                    self.buffer.push_str(value);
+                    Ok(())
+                } else {
+                    // Normal padding
+                    let full = sign.concat(value);
+                    self.write_padded(&full, w - total_len)
+                }
+            }
+            _ => {
+                self.buffer.push_str(sign);
+                self.buffer.push_str(value);
+                Ok(())
+            }
+        }
+    }
+
+    // =========================================================================
+    // Float Formatting
+    // =========================================================================
+
+    // Format a float.
+    public fn write_float(&mut self, f: Float) -> Result<(), FormatError> {
+        let ty = self.spec.format_type.unwrap_or('g');
+        let precision = self.spec.precision.unwrap_or(6);
+
+        let mut buf = [0_u8; 64];
+        let len = float_to_string(f, &mut buf, precision);
+
+        let s = unsafe {
+            Text.from_utf8_unchecked(&buf[..len])
+        };
+
+        // Handle sign for positive numbers
+        let (sign, value) = if f < 0.0 || f.is_sign_negative() {
+            ("", s) // Already has '-'
+        } else {
+            match self.spec.sign {
+                Plus => ("+", s),
+                Space => (" ", s),
+                Minus => ("", s),
+            }
+        };
+
+        let full = sign + &value;
+        self.write_str(&full)
+    }
+
+    // =========================================================================
+    // Debug Formatting
+    // =========================================================================
+
+    // Format as debug output.
+    public fn debug<T: Debug>(&mut self, value: &T) -> Result<(), FormatError> {
+        value.fmt_debug(self)
+    }
+
+    // Start a debug struct.
+    public fn debug_struct(&mut self, name: &Text) -> DebugStruct {
+        DebugStruct {
+            formatter: self,
+            name: name.clone(),
+            fields: List.new(),
+        }
+    }
+
+    // Start a debug tuple.
+    public fn debug_tuple(&mut self, name: &Text) -> DebugTuple {
+        DebugTuple {
+            formatter: self,
+            name: name.clone(),
+            fields: List.new(),
+        }
+    }
+
+    // Start a debug list.
+    public fn debug_list(&mut self) -> DebugList {
+        DebugList {
+            formatter: self,
+            items: List.new(),
+        }
+    }
+
+    // Start a debug map.
+    public fn debug_map(&mut self) -> DebugMap {
+        DebugMap {
+            formatter: self,
+            entries: List.new(),
+        }
+    }
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    // Get current width specification.
+    public fn width(&self) -> Maybe<Int> {
+        self.spec.width
+    }
+
+    // Get current precision specification.
+    public fn precision(&self) -> Maybe<Int> {
+        self.spec.precision
+    }
+
+    // Get current alignment.
+    public fn align(&self) -> Alignment {
+        self.spec.align
+    }
+
+    // Get current fill character.
+    public fn fill(&self) -> Char {
+        self.spec.fill
+    }
+
+    // Check if alternate form is enabled.
+    public fn alternate(&self) -> Bool {
+        self.spec.alternate
+    }
+}
+
+// =============================================================================
+// Debug Helpers
+// =============================================================================
+
+// Helper for formatting structs.
+public type DebugStruct is {
+    formatter: &mut Formatter,
+    name: Text,
+    fields: List<(Text, Text)>,
+};
+
+implement DebugStruct {
+    // Add a field.
+    public fn field<T: Debug>(&mut self, name: &Text, value: &T) -> &mut DebugStruct {
+        let mut buf = Text.new();
+        let mut f = Formatter.new(&mut buf);
+        value.fmt_debug(&mut f);
+        self.fields.push((name.clone(), buf));
+        self
+    }
+
+    // Finish && write output.
+    public fn finish(&mut self) -> Result<(), FormatError> {
+        self.formatter.write_str(&self.name)?;
+        self.formatter.write_str(" { ")?;
+
+        for (i, (name, value)) in self.fields.iter().enumerate() {
+            if i > 0 {
+                self.formatter.write_str(", ")?;
+            }
+            self.formatter.write_str(name)?;
+            self.formatter.write_str(": ")?;
+            self.formatter.write_str(value)?;
+        }
+
+        self.formatter.write_str(" }")
+    }
+}
+
+// Helper for formatting tuples.
+public type DebugTuple is {
+    formatter: &mut Formatter,
+    name: Text,
+    fields: List<Text>,
+};
+
+implement DebugTuple {
+    // Add a field.
+    public fn field<T: Debug>(&mut self, value: &T) -> &mut DebugTuple {
+        let mut buf = Text.new();
+        let mut f = Formatter.new(&mut buf);
+        value.fmt_debug(&mut f);
+        self.fields.push(buf);
+        self
+    }
+
+    // Finish && write output.
+    public fn finish(&mut self) -> Result<(), FormatError> {
+        self.formatter.write_str(&self.name)?;
+        self.formatter.write_char('(')?;
+
+        for (i, value) in self.fields.iter().enumerate() {
+            if i > 0 {
+                self.formatter.write_str(", ")?;
+            }
+            self.formatter.write_str(value)?;
+        }
+
+        self.formatter.write_char(')')
+    }
+}
+
+// Helper for formatting lists.
+public type DebugList is {
+    formatter: &mut Formatter,
+    items: List<Text>,
+};
+
+implement DebugList {
+    // Add an item.
+    public fn entry<T: Debug>(&mut self, value: &T) -> &mut DebugList {
+        let mut buf = Text.new();
+        let mut f = Formatter.new(&mut buf);
+        value.fmt_debug(&mut f);
+        self.items.push(buf);
+        self
+    }
+
+    // Add multiple items from iterator.
+    public fn entries<I: Iterator>(&mut self, iter: I) -> &mut DebugList
+    where I.Item: Debug
+    {
+        for item in iter {
+            self.entry(&item);
+        }
+        self
+    }
+
+    // Finish && write output.
+    public fn finish(&mut self) -> Result<(), FormatError> {
+        self.formatter.write_char('[')?;
+
+        for (i, value) in self.items.iter().enumerate() {
+            if i > 0 {
+                self.formatter.write_str(", ")?;
+            }
+            self.formatter.write_str(value)?;
+        }
+
+        self.formatter.write_char(']')
+    }
+}
+
+// Helper for formatting maps.
+public type DebugMap is {
+    formatter: &mut Formatter,
+    entries: List<(Text, Text)>,
+};
+
+implement DebugMap {
+    // Add an entry.
+    public fn entry<K: Debug, V: Debug>(&mut self, key: &K, value: &V) -> &mut DebugMap {
+        let mut key_buf = Text.new();
+        let mut key_f = Formatter.new(&mut key_buf);
+        key.fmt_debug(&mut key_f);
+
+        let mut val_buf = Text.new();
+        let mut val_f = Formatter.new(&mut val_buf);
+        value.fmt_debug(&mut val_f);
+
+        self.entries.push((key_buf, val_buf));
+        self
+    }
+
+    // Finish && write output.
+    public fn finish(&mut self) -> Result<(), FormatError> {
+        self.formatter.write_char('{')?;
+
+        for (i, (key, value)) in self.entries.iter().enumerate() {
+            if i > 0 {
+                self.formatter.write_str(", ")?;
+            }
+            self.formatter.write_str(key)?;
+            self.formatter.write_str(": ")?;
+            self.formatter.write_str(value)?;
+        }
+
+        self.formatter.write_char('}')
+    }
+}
+
+// =============================================================================
+// Print Functions
+// =============================================================================
+
+// Print text to stdout (no newline).
+public fn print(s: &Text) {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, s.as_bytes());
+}
+
+// Print text to stdout with newline.
+public fn println(s: &Text) {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, s.as_bytes());
+    let _ = sys_write(fd, b"\n");
+}
+
+// Print empty line to stdout.
+public fn println_empty() {
+    let fd = FileDesc.from_raw(STDOUT_FD);
+    let _ = sys_write(fd, b"\n");
+}
+
+// Print text to stderr (no newline).
+public fn eprint(s: &Text) {
+    let fd = FileDesc.from_raw(STDERR_FD);
+    let _ = sys_write(fd, s.as_bytes());
+}
+
+// Print text to stderr with newline.
+public fn eprintln(s: &Text) {
+    let fd = FileDesc.from_raw(STDERR_FD);
+    let _ = sys_write(fd, s.as_bytes());
+    let _ = sys_write(fd, b"\n");
+}
+
+// =============================================================================
+// Format Functions
+// =============================================================================
+
+// Format a Debug value to Text.
+public fn format_debug<T: Debug>(value: &T) -> Text {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    value.fmt_debug(&mut f);
+    buf
+}
+
+// Format a Display value to Text.
+public fn format_display<T: Display>(value: &T) -> Text {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    value.fmt(&mut f);
+    buf
+}
+
+// Debug print with file/line info (for debugging).
+public fn dbg<T: Debug>(value: T) -> T {
+    let formatted = format_debug(&value);
+    eprintln(&formatted);
+    value
+}
+
+// NOTE: Display and Debug implementations for primitives (Int, Float, Bool,
+// Char, Byte) are defined in core/base/primitives.vr as the canonical source.
+// Do NOT duplicate them here.
+
+// =============================================================================
+// Debug Implementations for Common Types
+// =============================================================================
+
+// NOTE: Debug for Maybe<T> is defined in core/base/maybe.vr (canonical source).
+// NOTE: Debug for Result<T, E> is defined in core/base/result.vr (canonical source).
+// Do NOT duplicate them here.
+
+implement<T: Debug> Debug for &T {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        (*self).fmt_debug(f)
+    }
+}
+
+implement<T: Debug> Debug for &mut T {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        (**self).fmt_debug(f)
+    }
+}
+
+// Tuple implementations
+implement<A: Debug> Debug for (A,) {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_char('(')?;
+        self.0.fmt_debug(f)?;
+        f.write_str(",)")
+    }
+}
+
+implement<A: Debug, B: Debug> Debug for (A, B) {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_char('(')?;
+        self.0.fmt_debug(f)?;
+        f.write_str(", ")?;
+        self.1.fmt_debug(f)?;
+        f.write_char(')')
+    }
+}
+
+implement<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_char('(')?;
+        self.0.fmt_debug(f)?;
+        f.write_str(", ")?;
+        self.1.fmt_debug(f)?;
+        f.write_str(", ")?;
+        self.2.fmt_debug(f)?;
+        f.write_char(')')
+    }
+}
+
+// Slice/array debug
+implement<T: Debug> Debug for [T] {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_char('[')?;
+        for (i, item) in self.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            item.fmt_debug(f)?;
+        }
+        f.write_char(']')
+    }
+}
+
+// =============================================================================
+// Specialized Format Protocols
+// =============================================================================
+
+/// Format a value as lowercase hexadecimal (e.g., "ff", "deadbeef").
+///
+/// Types implementing this protocol support `{:x}` formatting.
+public type LowerHex is protocol {
+    fn fmt_lower_hex(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+/// Format a value as uppercase hexadecimal (e.g., "FF", "DEADBEEF").
+///
+/// Types implementing this protocol support `{:X}` formatting.
+public type UpperHex is protocol {
+    fn fmt_upper_hex(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+/// Format a value as binary (e.g., "1010", "11111111").
+///
+/// Types implementing this protocol support `{:b}` formatting.
+public type Binary is protocol {
+    fn fmt_binary(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+/// Format a value as octal (e.g., "77", "377").
+///
+/// Types implementing this protocol support `{:o}` formatting.
+public type Octal is protocol {
+    fn fmt_octal(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+/// Format a value in lowercase exponential notation (e.g., "1.5e2").
+///
+/// Types implementing this protocol support `{:e}` formatting.
+public type LowerExp is protocol {
+    fn fmt_lower_exp(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+/// Format a value in uppercase exponential notation (e.g., "1.5E2").
+///
+/// Types implementing this protocol support `{:E}` formatting.
+public type UpperExp is protocol {
+    fn fmt_upper_exp(&self, f: &mut Formatter) -> Result<(), FormatError>;
+};
+
+// =============================================================================
+// LowerHex / UpperHex / Binary / Octal for Int
+// =============================================================================
+// These use the Formatter's write_int_base method for the actual conversion.
+
+implement LowerHex for Int {
+    fn fmt_lower_hex(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_int_base(*self, 16, false)
+    }
+}
+
+implement UpperHex for Int {
+    fn fmt_upper_hex(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_int_base(*self, 16, true)
+    }
+}
+
+implement Binary for Int {
+    fn fmt_binary(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_int_base(*self, 2, false)
+    }
+}
+
+implement Octal for Int {
+    fn fmt_octal(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_int_base(*self, 8, false)
+    }
+}
+
+// =============================================================================
+// LowerExp / UpperExp for Float
+// =============================================================================
+
+implement LowerExp for Float {
+    fn fmt_lower_exp(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let precision = f.precision().unwrap_or(6);
+        let s = float_to_exp(*self, precision, false);
+        f.write_str(&s)
+    }
+}
+
+implement UpperExp for Float {
+    fn fmt_upper_exp(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let precision = f.precision().unwrap_or(6);
+        let s = float_to_exp(*self, precision, true);
+        f.write_str(&s)
+    }
+}
+
+/// Convert a float to exponential notation string.
+/// `uppercase` controls whether 'E' or 'e' is used.
+fn float_to_exp(value: Float, precision: Int, uppercase: Bool) -> Text {
+    // Handle special cases
+    if value.is_nan() {
+        if uppercase { "NAN" } else { "NaN" }
+    } else if value.is_infinite() {
+        if value < 0.0 {
+            if uppercase { "-INF" } else { "-inf" }
+        } else {
+            if uppercase { "INF" } else { "inf" }
+        }
+    } else if value == 0.0 {
+        let mut result: Text = if value.is_sign_negative() { "-0." } else { "0." };
+        let mut i = 0;
+        while i < precision {
+            result = result + "0";
+            i = i + 1;
+        }
+        if uppercase { result = result + "E0"; } else { result = result + "e0"; }
+        result
+    } else {
+        let negative = value < 0.0;
+        let abs_val: Float = if negative { 0.0 - value } else { value };
+
+        // Calculate exponent: floor(log10(abs_val))
+        let log_val: Float = abs_val.log10();
+        let exponent: Int = log_val.floor() as Int;
+
+        // Normalize mantissa to [1.0, 10.0)
+        let mut mantissa: Float = abs_val / 10.0.powi(exponent);
+        // Correct for floating point imprecision
+        if mantissa >= 10.0 {
+            mantissa = mantissa / 10.0;
+        }
+
+        // Build the string
+        let mut result: Text = if negative { "-" } else { "" };
+
+        // Integer part of mantissa (always a single digit)
+        let int_digit = mantissa.floor() as Int;
+        result = result + int_digit.to_text();
+
+        // Fractional part
+        if precision > 0 {
+            result = result + ".";
+            let mut frac: Float = mantissa - (int_digit as Float);
+            let mut i = 0;
+            while i < precision {
+                frac = frac * 10.0;
+                let digit = frac.floor() as Int;
+                result = result + digit.to_text();
+                frac = frac - (digit as Float);
+                i = i + 1;
+            }
+        }
+
+        // Exponent part
+        if uppercase {
+            result = result + "E";
+        } else {
+            result = result + "e";
+        }
+        if exponent >= 0 {
+            result = result + exponent.to_text();
+        } else {
+            result = result + "-";
+            result = result + (0 - exponent).to_text();
+        }
+        result
+    }
+}
+
+// =============================================================================
+// Convenience formatting functions
+// =============================================================================
+
+/// Format a value as lowercase hexadecimal string.
+public fn format_hex(value: &Int) -> Text {
+    value.to_hex()
+}
+
+/// Format a value as binary string.
+public fn format_binary(value: &Int) -> Text {
+    value.to_binary()
+}
+
+/// Format a value as octal string.
+public fn format_octal(value: &Int) -> Text {
+    value.to_octal()
+}
+
+/// Format a float in lowercase exponential notation.
+public fn format_lower_exp(value: &Float) -> Text {
+    float_to_exp(*value, 6, false)
+}
+
+/// Format a float in uppercase exponential notation.
+public fn format_upper_exp(value: &Float) -> Text {
+    float_to_exp(*value, 6, true)
+}

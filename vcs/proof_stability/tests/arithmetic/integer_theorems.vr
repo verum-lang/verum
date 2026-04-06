@@ -1,0 +1,376 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, arithmetic, integer
+// @timeout: 10000
+// @expected-proof-time: <50ms
+
+/// Description: Tests SMT stability for integer arithmetic theorems
+/// Regression Detection: These proofs should complete deterministically within 50ms.
+/// If proof times exceed 100ms or become non-deterministic, SMT solver regression suspected.
+
+// ============================================================================
+// Basic Integer Properties
+// ============================================================================
+
+/// Commutativity of addition - SMT should prove instantly
+@verify(proof)
+fn add_commutative(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures a + b == b + a;
+    "
+    a + b == b + a
+}
+
+/// Associativity of addition - SMT should prove instantly
+@verify(proof)
+fn add_associative(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a + b) + c == a + (b + c);
+    "
+    (a + b) + c == a + (b + c)
+}
+
+/// Identity of addition - SMT should prove instantly
+@verify(proof)
+fn add_identity(a: Int) -> Int {
+    contract#"
+        ensures result == a;
+        ensures a + 0 == a;
+    "
+    a + 0
+}
+
+/// Commutativity of multiplication - SMT should prove instantly
+@verify(proof)
+fn mul_commutative(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures a * b == b * a;
+    "
+    a * b == b * a
+}
+
+/// Associativity of multiplication
+@verify(proof)
+fn mul_associative(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a * b) * c == a * (b * c);
+    "
+    (a * b) * c == a * (b * c)
+}
+
+/// Identity of multiplication
+@verify(proof)
+fn mul_identity(a: Int) -> Int {
+    contract#"
+        ensures result == a;
+        ensures a * 1 == a;
+    "
+    a * 1
+}
+
+/// Zero property of multiplication
+@verify(proof)
+fn mul_zero(a: Int) -> Int {
+    contract#"
+        ensures result == 0;
+        ensures a * 0 == 0;
+    "
+    a * 0
+}
+
+// ============================================================================
+// Distributive Properties
+// ============================================================================
+
+/// Left distributivity - SMT should prove within 20ms
+@verify(proof)
+fn distributive_left(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures a * (b + c) == a * b + a * c;
+    "
+    a * (b + c) == a * b + a * c
+}
+
+/// Right distributivity
+@verify(proof)
+fn distributive_right(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a + b) * c == a * c + b * c;
+    "
+    (a + b) * c == a * c + b * c
+}
+
+// ============================================================================
+// Negation Properties
+// ============================================================================
+
+/// Double negation
+@verify(proof)
+fn double_negation(a: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures -(-a) == a;
+    "
+    -(-a) == a
+}
+
+/// Negation addition
+@verify(proof)
+fn negation_addition(a: Int) -> Int {
+    contract#"
+        ensures result == 0;
+        ensures a + (-a) == 0;
+    "
+    a + (-a)
+}
+
+/// Negation of sum
+@verify(proof)
+fn negation_of_sum(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures -(a + b) == (-a) + (-b);
+    "
+    -(a + b) == (-a) + (-b)
+}
+
+// ============================================================================
+// Subtraction Properties
+// ============================================================================
+
+/// Subtraction as addition of negation
+@verify(proof)
+fn subtraction_as_negation(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures a - b == a + (-b);
+    "
+    a - b == a + (-b)
+}
+
+/// Self subtraction
+@verify(proof)
+fn self_subtraction(a: Int) -> Int {
+    contract#"
+        ensures result == 0;
+        ensures a - a == 0;
+    "
+    a - a
+}
+
+// ============================================================================
+// Order Properties
+// ============================================================================
+
+/// Transitivity of less-than
+@verify(proof)
+fn lt_transitive(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        requires a < b;
+        requires b < c;
+        ensures result == true;
+        ensures a < c;
+    "
+    a < c
+}
+
+/// Addition preserves order
+@verify(proof)
+fn add_preserves_order(a: Int, b: Int, c: Int) -> Bool {
+    contract#"
+        requires a < b;
+        ensures result == true;
+        ensures a + c < b + c;
+    "
+    a + c < b + c
+}
+
+/// Multiplication by positive preserves order
+@verify(proof)
+fn mul_positive_preserves_order(a: Int, b: Int, c: Int{> 0}) -> Bool {
+    contract#"
+        requires a < b;
+        requires c > 0;
+        ensures result == true;
+        ensures a * c < b * c;
+    "
+    a * c < b * c
+}
+
+// ============================================================================
+// Division Properties
+// ============================================================================
+
+/// Division identity
+@verify(proof)
+fn div_identity(a: Int) -> Int {
+    contract#"
+        ensures result == a;
+        ensures a / 1 == a;
+    "
+    a / 1
+}
+
+/// Zero dividend
+@verify(proof)
+fn div_zero_dividend(b: Int{!= 0}) -> Int {
+    contract#"
+        requires b != 0;
+        ensures result == 0;
+        ensures 0 / b == 0;
+    "
+    0 / b
+}
+
+// ============================================================================
+// Modular Arithmetic Properties
+// ============================================================================
+
+/// Modulo range
+@verify(proof)
+fn mod_range(a: Int, b: Int{> 0}) -> Bool {
+    contract#"
+        requires b > 0;
+        ensures result == true;
+        ensures a % b >= 0;
+        ensures a % b < b;
+    "
+    a % b >= 0 && a % b < b
+}
+
+/// Division-modulo relationship
+@verify(proof)
+fn div_mod_relationship(a: Int, b: Int{> 0}) -> Bool {
+    contract#"
+        requires b > 0;
+        ensures result == true;
+        ensures a == (a / b) * b + (a % b);
+    "
+    a == (a / b) * b + (a % b)
+}
+
+// ============================================================================
+// Absolute Value Properties
+// ============================================================================
+
+/// Absolute value non-negative
+@verify(proof)
+fn abs_non_negative(a: Int) -> Int{>= 0} {
+    contract#"
+        ensures result >= 0;
+        ensures result == a || result == -a;
+    "
+    if a >= 0 { a } else { -a }
+}
+
+/// Absolute value of product
+@verify(proof)
+fn abs_product(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let abs_a = if a >= 0 { a } else { -a };
+    let abs_b = if b >= 0 { b } else { -b };
+    let abs_ab = if a * b >= 0 { a * b } else { -(a * b) };
+    abs_ab == abs_a * abs_b
+}
+
+// ============================================================================
+// Power Properties
+// ============================================================================
+
+/// Zero exponent
+@verify(proof)
+fn pow_zero_exp(a: Int{!= 0}) -> Int {
+    contract#"
+        requires a != 0;
+        ensures result == 1;
+    "
+    a ** 0
+}
+
+/// One exponent
+@verify(proof)
+fn pow_one_exp(a: Int) -> Int {
+    contract#"
+        ensures result == a;
+    "
+    a ** 1
+}
+
+/// Power of one
+@verify(proof)
+fn pow_one_base(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result == 1;
+    "
+    1 ** n
+}
+
+// ============================================================================
+// Combined Properties (Slightly More Complex - Should Still Be <50ms)
+// ============================================================================
+
+/// Square difference
+@verify(proof)
+fn square_difference(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a + b) * (a - b) == a * a - b * b;
+    "
+    (a + b) * (a - b) == a * a - b * b
+}
+
+/// Perfect square
+@verify(proof)
+fn perfect_square_expand(a: Int, b: Int) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a + b) * (a + b) == a * a + 2 * a * b + b * b;
+    "
+    (a + b) * (a + b) == a * a + 2 * a * b + b * b
+}
+
+/// Sum formula
+@verify(proof)
+fn sum_first_n(n: Int{>= 0}) -> Bool {
+    contract#"
+        requires n >= 0;
+        ensures result == true;
+    "
+    // Gauss formula verification helper
+    let sum = n * (n + 1) / 2;
+    sum >= 0 && sum * 2 == n * (n + 1)
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Run all theorem checks
+    assert(add_commutative(5, 3));
+    assert(add_associative(1, 2, 3));
+    assert(add_identity(42) == 42);
+    assert(mul_commutative(7, 11));
+    assert(mul_associative(2, 3, 4));
+    assert(mul_identity(17) == 17);
+    assert(mul_zero(999) == 0);
+    assert(distributive_left(2, 3, 4));
+    assert(distributive_right(2, 3, 4));
+    assert(double_negation(-5));
+    assert(negation_addition(100) == 0);
+    assert(lt_transitive(1, 2, 3));
+    assert(abs_non_negative(-42) >= 0);
+    assert(square_difference(5, 3));
+
+    println("All integer theorems verified successfully!");
+}

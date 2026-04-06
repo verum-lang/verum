@@ -1,0 +1,17 @@
+// Fibonacci sequence generator
+// Spec: 03-type-system.md#1.1.1 (Recursion with refinement types)
+
+@main
+fn main() {
+    // Calculate fibonacci(10)
+    let result = fib(10);
+    print(f"fibonacci(10) = {result}");
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}

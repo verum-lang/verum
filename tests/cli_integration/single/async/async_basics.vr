@@ -1,0 +1,40 @@
+// Test: AS-001 through AS-006 - Async/Await
+// Priority: Critical/High
+// Expected output: Async operations
+
+// Basic async function
+async fn fetch_data() -> Int {
+    42
+}
+
+// Async block
+async fn compute() -> Int {
+    let future = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    await future
+}
+
+// Async closure
+async fn with_closure() -> Int {
+    let double = async |x: Int| -> Int {
+        x * 2
+    };
+    await double(21)
+}
+
+async fn main() {
+    // Basic async function
+    let result = await fetch_data();
+    print(f"Fetch result: {result}");
+
+    // Async block
+    let computed = await compute();
+    print(f"Computed: {computed}");
+
+    // Async closure
+    let doubled = await with_closure();
+    print(f"Doubled: {doubled}");
+}

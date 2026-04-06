@@ -1,0 +1,848 @@
+// =============================================================================
+// addr.vr - Network addresses
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core
+// =============================================================================
+//
+// IP addresses and socket addresses for network operations.
+//
+// =============================================================================
+
+module core.net.addr;
+mount core.*;
+mount net.dns.{resolve as dns_resolve};
+
+// =============================================================================
+// IPv4 Address
+// =============================================================================
+
+/// An IPv4 address (e.g., 192.168.1.1).
+///
+/// IPv4 addresses are 32-bit addresses, typically written as four
+/// decimal numbers separated by dots (dotted-decimal notation).
+public type Ipv4Addr is {
+    /// The four octets of the address
+    octets: (Byte, Byte, Byte, Byte),
+};
+
+implement Ipv4Addr {
+    /// Create a new IPv4 address from four octets.
+    ///
+    /// # Example
+    /// ```verum
+    /// let addr = Ipv4Addr.new(192, 168, 1, 1);
+    /// ```
+    public fn new(a: Byte, b: Byte, c: Byte, d: Byte) -> Ipv4Addr {
+        Ipv4Addr { octets: (a, b, c, d) }
+    }
+
+    /// Create the localhost address (127.0.0.1).
+    public fn localhost() -> Ipv4Addr {
+        Ipv4Addr.new(127, 0, 0, 1)
+    }
+
+    /// Create the unspecified address (0.0.0.0).
+    public fn unspecified() -> Ipv4Addr {
+        Ipv4Addr.new(0, 0, 0, 0)
+    }
+
+    /// Create the broadcast address (255.255.255.255).
+    public fn broadcast() -> Ipv4Addr {
+        Ipv4Addr.new(255, 255, 255, 255)
+    }
+
+    /// Get the four octets of this address.
+    public fn octets(&self) -> (Byte, Byte, Byte, Byte) {
+        self.octets
+    }
+
+    /// Check if this is the localhost address.
+    public fn is_loopback(&self) -> Bool {
+        self.octets.0 == 127
+    }
+
+    /// Check if this is the unspecified address.
+    public fn is_unspecified(&self) -> Bool {
+        self.octets == (0, 0, 0, 0)
+    }
+
+    /// Check if this is a private address.
+    ///
+    /// Private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    public fn is_private(&self) -> Bool {
+        let (a, b, _, _) = self.octets;
+        a == 10 ||
+        (a == 172 && (b >= 16 && b <= 31)) ||
+        (a == 192 && b == 168)
+    }
+
+    /// Check if this is a multicast address (224.0.0.0/4).
+    public fn is_multicast(&self) -> Bool {
+        self.octets.0 >= 224 && self.octets.0 <= 239
+    }
+
+    /// Check if this is a broadcast address.
+    public fn is_broadcast(&self) -> Bool {
+        self.octets == (255, 255, 255, 255)
+    }
+
+    /// Convert to 32-bit integer (big-endian).
+    public fn to_u32(&self) -> Int {
+        let (a, b, c, d) = self.octets;
+        ((a as Int) << 24) | ((b as Int) << 16) | ((c as Int) << 8) | (d as Int)
+    }
+
+    /// Create from 32-bit integer (big-endian).
+    public fn from_u32(bits: Int) -> Ipv4Addr {
+        Ipv4Addr.new(
+            ((bits >> 24) & 0xFF) as Byte,
+            ((bits >> 16) & 0xFF) as Byte,
+            ((bits >> 8) & 0xFF) as Byte,
+            (bits & 0xFF) as Byte,
+        )
+    }
+
+    /// Parse from string.
+    ///
+    /// # Example
+    /// ```verum
+    /// let addr = Ipv4Addr.parse("192.168.1.1")?;
+    /// ```
+    public fn parse(s: &Text) -> Result<Ipv4Addr, AddrParseError> {
+        let parts = s.split(".");
+        if parts.len() != 4 {
+            return Err(AddrParseError.InvalidFormat);
+        }
+
+        let a = parse_octet(&parts[0])?;
+        let b = parse_octet(&parts[1])?;
+        let c = parse_octet(&parts[2])?;
+        let d = parse_octet(&parts[3])?;
+
+        Ok(Ipv4Addr.new(a, b, c, d))
+    }
+}
+
+fn parse_octet(s: &Text) -> Result<Byte, AddrParseError> {
+    let n = s.parse_int().map_err(|_| AddrParseError.InvalidOctet)?;
+    if n < 0 || n > 255 {
+        return Err(AddrParseError.InvalidOctet);
+    }
+    Ok(n as Byte)
+}
+
+/// Parse a hex segment (1-4 hex digits) for IPv6.
+fn parse_hex_segment(s: &Text) -> Result<Int, AddrParseError> {
+    if s.is_empty() || s.len() > 4 {
+        return Err(AddrParseError.InvalidFormat);
+    }
+
+    let mut res = 0;
+    for ch in s.chars() {
+        let digit = match ch {
+            '0' => 0,
+            '1' => 1,
+            '2' => 2,
+            '3' => 3,
+            '4' => 4,
+            '5' => 5,
+            '6' => 6,
+            '7' => 7,
+            '8' => 8,
+            '9' => 9,
+            'a' | 'A' => 10,
+            'b' | 'B' => 11,
+            'c' | 'C' => 12,
+            'd' | 'D' => 13,
+            'e' | 'E' => 14,
+            'f' | 'F' => 15,
+            _ => return Err(AddrParseError.InvalidFormat),
+        };
+        res = (res << 4) | digit;
+    }
+
+    Ok(res)
+}
+
+implement Eq for Ipv4Addr {
+    fn eq(&self, other: &Ipv4Addr) -> Bool {
+        self.octets == other.octets
+    }
+}
+
+implement Hash for Ipv4Addr {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.to_u32().hash(hasher);
+    }
+}
+
+implement Debug for Ipv4Addr {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let (a, b, c, d) = self.octets;
+        f.write_str(f"{a}.{b}.{c}.{d}")
+    }
+}
+
+implement Display for Ipv4Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+// =============================================================================
+// IPv6 Address
+// =============================================================================
+
+/// An IPv6 address (e.g., .1 || 2001:db8.1).
+///
+/// IPv6 addresses are 128-bit addresses, typically written as eight
+/// groups of four hexadecimal digits.
+public type Ipv6Addr is {
+    /// The eight 16-bit segments of the address
+    segments: (Int, Int, Int, Int, Int, Int, Int, Int),
+};
+
+implement Ipv6Addr {
+    /// Create a new IPv6 address from eight 16-bit segments.
+    public fn new(
+        a: Int, b: Int, c: Int, d: Int,
+        e: Int, f: Int, g: Int, h: Int
+    ) -> Ipv6Addr {
+        Ipv6Addr { segments: (a, b, c, d, e, f, g, h) }
+    }
+
+    /// Create the localhost address (.1).
+    public fn localhost() -> Ipv6Addr {
+        Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 1)
+    }
+
+    /// Create the unspecified address (.).
+    public fn unspecified() -> Ipv6Addr {
+        Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 0)
+    }
+
+    /// Get the eight 16-bit segments.
+    public fn segments(&self) -> (Int, Int, Int, Int, Int, Int, Int, Int) {
+        self.segments
+    }
+
+    /// Check if this is the localhost address.
+    public fn is_loopback(&self) -> Bool {
+        self.segments == (0, 0, 0, 0, 0, 0, 0, 1)
+    }
+
+    /// Check if this is the unspecified address.
+    public fn is_unspecified(&self) -> Bool {
+        self.segments == (0, 0, 0, 0, 0, 0, 0, 0)
+    }
+
+    /// Check if this is a multicast address.
+    public fn is_multicast(&self) -> Bool {
+        (self.segments.0 & 0xFF00) == 0xFF00
+    }
+
+    /// Check if this is a link-local address (fe80./10).
+    public fn is_link_local(&self) -> Bool {
+        (self.segments.0 & 0xFFC0) == 0xFE80
+    }
+
+    /// Check if this is a unique local address (fc00./7).
+    public fn is_unique_local(&self) -> Bool {
+        (self.segments.0 & 0xFE00) == 0xFC00
+    }
+
+    /// Convert to 16-byte array.
+    public fn octets(&self) -> [Byte; 16] {
+        let (a, b, c, d, e, f, g, h) = self.segments;
+        [
+            ((a >> 8) & 0xFF) as Byte, (a & 0xFF) as Byte,
+            ((b >> 8) & 0xFF) as Byte, (b & 0xFF) as Byte,
+            ((c >> 8) & 0xFF) as Byte, (c & 0xFF) as Byte,
+            ((d >> 8) & 0xFF) as Byte, (d & 0xFF) as Byte,
+            ((e >> 8) & 0xFF) as Byte, (e & 0xFF) as Byte,
+            ((f >> 8) & 0xFF) as Byte, (f & 0xFF) as Byte,
+            ((g >> 8) & 0xFF) as Byte, (g & 0xFF) as Byte,
+            ((h >> 8) & 0xFF) as Byte, (h & 0xFF) as Byte,
+        ]
+    }
+
+    /// Parse an IPv6 address from string.
+    ///
+    /// Supports:
+    /// - Full notation: 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+    /// - Compressed: 2001:db8.8a2e:370:7334 (. = consecutive zeros)
+    /// - Localhost: .1
+    /// - Unspecified: .
+    /// - IPv4-mapped: .ffff:192.168.1.1
+    ///
+    /// # Example
+    /// ```verum
+    /// let addr = Ipv6Addr.parse(".1")?;          // Localhost
+    /// let addr = Ipv6Addr.parse("2001:db8::1")?;  // Compressed
+    /// ```
+    public fn parse(s: &Text) -> Result<Ipv6Addr, AddrParseError> {
+        // Handle empty string
+        if s.is_empty() {
+            return Err(AddrParseError.InvalidFormat);
+        }
+
+        // Check for IPv4-mapped address (::ffff:x.x.x.x or ::x.x.x.x)
+        if let Some(idx) = s.rfind('.') {
+            // Contains a dot - might be IPv4 suffix
+            if let Some(colon_idx) = s.rfind(':') {
+                let ipv4_part = s.slice(colon_idx + 1, s.len());
+                if let Ok(ipv4) = Ipv4Addr.parse(ipv4_part) {
+                    let prefix = s.slice(0, colon_idx);
+                    let mut segments = [0; 8];
+
+                    if prefix == ":" || prefix == "" {
+                        // Pure IPv4-compatible (::x.x.x.x)
+                        let (a, b, c, d) = ipv4.octets();
+                        segments[6] = ((a as Int) << 8) | (b as Int);
+                        segments[7] = ((c as Int) << 8) | (d as Int);
+                        return Ok(Ipv6Addr.new(
+                            segments[0], segments[1], segments[2], segments[3],
+                            segments[4], segments[5], segments[6], segments[7]
+                        ));
+                    } else if prefix == ":ffff" || prefix == "::ffff" {
+                        // IPv4-mapped (::ffff:x.x.x.x)
+                        let (a, b, c, d) = ipv4.octets();
+                        segments[5] = 0xFFFF;
+                        segments[6] = ((a as Int) << 8) | (b as Int);
+                        segments[7] = ((c as Int) << 8) | (d as Int);
+                        return Ok(Ipv6Addr.new(
+                            segments[0], segments[1], segments[2], segments[3],
+                            segments[4], segments[5], segments[6], segments[7]
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Split by :: (double-colon abbreviation)
+        let parts = s.split("::");
+        let num_parts = parts.len();
+
+        if num_parts > 2 {
+            // More than one :: is invalid per RFC 4291
+            return Err(AddrParseError.InvalidFormat);
+        }
+
+        let mut segments = [0; 8];
+
+        if num_parts == 1 {
+            // No :: abbreviation - must have exactly 8 colon-separated groups
+            let groups = s.split(":");
+            if groups.len() != 8 {
+                return Err(AddrParseError.InvalidFormat);
+            }
+
+            let mut i = 0;
+            for group in groups {
+                segments[i] = parse_hex_segment(&group)?;
+                i = i + 1;
+            }
+        } else {
+            // Has :: - need to determine how many zeros to insert
+            let left = &parts[0];
+            let right = &parts[1];
+
+            let left_groups: List<Text> = if left.is_empty() {
+                List.new()
+            } else {
+                left.split(":")
+            };
+
+            let right_groups: List<Text> = if right.is_empty() {
+                List.new()
+            } else {
+                right.split(":")
+            };
+
+            let total_groups = left_groups.len() + right_groups.len();
+            if total_groups > 7 {
+                // Too many groups (8 is max, :: takes at least 1 slot)
+                return Err(AddrParseError.InvalidFormat);
+            }
+
+            // Fill in left groups
+            let mut i = 0;
+            for group in left_groups {
+                segments[i] = parse_hex_segment(&group)?;
+                i = i + 1;
+            }
+
+            // Fill in right groups (from the end)
+            let right_start = 8 - right_groups.len();
+            let mut j = 0;
+            for group in right_groups {
+                segments[right_start + j] = parse_hex_segment(&group)?;
+                j = j + 1;
+            }
+            // Middle segments (zeros) are already 0 from initialization
+        }
+
+        Ok(Ipv6Addr.new(
+            segments[0], segments[1], segments[2], segments[3],
+            segments[4], segments[5], segments[6], segments[7]
+        ))
+    }
+}
+
+implement Eq for Ipv6Addr {
+    fn eq(&self, other: &Ipv6Addr) -> Bool {
+        self.segments == other.segments
+    }
+}
+
+implement Hash for Ipv6Addr {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        let (a, b, c, d, e, f, g, h) = self.segments;
+        a.hash(hasher);
+        b.hash(hasher);
+        c.hash(hasher);
+        d.hash(hasher);
+        e.hash(hasher);
+        f.hash(hasher);
+        g.hash(hasher);
+        h.hash(hasher);
+    }
+}
+
+implement Debug for Ipv6Addr {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let (a, b, c, d, e, g, h, i) = self.segments;
+        f.write_str(f"{a:x}:{b:x}:{c:x}:{d:x}:{e:x}:{g:x}:{h:x}:{i:x}")
+    }
+}
+
+implement Display for Ipv6Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+// =============================================================================
+// IP Address (Either v4 || v6)
+// =============================================================================
+
+/// An IP address, either IPv4 || IPv6.
+public type IpAddr is
+    | V4(Ipv4Addr)
+    | V6(Ipv6Addr);
+
+implement IpAddr {
+    /// Create an IPv4 address.
+    public fn v4(a: Byte, b: Byte, c: Byte, d: Byte) -> IpAddr {
+        V4(Ipv4Addr.new(a, b, c, d))
+    }
+
+    /// Create an IPv6 address.
+    public fn v6(
+        a: Int, b: Int, c: Int, d: Int,
+        e: Int, f: Int, g: Int, h: Int
+    ) -> IpAddr {
+        V6(Ipv6Addr.new(a, b, c, d, e, f, g, h))
+    }
+
+    /// Check if this is IPv4.
+    public fn is_ipv4(&self) -> Bool {
+        match *self {
+            V4(_) => true,
+            V6(_) => false,
+        }
+    }
+
+    /// Check if this is IPv6.
+    public fn is_ipv6(&self) -> Bool {
+        !self.is_ipv4()
+    }
+
+    /// Check if this is the loopback address.
+    public fn is_loopback(&self) -> Bool {
+        match *self {
+            V4(addr) => addr.is_loopback(),
+            V6(addr) => addr.is_loopback(),
+        }
+    }
+
+    /// Check if this is the unspecified address.
+    public fn is_unspecified(&self) -> Bool {
+        match *self {
+            V4(addr) => addr.is_unspecified(),
+            V6(addr) => addr.is_unspecified(),
+        }
+    }
+
+    /// Check if this is a multicast address.
+    public fn is_multicast(&self) -> Bool {
+        match *self {
+            V4(addr) => addr.is_multicast(),
+            V6(addr) => addr.is_multicast(),
+        }
+    }
+}
+
+implement Eq for IpAddr {
+    fn eq(&self, other: &IpAddr) -> Bool {
+        match (*self, *other) {
+            (V4(a), V4(b)) => a == b,
+            (V6(a), V6(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Hash for IpAddr {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        match *self {
+            V4(addr) => {
+                (0 as Int).hash(hasher);
+                addr.hash(hasher);
+            }
+            V6(addr) => {
+                (1 as Int).hash(hasher);
+                addr.hash(hasher);
+            }
+        }
+    }
+}
+
+implement Debug for IpAddr {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            V4(addr) => addr.fmt_debug(f),
+            V6(addr) => addr.fmt_debug(f),
+        }
+    }
+}
+
+implement Display for IpAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+// =============================================================================
+// Socket Addresses
+// =============================================================================
+
+/// A socket address with IPv4 address && port.
+public type SocketAddrV4 is {
+    ip: Ipv4Addr,
+    port: Int,
+};
+
+implement SocketAddrV4 {
+    /// Create a new IPv4 socket address.
+    public fn new(ip: Ipv4Addr, port: Int) -> SocketAddrV4 {
+        assert(port >= 0 && port <= 65535, "Port out of range");
+        SocketAddrV4 { ip: ip, port: port }
+    }
+
+    /// Get the IP address.
+    public fn ip(&self) -> &Ipv4Addr {
+        &self.ip
+    }
+
+    /// Get the port number.
+    public fn port(&self) -> Int {
+        self.port
+    }
+
+    /// Set the port number.
+    public fn set_port(&mut self, port: Int) {
+        assert(port >= 0 && port <= 65535, "Port out of range");
+        self.port = port;
+    }
+}
+
+implement Eq for SocketAddrV4 {
+    fn eq(&self, other: &SocketAddrV4) -> Bool {
+        self.ip == other.ip && self.port == other.port
+    }
+}
+
+implement Hash for SocketAddrV4 {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.ip.hash(hasher);
+        self.port.hash(hasher);
+    }
+}
+
+implement Debug for SocketAddrV4 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.ip}:{self.port}")
+    }
+}
+
+implement Display for SocketAddrV4 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+/// A socket address with IPv6 address && port.
+public type SocketAddrV6 is {
+    ip: Ipv6Addr,
+    port: Int,
+    flowinfo: Int,
+    scope_id: Int,
+};
+
+implement SocketAddrV6 {
+    /// Create a new IPv6 socket address.
+    public fn new(ip: Ipv6Addr, port: Int, flowinfo: Int, scope_id: Int) -> SocketAddrV6 {
+        assert(port >= 0 && port <= 65535, "Port out of range");
+        SocketAddrV6 {
+            ip: ip,
+            port: port,
+            flowinfo: flowinfo,
+            scope_id: scope_id,
+        }
+    }
+
+    /// Get the IP address.
+    public fn ip(&self) -> &Ipv6Addr {
+        &self.ip
+    }
+
+    /// Get the port number.
+    public fn port(&self) -> Int {
+        self.port
+    }
+}
+
+implement Eq for SocketAddrV6 {
+    fn eq(&self, other: &SocketAddrV6) -> Bool {
+        self.ip == other.ip && self.port == other.port &&
+        self.flowinfo == other.flowinfo && self.scope_id == other.scope_id
+    }
+}
+
+implement Hash for SocketAddrV6 {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.ip.hash(hasher);
+        self.port.hash(hasher);
+        self.flowinfo.hash(hasher);
+        self.scope_id.hash(hasher);
+    }
+}
+
+implement Debug for SocketAddrV6 {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"[{self.ip}]:{self.port}")
+    }
+}
+
+implement Display for SocketAddrV6 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+/// A socket address, either IPv4 || IPv6.
+public type SocketAddr is
+    | V4(SocketAddrV4)
+    | V6(SocketAddrV6);
+
+implement SocketAddr {
+    /// Create an IPv4 socket address.
+    public fn new_v4(ip: Ipv4Addr, port: Int) -> SocketAddr {
+        V4(SocketAddrV4.new(ip, port))
+    }
+
+    /// Create an IPv6 socket address.
+    public fn new_v6(ip: Ipv6Addr, port: Int) -> SocketAddr {
+        V6(SocketAddrV6.new(ip, port, 0, 0))
+    }
+
+    /// Get the IP address.
+    public fn ip(&self) -> IpAddr {
+        match *self {
+            V4(addr) => IpAddr.V4(addr.ip),
+            V6(addr) => IpAddr.V6(addr.ip),
+        }
+    }
+
+    /// Get the port number.
+    public fn port(&self) -> Int {
+        match *self {
+            V4(addr) => addr.port,
+            V6(addr) => addr.port,
+        }
+    }
+
+    /// Check if this is IPv4.
+    public fn is_ipv4(&self) -> Bool {
+        match *self {
+            V4(_) => true,
+            V6(_) => false,
+        }
+    }
+
+    /// Check if this is IPv6.
+    public fn is_ipv6(&self) -> Bool {
+        !self.is_ipv4()
+    }
+
+    /// Parse from "host:port" string.
+    public fn parse(s: &Text) -> Result<SocketAddr, AddrParseError> {
+        let parts = s.rsplit_once(':');
+        match parts {
+            Some((host, port_str)) => {
+                let port = port_str.parse_int()
+                    .map_err(|_| AddrParseError.InvalidPort)?;
+                if port < 0 || port > 65535 {
+                    return Err(AddrParseError.InvalidPort);
+                }
+
+                // Try IPv4 first
+                if let Ok(ipv4) = Ipv4Addr.parse(host) {
+                    return Ok(SocketAddr.new_v4(ipv4, port));
+                }
+
+                // Try IPv6 (strip brackets if present: [::1]:8080)
+                let ipv6_str = if host.starts_with("[") && host.ends_with("]") {
+                    host.slice(1, host.len() - 1)
+                } else {
+                    host.clone()
+                };
+                if let Ok(ipv6) = Ipv6Addr.parse(&ipv6_str) {
+                    return Ok(SocketAddr.new_v6(ipv6, port));
+                }
+
+                Err(AddrParseError.InvalidFormat)
+            }
+            None => Err(AddrParseError.InvalidFormat),
+        }
+    }
+}
+
+implement Eq for SocketAddr {
+    fn eq(&self, other: &SocketAddr) -> Bool {
+        match (*self, *other) {
+            (V4(a), V4(b)) => a == b,
+            (V6(a), V6(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Hash for SocketAddr {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        match *self {
+            V4(addr) => {
+                (0 as Int).hash(hasher);
+                addr.hash(hasher);
+            }
+            V6(addr) => {
+                (1 as Int).hash(hasher);
+                addr.hash(hasher);
+            }
+        }
+    }
+}
+
+implement Debug for SocketAddr {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            V4(addr) => addr.fmt_debug(f),
+            V6(addr) => {
+                f.write_str(f"[{addr.ip}]:{addr.port}")
+            }
+        }
+    }
+}
+
+implement Display for SocketAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+// =============================================================================
+// ToSocketAddrs Protocol
+// =============================================================================
+
+/// Protocol for types that can be converted to socket addresses.
+public type ToSocketAddrs is protocol {
+    type Iter: Iterator<Item>;
+    fn to_socket_addrs(&self) -> Result<Self.Iter, IoError>;
+};
+
+// Implementations for common types
+implement ToSocketAddrs for SocketAddr {
+    type Iter = Once<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<Once<SocketAddr>, IoError> {
+        Ok(once(*self))
+    }
+}
+
+implement ToSocketAddrs for (&Text, Int) {
+    type Iter = List<SocketAddr>;
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        let (host, port) = *self;
+        // Try IPv4 first
+        if let Ok(ip) = Ipv4Addr.parse(host) {
+            return Ok(List.of(SocketAddr.new_v4(ip, port)));
+        }
+        // Try IPv6
+        if let Ok(ip) = Ipv6Addr.parse(host) {
+            return Ok(List.of(SocketAddr.new_v6(ip, port)));
+        }
+        // DNS resolution for hostnames
+        match dns_resolve(host, port) {
+            Ok(addrs) => {
+                if addrs.is_empty() {
+                    Err(IoError.Other(f"Cannot resolve: {host}"))
+                } else {
+                    Ok(addrs)
+                }
+            }
+            Err(_) => Err(IoError.Other(f"Cannot resolve: {host}")),
+        }
+    }
+}
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// Error when parsing an address.
+public type AddrParseError is
+    | InvalidFormat
+    | InvalidOctet
+    | InvalidPort;
+
+implement Eq for AddrParseError {
+    fn eq(&self, other: &AddrParseError) -> Bool {
+        match (*self, *other) {
+            (InvalidFormat, InvalidFormat) => true,
+            (InvalidOctet, InvalidOctet) => true,
+            (InvalidPort, InvalidPort) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Debug for AddrParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            InvalidFormat => f.write_str("InvalidFormat"),
+            InvalidOctet => f.write_str("InvalidOctet"),
+            InvalidPort => f.write_str("InvalidPort"),
+        }
+    }
+}
+
+implement Display for AddrParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match *self {
+            InvalidFormat => f.write_str("invalid address format"),
+            InvalidOctet => f.write_str("invalid octet value"),
+            InvalidPort => f.write_str("invalid port number"),
+        }
+    }
+}

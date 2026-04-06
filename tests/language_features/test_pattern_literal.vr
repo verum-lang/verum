@@ -1,0 +1,11 @@
+fn main() {
+    // Test 1: Literal patterns
+    let x = 5;
+    match x {
+        0 => print(f"zero"),
+        1 => print(f"one"),
+        5 => print(f"five"),
+        _ => print(f"other"),
+    }
+    print(f"Literal pattern test complete!");
+}

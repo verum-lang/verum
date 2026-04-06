@@ -1,0 +1,32 @@
+[package]
+name = "verum_modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Module system for the Verum programming language"
+
+[dependencies]
+# DEPRECATED: Superseded by stdlib/ and verum_common types
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_lexer = { workspace = true }
+verum_parser = { workspace = true }
+
+# External dependencies
+serde = { workspace = true }
+petgraph = { workspace = true }  # For dependency graph
+dashmap = { workspace = true }   # For concurrent caching
+thiserror = { workspace = true }
+tokio = { workspace = true }     # For async parallel loading
+rayon = { workspace = true }     # For sync parallel loading
+num_cpus = { workspace = true }  # For default concurrency config
+blake3 = { workspace = true }    # For content hashing (unified with compiler)
+
+[dev-dependencies]
+tempfile = "3.14"
+criterion = { workspace = true }
+

@@ -1,0 +1,25 @@
+[package]
+name = "verum_mlir_macro"
+version = "21.0.0"
+edition = "2024"
+description = "Procedural macros for verum_mlir MLIR bindings"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/luxquant/axiom"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+comrak = { version = "0.49.0", default-features = false }
+convert_case = "0.10.0"
+proc-macro2 = "1"
+quote = "1"
+regex = { workspace = true }
+syn = { version = "2", features = ["full"] }
+verum_tblgen = { path = "../verum_tblgen" }
+unindent = "0.2.4"
+
+[dev-dependencies]
+verum_mlir = { path = "../verum_mlir", features = ["ods-dialects"] }
+verum_mlir_sys = { path = "../verum_mlir_sys" }
+pretty_assertions = { workspace = true }

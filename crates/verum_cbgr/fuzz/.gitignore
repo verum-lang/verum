@@ -1,0 +1,11 @@
+# Fuzz artifacts (crashes, hangs, etc)
+artifacts/
+
+# Coverage reports
+coverage/
+
+# Build artifacts
+target/
+
+# Cargo lock (workspace manages this)
+Cargo.lock

@@ -1,0 +1,1294 @@
+// =============================================================================
+// autodiff.vr - Automatic Differentiation System
+// =============================================================================
+// Layer: 6 (Autodiff)
+//
+// Compile-time source transformation for gradients:
+// - VJP (Vector-Jacobian Product) for reverse-mode AD
+// - JVP (Jacobian-Vector Product) for forward-mode AD
+// - Primitive gradient rules for all operations
+// - Higher-order derivatives (Hessian, Jacobian)
+// - Memory optimizations (checkpointing, recomputation)
+//
+// # Design Philosophy
+//
+// Verum uses compile-time source transformation, not runtime tape recording:
+// - Zero runtime overhead for gradient tracking
+// - O(1) memory for simple functions (no tape storage)
+// - Source-level debugging of gradients
+//
+// # Context System Integration
+//
+// Operations use Verum's context system for:
+// - AutodiffContext: Gradient recording state and mode
+// - GradientAccumulation: Micro-batching support
+//
+// Spec: docs/architecture/math-spec.md Part VII (L6)
+// =============================================================================
+
+module core.math.autodiff;
+
+mount super.tensor.{DynTensor, Tensor, zeros, ones, full, zeros_like, ones_like, full_like};
+mount super.tensor.{add, sub, mul, div, neg, pow, exp, log, sqrt, sin, cos, tanh};
+mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
+mount super.linalg.{Vector, Matrix, Numeric};
+
+// =============================================================================
+// Differentiation Mode
+// =============================================================================
+
+// Differentiation mode selection
+public type DiffMode is
+    | ReverseMode       // Standard backprop (VJP) - efficient for f: R^n -> R^m where m << n
+    | ForwardMode       // Tangent propagation (JVP) - efficient for m >> n
+    | MixedMode {       // Automatic selection based on Jacobian shape
+        threshold: Float,   // Switch threshold (M/N ratio)
+    };
+
+implement DiffMode {
+    // Default mode for most neural network training
+    public fn default() -> Self {
+        DiffMode.ReverseMode
+    }
+
+    // Select optimal mode based on input/output dimensions
+    public fn auto(input_dim: USize, output_dim: USize) -> Self {
+        let ratio = output_dim as Float / input_dim as Float;
+        if ratio > 1.0 {
+            DiffMode.ForwardMode
+        } else {
+            DiffMode.ReverseMode
+        }
+    }
+}
+
+// =============================================================================
+// Differentiable Protocol
+// =============================================================================
+
+// Protocol for types that support automatic differentiation
+//
+// Types implementing this protocol can participate in gradient computation.
+// The compiler automatically implements this for @differentiable functions.
+public type Differentiable is protocol {
+    // Type of tangent vectors (same structure as self)
+    type Tangent;
+
+    // Type of cotangent vectors (pullback outputs)
+    type Cotangent;
+
+    // Create zero tangent (additive identity)
+    fn zero_tangent() -> Self.Tangent;
+
+    // Add two tangent vectors (for gradient accumulation)
+    fn add_tangent(a: Self.Tangent, b: Self.Tangent) -> Self.Tangent;
+
+    // Scale tangent by scalar
+    fn scale_tangent(t: Self.Tangent, s: Float) -> Self.Tangent;
+};
+
+// Implement Differentiable for Float
+implement Differentiable for Float {
+    type Tangent = Float;
+    type Cotangent = Float;
+
+    fn zero_tangent() -> Float { 0.0 }
+    fn add_tangent(a: Float, b: Float) -> Float { a + b }
+    fn scale_tangent(t: Float, s: Float) -> Float { t * s }
+}
+
+// Implement Differentiable for dynamic tensors
+implement<T: Numeric> Differentiable for DynTensor<T> {
+    type Tangent = DynTensor<T>;
+    type Cotangent = DynTensor<T>;
+
+    fn zero_tangent() -> DynTensor<T> {
+        // Shape must be determined at runtime
+        @vbc(GRAD_ZERO_TANGENT)
+    }
+
+    fn add_tangent(a: DynTensor<T>, b: DynTensor<T>) -> DynTensor<T> {
+        add(&a, &b)
+    }
+
+    fn scale_tangent(t: DynTensor<T>, s: Float) -> DynTensor<T> {
+        mul(&t, &full_like(&t, T.from_float(s)))
+    }
+}
+
+// Implement Differentiable for static tensors
+implement<T: Numeric, S: meta [USize]> Differentiable for Tensor<T, S> {
+    type Tangent = Tensor<T, S>;
+    type Cotangent = Tensor<T, S>;
+
+    fn zero_tangent() -> Tensor<T, S> {
+        zeros<T, S>()
+    }
+
+    fn add_tangent(a: Tensor<T, S>, b: Tensor<T, S>) -> Tensor<T, S> {
+        add(&a, &b)
+    }
+
+    fn scale_tangent(t: Tensor<T, S>, s: Float) -> Tensor<T, S> {
+        mul(&t, &full<T, S>(T.from_float(s)))
+    }
+}
+
+// Implement Differentiable for Vector
+implement Differentiable for Vector<Float> {
+    type Tangent = Vector<Float>;
+    type Cotangent = Vector<Float>;
+
+    fn zero_tangent() -> Vector<Float> {
+        Vector.zeros(0)  // Size determined at runtime
+    }
+
+    fn add_tangent(a: Vector<Float>, b: Vector<Float>) -> Vector<Float> {
+        a.add(&b)
+    }
+
+    fn scale_tangent(t: Vector<Float>, s: Float) -> Vector<Float> {
+        t.scale(s)
+    }
+}
+
+// Implement Differentiable for Matrix
+implement Differentiable for Matrix<Float> {
+    type Tangent = Matrix<Float>;
+    type Cotangent = Matrix<Float>;
+
+    fn zero_tangent() -> Matrix<Float> {
+        Matrix.zeros(0, 0)  // Size determined at runtime
+    }
+
+    fn add_tangent(a: Matrix<Float>, b: Matrix<Float>) -> Matrix<Float> {
+        a.add(&b)
+    }
+
+    fn scale_tangent(t: Matrix<Float>, s: Float) -> Matrix<Float> {
+        t.scale(s)
+    }
+}
+
+// =============================================================================
+// VJP (Vector-Jacobian Product) - Reverse Mode
+// =============================================================================
+
+// Result of VJP computation
+//
+// Contains the primal (forward) output and a pullback function
+// that computes gradients with respect to inputs.
+public type VJPResult<In: Differentiable, Out: Differentiable> is {
+    // Forward pass result
+    primal: Out,
+    // Pullback function: cotangent of output -> cotangent of input
+    pullback: fn(Out.Cotangent) -> In.Cotangent,
+};
+
+// Compute Vector-Jacobian Product (reverse mode AD)
+//
+// For f: R^n -> R^m, computes v^T * J where J is the Jacobian.
+// This is the foundation of backpropagation.
+//
+// # Example
+// ```verum
+// let result = vjp(|x| x * x, 3.0);
+// let grad = result.pullback(1.0);  // grad = 6.0
+// ```
+public fn vjp<F, In, Out>(f: F, x: In) -> VJPResult<In, Out>
+where
+    F: Fn(In) -> Out,
+    In: Differentiable,
+    Out: Differentiable,
+{
+    @vbc(GRAD_BEGIN, 0x00);  // mode: reverse
+    let primal = f(x);
+    let pullback = @vbc(GRAD_END);
+    VJPResult { primal, pullback }
+}
+
+// =============================================================================
+// JVP (Jacobian-Vector Product) - Forward Mode
+// =============================================================================
+
+// Result of JVP computation
+//
+// Contains the primal output and the tangent (directional derivative).
+public type JVPResult<Out: Differentiable> is {
+    // Forward pass result
+    primal: Out,
+    // Tangent (directional derivative)
+    tangent: Out.Tangent,
+};
+
+// Compute Jacobian-Vector Product (forward mode AD)
+//
+// For f: R^n -> R^m, computes J * v where J is the Jacobian.
+// Efficient when output dimension >> input dimension.
+//
+// # Example
+// ```verum
+// let result = jvp(|x| x * x, 3.0, 1.0);
+// // primal = 9.0, tangent = 6.0
+// ```
+public fn jvp<F, In, Out>(f: F, x: In, tangent: In.Tangent) -> JVPResult<Out>
+where
+    F: Fn(In) -> Out,
+    In: Differentiable,
+    Out: Differentiable,
+{
+    @vbc(JVP_BEGIN, tangent);
+    let primal = f(x);
+    let tangent_out = @vbc(JVP_END);
+    JVPResult { primal, tangent: tangent_out }
+}
+
+// =============================================================================
+// Gradient API
+// =============================================================================
+
+// Compute gradient of scalar function
+//
+// Transforms a scalar-valued function into a function returning gradients.
+//
+// # Example
+// ```verum
+// let loss_fn = |x: &Tensor<Float, [N]>| x.sum();
+// let grad_fn = grad(loss_fn);
+// let gradients = grad_fn(&input);
+// ```
+public fn grad<F, In>(f: F) -> fn(In) -> In.Cotangent
+where
+    F: Fn(In) -> Float,
+    In: Differentiable,
+{
+    |x| {
+        let vjp_result = vjp(f, x);
+        vjp_result.pullback(1.0)
+    }
+}
+
+// Compute value and gradient together
+//
+// More efficient than computing f(x) and grad(f)(x) separately
+// when both values are needed.
+//
+// # Example
+// ```verum
+// let (loss, grads) = value_and_grad(loss_fn)(&params);
+// ```
+public fn value_and_grad<F, In>(f: F) -> fn(In) -> (Float, In.Cotangent)
+where
+    F: Fn(In) -> Float,
+    In: Differentiable,
+{
+    |x| {
+        let vjp_result = vjp(f, x);
+        (vjp_result.primal, vjp_result.pullback(1.0))
+    }
+}
+
+// Gradient with respect to specific argument indices
+//
+// Useful when only gradients for some arguments are needed.
+public fn grad_argnums<F, Args>(f: F, argnums: &[USize]) -> fn(Args) -> List<Args.Cotangent>
+where
+    F: Fn(Args) -> Float,
+    Args: Differentiable,
+{
+    |args| {
+        let vjp_result = vjp(f, args);
+        let all_grads = vjp_result.pullback(1.0);
+        argnums.iter().map(|&i| all_grads.get(i).clone()).collect()
+    }
+}
+
+// Stop gradient propagation (detach from computation graph)
+//
+// Returns value unchanged but stops gradient flow through it.
+// Useful for implementing stop-gradient in RL algorithms.
+public fn stop_gradient<T: Differentiable>(x: T) -> T {
+    @vbc(GRAD_STOP, x)
+}
+
+// Create a function with custom gradient
+//
+// Allows specifying custom VJP rule for functions that need
+// non-standard gradient behavior.
+public fn custom_vjp<F, VJP, In, Out>(f: F, vjp_fn: VJP) -> fn(In) -> Out
+where
+    F: Fn(In) -> Out,
+    VJP: Fn(In, Out.Cotangent) -> In.Cotangent,
+    In: Differentiable,
+    Out: Differentiable,
+{
+    @vbc(GRAD_CUSTOM, f, vjp_fn)
+}
+
+// =============================================================================
+// Higher-Order Derivatives
+// =============================================================================
+
+// Compute Jacobian matrix of vector function
+//
+// For f: R^n -> R^m, returns the m x n Jacobian matrix.
+// Uses forward mode AD (one pass per input dimension).
+public fn jacobian<F>(f: F, x: &Vector<Float>) -> Matrix<Float>
+where
+    F: Fn(&Vector<Float>) -> Vector<Float>,
+{
+    let n = x.len();
+    let fx = f(x);
+    let m = fx.len();
+    let mut jac = Matrix.zeros(m, n);
+
+    // Use forward mode for each column
+    for j in 0..n {
+        let mut tangent = Vector.zeros(n);
+        tangent.set(j, 1.0);
+        let jvp_result = jvp(f, x.clone(), tangent);
+        for i in 0..m {
+            jac.set(i, j, jvp_result.tangent.get(i));
+        }
+    }
+    jac
+}
+
+// Compute Hessian matrix (second derivative)
+//
+// For f: R^n -> R, returns the n x n Hessian matrix.
+// Computed as Jacobian of gradient.
+public fn hessian<F>(f: F) -> fn(&Vector<Float>) -> Matrix<Float>
+where
+    F: Fn(&Vector<Float>) -> Float,
+{
+    |x| {
+        let grad_f = grad(f);
+        jacobian(grad_f, x)
+    }
+}
+
+// Compute Hessian-vector product efficiently
+//
+// For f: R^n -> R and vector v, computes H*v without
+// materializing the full Hessian matrix.
+// Memory: O(n) instead of O(n²)
+public fn hvp<F>(f: F, x: &Vector<Float>, v: &Vector<Float>) -> Vector<Float>
+where
+    F: Fn(&Vector<Float>) -> Float,
+{
+    // H*v = grad(grad(f)(x) · v)
+    // Use VBC intrinsic for Hessian-vector product
+    @vbc(AUTODIFF_HVP, f, x, v)
+}
+
+// Compute Gauss-Newton matrix-vector product
+//
+// For f: R^n -> R^m with loss L(f(x)), computes J^T J v.
+// Used in second-order optimization (Levenberg-Marquardt).
+public fn gnvp<F>(f: F, x: &Vector<Float>, v: &Vector<Float>) -> Vector<Float>
+where
+    F: Fn(&Vector<Float>) -> Vector<Float>,
+{
+    // J^T J v = J^T (J v) using two JVP/VJP passes
+    let jv = jvp(f, x.clone(), v.clone()).tangent;  // J v
+    let vjp_result = vjp(f, x.clone());
+    vjp_result.pullback(jv)  // J^T (J v)
+}
+
+// =============================================================================
+// Primitive VJP Rules - Arithmetic
+// =============================================================================
+
+// VJP rule for addition: z = x + y
+// ∂L/∂x = ∂L/∂z, ∂L/∂y = ∂L/∂z
+@vjp_rule(add)
+fn add_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+    // Handle broadcasting by reducing along broadcast dimensions
+    let grad_x = reduce_to_shape(grad_z, x.shape());
+    let grad_y = reduce_to_shape(grad_z, y.shape());
+    (grad_x, grad_y)
+}
+
+// VJP rule for subtraction: z = x - y
+// ∂L/∂x = ∂L/∂z, ∂L/∂y = -∂L/∂z
+@vjp_rule(sub)
+fn sub_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+    let grad_x = reduce_to_shape(grad_z, x.shape());
+    let grad_y = reduce_to_shape(&neg(grad_z), y.shape());
+    (grad_x, grad_y)
+}
+
+// VJP rule for multiplication: z = x * y
+// ∂L/∂x = ∂L/∂z * y, ∂L/∂y = ∂L/∂z * x
+@vjp_rule(mul)
+fn mul_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+    let grad_x = reduce_to_shape(&mul(grad_z, y), x.shape());
+    let grad_y = reduce_to_shape(&mul(grad_z, x), y.shape());
+    (grad_x, grad_y)
+}
+
+// VJP rule for division: z = x / y
+// ∂L/∂x = ∂L/∂z / y, ∂L/∂y = -∂L/∂z * x / y²
+@vjp_rule(div)
+fn div_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+    let grad_x = reduce_to_shape(&div(grad_z, y), x.shape());
+    let y_sq = mul(y, y);
+    let grad_y = reduce_to_shape(&neg(&div(&mul(grad_z, x), &y_sq)), y.shape());
+    (grad_x, grad_y)
+}
+
+// VJP rule for power: z = x^y
+// ∂L/∂x = ∂L/∂z * y * x^(y-1)
+// ∂L/∂y = ∂L/∂z * x^y * ln(x)
+@vjp_rule(pow)
+fn pow_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+    let one = ones_like(y);
+    let y_minus_one = sub(y, &one);
+    let x_pow_y_minus_one = pow(x, &y_minus_one);
+    let grad_x = mul(grad_z, &mul(y, &x_pow_y_minus_one));
+
+    let z = pow(x, y);
+    let log_x = log(x);
+    let grad_y = mul(grad_z, &mul(&z, &log_x));
+
+    (reduce_to_shape(&grad_x, x.shape()), reduce_to_shape(&grad_y, y.shape()))
+}
+
+// VJP rule for negation: z = -x
+// ∂L/∂x = -∂L/∂z
+@vjp_rule(neg)
+fn neg_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    neg(grad_z)
+}
+
+// =============================================================================
+// Primitive VJP Rules - Transcendental
+// =============================================================================
+
+// VJP rule for exponential: z = e^x
+// ∂L/∂x = ∂L/∂z * e^x
+@vjp_rule(exp)
+fn exp_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    mul(grad_z, &exp(x))
+}
+
+// VJP rule for logarithm: z = ln(x)
+// ∂L/∂x = ∂L/∂z / x
+@vjp_rule(log)
+fn log_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    div(grad_z, x)
+}
+
+// VJP rule for square root: z = √x
+// ∂L/∂x = ∂L/∂z / (2√x)
+@vjp_rule(sqrt)
+fn sqrt_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    let two = full_like(x, T.from_float(2.0));
+    let two_sqrt_x = mul(&two, &sqrt(x));
+    div(grad_z, &two_sqrt_x)
+}
+
+// VJP rule for sine: z = sin(x)
+// ∂L/∂x = ∂L/∂z * cos(x)
+@vjp_rule(sin)
+fn sin_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    mul(grad_z, &cos(x))
+}
+
+// VJP rule for cosine: z = cos(x)
+// ∂L/∂x = -∂L/∂z * sin(x)
+@vjp_rule(cos)
+fn cos_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    neg(&mul(grad_z, &sin(x)))
+}
+
+// VJP rule for hyperbolic tangent: z = tanh(x)
+// ∂L/∂x = ∂L/∂z * (1 - tanh²(x))
+@vjp_rule(tanh)
+fn tanh_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    let t = tanh(x);
+    let one = ones_like(&t);
+    let t_sq = mul(&t, &t);
+    let one_minus_t_sq = sub(&one, &t_sq);
+    mul(grad_z, &one_minus_t_sq)
+}
+
+// =============================================================================
+// Primitive VJP Rules - Tensor Operations
+// =============================================================================
+
+// VJP rule for matrix multiply: Z = X @ Y
+// ∂L/∂X = ∂L/∂Z @ Y^T
+// ∂L/∂Y = X^T @ ∂L/∂Z
+@vjp_rule(matmul)
+fn matmul_vjp<T: Numeric>(
+    x: &DynTensor<T>,
+    y: &DynTensor<T>,
+    grad_z: &DynTensor<T>,
+) -> (DynTensor<T>, DynTensor<T>) {
+    let grad_x = matmul(grad_z, &transpose(y));
+    let grad_y = matmul(&transpose(x), grad_z);
+    (grad_x, grad_y)
+}
+
+// VJP rule for softmax: z = softmax(x)
+// ∂L/∂x = z * (∂L/∂z - sum(∂L/∂z * z))
+@vjp_rule(softmax)
+fn softmax_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    let z = softmax(x, -1);
+    let gz_times_z = mul(grad_z, &z);
+    let sum_gz_z = sum_axis(&gz_times_z, x.rank() - 1);
+    let sum_expanded = unsqueeze(&sum_gz_z, x.rank() - 1);
+    mul(&z, &sub(grad_z, &sum_expanded))
+}
+
+// VJP rule for sum reduction
+@vjp_rule(sum)
+fn sum_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
+    full_like(x, grad_out)
+}
+
+// VJP rule for sum along axis
+@vjp_rule(sum_axis)
+fn sum_axis_vjp<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: USize,
+    grad_out: &DynTensor<T>,
+) -> DynTensor<T> {
+    let expanded = unsqueeze(grad_out, axis);
+    broadcast_to(&expanded, x.shape())
+}
+
+// VJP rule for mean
+@vjp_rule(mean)
+fn mean_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
+    let n = x.numel() as Float;
+    full_like(x, T.from_float(grad_out.to_float() / n))
+}
+
+// VJP rule for mean along axis
+@vjp_rule(mean_axis)
+fn mean_axis_vjp<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: USize,
+    grad_out: &DynTensor<T>,
+) -> DynTensor<T> {
+    let n = x.shape()[axis] as Float;
+    let scaled = div(grad_out, &full_like(grad_out, T.from_float(n)));
+    let expanded = unsqueeze(&scaled, axis);
+    broadcast_to(&expanded, x.shape())
+}
+
+// VJP rule for reshape
+@vjp_rule(reshape)
+fn reshape_vjp<T: Numeric>(
+    x: &DynTensor<T>,
+    new_shape: &[USize],
+    grad_out: &DynTensor<T>,
+) -> DynTensor<T> {
+    reshape(grad_out, x.shape())
+}
+
+// VJP rule for transpose
+@vjp_rule(transpose)
+fn transpose_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: &DynTensor<T>) -> DynTensor<T> {
+    transpose(grad_out)
+}
+
+// =============================================================================
+// Activation Function VJPs
+// =============================================================================
+
+// VJP rule for ReLU: z = max(0, x)
+// ∂L/∂x = ∂L/∂z * (x > 0)
+@vjp_rule(relu)
+fn relu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    let mask = tensor_gt(x, &zeros_like(x));
+    where_tensor(&mask, grad_z, &zeros_like(grad_z))
+}
+
+// VJP rule for sigmoid: z = 1 / (1 + e^(-x))
+// ∂L/∂x = ∂L/∂z * z * (1 - z)
+@vjp_rule(sigmoid)
+fn sigmoid_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    let z = sigmoid(x);
+    let one = ones_like(&z);
+    let one_minus_z = sub(&one, &z);
+    mul(grad_z, &mul(&z, &one_minus_z))
+}
+
+// VJP rule for GELU (Gaussian Error Linear Unit)
+@vjp_rule(gelu)
+fn gelu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+    // d/dx GELU(x) = 0.5 * (1 + tanh(k)) + 0.5 * x * sech²(k) * k'
+    // where k = sqrt(2/π) * (x + 0.044715 * x³)
+    let sqrt_2_pi = T.from_float(0.7978845608);  // sqrt(2/π)
+    let c = T.from_float(0.044715);
+
+    let x_cubed = mul(x, &mul(x, x));
+    let inner = add(x, &mul(&full_like(x, c), &x_cubed));
+    let k = mul(&full_like(x, sqrt_2_pi), &inner);
+    let tanh_k = tanh(&k);
+
+    // sech²(k) = 1 - tanh²(k)
+    let one = ones_like(x);
+    let sech_sq = sub(&one, &mul(&tanh_k, &tanh_k));
+
+    // k' = sqrt(2/π) * (1 + 3 * 0.044715 * x²)
+    let three_c = T.from_float(3.0 * 0.044715);
+    let x_sq = mul(x, x);
+    let k_prime = mul(&full_like(x, sqrt_2_pi), &add(&one, &mul(&full_like(x, three_c), &x_sq)));
+
+    // Final gradient
+    let half = T.from_float(0.5);
+    let term1 = mul(&full_like(x, half), &add(&one, &tanh_k));
+    let term2 = mul(&full_like(x, half), &mul(x, &mul(&sech_sq, &k_prime)));
+
+    mul(grad_z, &add(&term1, &term2))
+}
+
+// =============================================================================
+// Layer-specific VJPs
+// =============================================================================
+
+// VJP rule for cross-entropy loss
+@vjp_rule(cross_entropy)
+fn cross_entropy_vjp<T: Numeric>(
+    pred: &DynTensor<T>,
+    target: &DynTensor<T>,
+    grad_out: T,
+) -> (DynTensor<T>, DynTensor<T>) {
+    // ∂L/∂pred = -target / pred
+    let grad_pred = mul(&full_like(pred, T.from_float(-grad_out.to_float())), &div(target, pred));
+    // Target is typically constant, no gradient needed
+    let grad_target = zeros_like(target);
+    (grad_pred, grad_target)
+}
+
+// VJP rule for layer normalization
+@vjp_rule(layer_norm)
+fn layer_norm_vjp<T: Numeric>(
+    x: &DynTensor<T>,
+    weight: &DynTensor<T>,
+    bias: &DynTensor<T>,
+    grad_out: &DynTensor<T>,
+) -> (DynTensor<T>, DynTensor<T>, DynTensor<T>) {
+    let eps = T.from_float(1e-5);
+    let axis = x.rank() - 1;
+    let n = x.shape()[axis] as Float;
+
+    // Recompute normalized value
+    let mean = mean_axis(x, axis);
+    let var = var_axis(x, axis);
+    let std = sqrt(&add(&var, &full_like(&var, eps)));
+    let mean_expanded = unsqueeze(&mean, axis);
+    let std_expanded = unsqueeze(&std, axis);
+    let x_norm = div(&sub(x, &mean_expanded), &std_expanded);
+
+    // Gradients for weight and bias
+    let grad_bias = sum_axis(grad_out, 0);
+    let grad_weight = sum_axis(&mul(grad_out, &x_norm), 0);
+
+    // Input gradient
+    let dx_norm = mul(grad_out, weight);
+    let inv_std = div(&ones_like(&std), &std_expanded);
+
+    // Variance gradient
+    let x_centered = sub(x, &mean_expanded);
+    let neg_half_inv_std_cubed = neg(&mul(
+        &full_like(&std, T.from_float(0.5)),
+        &div(&inv_std, &mul(&std_expanded, &std_expanded)),
+    ));
+    let dvar = sum_axis(&mul(&mul(&dx_norm, &x_centered), &neg_half_inv_std_cubed), axis);
+
+    // Mean gradient
+    let dmean = sum_axis(&mul(&dx_norm, &neg(&inv_std)), axis);
+
+    // Final input gradient
+    let inv_n = T.from_float(1.0 / n);
+    let dvar_expanded = unsqueeze(&dvar, axis);
+    let dmean_expanded = unsqueeze(&dmean, axis);
+
+    let grad_x = add(
+        &add(
+            &mul(&dx_norm, &inv_std),
+            &mul(&mul(&full_like(x, T.from_float(2.0 / n)), &dvar_expanded), &x_centered),
+        ),
+        &mul(&full_like(x, inv_n), &dmean_expanded),
+    );
+
+    (grad_x, grad_weight, grad_bias)
+}
+
+// VJP rule for 2D convolution
+@vjp_rule(conv2d)
+fn conv2d_vjp<T: Numeric>(
+    input: &DynTensor<T>,
+    weight: &DynTensor<T>,
+    grad_output: &DynTensor<T>,
+) -> (DynTensor<T>, DynTensor<T>) {
+    let grad_input = @vbc(TENSOR_CONV2D_BACKWARD_INPUT, grad_output, weight);
+    let grad_weight = @vbc(TENSOR_CONV2D_BACKWARD_WEIGHT, grad_output, input);
+    (grad_input, grad_weight)
+}
+
+// VJP rule for attention mechanism
+@vjp_rule(attention)
+fn attention_vjp<T: Numeric>(
+    q: &DynTensor<T>,
+    k: &DynTensor<T>,
+    v: &DynTensor<T>,
+    grad_output: &DynTensor<T>,
+) -> (DynTensor<T>, DynTensor<T>, DynTensor<T>) {
+    @vbc(TENSOR_ATTENTION_BACKWARD, q, k, v, grad_output)
+}
+
+// =============================================================================
+// Gradient Scope Control
+// =============================================================================
+
+// Gradient scope - enables/disables gradient tracking
+//
+// RAII-style scope guard for controlling gradient computation.
+public type GradientScope is {
+    previous_recording: Bool,
+    previous_mode: DiffMode,
+};
+
+implement GradientScope {
+    // Enter no-gradient scope (like PyTorch's torch.no_grad())
+    //
+    // Disables gradient tracking within the scope.
+    // Useful for inference and evaluation.
+    public fn no_grad() -> Self using [AutodiffContext] {
+        let prev_recording = AutodiffContext.is_recording();
+        let prev_mode = AutodiffContext.mode();
+        @vbc(GRAD_SCOPE_PUSH, false);
+        GradientScope { previous_recording: prev_recording, previous_mode: prev_mode }
+    }
+
+    // Enter gradient-enabled scope
+    //
+    // Ensures gradient tracking is enabled within the scope.
+    public fn enable_grad() -> Self using [AutodiffContext] {
+        let prev_recording = AutodiffContext.is_recording();
+        let prev_mode = AutodiffContext.mode();
+        @vbc(GRAD_SCOPE_PUSH, true);
+        GradientScope { previous_recording: prev_recording, previous_mode: prev_mode }
+    }
+
+    // Enter inference mode (optimized for no gradients)
+    //
+    // More aggressive optimizations than no_grad() since
+    // tensors won't need gradient tracking metadata.
+    public fn inference_mode() -> Self using [AutodiffContext] {
+        let prev_recording = AutodiffContext.is_recording();
+        let prev_mode = AutodiffContext.mode();
+        @vbc(GRAD_SCOPE_PUSH_INFERENCE);
+        GradientScope { previous_recording: prev_recording, previous_mode: prev_mode }
+    }
+}
+
+implement Drop for GradientScope {
+    fn drop(&mut self) {
+        @vbc(GRAD_SCOPE_POP, self.previous_recording);
+    }
+}
+
+// Execute function without gradient tracking
+//
+// # Example
+// ```verum
+// let output = with_no_grad(|| {
+//     model.forward(&input)
+// });
+// ```
+public fn with_no_grad<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
+    let _scope = GradientScope.no_grad();
+    f()
+}
+
+// Execute function in inference mode
+public fn with_inference<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
+    let _scope = GradientScope.inference_mode();
+    f()
+}
+
+// =============================================================================
+// Memory Optimizations - Checkpointing
+// =============================================================================
+
+// Gradient checkpoint - recompute forward pass during backward
+//
+// Trades compute for memory: saves only inputs, recomputes
+// intermediate activations during backward pass.
+//
+// Memory: O(1) for checkpointed region
+// Compute: 2x forward pass cost
+//
+// # Example
+// ```verum
+// let output = checkpoint(expensive_forward, &input);
+// ```
+public fn checkpoint<F, In, Out>(f: F, x: In) -> Out
+where
+    F: Fn(In) -> Out,
+    In: Differentiable,
+    Out: Differentiable,
+{
+    @vbc(GRAD_CHECKPOINT, f, x)
+}
+
+// Mark tensor for recomputation instead of storage
+//
+// During backward pass, the tensor will be recomputed
+// from its inputs rather than retrieved from memory.
+public fn recompute<T: Differentiable>(x: T) -> T {
+    @vbc(GRAD_RECOMPUTE, x)
+}
+
+// Automatic checkpointing for sequential layers
+//
+// Applies checkpointing every `checkpoint_every` layers,
+// achieving sublinear memory usage.
+@differentiable
+public fn checkpointed_sequential<T: Numeric>(
+    layers: &[fn(&DynTensor<T>) -> DynTensor<T>],
+    x: &DynTensor<T>,
+    checkpoint_every: USize,
+) -> DynTensor<T> {
+    // Apply layers sequentially with checkpointing via VBC intrinsic
+    @vbc(AUTODIFF_CHECKPOINTED_SEQ, layers, x, checkpoint_every)
+}
+
+// Optimal checkpointing for O(√n) memory
+//
+// Uses binomial checkpointing strategy to achieve
+// √n memory with 2x compute overhead.
+public fn optimal_checkpoint<T: Numeric>(
+    layers: &[fn(&DynTensor<T>) -> DynTensor<T>],
+    x: &DynTensor<T>,
+) -> DynTensor<T> {
+    let n = layers.len();
+    let num_checkpoints = ((n as Float).sqrt().ceil()) as USize;
+    let segment_size = (n + num_checkpoints - 1) / num_checkpoints;
+
+    checkpointed_sequential(layers, x, segment_size)
+}
+
+// Compute optimal checkpoint schedule
+//
+// Returns checkpoint positions for given layer count
+// and memory budget.
+public fn compute_checkpoint_schedule(n: USize, memory_budget: USize) -> List<USize> {
+    let sqrt_n = ((n as Float).sqrt().ceil()) as USize;
+
+    if memory_budget >= sqrt_n {
+        // Can achieve O(√n) memory
+        (0..n).step_by(sqrt_n).collect()
+    } else {
+        // Need to checkpoint more frequently
+        let segment = n / (memory_budget + 1);
+        (0..n).step_by(segment.max(1)).collect()
+    }
+}
+
+// Memory-efficient attention with recomputation
+//
+// Avoids storing the full attention matrix by recomputing
+// it during the backward pass.
+//
+// Memory: O(batch * heads * seq_len * head_dim)
+// Compute: 2x attention cost during backward
+@differentiable
+public fn memory_efficient_attention<T: Numeric>(
+    q: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
+    k: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
+    v: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
+) -> DynTensor<T> {
+    let head_dim = q.shape()[q.rank() - 1];
+    let scale = T.from_float(1.0 / (head_dim as Float).sqrt());
+
+    // Mark attention weights for recomputation
+    let scores = recompute(&mul(&matmul(q, &transpose(k)), &full_like(q, scale)));
+    let weights = recompute(&softmax(&scores, -1));
+
+    matmul(&weights, v)
+}
+
+// =============================================================================
+// Gradient Accumulation Context
+// =============================================================================
+
+// Context for gradient accumulation across micro-batches
+context GradientAccumulation {
+    // Number of micro-batches to accumulate
+    fn accumulation_steps() -> USize;
+
+    // Current micro-batch index
+    fn current_step() -> USize;
+
+    // Whether to synchronize gradients (true on last step)
+    fn should_sync() -> Bool;
+}
+
+// Backward pass with gradient accumulation
+//
+// Scales gradients by 1/accumulation_steps and only
+// synchronizes on the final micro-batch.
+public fn accumulated_backward<T: Numeric>(
+    loss: &DynTensor<T>,
+    accumulation_steps: USize,
+    should_sync: Bool,
+) using [AutodiffContext] {
+    let scale_val = 1.0 / (accumulation_steps as Float);
+    let scale_tensor = full_like(loss, scale_val as T);
+    let scaled_loss = mul(loss, &scale_tensor);
+
+    @vbc(GRAD_BACKWARD, &scaled_loss);
+
+    if should_sync {
+        @vbc(GRAD_SYNC);
+    }
+}
+
+// =============================================================================
+// AutodiffContext Definition
+// =============================================================================
+
+// Core autodiff context - controls gradient computation behavior
+context AutodiffContext {
+    // Whether gradients are currently being recorded
+    fn is_recording() -> Bool;
+
+    // Current differentiation mode
+    fn mode() -> DiffMode;
+
+    // Get the compute graph for current scope
+    fn graph() -> &mut ComputeGraph;
+
+    // Memory budget for checkpointing (in bytes)
+    fn memory_budget() -> USize;
+
+    // Whether to use mixed precision for gradients
+    fn use_mixed_precision() -> Bool;
+}
+
+// =============================================================================
+// Compute Graph Types
+// =============================================================================
+
+// Unique identifier for graph nodes
+public type NodeId is (USize);
+
+// Unique identifier for tensors
+public type TensorId is (USize);
+
+// Operation type enumeration
+public type OpType is
+    | Add
+    | Sub
+    | Mul
+    | Div
+    | Pow
+    | Neg
+    | Exp
+    | Log
+    | Sqrt
+    | Sin
+    | Cos
+    | Tanh
+    | Matmul
+    | Softmax
+    | Sum
+    | Mean
+    | Reshape
+    | Transpose
+    | Custom(Text);
+
+implement OpType {
+    // Get default VJP rule for this operation
+    fn default_vjp(&self) -> Maybe<VJPRule> {
+        // VJP rules are registered by @vjp_rule attribute
+        @vbc(GRAD_GET_VJP_RULE, self)
+    }
+
+    // Get default JVP rule for this operation
+    fn default_jvp(&self) -> Maybe<JVPRule> {
+        @vbc(GRAD_GET_JVP_RULE, self)
+    }
+}
+
+// VJP rule handle (opaque)
+public type VJPRule is (U64);
+
+// JVP rule handle (opaque)
+public type JVPRule is (U64);
+
+// Graph node representing an operation
+public type GraphNode is {
+    id: NodeId,
+    op: OpType,
+    inputs: List<TensorId>,
+    output: TensorId,
+    vjp_rule: Maybe<VJPRule>,
+    jvp_rule: Maybe<JVPRule>,
+};
+
+// Graph edge representing data flow
+public type GraphEdge is {
+    from: NodeId,
+    to: NodeId,
+    tensor_id: TensorId,
+};
+
+// Checkpoint data for a node
+public type CheckpointData is {
+    recompute_from: NodeId,
+    saved_inputs: List<TensorId>,
+};
+
+// Memory usage tracker
+public type MemoryTracker is {
+    current_usage: USize,
+    peak_usage: USize,
+    tensor_sizes: Map<TensorId, USize>,
+};
+
+implement MemoryTracker {
+    fn new() -> Self {
+        MemoryTracker {
+            current_usage: 0,
+            peak_usage: 0,
+            tensor_sizes: Map.new(),
+        }
+    }
+
+    fn current_usage(&self) -> USize {
+        self.current_usage
+    }
+
+    fn record_allocation(&mut self, tensor_id: TensorId, size: USize) {
+        self.tensor_sizes.insert(tensor_id, size);
+        self.current_usage += size;
+        self.peak_usage = self.peak_usage.max(self.current_usage);
+    }
+
+    fn record_deallocation(&mut self, tensor_id: TensorId) {
+        if let Some(size) = self.tensor_sizes.remove(&tensor_id) {
+            self.current_usage -= size;
+        }
+    }
+}
+
+// Compute graph for tracking operations
+public type ComputeGraph is {
+    nodes: List<GraphNode>,
+    edges: List<GraphEdge>,
+    checkpoints: Map<NodeId, CheckpointData>,
+    memory_tracker: MemoryTracker,
+};
+
+implement ComputeGraph {
+    fn new() -> Self {
+        ComputeGraph {
+            nodes: List.new(),
+            edges: List.new(),
+            checkpoints: Map.new(),
+            memory_tracker: MemoryTracker.new(),
+        }
+    }
+
+    // Record an operation in the graph
+    fn record_op(&mut self, op: OpType, inputs: &[TensorId], output: TensorId) {
+        let node_id = NodeId(self.nodes.len());
+        let node = GraphNode {
+            id: node_id,
+            op,
+            inputs: List.from(inputs),
+            output,
+            vjp_rule: op.default_vjp(),
+            jvp_rule: op.default_jvp(),
+        };
+        self.nodes.push(node);
+
+        // Add edges
+        for input in inputs {
+            self.edges.push(GraphEdge {
+                from: self.find_producing_node(*input),
+                to: node_id,
+                tensor_id: *input,
+            });
+        }
+    }
+
+    // Find node that produces a tensor
+    fn find_producing_node(&self, tensor_id: TensorId) -> NodeId {
+        for node in &self.nodes {
+            if node.output == tensor_id {
+                return node.id;
+            }
+        }
+        NodeId(0)  // Input tensor
+    }
+
+    // Automatic checkpointing based on memory budget
+    fn auto_checkpoint(&mut self, memory_budget: USize) {
+        let memory_usage = self.memory_tracker.current_usage();
+        if memory_usage > memory_budget {
+            let checkpoint_nodes = binomial_checkpoint_selection(&self.nodes, memory_budget);
+            for node_id in checkpoint_nodes {
+                self.mark_checkpoint(node_id);
+            }
+        }
+    }
+
+    fn mark_checkpoint(&mut self, node_id: NodeId) {
+        let recompute_from = self.find_cheap_ancestor(node_id);
+        self.checkpoints.insert(node_id, CheckpointData {
+            recompute_from,
+            saved_inputs: List.new(),
+        });
+    }
+
+    fn find_cheap_ancestor(&self, node_id: NodeId) -> NodeId {
+        // Find nearest input or checkpoint
+        // Simplified: return immediate predecessor
+        if node_id.0 > 0 {
+            NodeId(node_id.0 - 1)
+        } else {
+            NodeId(0)
+        }
+    }
+}
+
+// Binomial checkpointing selection algorithm
+fn binomial_checkpoint_selection(nodes: &[GraphNode], memory_budget: USize) -> List<NodeId> {
+    let n = nodes.len();
+    let sqrt_n = ((n as Float).sqrt().ceil()) as USize;
+
+    let mut checkpoints = List.new();
+    let mut i = sqrt_n;
+    while i < n {
+        checkpoints.push(NodeId(i));
+        i += sqrt_n;
+    }
+    checkpoints
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Reduce gradient to match input shape (for broadcasting)
+fn reduce_to_shape<T: Numeric>(grad: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
+    if grad.shape() == target_shape {
+        return grad.clone();
+    }
+
+    // Sum along broadcast dimensions
+    let grad_rank = grad.rank();
+    let target_rank = target_shape.len();
+
+    let mut result = grad.clone();
+
+    // Handle rank difference
+    if grad_rank > target_rank {
+        let extra_dims = grad_rank - target_rank;
+        for _ in 0..extra_dims {
+            let tmp = result.clone();
+            let reduced = sum_axis(&tmp, 0);
+            result = reduced;
+        }
+    }
+
+    // Handle size-1 dimensions
+    let mut dim_idx: USize = 0;
+    while dim_idx < target_shape.len() as USize {
+        let target_dim = target_shape[dim_idx as Int];
+        let current = result.clone();
+        let grad_dim = current.shape()[dim_idx as Int];
+        if target_dim == 1 && grad_dim > 1 {
+            let summed = sum_axis(&current, dim_idx as Int);
+            result = unsqueeze(&summed, dim_idx);
+        }
+        dim_idx = dim_idx + 1;
+    }
+
+    result
+}
+
+// Broadcast tensor to target shape
+fn broadcast_to<T: Numeric>(x: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_BROADCAST_TO, x, target_shape)
+}
+
+// Unsqueeze tensor at specified axis
+fn unsqueeze<T: Numeric>(x: &DynTensor<T>, axis: USize) -> DynTensor<T> {
+    @vbc(TENSOR_UNSQUEEZE, x, axis)
+}
+
+// Backward pass (computes gradients)
+fn backward<T: Numeric>(loss: &DynTensor<T>) {
+    @vbc(GRAD_BACKWARD, loss)
+}
+
+// Greater-than comparison for masks (tensor-level)
+fn tensor_gt<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+    @vbc(TENSOR_COMPARE, a, b, CompareOp.Gt)
+}
+
+// Conditional selection: where(mask, a, b)
+fn where_tensor<T: Numeric>(
+    mask: &DynTensor<Bool>,
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+) -> DynTensor<T> {
+    @vbc(TENSOR_WHERE, mask, a, b)
+}
+
+// Sigmoid activation
+fn sigmoid<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_SIGMOID, x)
+}
+
+// Reshape tensor
+fn reshape<T: Numeric>(x: &DynTensor<T>, shape: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_RESHAPE, x, shape)
+}
+
+// Comparison operations
+type CompareOp is
+    | Eq
+    | Ne
+    | Lt
+    | Le
+    | Gt
+    | Ge;
+
+// =============================================================================
+// VBC Autodiff Opcodes Reference
+// =============================================================================
+//
+// ┌────────┬──────────────────────┬────────────────────────────────────────┐
+// │ Opcode │ Name                 │ Description                            │
+// ├────────┼──────────────────────┼────────────────────────────────────────┤
+// │ 0xA8   │ GRAD_BEGIN           │ Begin gradient computation region      │
+// │ 0xA9   │ GRAD_END             │ End region, return pullback function   │
+// │ 0xAA   │ GRAD_CHECKPOINT      │ Mark checkpoint for recomputation      │
+// │ 0xAB   │ GRAD_ACCUMULATE      │ Accumulate gradients (for fan-out)     │
+// │ 0xAC   │ GRAD_STOP            │ Stop gradient (detach)                 │
+// │ 0xAD   │ GRAD_CUSTOM          │ Register custom VJP rule               │
+// │ 0xAE   │ JVP_BEGIN            │ Begin forward-mode AD                  │
+// │ 0xAF   │ JVP_END              │ End forward-mode, return tangent       │
+// │ 0xB0   │ GRAD_SCOPE_PUSH      │ Push gradient scope                    │
+// │ 0xB1   │ GRAD_SCOPE_POP       │ Pop gradient scope                     │
+// │ 0xB2   │ GRAD_SCOPE_PUSH_INF  │ Push inference mode scope              │
+// │ 0xB3   │ GRAD_RECOMPUTE       │ Mark tensor for recomputation          │
+// │ 0xB4   │ GRAD_SYNC            │ Synchronize gradients                  │
+// │ 0xB5   │ GRAD_BACKWARD        │ Execute backward pass                  │
+// │ 0xB6   │ GRAD_ZERO_TANGENT    │ Create zero tangent                    │
+// │ 0xB7   │ GRAD_GET_VJP_RULE    │ Get VJP rule for operation             │
+// │ 0xB8   │ GRAD_GET_JVP_RULE    │ Get JVP rule for operation             │
+// └────────┴──────────────────────┴────────────────────────────────────────┘

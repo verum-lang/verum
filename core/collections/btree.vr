@@ -1,0 +1,3271 @@
+// =============================================================================
+// collections/btree.vr - B-Tree Based Ordered Collections
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, memory
+// =============================================================================
+//
+// This module provides B-tree based ordered collections:
+//
+// - BTreeMap<K, V>: Ordered map with O(log n) operations
+// - BTreeSet<T>: Ordered set backed by BTreeMap
+//
+// B-trees maintain sorted order and provide efficient range queries.
+// They are cache-friendly due to their node structure.
+//
+// Performance characteristics:
+// - Insert: O(log n)
+// - Lookup: O(log n)
+// - Delete: O(log n)
+// - Range iteration: O(log n + k) where k is range size
+// - In-order iteration: O(n)
+//
+// =============================================================================
+
+module btree;
+
+mount core.*;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Minimum degree of B-tree (minimum children per non-root node)
+/// B = 6 means nodes have 5-11 keys (except root which can have 1-11)
+const B: Int = 6;
+
+/// Maximum keys per node = 2*B - 1 = 11
+const MAX_KEYS: Int = 2 * B - 1;
+
+/// Minimum keys per node = B - 1 = 5 (except root)
+const MIN_KEYS: Int = B - 1;
+
+// =============================================================================
+// BTreeMap - Ordered Map
+// =============================================================================
+
+/// An ordered map based on a B-tree.
+///
+/// BTreeMap maintains keys in sorted order and provides efficient
+/// range queries and ordered iteration.
+///
+/// # Example
+///
+/// ```verum
+/// let mut map = BTreeMap.new();
+/// map.insert(3, "three");
+/// map.insert(1, "one");
+/// map.insert(2, "two");
+///
+/// // Iteration is in sorted order
+/// for (k, v) in map.iter() {
+///     println(f"{k}: {v}");  // 1: one, 2: two, 3: three
+/// }
+///
+/// // Range queries
+/// for (k, v) in map.range(1..3) {
+///     println(f"{k}: {v}");  // 1: one, 2: two
+/// }
+/// ```
+public type BTreeMap<K: Ord, V> is {
+    root: Maybe<Heap<BTreeNode<K, V>>>,
+    len: Int,
+};
+
+/// Internal B-tree node
+type BTreeNode<K: Ord, V> is {
+    /// Keys stored in this node (sorted)
+    keys: List<K>,
+    /// Values corresponding to keys
+    values: List<V>,
+    /// Child nodes (len = keys.len() + 1 for internal nodes, 0 for leaves)
+    children: List<Heap<BTreeNode<K, V>>>,
+    /// Is this a leaf node?
+    is_leaf: Bool,
+};
+
+implement<K: Ord, V> BTreeMap<K, V> {
+    /// Create a new empty BTreeMap.
+    public fn new() -> BTreeMap<K, V> {
+        BTreeMap {
+            root: None,
+            len: 0,
+        }
+    }
+
+    /// Create a BTreeMap from a list of key-value pairs.
+    /// If duplicate keys exist, the last value wins.
+    /// The resulting map is always properly sorted.
+    public fn from_entries(entries: &List<(K, V)>) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut map = BTreeMap.new();
+        let mut i = 0;
+        while i < entries.len() {
+            let pair = &entries[i];
+            map.insert(pair.0.clone(), pair.1.clone());
+            i = i + 1;
+        }
+        map
+    }
+
+    /// Returns the number of elements in the map.
+    public fn len(&self) -> Int {
+        self.len
+    }
+
+    /// Returns true if the map contains no elements.
+    public fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    /// Clears the map, removing all elements.
+    public fn clear(&mut self) {
+        self.root = None;
+        self.len = 0;
+    }
+
+    /// Returns a reference to the value corresponding to the key.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "a");
+    /// assert_eq(map.get(&1), Some(&"a"));
+    /// assert_eq(map.get(&2), None);
+    /// ```
+    public fn get(&self, key: &K) -> Maybe<V> {
+        if self.root.is_none() {
+            return None;
+        }
+        let node = self.root.as_ref().unwrap();
+        self.search_node(node, key)
+    }
+
+    /// Returns a mutable reference to the value corresponding to the key.
+    public fn get_mut(&mut self, key: &K) -> Maybe<&mut V> {
+        if self.root.is_none() {
+            return None;
+        }
+        let node = self.root.as_mut().unwrap();
+        self.search_node_mut(node, key)
+    }
+
+    /// Returns true if the map contains a value for the specified key.
+    public fn contains_key(&self, key: &K) -> Bool {
+        self.get(key).is_some()
+    }
+
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not have this key present, None is returned.
+    /// If the map did have this key present, the value is updated,
+    /// && the old value is returned.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// assert_eq(map.insert(37, "a"), None);
+    /// assert_eq(map.insert(37, "b"), Some("a"));
+    /// ```
+    public fn insert(&mut self, key: K, value: V) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        // Handle empty tree
+        if self.root.is_none() {
+            let mut node = BTreeNode.new_leaf();
+            node.keys.push(key);
+            node.values.push(value);
+            self.root = Some(Heap.new(node));
+            self.len = 1;
+            return None;
+        }
+
+        // Check if key exists — replace value directly via SetE (no &mut references)
+        // Pass key by value (not &key) to avoid alloca/deref mismatch in VBC generics.
+        let root_ref = self.root.as_mut().unwrap();
+        match self.replace_value_in_node(root_ref, key, value) {
+            Some(old_val) => {
+                return Some(old_val);
+            },
+            None => {},
+        }
+
+        // Insert into tree
+        let root = self.root.as_mut().unwrap();
+
+        // If root is full, split it
+        if root.keys.len() == MAX_KEYS {
+            let new_root = BTreeNode.new_internal();
+            let old_root = replace(root, Heap.new(new_root));
+            root.children.push(old_root);
+            self.split_child(root, 0);
+        }
+
+        self.insert_non_full(root, key, value);
+        self.len = self.len + 1;
+        None
+    }
+
+    /// Removes a key from the map, returning the value at the key if it existed.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "a");
+    /// assert_eq(map.remove(&1), Some("a"));
+    /// assert_eq(map.remove(&1), None);
+    /// ```
+    public fn remove(&mut self, key: &K) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        if self.root.is_none() {
+            return None;
+        }
+
+        let res = self.remove_from_node(self.root.as_mut().unwrap(), key);
+
+        // If root became empty && has a child, make child the new root
+        if let Some(ref mut root) = self.root {
+            if root.keys.is_empty() && !root.children.is_empty() {
+                self.root = Some(root.children.remove(0));
+            } else if root.keys.is_empty() {
+                self.root = None;
+            }
+        }
+
+        if res.is_some() {
+            self.len = self.len - 1;
+        }
+        res
+    }
+
+    /// Gets the first key-value pair in the map.
+    ///
+    /// The key is the minimum key in the map.
+    public fn first_key_value(&self) -> Maybe<(&K, &V)> {
+        match &self.root {
+            None => None,
+            Some(node) => self.find_min(node),
+        }
+    }
+
+    /// Gets the last key-value pair in the map.
+    ///
+    /// The key is the maximum key in the map.
+    public fn last_key_value(&self) -> Maybe<(&K, &V)> {
+        match &self.root {
+            None => None,
+            Some(node) => self.find_max(node),
+        }
+    }
+
+    /// Removes and returns the first (minimum) key-value pair.
+    public fn pop_first(&mut self) -> Maybe<(K, V)>
+    where K: Clone
+    {
+        match self.first_key_value() {
+            None => None,
+            Some(pair) => {
+                let key = pair.0.clone();
+                let value = self.remove(&key);
+                match value {
+                    None => None,
+                    Some(v) => Some((key, v)),
+                }
+            }
+        }
+    }
+
+    /// Removes and returns the last (maximum) key-value pair.
+    public fn pop_last(&mut self) -> Maybe<(K, V)>
+    where K: Clone
+    {
+        match self.last_key_value() {
+            None => None,
+            Some(pair) => {
+                let key = pair.0.clone();
+                let value = self.remove(&key);
+                match value {
+                    None => None,
+                    Some(v) => Some((key, v)),
+                }
+            }
+        }
+    }
+
+    /// Returns an iterator over the map's key-value pairs in sorted order.
+    public fn iter(&self) -> BTreeMapIter<K, V> {
+        BTreeMapIter.new(self)
+    }
+
+    /// Returns an iterator over the map's keys in sorted order.
+    public fn keys(&self) -> BTreeMapKeys<K, V> {
+        BTreeMapKeys { inner: self.iter() }
+    }
+
+    /// Returns an iterator over the map's values in key order.
+    public fn values(&self) -> BTreeMapValues<K, V> {
+        BTreeMapValues { inner: self.iter() }
+    }
+
+    /// Returns an iterator over key-value pairs in the given range.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// for i in 0..10 {
+    ///     map.insert(i, i * 10);
+    /// }
+    ///
+    /// for (k, v) in map.range(3..7) {
+    ///     println(f"{k}: {v}");  // 3: 30, 4: 40, 5: 50, 6: 60
+    /// }
+    /// ```
+    public fn range<R: RangeBounds<K>>(&self, range: R) -> BTreeMapRange<K, V> {
+        BTreeMapRange.new(self, range)
+    }
+
+    /// Returns the first key-value pair with a key greater than or equal to the given key.
+    ///
+    /// This is an efficient O(log n) bound query.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "one");
+    /// map.insert(3, "three");
+    /// map.insert(5, "five");
+    ///
+    /// assert_eq(map.lower_bound(&3), Some((&3, &"three")));
+    /// assert_eq(map.lower_bound(&2), Some((&3, &"three")));
+    /// assert_eq(map.lower_bound(&6), None);
+    /// ```
+    public fn lower_bound(&self, key: &K) -> Maybe<(&K, &V)> {
+        match &self.root {
+            None => None,
+            Some(node) => self.find_lower_bound(node, key),
+        }
+    }
+
+    /// Returns the first key-value pair with a key strictly greater than the given key.
+    ///
+    /// This is an efficient O(log n) bound query.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "one");
+    /// map.insert(3, "three");
+    /// map.insert(5, "five");
+    ///
+    /// assert_eq(map.upper_bound(&3), Some((&5, &"five")));
+    /// assert_eq(map.upper_bound(&5), None);
+    /// ```
+    public fn upper_bound(&self, key: &K) -> Maybe<(&K, &V)> {
+        match &self.root {
+            None => None,
+            Some(node) => self.find_upper_bound(node, key),
+        }
+    }
+
+    /// Returns the key-value pair corresponding to the supplied key.
+    ///
+    /// This is useful when the key type implements `Ord` based on only a portion
+    /// of the value, and you want to get the full stored key.
+    public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
+        match &self.root {
+            None => None,
+            Some(node) => self.search_node_kv(node, key),
+        }
+    }
+
+    /// Removes a key from the map, returning the stored key and value if present.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "one");
+    /// assert_eq(map.remove_entry(&1), Some((1, "one")));
+    /// assert_eq(map.remove_entry(&1), None);
+    /// ```
+    public fn remove_entry(&mut self, key: &K) -> Maybe<(K, V)>
+    where K: Clone, V: Clone
+    {
+        let key_clone = key.clone();
+        match self.remove(key) {
+            None => None,
+            Some(v) => Some((key_clone, v)),
+        }
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs `(k, v)` for which `f(&k, &v)` returns `false`.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, 10);
+    /// map.insert(2, 20);
+    /// map.insert(3, 30);
+    /// map.retain(|k, _v| *k % 2 != 0);
+    /// assert_eq(map.len(), 2); // Only odd keys remain
+    /// ```
+    public fn retain<F: fn(&K, &V) -> Bool>(&mut self, f: F)
+    where K: Clone, V: Clone
+    {
+        // Collect keys to remove (can't modify during iteration)
+        let mut to_remove: List<K> = List.new();
+        for (k, v) in self.iter() {
+            if !f(k, v) {
+                to_remove.push(k.clone());
+            }
+        }
+        // Remove collected keys
+        for key in to_remove.iter() {
+            self.remove(key);
+        }
+    }
+
+    /// Moves all elements from `other` into `self`, leaving `other` empty.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = BTreeMap.new();
+    /// a.insert(1, "one");
+    /// let mut b = BTreeMap.new();
+    /// b.insert(2, "two");
+    /// a.append(&mut b);
+    /// assert_eq(a.len(), 2);
+    /// assert(b.is_empty());
+    /// ```
+    public fn append(&mut self, other: &mut BTreeMap<K, V>)
+    where K: Clone, V: Clone
+    {
+        // Collect all entries from other
+        let mut entries: List<(K, V)> = List.new();
+        for (k, v) in other.iter() {
+            entries.push((k.clone(), v.clone()));
+        }
+        // Clear other
+        other.clear();
+        // Insert into self
+        for entry in entries.iter() {
+            self.insert(entry.0.clone(), entry.1.clone());
+        }
+    }
+
+    /// Splits the map into two at the given key. Returns everything after the given key,
+    /// including the key itself.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = BTreeMap.new();
+    /// a.insert(1, "one");
+    /// a.insert(2, "two");
+    /// a.insert(3, "three");
+    /// let b = a.split_off(&2);
+    /// assert_eq(a.len(), 1); // Only key 1
+    /// assert_eq(b.len(), 2); // Keys 2 and 3
+    /// ```
+    public fn split_off(&mut self, key: &K) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut other = BTreeMap.new();
+        // Collect entries that should move to the new map
+        let mut to_move: List<K> = List.new();
+        for (k, _v) in self.iter() {
+            if k >= key {
+                to_move.push(k.clone());
+            }
+        }
+        // Move entries
+        for k in to_move.iter() {
+            match self.remove(k) {
+                Some(v) => { other.insert(k.clone(), v); }
+                None => {}
+            }
+        }
+        other
+    }
+
+    /// Returns a mutable iterator over the values of the map, in order by key.
+    public fn values_mut(&mut self) -> BTreeMapValuesMut<K, V>
+    where K: Clone
+    {
+        // Collect keys for safe mutable iteration
+        let mut all_keys: List<K> = List.new();
+        for k in self.keys() {
+            all_keys.push(k.clone());
+        }
+        BTreeMapValuesMut { map: self, keys: all_keys, idx: 0 }
+    }
+
+    /// Returns a mutable iterator over key-value pairs in order.
+    /// Keys are immutable references, values are mutable references.
+    public fn iter_mut(&mut self) -> BTreeMapIterMut<K, V>
+    where K: Clone
+    {
+        let mut all_keys: List<K> = List.new();
+        for k in self.keys() {
+            all_keys.push(k.clone());
+        }
+        BTreeMapIterMut { map: self, keys: all_keys, idx: 0 }
+    }
+
+    // =========================================================================
+    // Internal methods
+    // =========================================================================
+
+    fn search_node_kv(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<(&K, &V)> {
+        let mut i = 0;
+        while i < node.keys.len() && *key > node.keys[i] {
+            i = i + 1;
+        }
+
+        if i < node.keys.len() && *key == node.keys[i] {
+            return Some((&node.keys[i], &node.values[i]));
+        }
+
+        if node.is_leaf {
+            return None;
+        }
+
+        self.search_node_kv(&node.children[i], key)
+    }
+
+    fn search_node(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<V> {
+        let klen = node.keys.len();
+        let mut i = 0;
+        while i < klen {
+            if *key > node.keys[i] {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if i < klen {
+            if *key == node.keys[i] {
+                return Some(node.values[i]);
+            }
+        }
+
+        if node.is_leaf {
+            return None;
+        }
+
+        self.search_node(&node.children[i], key)
+    }
+
+    fn search_node_mut(&mut self, node: &mut Heap<BTreeNode<K, V>>, key: &K) -> Maybe<&mut V> {
+        let mut i = 0;
+        let keys_len = node.keys.len();
+        while i < keys_len {
+            if *key > node.keys[i] {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        let found = if i < keys_len {
+            *key == node.keys[i]
+        } else {
+            false
+        };
+
+        if found {
+            return Some(&mut node.values[i]);
+        }
+
+        if node.is_leaf {
+            return None;
+        }
+
+        self.search_node_mut(&mut node.children[i], key)
+    }
+
+    /// Find a key in a node and replace its value directly via list element
+    /// assignment (SetE). Returns the old value if found.
+    /// This avoids &mut references through Maybe variants, which the VBC
+    /// compiler doesn't handle correctly (no Ref emission for &mut in variants).
+    fn replace_value_in_node(&mut self, node: &mut Heap<BTreeNode<K, V>>, key: K, value: V) -> Maybe<V>
+    where V: Clone
+    {
+        let mut i = 0;
+        let keys_len = node.keys.len();
+        while i < keys_len {
+            if key > node.keys[i] {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if i < keys_len && key == node.keys[i] {
+            let old = node.values[i];
+            node.values[i] = value;
+            return Some(old);
+        }
+
+        if node.is_leaf {
+            return None;
+        }
+
+        self.replace_value_in_node(&mut node.children[i], key, value)
+    }
+
+    fn split_child(&mut self, parent: &mut Heap<BTreeNode<K, V>>, child_idx: Int)
+    where K: Clone, V: Clone
+    {
+        let mid = B - 1;
+
+        // Extract data from child in a scope to end borrow before modifying parent
+        let (new_node, mid_key, mid_value) = {
+            let child = &mut parent.children[child_idx];
+            let child_is_leaf = child.is_leaf;
+            let child_keys_len = child.keys.len();
+            let child_children_len = child.children.len();
+
+            // Create new node with right half
+            let mut new_node = BTreeNode {
+                keys: List.new(),
+                values: List.new(),
+                children: List.new(),
+                is_leaf: child_is_leaf,
+            };
+
+            // Move keys && values to new node
+            let mut i = mid + 1;
+            while i < child_keys_len {
+                new_node.keys.push(child.keys[i].clone());
+                new_node.values.push(child.values[i].clone());
+                i = i + 1;
+            }
+
+            // Move children if internal node
+            if !child_is_leaf {
+                let mut j = mid + 1;
+                while j < child_children_len {
+                    new_node.children.push(child.children[j].clone());
+                    j = j + 1;
+                }
+            }
+
+            // Get middle key/value
+            let mid_key = child.keys[mid].clone();
+            let mid_value = child.values[mid].clone();
+
+            // Truncate child
+            child.keys.truncate(mid);
+            child.values.truncate(mid);
+            if !child_is_leaf {
+                child.children.truncate(mid + 1);
+            }
+
+            (new_node, mid_key, mid_value)
+        };
+
+        // Insert middle key into parent (child borrow ended)
+        parent.keys.insert(child_idx, mid_key);
+        parent.values.insert(child_idx, mid_value);
+        parent.children.insert(child_idx + 1, Heap.new(new_node));
+    }
+
+    fn insert_non_full(&mut self, node: &mut Heap<BTreeNode<K, V>>, key: K, value: V)
+    where K: Clone, V: Clone
+    {
+        let mut i = node.keys.len() as Int - 1;
+
+        if node.is_leaf {
+            // Find position && insert
+            while i >= 0 && key < node.keys[i as Int] {
+                i = i - 1;
+            }
+            node.keys.insert((i + 1) as Int, key);
+            node.values.insert((i + 1) as Int, value);
+        } else {
+            // Find child to recurse into
+            while i >= 0 && key < node.keys[i as Int] {
+                i = i - 1;
+            }
+            i = i + 1;
+
+            // Split child if full
+            if node.children[i as Int].keys.len() == MAX_KEYS {
+                self.split_child(node, i as Int);
+                if key > node.keys[i as Int] {
+                    i = i + 1;
+                }
+            }
+
+            self.insert_non_full(&mut node.children[i as Int], key, value);
+        }
+    }
+
+    fn remove_from_node(&mut self, node: &mut Heap<BTreeNode<K, V>>, key: &K) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        // Find position of key
+        let mut i = 0;
+        let keys_len = node.keys.len();
+        while i < keys_len {
+            if *key > node.keys[i] {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        let key_found = if i < keys_len {
+            *key == node.keys[i]
+        } else {
+            false
+        };
+
+        let is_leaf = node.is_leaf;
+
+        // Key is in this node
+        if key_found {
+            if is_leaf {
+                // Simple case: remove from leaf
+                node.keys.remove(i);
+                return Some(node.values.remove(i));
+            } else {
+                // Internal node: replace with predecessor || successor
+                return self.remove_from_internal(node, i);
+            }
+        }
+
+        // Key not in this node
+        if is_leaf {
+            return None;
+        }
+
+        // Ensure child has enough keys
+        let child_is_min = node.children[i].keys.len() == MIN_KEYS;
+        if child_is_min {
+            self.fill_child(node, i);
+        }
+
+        // Recurse (index might have changed after fill)
+        let children_len = node.children.len();
+        if i >= children_len {
+            self.remove_from_node(&mut node.children[i - 1], key)
+        } else {
+            self.remove_from_node(&mut node.children[i], key)
+        }
+    }
+
+    fn remove_from_internal(&mut self, node: &mut Heap<BTreeNode<K, V>>, idx: Int) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        let key = node.keys[idx].clone();
+
+        // If predecessor child has enough keys, replace with predecessor
+        if node.children[idx].keys.len() >= B {
+            let (pred_key, pred_value) = self.get_predecessor(&mut node.children[idx]);
+            node.keys[idx] = pred_key;
+            let old_value = replace(&mut node.values[idx], pred_value);
+            self.remove_from_node(&mut node.children[idx], &node.keys[idx]);
+            return Some(old_value);
+        }
+
+        // If successor child has enough keys, replace with successor
+        if node.children[idx + 1].keys.len() >= B {
+            let (succ_key, succ_value) = self.get_successor(&mut node.children[idx + 1]);
+            node.keys[idx] = succ_key;
+            let old_value = replace(&mut node.values[idx], succ_value);
+            self.remove_from_node(&mut node.children[idx + 1], &node.keys[idx]);
+            return Some(old_value);
+        }
+
+        // Merge children && delete from merged node
+        self.merge_children(node, idx);
+        self.remove_from_node(&mut node.children[idx], &key)
+    }
+
+    fn get_predecessor(&self, node: &mut Heap<BTreeNode<K, V>>) -> (K, V)
+    where K: Clone, V: Clone
+    {
+        if node.is_leaf {
+            let last_idx = node.keys.len() - 1;
+            (node.keys[last_idx].clone(), node.values[last_idx].clone())
+        } else {
+            let last_idx = node.children.len() - 1;
+            self.get_predecessor(&mut node.children[last_idx])
+        }
+    }
+
+    fn get_successor(&self, node: &mut Heap<BTreeNode<K, V>>) -> (K, V)
+    where K: Clone, V: Clone
+    {
+        if node.is_leaf {
+            (node.keys[0].clone(), node.values[0].clone())
+        } else {
+            self.get_successor(&mut node.children[0])
+        }
+    }
+
+    fn fill_child(&mut self, node: &mut Heap<BTreeNode<K, V>>, idx: Int)
+    where K: Clone, V: Clone
+    {
+        // Try borrowing from left sibling
+        if idx > 0 && node.children[idx - 1].keys.len() >= B {
+            self.borrow_from_prev(node, idx);
+        }
+        // Try borrowing from right sibling
+        else if idx < node.children.len() - 1 && node.children[idx + 1].keys.len() >= B {
+            self.borrow_from_next(node, idx);
+        }
+        // Merge with sibling
+        else {
+            if idx < node.children.len() - 1 {
+                self.merge_children(node, idx);
+            } else {
+                self.merge_children(node, idx - 1);
+            }
+        }
+    }
+
+    fn borrow_from_prev(&mut self, node: &mut Heap<BTreeNode<K, V>>, idx: Int)
+    where K: Clone, V: Clone
+    {
+        // Get parent key to move to child
+        let parent_key = node.keys[idx - 1].clone();
+        let parent_value = node.values[idx - 1].clone();
+
+        // Get data from sibling first (releases borrow after scope)
+        let sibling_is_leaf = node.children[idx - 1].is_leaf;
+        let (sibling_key, sibling_value, maybe_sibling_child) = {
+            let sibling = &mut node.children[idx - 1];
+            let last_key_idx = sibling.keys.len() - 1;
+            let key = sibling.keys.remove(last_key_idx);
+            let value = sibling.values.remove(last_key_idx);
+            let child = if !sibling_is_leaf {
+                let last_child_idx = sibling.children.len() - 1;
+                Some(sibling.children.remove(last_child_idx))
+            } else {
+                None
+            };
+            (key, value, child)
+        };
+
+        // Update parent
+        node.keys[idx - 1] = sibling_key;
+        node.values[idx - 1] = sibling_value;
+
+        // Update child
+        {
+            let child = &mut node.children[idx];
+            child.keys.insert(0, parent_key);
+            child.values.insert(0, parent_value);
+            if let Some(c) = maybe_sibling_child {
+                child.children.insert(0, c);
+            }
+        }
+    }
+
+    fn borrow_from_next(&mut self, node: &mut Heap<BTreeNode<K, V>>, idx: Int)
+    where K: Clone, V: Clone
+    {
+        // Get parent key to move to child
+        let parent_key = node.keys[idx].clone();
+        let parent_value = node.values[idx].clone();
+
+        // Get data from sibling first (releases borrow after scope)
+        let sibling_is_leaf = node.children[idx + 1].is_leaf;
+        let (sibling_key, sibling_value, maybe_sibling_child) = {
+            let sibling = &mut node.children[idx + 1];
+            let key = sibling.keys.remove(0);
+            let value = sibling.values.remove(0);
+            let child = if !sibling_is_leaf {
+                Some(sibling.children.remove(0))
+            } else {
+                None
+            };
+            (key, value, child)
+        };
+
+        // Update parent
+        node.keys[idx] = sibling_key;
+        node.values[idx] = sibling_value;
+
+        // Update child
+        {
+            let child = &mut node.children[idx];
+            child.keys.push(parent_key);
+            child.values.push(parent_value);
+            if let Some(c) = maybe_sibling_child {
+                child.children.push(c);
+            }
+        }
+    }
+
+    fn merge_children(&mut self, node: &mut Heap<BTreeNode<K, V>>, idx: Int) {
+        // Remove sibling and parent key/value first (before borrowing child)
+        let sibling = node.children.remove(idx + 1);
+        let parent_key = node.keys.remove(idx);
+        let parent_value = node.values.remove(idx);
+
+        // Now we can safely borrow child
+        let child = &mut node.children[idx];
+
+        // Move key from parent to child
+        child.keys.push(parent_key);
+        child.values.push(parent_value);
+
+        // Move all keys/values from sibling
+        for key in sibling.keys {
+            child.keys.push(key);
+        }
+        for value in sibling.values {
+            child.values.push(value);
+        }
+
+        // Move children if internal
+        if !child.is_leaf {
+            for c in sibling.children {
+                child.children.push(c);
+            }
+        }
+    }
+
+    fn find_min(&self, node: &Heap<BTreeNode<K, V>>) -> Maybe<(&K, &V)> {
+        if node.is_leaf {
+            if node.keys.is_empty() {
+                None
+            } else {
+                Some((&node.keys[0], &node.values[0]))
+            }
+        } else {
+            self.find_min(&node.children[0])
+        }
+    }
+
+    fn find_max(&self, node: &Heap<BTreeNode<K, V>>) -> Maybe<(&K, &V)> {
+        if node.is_leaf {
+            if node.keys.is_empty() {
+                None
+            } else {
+                let last = node.keys.len() - 1;
+                Some((&node.keys[last], &node.values[last]))
+            }
+        } else {
+            let last = node.children.len() - 1;
+            self.find_max(&node.children[last])
+        }
+    }
+
+    /// Find first key-value pair where key >= given key.
+    fn find_lower_bound(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<(&K, &V)> {
+        let mut best: Maybe<(&K, &V)> = None;
+
+        let mut i = 0;
+        while i < node.keys.len() {
+            if node.keys[i] >= *key {
+                best = Some((&node.keys[i], &node.values[i]));
+                break;
+            }
+            i = i + 1;
+        }
+
+        if !node.is_leaf {
+            let child_result = self.find_lower_bound(&node.children[i], key);
+            match child_result {
+                Some(pair) => {
+                    match best {
+                        None => { return Some(pair); }
+                        Some(curr) => {
+                            if *pair.0 < *curr.0 {
+                                return Some(pair);
+                            } else {
+                                return Some(curr);
+                            }
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+
+        best
+    }
+
+    /// Find first key-value pair where key > given key.
+    fn find_upper_bound(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<(&K, &V)> {
+        let mut best: Maybe<(&K, &V)> = None;
+
+        let mut i = 0;
+        while i < node.keys.len() {
+            if node.keys[i] > *key {
+                best = Some((&node.keys[i], &node.values[i]));
+                break;
+            }
+            i = i + 1;
+        }
+
+        if !node.is_leaf {
+            let child_result = self.find_upper_bound(&node.children[i], key);
+            match child_result {
+                Some(pair) => {
+                    match best {
+                        None => { return Some(pair); }
+                        Some(curr) => {
+                            if *pair.0 < *curr.0 {
+                                return Some(pair);
+                            } else {
+                                return Some(curr);
+                            }
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+
+        best
+    }
+
+    /// Consume this map and return all keys as a sorted list.
+    public fn into_keys(self) -> List<K>
+    where K: Clone
+    {
+        let mut result: List<K> = List.new();
+        for (k, _v) in self.iter() {
+            result.push(k.clone());
+        }
+        result
+    }
+
+    /// Consume this map and return all values in key-sorted order.
+    public fn into_values(self) -> List<V>
+    where V: Clone
+    {
+        let mut result: List<V> = List.new();
+        for (_k, v) in self.iter() {
+            result.push(v.clone());
+        }
+        result
+    }
+
+    /// Convert map to a list of key-value pairs in sorted key order.
+    public fn to_entries(&self) -> List<(K, V)>
+    where K: Clone, V: Clone
+    {
+        let mut result: List<(K, V)> = List.with_capacity(self.len());
+        for (k, v) in self.iter() {
+            result.push((k.clone(), v.clone()));
+        }
+        result
+    }
+
+    /// Return all keys as a sorted list (non-consuming).
+    public fn keys_list(&self) -> List<K>
+    where K: Clone
+    {
+        let mut result: List<K> = List.with_capacity(self.len());
+        let mut iter = self.keys();
+        while let Some(k) = iter.next() {
+            result.push(k.clone());
+        }
+        result
+    }
+
+    /// Return all values in key-sorted order (non-consuming).
+    public fn values_list(&self) -> List<V>
+    where V: Clone
+    {
+        let mut result: List<V> = List.with_capacity(self.len());
+        let mut iter = self.values();
+        while let Some(v) = iter.next() {
+            result.push(v.clone());
+        }
+        result
+    }
+
+    /// Try to insert a key-value pair. Returns Err if the key already exists.
+    public fn try_insert(&mut self, key: K, value: V) -> Result<(), V>
+    where K: Clone
+    {
+        if self.contains_key(&key) {
+            Err(value)
+        } else {
+            self.insert(key, value);
+            Ok(())
+        }
+    }
+
+    /// Remove all entries matching the predicate and return them as a list.
+    public fn extract_if<F: fn(&K, &V) -> Bool>(&mut self, f: F) -> List<(K, V)>
+    where K: Clone, V: Clone
+    {
+        let mut extracted: List<(K, V)> = List.new();
+        let mut to_remove: List<K> = List.new();
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                extracted.push((k.clone(), v.clone()));
+                to_remove.push(k.clone());
+            }
+        }
+        for k in to_remove.iter() {
+            self.remove(k);
+        }
+        extracted
+    }
+
+    /// Drain all entries from the map, returning an iterator over (K, V) pairs.
+    /// After draining, the map is empty.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut map = BTreeMap.new();
+    /// map.insert(1, "a");
+    /// map.insert(2, "b");
+    /// let mut drain = map.drain();
+    /// // drain yields (1, "a"), (2, "b") in sorted order
+    /// assert_eq(map.len(), 0);
+    /// ```
+    public fn drain(&mut self) -> BTreeMapDrain<K, V>
+    where K: Clone, V: Clone
+    {
+        let entries = self.to_entries();
+        self.clear();
+        BTreeMapDrain { entries: entries, idx: 0 }
+    }
+
+    /// Returns true if the map contains the given value.
+    public fn contains_value(&self, value: &V) -> Bool
+    where V: Eq
+    {
+        for (_k, v) in self.iter() {
+            if *v == *value {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns the value for the given key, or the default if not found.
+    public fn get_or_default(&self, key: &K, default: V) -> V
+    where V: Clone
+    {
+        match self.get(key) {
+            Some(v) => v.clone(),
+            None => default,
+        }
+    }
+
+    /// Returns true if any entry satisfies the predicate.
+    public fn any<F: fn(&K, &V) -> Bool>(&self, f: F) -> Bool {
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns true if all entries satisfy the predicate.
+    /// Returns true for empty maps (vacuously true).
+    public fn all<F: fn(&K, &V) -> Bool>(&self, f: F) -> Bool {
+        for (k, v) in self.iter() {
+            if !f(k, v) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Find the first entry matching a predicate (in sorted key order).
+    public fn find<F: fn(&K, &V) -> Bool>(&self, f: F) -> Maybe<(&K, &V)> {
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                return Some((k, v));
+            }
+        }
+        None
+    }
+
+    /// Transforms values while preserving keys and ordering.
+    /// Returns a new BTreeMap with the same keys but transformed values.
+    public fn map_values<U, F: fn(&K, &V) -> U>(&self, f: F) -> BTreeMap<K, U>
+    where K: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            let new_v = f(k, v);
+            result.insert(k.clone(), new_v);
+        }
+        result
+    }
+
+    /// Filters entries and transforms values in one pass.
+    /// Returns a new BTreeMap with only entries where `f` returns `Some`.
+    /// Return a new BTreeMap containing only entries matching the predicate.
+    public fn filter<F: fn(&K, &V) -> Bool>(&self, f: F) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
+    }
+
+    public fn filter_map<U, F: fn(&K, &V) -> Maybe<U>>(&self, f: F) -> BTreeMap<K, U>
+    where K: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if let Some(new_v) = f(k, v) {
+                result.insert(k.clone(), new_v);
+            }
+        }
+        result
+    }
+
+    /// Splits the map into two based on a predicate.
+    /// Returns (matching, non-matching).
+    public fn partition<F: fn(&K, &V) -> Bool>(&self, f: F) -> (BTreeMap<K, V>, BTreeMap<K, V>)
+    where K: Clone, V: Clone
+    {
+        let mut yes = BTreeMap.new();
+        let mut no = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                yes.insert(k.clone(), v.clone());
+            } else {
+                no.insert(k.clone(), v.clone());
+            }
+        }
+        (yes, no)
+    }
+
+    /// Merges another BTreeMap into this one, using `resolve` for key conflicts.
+    /// The resolve function receives (existing_value, new_value) and returns the merged value.
+    public fn merge<F: fn(V, V) -> V>(&mut self, other: BTreeMap<K, V>, resolve: F) {
+        for (k, v) in other.into_iter() {
+            if let Some(existing) = self.remove(&k) {
+                self.insert(k, resolve(existing, v));
+            } else {
+                self.insert(k, v);
+            }
+        }
+    }
+
+    /// Returns the number of entries matching a predicate.
+    public fn count_where<F: fn(&K, &V) -> Bool>(&self, f: F) -> Int {
+        let mut count = 0;
+        for (k, v) in self.iter() {
+            if f(k, v) {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    /// Returns a new BTreeMap containing entries from self whose keys
+    /// are NOT present in other.
+    public fn difference(&self, other: &BTreeMap<K, V>) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if !other.contains_key(k) {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
+    }
+
+    /// Returns a new BTreeMap containing entries from self whose keys
+    /// ARE present in other. Values come from self.
+    public fn intersection(&self, other: &BTreeMap<K, V>) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if other.contains_key(k) {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
+    }
+
+    /// Returns a new BTreeMap containing entries whose keys are in exactly
+    /// one of self or other (XOR on keys).
+    public fn symmetric_difference(&self, other: &BTreeMap<K, V>) -> BTreeMap<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result = BTreeMap.new();
+        for (k, v) in self.iter() {
+            if !other.contains_key(k) {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        for (k, v) in other.iter() {
+            if !self.contains_key(k) {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
+    }
+
+    /// Swap keys and values, returning a new BTreeMap<V, K>.
+    /// If multiple keys map to the same value, only one is kept.
+    public fn invert(&self) -> BTreeMap<V, K>
+    where V: Ord + Clone, K: Clone
+    {
+        let mut result: BTreeMap<V, K> = BTreeMap.new();
+        for (k, v) in self.iter() {
+            result.insert(v.clone(), k.clone());
+        }
+        result
+    }
+
+    /// Update self with all entries from other. Existing keys are overwritten.
+    public fn update(&mut self, other: &BTreeMap<K, V>)
+    where K: Clone, V: Clone
+    {
+        for (k, v) in other.iter() {
+            self.insert(k.clone(), v.clone());
+        }
+    }
+
+    /// Fold over all key-value pairs, accumulating a result.
+    public fn fold<U>(&self, init: U, f: fn(U, &K, &V) -> U) -> U {
+        let mut acc = init;
+        for (k, v) in self.iter() {
+            acc = f(acc, k, v);
+        }
+        acc
+    }
+
+    /// Apply a function to each key-value pair for its side effects.
+    public fn for_each<F: fn(&K, &V)>(&self, f: F) {
+        for (k, v) in self.iter() {
+            f(k, v);
+        }
+    }
+}
+
+implement<K: Ord, V> BTreeNode<K, V> {
+    fn new_leaf() -> BTreeNode<K, V> {
+        BTreeNode {
+            keys: List.new(),
+            values: List.new(),
+            children: List.new(),
+            is_leaf: true,
+        }
+    }
+
+    fn new_internal() -> BTreeNode<K, V> {
+        BTreeNode {
+            keys: List.new(),
+            values: List.new(),
+            children: List.new(),
+            is_leaf: false,
+        }
+    }
+}
+
+implement<K: Ord, V> Default for BTreeMap<K, V> {
+    fn default() -> BTreeMap<K, V> {
+        BTreeMap.new()
+    }
+}
+
+implement<K: Ord + Display, V: Display> Display for BTreeMap<K, V> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(pair) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let key: &K = pair.0;
+                    let value: &V = pair.1;
+                    key.fmt(f)?;
+                    f.write_str(": ")?;
+                    value.fmt(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<K: Ord + Debug, V: Debug> Debug for BTreeMap<K, V> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BTreeMap{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(pair) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let key: &K = pair.0;
+                    let value: &V = pair.1;
+                    key.fmt_debug(f)?;
+                    f.write_str(": ")?;
+                    value.fmt_debug(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<K: Ord + Clone, V: Clone> Clone for BTreeMap<K, V> {
+    fn clone(&self) -> BTreeMap<K, V> {
+        let mut new_map = BTreeMap.new();
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(pair) => {
+                    let k: &K = pair.0;
+                    let v: &V = pair.1;
+                    new_map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        new_map
+    }
+}
+
+// =============================================================================
+// Ord for BTreeMap and BTreeSet
+// =============================================================================
+
+implement<K: Ord, V: Ord> Ord for BTreeMap<K, V> {
+    fn cmp(&self, other: &BTreeMap<K, V>) -> Ordering {
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            let a = it_self.next();
+            let b = it_other.next();
+            if a.is_none() && b.is_none() {
+                return Ordering.Equal;
+            }
+            if a.is_none() {
+                return Ordering.Less;
+            }
+            if b.is_none() {
+                return Ordering.Greater;
+            }
+            let pa = a.unwrap();
+            let pb = b.unwrap();
+            // Compare keys first
+            let key_cmp = pa.0.cmp(pb.0);
+            match key_cmp {
+                Ordering.Equal => {
+                    // Keys equal, compare values
+                    let val_cmp = pa.1.cmp(pb.1);
+                    match val_cmp {
+                        Ordering.Equal => {}
+                        _ => { return val_cmp; }
+                    }
+                }
+                _ => { return key_cmp; }
+            }
+        }
+    }
+}
+
+implement<T: Ord> Ord for BTreeSet<T> {
+    fn cmp(&self, other: &BTreeSet<T>) -> Ordering {
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            let a = it_self.next();
+            let b = it_other.next();
+            if a.is_none() && b.is_none() {
+                return Ordering.Equal;
+            }
+            if a.is_none() {
+                return Ordering.Less;
+            }
+            if b.is_none() {
+                return Ordering.Greater;
+            }
+            let va = a.unwrap();
+            let vb = b.unwrap();
+            let c = va.cmp(vb);
+            match c {
+                Ordering.Equal => {}
+                _ => { return c; }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Hash for BTreeMap and BTreeSet
+// =============================================================================
+
+implement<K: Ord + Hash, V: Hash> Hash for BTreeMap<K, V> {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.len);
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(pair) => {
+                    let k: &K = pair.0;
+                    let v: &V = pair.1;
+                    k.hash(hasher);
+                    v.hash(hasher);
+                }
+            }
+        }
+    }
+}
+
+implement<T: Ord + Hash> Hash for BTreeSet<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.len());
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(item) => {
+                    let val: &T = item;
+                    val.hash(hasher);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Index<K> for BTreeMap
+// =============================================================================
+
+implement<K: Ord, V> Index<K> for BTreeMap<K, V> {
+    type Output = V;
+
+    fn index(&self, key: K) -> &V {
+        self.get(&key).expect("Key not found in BTreeMap")
+    }
+}
+
+// =============================================================================
+// BTreeMap Iterators
+// =============================================================================
+
+/// Iterator over BTreeMap entries in sorted order.
+public type BTreeMapIter<K: Ord, V> is {
+    stack: List<(&Heap<BTreeNode<K, V>>, Int)>,
+    len: Int,
+};
+
+implement<K: Ord, V> BTreeMapIter<K, V> {
+    fn new(map: &BTreeMap<K, V>) -> BTreeMapIter<K, V> {
+        let mut iter = BTreeMapIter {
+            stack: List.new(),
+            len: map.len,
+        };
+
+        if let Some(ref root) = map.root {
+            iter.push_left(root);
+        }
+
+        iter
+    }
+
+    /// Create an iterator that starts at the first key >= start_key.
+    ///
+    /// This is O(log n) instead of O(n) for range queries.
+    /// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
+    fn seek_from(map: &BTreeMap<K, V>, start_key: &K) -> BTreeMapIter<K, V> {
+        let mut iter = BTreeMapIter {
+            stack: List.new(),
+            len: 0,
+        };
+
+        if let Some(ref root) = map.root {
+            iter.seek_to_key(root, start_key);
+            // Estimate remaining length (upper bound is map.len)
+            iter.len = map.len;
+        }
+
+        iter
+    }
+
+    /// Seek to the first key >= target in the subtree rooted at node.
+    ///
+    /// Uses binary search within each node for O(log n) total time.
+    fn seek_to_key(&mut self, node: &Heap<BTreeNode<K, V>>, target: &K) {
+        // Use a stack-based iteration to avoid reassignment type issues
+        let mut to_visit: List<&Heap<BTreeNode<K, V>>> = List.new();
+        to_visit.push(node);
+
+        while let Some(current) = to_visit.pop() {
+            // Binary search for position in current node
+            let pos = BTreeMapIter.find_key_position(current, target);
+
+            if current.is_leaf {
+                // At leaf: push with position where target would be
+                self.stack.push((current, pos));
+            } else {
+                // Internal node: push current position and descend
+                self.stack.push((current, pos));
+
+                if pos < current.children.len() {
+                    let child: &Heap<BTreeNode<K, V>> = &current.children[pos];
+                    to_visit.push(child);
+                }
+                // else: No more children, we're done
+            }
+        }
+    }
+
+    /// Binary search to find the index of the first key >= target.
+    ///
+    /// Returns the index where target would be inserted to maintain order.
+    fn find_key_position(node: &Heap<BTreeNode<K, V>>, target: &K) -> Int {
+        let mut low = 0;
+        let mut high = node.keys.len();
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let key: &K = &node.keys[mid];
+            if *key < *target {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        low
+    }
+
+    fn push_left(&mut self, start_node: &Heap<BTreeNode<K, V>>) {
+        // Use stack-based iteration to avoid reassignment type issues
+        let mut to_visit: List<&Heap<BTreeNode<K, V>>> = List.new();
+        to_visit.push(start_node);
+
+        while let Some(node) = to_visit.pop() {
+            self.stack.push((node, 0));
+            if !node.is_leaf {
+                let child: &Heap<BTreeNode<K, V>> = &node.children[0];
+                to_visit.push(child);
+            }
+        }
+    }
+}
+
+implement<K: Ord, V> Iterator for BTreeMapIter<K, V> {
+    type Item = (&K, &V);
+
+    fn next(&mut self) -> Maybe<(&K, &V)> {
+        while let Some((node, idx)) = self.stack.pop() {
+            if idx < node.keys.len() {
+                // Return current key/value
+                let res = (&node.keys[idx], &node.values[idx]);
+
+                // Push back with incremented index
+                self.stack.push((node, idx + 1));
+
+                // If internal node, push left path of next child
+                if !node.is_leaf && idx + 1 < node.children.len() {
+                    self.push_left(&node.children[idx + 1]);
+                }
+
+                self.len = self.len - 1;
+                return Some(res);
+            }
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.len, Some(self.len))
+    }
+}
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapIter<K, V> {
+    fn len(&self) -> Int { self.len }
+}
+
+// IntoIterator for BTreeMapIter so it can be used in for loops
+implement<K: Ord, V> IntoIterator for BTreeMapIter<K, V> {
+    type Item = (&K, &V);
+    type IntoIter = BTreeMapIter<K, V>;
+
+    fn into_iter(self) -> BTreeMapIter<K, V> {
+        self
+    }
+}
+
+/// Iterator over BTreeMap keys.
+public type BTreeMapKeys<K: Ord, V> is {
+    inner: BTreeMapIter<K, V>,
+};
+
+implement<K: Ord, V> Iterator for BTreeMapKeys<K, V> {
+    type Item = &K;
+
+    fn next(&mut self) -> Maybe<&K> {
+        match self.inner.next() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+}
+
+// IntoIterator for BTreeMapKeys so it can be used in for loops
+implement<K: Ord, V> IntoIterator for BTreeMapKeys<K, V> {
+    type Item = &K;
+    type IntoIter = BTreeMapKeys<K, V>;
+
+    fn into_iter(self) -> BTreeMapKeys<K, V> {
+        self
+    }
+}
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapKeys<K, V> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+implement<K: Ord + Clone, V> BTreeMapKeys<K, V> {
+    /// Create an iterator that clones each key.
+    /// Transforms Iterator<Item = &K> into Iterator<Item = K>.
+    public fn cloned(self) -> Cloned<BTreeMapKeys<K, V>> {
+        Cloned { inner: self }
+    }
+}
+
+/// Iterator over BTreeMap values.
+public type BTreeMapValues<K: Ord, V> is {
+    inner: BTreeMapIter<K, V>,
+};
+
+implement<K: Ord, V> Iterator for BTreeMapValues<K, V> {
+    type Item = &V;
+
+    fn next(&mut self) -> Maybe<&V> {
+        match self.inner.next() {
+            None => None,
+            Some(pair) => Some(pair.1),
+        }
+    }
+}
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapValues<K, V> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+// IntoIterator for BTreeMapValues so it can be used in for loops
+implement<K: Ord, V> IntoIterator for BTreeMapValues<K, V> {
+    type Item = &V;
+    type IntoIter = BTreeMapValues<K, V>;
+
+    fn into_iter(self) -> BTreeMapValues<K, V> {
+        self
+    }
+}
+
+/// Range iterator over BTreeMap.
+///
+/// Optimized for O(log n + k) where k is the number of elements in range.
+/// Uses binary search to seek to range start instead of scanning from beginning.
+///
+/// Spec: docs/audit1.md Section 13.2 (BTreeMap range optimization)
+public type BTreeMapRange<K: Ord, V> is {
+    iter: BTreeMapIter<K, V>,
+    /// Start bound for filtering (only used when start is exclusive)
+    start: Maybe<&K>,
+    start_inclusive: Bool,
+    /// End bound for filtering
+    end: Maybe<&K>,
+    end_inclusive: Bool,
+    /// Whether we've skipped past start (for exclusive start bound)
+    past_start: Bool,
+};
+
+implement<K: Ord, V> BTreeMapRange<K, V> {
+    /// Create a new range iterator with O(log n) seek to start.
+    fn new<R: RangeBounds<K>>(map: &BTreeMap<K, V>, range: R) -> BTreeMapRange<K, V> {
+        // Get start bound
+        let start_bound = range.start_bound();
+        let start_inclusive = range.start_is_inclusive();
+
+        // Create iterator - seek to start if we have a start bound
+        let iter = match start_bound {
+            Some(start_key) => BTreeMapIter.seek_from(map, start_key),
+            None => BTreeMapIter.new(map),
+        };
+
+        BTreeMapRange {
+            iter: iter,
+            start: start_bound,
+            start_inclusive: start_inclusive,
+            end: range.end_bound(),
+            end_inclusive: range.end_is_inclusive(),
+            past_start: start_inclusive, // If inclusive, we're already past start
+        }
+    }
+}
+
+implement<K: Ord, V> Iterator for BTreeMapRange<K, V> {
+    type Item = (&K, &V);
+
+    fn next(&mut self) -> Maybe<(&K, &V)> {
+        loop {
+            match self.iter.next() {
+                None => return None,
+                Some((k, v)) => {
+                    // Handle start bound (only relevant for exclusive start)
+                    if !self.past_start {
+                        match self.start {
+                            Some(start) => {
+                                // For exclusive start, skip equal elements
+                                if k == start {
+                                    continue; // Skip this element
+                                }
+                            }
+                            None => {}
+                        }
+                        self.past_start = true;
+                    }
+
+                    // Handle end bound
+                    match self.end {
+                        None => return Some((k, v)),
+                        Some(end) => {
+                            if self.end_inclusive {
+                                if k <= end {
+                                    return Some((k, v));
+                                } else {
+                                    return None;
+                                }
+                            } else {
+                                if k < end {
+                                    return Some((k, v));
+                                } else {
+                                    return None;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// IntoIterator for BTreeMapRange so it can be used in for loops
+implement<K: Ord, V> IntoIterator for BTreeMapRange<K, V> {
+    type Item = (&K, &V);
+    type IntoIter = BTreeMapRange<K, V>;
+
+    fn into_iter(self) -> BTreeMapRange<K, V> {
+        self
+    }
+}
+
+// =============================================================================
+// BTreeSet - Ordered Set
+// =============================================================================
+
+/// An ordered set based on a B-tree.
+///
+/// BTreeSet is implemented as a BTreeMap<T, ()>, providing all the
+/// same performance characteristics.
+///
+/// # Example
+///
+/// ```verum
+/// let mut set = BTreeSet.new();
+/// set.insert(3);
+/// set.insert(1);
+/// set.insert(2);
+///
+/// // Iteration is in sorted order
+/// for x in set.iter() {
+///     println(x);  // 1, 2, 3
+/// }
+///
+/// assert(set.contains(&2));
+/// ```
+public type BTreeSet<T: Ord> is {
+    map: BTreeMap<T, ()>,
+};
+
+implement<T: Ord> BTreeSet<T> {
+    /// Create a new empty BTreeSet.
+    public fn new() -> BTreeSet<T> {
+        BTreeSet {
+            map: BTreeMap.new(),
+        }
+    }
+
+    /// Returns the number of elements in the set.
+    public fn len(&self) -> Int {
+        self.map.len()
+    }
+
+    /// Returns true if the set contains no elements.
+    public fn is_empty(&self) -> Bool {
+        self.map.is_empty()
+    }
+
+    /// Clears the set, removing all elements.
+    public fn clear(&mut self) {
+        self.map.clear()
+    }
+
+    /// Returns true if the set contains a value.
+    public fn contains(&self, value: &T) -> Bool {
+        self.map.contains_key(value)
+    }
+
+    /// Adds a value to the set.
+    ///
+    /// Returns true if the value was newly inserted.
+    /// Returns false if the set already contained this value.
+    public fn insert(&mut self, value: T) -> Bool
+    where T: Clone
+    {
+        self.map.insert(value, ()).is_none()
+    }
+
+    /// Removes a value from the set.
+    ///
+    /// Returns true if the value was present.
+    public fn remove(&mut self, value: &T) -> Bool
+    where T: Clone
+    {
+        self.map.remove(value).is_some()
+    }
+
+    /// Returns a reference to the first (minimum) element.
+    public fn first(&self) -> Maybe<&T> {
+        match self.map.first_key_value() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    /// Returns a reference to the last (maximum) element.
+    public fn last(&self) -> Maybe<&T> {
+        match self.map.last_key_value() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    /// Returns an iterator over the set's elements in sorted order.
+    public fn iter(&self) -> BTreeSetIter<T> {
+        BTreeSetIter {
+            inner: self.map.keys(),
+        }
+    }
+
+    /// Returns an iterator over elements in the given range.
+    public fn range<R: RangeBounds<T>>(&self, range: R) -> BTreeSetRange<T> {
+        BTreeSetRange {
+            inner: self.map.range(range),
+        }
+    }
+
+    /// Returns true if `self` has no elements in common with `other`.
+    public fn is_disjoint(&self, other: &BTreeSet<T>) -> Bool {
+        for x in self.iter() {
+            if other.contains(x) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns true if `self` is a subset of `other`.
+    public fn is_subset(&self, other: &BTreeSet<T>) -> Bool {
+        for x in self.iter() {
+            if !other.contains(x) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns true if `self` is a superset of `other`.
+    public fn is_superset(&self, other: &BTreeSet<T>) -> Bool {
+        other.is_subset(self)
+    }
+
+    /// Returns the union of self and other (elements in either set).
+    public fn union(&self, other: &BTreeSet<T>) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut result = self.clone();
+        for x in other.iter() {
+            result.insert(x.clone());
+        }
+        result
+    }
+
+    /// Returns the intersection of self and other (elements in both sets).
+    public fn intersection(&self, other: &BTreeSet<T>) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut result = BTreeSet.new();
+        for x in self.iter() {
+            if other.contains(x) {
+                result.insert(x.clone());
+            }
+        }
+        result
+    }
+
+    /// Returns the difference of self and other (elements in self but not other).
+    public fn difference(&self, other: &BTreeSet<T>) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut result = BTreeSet.new();
+        for x in self.iter() {
+            if !other.contains(x) {
+                result.insert(x.clone());
+            }
+        }
+        result
+    }
+
+    /// Returns the symmetric difference (elements in either but not both).
+    public fn symmetric_difference(&self, other: &BTreeSet<T>) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut result = BTreeSet.new();
+        for x in self.iter() {
+            if !other.contains(x) {
+                result.insert(x.clone());
+            }
+        }
+        for x in other.iter() {
+            if !self.contains(x) {
+                result.insert(x.clone());
+            }
+        }
+        result
+    }
+
+    /// Remove and return the first (minimum) element.
+    public fn pop_first(&mut self) -> Maybe<T>
+    where T: Clone
+    {
+        match self.first() {
+            None => None,
+            Some(val) => {
+                let v = val.clone();
+                self.remove(&v);
+                Some(v)
+            }
+        }
+    }
+
+    /// Remove and return the last (maximum) element.
+    public fn pop_last(&mut self) -> Maybe<T>
+    where T: Clone
+    {
+        match self.last() {
+            None => None,
+            Some(val) => {
+                let v = val.clone();
+                self.remove(&v);
+                Some(v)
+            }
+        }
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut set = BTreeSet.new();
+    /// set.insert(1); set.insert(2); set.insert(3); set.insert(4);
+    /// set.retain(|x| *x % 2 == 0);
+    /// assert_eq(set.len(), 2); // Only 2 and 4 remain
+    /// ```
+    public fn retain<F: fn(&T) -> Bool>(&mut self, f: F)
+    where T: Clone
+    {
+        let mut to_remove: List<T> = List.new();
+        for x in self.iter() {
+            if !f(x) {
+                to_remove.push(x.clone());
+            }
+        }
+        for x in to_remove.iter() {
+            self.remove(x);
+        }
+    }
+
+    /// Moves all elements from `other` into `self`, leaving `other` empty.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1);
+    /// let mut b = BTreeSet.new();
+    /// b.insert(2);
+    /// a.append(&mut b);
+    /// assert_eq(a.len(), 2);
+    /// assert(b.is_empty());
+    /// ```
+    public fn append(&mut self, other: &mut BTreeSet<T>)
+    where T: Clone
+    {
+        let mut elements: List<T> = List.new();
+        for x in other.iter() {
+            elements.push(x.clone());
+        }
+        other.clear();
+        for x in elements.iter() {
+            self.insert(x.clone());
+        }
+    }
+
+    /// Splits the set into two at the given value. Returns everything
+    /// after the given value, including the value itself.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1); a.insert(2); a.insert(3);
+    /// let b = a.split_off(&2);
+    /// assert_eq(a.len(), 1); // Only 1
+    /// assert_eq(b.len(), 2); // 2 and 3
+    /// ```
+    public fn split_off(&mut self, value: &T) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut other = BTreeSet.new();
+        let mut to_move: List<T> = List.new();
+        for x in self.iter() {
+            if x >= value {
+                to_move.push(x.clone());
+            }
+        }
+        for x in to_move.iter() {
+            self.remove(x);
+            other.insert(x.clone());
+        }
+        other
+    }
+
+    /// Returns a reference to the stored value that is equal to the given value.
+    public fn get(&self, value: &T) -> Maybe<&T> {
+        match self.map.get_key_value(value) {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    /// Remove and return the value equal to the given value, if present.
+    public fn take(&mut self, value: &T) -> Maybe<T>
+    where T: Clone
+    {
+        if self.contains(value) {
+            let v = value.clone();
+            self.remove(value);
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    /// Replace the stored value with the given value, returning the old value if present.
+    /// If the value is not present, inserts it and returns None.
+    public fn replace(&mut self, value: T) -> Maybe<T>
+    where T: Clone
+    {
+        if self.contains(&value) {
+            let old = value.clone();
+            self.map.insert(value, ());
+            Some(old)
+        } else {
+            self.map.insert(value, ());
+            None
+        }
+    }
+
+    /// Returns true if self is a strict (proper) subset of other.
+    /// A strict subset means self is a subset but not equal to other.
+    public fn is_strict_subset(&self, other: &BTreeSet<T>) -> Bool {
+        self.len() < other.len() && self.is_subset(other)
+    }
+
+    /// Returns true if self is a strict (proper) superset of other.
+    /// A strict superset means self is a superset but not equal to other.
+    public fn is_strict_superset(&self, other: &BTreeSet<T>) -> Bool {
+        self.len() > other.len() && self.is_superset(other)
+    }
+
+    /// Remove all elements matching the predicate and return them as a list.
+    public fn extract_if<F: fn(&T) -> Bool>(&mut self, f: F) -> List<T>
+    where T: Clone
+    {
+        let mut extracted: List<T> = List.new();
+        let mut to_remove: List<T> = List.new();
+        for x in self.iter() {
+            if f(x) {
+                extracted.push(x.clone());
+                to_remove.push(x.clone());
+            }
+        }
+        for x in to_remove.iter() {
+            self.remove(x);
+        }
+        extracted
+    }
+
+    /// Returns a reference to the first element >= given value.
+    /// O(log n) operation using the underlying BTreeMap.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut set = BTreeSet.new();
+    /// set.insert(1); set.insert(3); set.insert(5);
+    /// assert_eq(set.lower_bound(&3), Some(&3));
+    /// assert_eq(set.lower_bound(&2), Some(&3));
+    /// assert_eq(set.lower_bound(&6), None);
+    /// ```
+    public fn lower_bound(&self, value: &T) -> Maybe<&T> {
+        match self.map.lower_bound(value) {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    /// Returns a reference to the first element strictly > given value.
+    /// O(log n) operation using the underlying BTreeMap.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut set = BTreeSet.new();
+    /// set.insert(1); set.insert(3); set.insert(5);
+    /// assert_eq(set.upper_bound(&3), Some(&5));
+    /// assert_eq(set.upper_bound(&5), None);
+    /// ```
+    public fn upper_bound(&self, value: &T) -> Maybe<&T> {
+        match self.map.upper_bound(value) {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    /// In-place symmetric difference: removes elements present in both,
+    /// adds elements only in other.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1); a.insert(2); a.insert(3);
+    /// let mut b = BTreeSet.new();
+    /// b.insert(2); b.insert(3); b.insert(4);
+    /// a.symmetric_difference_update(&b);
+    /// // a = {1, 4}
+    /// ```
+    public fn symmetric_difference_update(&mut self, other: &BTreeSet<T>)
+    where T: Clone
+    {
+        // Collect elements to add (in other but not self)
+        let mut to_add: List<T> = List.new();
+        // Collect elements to remove (in both)
+        let mut to_remove: List<T> = List.new();
+        for x in other.iter() {
+            if self.contains(x) {
+                to_remove.push(x.clone());
+            } else {
+                to_add.push(x.clone());
+            }
+        }
+        for x in to_remove.iter() {
+            self.remove(x);
+        }
+        for x in to_add.iter() {
+            self.insert(x.clone());
+        }
+    }
+
+    /// In-place union: add all elements from other without draining it.
+    ///
+    /// Unlike `append` which empties `other`, this preserves `other`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1);
+    /// let mut b = BTreeSet.new();
+    /// b.insert(2); b.insert(3);
+    /// a.extend_from_set(&b);
+    /// assert_eq(a.len(), 3);
+    /// assert_eq(b.len(), 2); // b is unchanged
+    /// ```
+    public fn extend_from_set(&mut self, other: &BTreeSet<T>)
+    where T: Clone
+    {
+        for x in other.iter() {
+            self.insert(x.clone());
+        }
+    }
+
+    /// In-place difference: remove all elements that are in other.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1); a.insert(2); a.insert(3);
+    /// let mut b = BTreeSet.new();
+    /// b.insert(2); b.insert(4);
+    /// a.remove_from_set(&b);
+    /// // a = {1, 3}
+    /// ```
+    public fn remove_from_set(&mut self, other: &BTreeSet<T>)
+    where T: Clone
+    {
+        let mut to_remove: List<T> = List.new();
+        for x in self.iter() {
+            if other.contains(x) {
+                to_remove.push(x.clone());
+            }
+        }
+        for x in to_remove.iter() {
+            self.remove(x);
+        }
+    }
+
+    /// In-place intersection: retain only elements also in other.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut a = BTreeSet.new();
+    /// a.insert(1); a.insert(2); a.insert(3);
+    /// let mut b = BTreeSet.new();
+    /// b.insert(2); b.insert(3); b.insert(4);
+    /// a.retain_from_set(&b);
+    /// // a = {2, 3}
+    /// ```
+    public fn retain_from_set(&mut self, other: &BTreeSet<T>)
+    where T: Clone
+    {
+        self.retain(|v| other.contains(v));
+    }
+
+    // =========================================================================
+    // Conversion
+    // =========================================================================
+
+    /// Convert set to a sorted List.
+    /// BTreeSet iteration is always in sorted order.
+    public fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.with_capacity(self.len());
+        let mut iter = self.iter();
+        while let Some(item) = iter.next() {
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Consume the set and return its elements as a sorted List.
+    public fn into_list(self) -> List<T> {
+        self.map.into_keys()
+    }
+
+    /// Drain all elements from the set, returning an iterator over them.
+    /// After draining, the set is empty. Elements are yielded in sorted order.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut set = BTreeSet.new();
+    /// set.insert(3); set.insert(1); set.insert(2);
+    /// let mut drain = set.drain();
+    /// // drain yields 1, 2, 3 in sorted order
+    /// assert_eq(set.len(), 0);
+    /// ```
+    public fn drain(&mut self) -> BTreeSetDrain<T>
+    where T: Clone
+    {
+        let elements = self.to_list();
+        self.clear();
+        BTreeSetDrain { elements: elements, idx: 0 }
+    }
+
+    /// Returns true if any element satisfies the predicate.
+    public fn any<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        for x in self.iter() {
+            if f(x) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns true if all elements satisfy the predicate.
+    /// Returns true for empty sets (vacuously true).
+    public fn all<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        for x in self.iter() {
+            if !f(x) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Find the first element matching a predicate (in sorted order).
+    public fn find<F: fn(&T) -> Bool>(&self, f: F) -> Maybe<&T> {
+        for x in self.iter() {
+            if f(x) {
+                return Some(x);
+            }
+        }
+        None
+    }
+
+    /// Returns a new set containing only elements matching the predicate.
+    public fn filter<F: fn(&T) -> Bool>(&self, f: F) -> BTreeSet<T>
+    where T: Clone
+    {
+        let mut result = BTreeSet.new();
+        for v in self.iter() {
+            if f(v) {
+                result.insert(v.clone());
+            }
+        }
+        result
+    }
+
+    /// Applies a function to each element and collects results into a new ordered set.
+    public fn map<U: Ord, F: fn(&T) -> U>(&self, f: F) -> BTreeSet<U> {
+        let mut result = BTreeSet.new();
+        for v in self.iter() {
+            result.insert(f(v));
+        }
+        result
+    }
+
+    /// Splits the set into two based on a predicate.
+    public fn partition<F: fn(&T) -> Bool>(&self, f: F) -> (BTreeSet<T>, BTreeSet<T>)
+    where T: Clone
+    {
+        let mut yes = BTreeSet.new();
+        let mut no = BTreeSet.new();
+        for v in self.iter() {
+            if f(v) {
+                yes.insert(v.clone());
+            } else {
+                no.insert(v.clone());
+            }
+        }
+        (yes, no)
+    }
+
+    /// Returns the number of elements matching a predicate.
+    public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
+        let mut count = 0;
+        for v in self.iter() {
+            if f(v) {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    /// Applies a function to each element, collecting Some results into a new set.
+    public fn filter_map<U: Ord, F: fn(&T) -> Maybe<U>>(&self, f: F) -> BTreeSet<U> {
+        let mut result = BTreeSet.new();
+        for v in self.iter() {
+            if let Some(u) = f(v) {
+                result.insert(u);
+            }
+        }
+        result
+    }
+
+    /// Fold over all elements, accumulating a result.
+    public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
+        let mut acc = init;
+        for v in self.iter() {
+            acc = f(acc, v);
+        }
+        acc
+    }
+
+    /// Apply a function to each element for its side effects.
+    public fn for_each<F: fn(&T)>(&self, f: F) {
+        for v in self.iter() {
+            f(v);
+        }
+    }
+}
+
+implement<T: Ord> Default for BTreeSet<T> {
+    fn default() -> BTreeSet<T> {
+        BTreeSet.new()
+    }
+}
+
+implement<T: Ord + Display> Display for BTreeSet<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<T: Ord + Debug> Debug for BTreeSet<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BTreeSet{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt_debug(f)?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+implement<T: Ord + Clone> Clone for BTreeSet<T> {
+    fn clone(&self) -> BTreeSet<T> {
+        let mut new_set = BTreeSet.new();
+        for x in self.iter() {
+            new_set.insert(x.clone());
+        }
+        new_set
+    }
+}
+
+/// Iterator over BTreeSet elements.
+public type BTreeSetIter<T: Ord> is {
+    inner: BTreeMapKeys<T, ()>,
+};
+
+implement<T: Ord> Iterator for BTreeSetIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        self.inner.next()
+    }
+}
+
+// IntoIterator for BTreeSetIter so it can be used in for loops
+implement<T: Ord> IntoIterator for BTreeSetIter<T> {
+    type Item = &T;
+    type IntoIter = BTreeSetIter<T>;
+
+    fn into_iter(self) -> BTreeSetIter<T> {
+        self
+    }
+}
+
+implement<T: Ord + Clone> BTreeSetIter<T> {
+    /// Create an iterator that clones each element.
+    /// Transforms Iterator<Item = &T> into Iterator<Item = T>.
+    public fn cloned(self) -> Cloned<BTreeSetIter<T>> {
+        Cloned { inner: self }
+    }
+}
+
+/// Range iterator over BTreeSet.
+public type BTreeSetRange<T: Ord> is {
+    inner: BTreeMapRange<T, ()>,
+};
+
+implement<T: Ord> Iterator for BTreeSetRange<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        match self.inner.next() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+}
+
+// IntoIterator for BTreeSetRange so it can be used in for loops
+implement<T: Ord> IntoIterator for BTreeSetRange<T> {
+    type Item = &T;
+    type IntoIter = BTreeSetRange<T>;
+
+    fn into_iter(self) -> BTreeSetRange<T> {
+        self
+    }
+}
+
+// =============================================================================
+// BTreeMap Drain Iterator
+// =============================================================================
+
+/// Drain iterator for BTreeMap. Yields (K, V) pairs in sorted key order.
+/// The map is already empty when this iterator is created.
+public type BTreeMapDrain<K: Ord, V> is {
+    entries: List<(K, V)>,
+    idx: Int,
+};
+
+implement<K: Ord, V> Iterator for BTreeMapDrain<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Maybe<(K, V)> {
+        if self.idx < self.entries.len() {
+            let i = self.idx;
+            self.idx = self.idx + 1;
+            Some(self.entries[i].clone())
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.entries.len() - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<K: Ord, V> IntoIterator for BTreeMapDrain<K, V> {
+    type Item = (K, V);
+    type IntoIter = BTreeMapDrain<K, V>;
+
+    fn into_iter(self) -> BTreeMapDrain<K, V> {
+        self
+    }
+}
+
+// =============================================================================
+// BTreeSet Drain Iterator
+// =============================================================================
+
+/// Drain iterator for BTreeSet. Yields elements in sorted order.
+/// The set is already empty when this iterator is created.
+public type BTreeSetDrain<T: Ord> is {
+    elements: List<T>,
+    idx: Int,
+};
+
+implement<T: Ord> Iterator for BTreeSetDrain<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.idx < self.elements.len() {
+            let i = self.idx;
+            self.idx = self.idx + 1;
+            Some(self.elements[i].clone())
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.elements.len() - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T: Ord> IntoIterator for BTreeSetDrain<T> {
+    type Item = T;
+    type IntoIter = BTreeSetDrain<T>;
+
+    fn into_iter(self) -> BTreeSetDrain<T> {
+        self
+    }
+}
+
+// =============================================================================
+// BTreeMap Mutable Values Iterator
+// =============================================================================
+
+/// Mutable iterator over BTreeMap values in key order.
+///
+/// Uses pre-collected keys to safely yield mutable value references.
+public type BTreeMapValuesMut<K: Ord, V> is {
+    map: &mut BTreeMap<K, V>,
+    keys: List<K>,
+    idx: Int,
+};
+
+implement<K: Ord, V> Iterator for BTreeMapValuesMut<K, V> {
+    type Item = &mut V;
+
+    fn next(&mut self) -> Maybe<&mut V> {
+        if self.idx >= self.keys.len() {
+            return None;
+        }
+        let key = &self.keys[self.idx];
+        self.idx = self.idx + 1;
+        self.map.get_mut(key)
+    }
+}
+
+// =============================================================================
+// BTreeMap Mutable Entry Iterator
+// =============================================================================
+
+/// Mutable iterator over BTreeMap entries (&K, &mut V) in key order.
+///
+/// Keys are yielded as immutable references to preserve tree ordering invariant.
+/// Uses pre-collected keys to safely yield mutable value references.
+public type BTreeMapIterMut<K: Ord, V> is {
+    map: &mut BTreeMap<K, V>,
+    keys: List<K>,
+    idx: Int,
+};
+
+implement<K: Ord, V> Iterator for BTreeMapIterMut<K, V> {
+    type Item = (&K, &mut V);
+
+    fn next(&mut self) -> Maybe<(&K, &mut V)> {
+        if self.idx >= self.keys.len() {
+            return None;
+        }
+        let key = &self.keys[self.idx];
+        self.idx = self.idx + 1;
+        match self.map.get_mut(key) {
+            Some(val) => Some((key, val)),
+            None => None,
+        }
+    }
+}
+
+implement<K: Ord, V> IntoIterator for BTreeMapIterMut<K, V> {
+    type Item = (&K, &mut V);
+    type IntoIter = BTreeMapIterMut<K, V>;
+
+    fn into_iter(self) -> BTreeMapIterMut<K, V> {
+        self
+    }
+}
+
+// =============================================================================
+// ExactSizeIterator for mutable iterators
+// =============================================================================
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapValuesMut<K, V> {
+    fn len(&self) -> Int { self.keys.len() - self.idx }
+}
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapIterMut<K, V> {
+    fn len(&self) -> Int { self.keys.len() - self.idx }
+}
+
+implement<T: Ord> ExactSizeIterator for BTreeSetIter<T> {
+    fn len(&self) -> Int { self.inner.len() }
+}
+
+implement<K: Ord, V> ExactSizeIterator for BTreeMapDrain<K, V> {
+    fn len(&self) -> Int { self.entries.len() - self.idx }
+}
+
+implement<T: Ord> ExactSizeIterator for BTreeSetDrain<T> {
+    fn len(&self) -> Int { self.elements.len() - self.idx }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<K: Ord, V> FusedIterator for BTreeMapIter<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapKeys<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapValues<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapValuesMut<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapIterMut<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapRange<K, V> {}
+implement<K: Ord, V> FusedIterator for BTreeMapDrain<K, V> {}
+implement<T: Ord> FusedIterator for BTreeSetIter<T> {}
+implement<T: Ord> FusedIterator for BTreeSetRange<T> {}
+implement<T: Ord> FusedIterator for BTreeSetDrain<T> {}
+
+// =============================================================================
+// RangeBounds Protocol (simplified)
+// =============================================================================
+
+/// Protocol for range bounds.
+public type RangeBounds<T> is protocol {
+    fn start_bound(&self) -> Maybe<&T>;
+    fn end_bound(&self) -> Maybe<&T>;
+    fn start_is_inclusive(&self) -> Bool;
+    fn end_is_inclusive(&self) -> Bool;
+};
+
+// =============================================================================
+// FromIterator implementations
+// =============================================================================
+
+implement<K: Ord, V> FromIterator<(K, V)> for BTreeMap<K, V> {
+    fn from_iter<I: Iterator<Item = (K, V)>>(mut iter: I) -> BTreeMap<K, V> {
+        let mut map = BTreeMap.new();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(pair) => {
+                    let tuple: (K, V) = pair;
+                    map.insert(tuple.0, tuple.1);
+                }
+            }
+        }
+        map
+    }
+}
+
+implement<T: Ord> FromIterator<T> for BTreeSet<T> {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> BTreeSet<T> {
+        let mut set = BTreeSet.new();
+        for x in iter {
+            set.insert(x);
+        }
+        set
+    }
+}
+
+// =============================================================================
+// IntoIterator for BTreeMap and BTreeSet containers
+// =============================================================================
+
+/// Allows `for (k, v) in map { ... }` usage.
+implement<K: Ord, V> IntoIterator for BTreeMap<K, V> {
+    type Item = (&K, &V);
+    type IntoIter = BTreeMapIter<K, V>;
+
+    fn into_iter(self) -> BTreeMapIter<K, V> {
+        self.iter()
+    }
+}
+
+/// Allows `for (k, v) in &map { ... }` usage.
+implement<K: Ord, V> IntoIterator for &BTreeMap<K, V> {
+    type Item = (&K, &V);
+    type IntoIter = BTreeMapIter<K, V>;
+
+    fn into_iter(self) -> BTreeMapIter<K, V> {
+        self.iter()
+    }
+}
+
+/// Allows `for x in set { ... }` usage.
+implement<T: Ord> IntoIterator for BTreeSet<T> {
+    type Item = &T;
+    type IntoIter = BTreeSetIter<T>;
+
+    fn into_iter(self) -> BTreeSetIter<T> {
+        self.iter()
+    }
+}
+
+/// Allows `for x in &set { ... }` usage.
+implement<T: Ord> IntoIterator for &BTreeSet<T> {
+    type Item = &T;
+    type IntoIter = BTreeSetIter<T>;
+
+    fn into_iter(self) -> BTreeSetIter<T> {
+        self.iter()
+    }
+}
+
+// =============================================================================
+// Eq for BTreeMap and BTreeSet
+// =============================================================================
+
+implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
+    fn eq(&self, other: &BTreeMap<K, V>) -> Bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            match (it_self.next(), it_other.next()) {
+                (None, None) => { return true; }
+                (Some(a), Some(b)) => {
+                    if !(a.0 == b.0 && a.1 == b.1) {
+                        return false;
+                    }
+                }
+                _ => { return false; }
+            }
+        }
+    }
+}
+
+implement<T: Ord + Eq> Eq for BTreeSet<T> {
+    fn eq(&self, other: &BTreeSet<T>) -> Bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            match (it_self.next(), it_other.next()) {
+                (None, None) => { return true; }
+                (Some(a), Some(b)) => {
+                    if !(a == b) {
+                        return false;
+                    }
+                }
+                _ => { return false; }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Extend for BTreeMap and BTreeSet
+// =============================================================================
+
+implement<K: Ord, V> Extend<(K, V)> for BTreeMap<K, V> {
+    fn extend<I: Iterator<Item = (K, V)>>(&mut self, iter: I) {
+        for pair in iter {
+            self.insert(pair.0, pair.1);
+        }
+    }
+}
+
+implement<T: Ord> Extend<T> for BTreeSet<T> {
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
+        for x in iter {
+            self.insert(x);
+        }
+    }
+}
+
+// =============================================================================
+// BTreeSet Operator Overloads for set algebra
+// =============================================================================
+
+/// Union: a | b
+implement<T: Ord + Clone> BitOr<BTreeSet<T>> for BTreeSet<T> {
+    type Output = BTreeSet<T>;
+
+    fn bitor(self, rhs: BTreeSet<T>) -> BTreeSet<T> {
+        self.union(&rhs)
+    }
+}
+
+/// Intersection: a & b
+implement<T: Ord + Clone> BitAnd<BTreeSet<T>> for BTreeSet<T> {
+    type Output = BTreeSet<T>;
+
+    fn bitand(self, rhs: BTreeSet<T>) -> BTreeSet<T> {
+        self.intersection(&rhs)
+    }
+}
+
+/// Difference: a - b
+implement<T: Ord + Clone> Sub<BTreeSet<T>> for BTreeSet<T> {
+    type Output = BTreeSet<T>;
+
+    fn sub(self, rhs: BTreeSet<T>) -> BTreeSet<T> {
+        self.difference(&rhs)
+    }
+}
+
+/// Symmetric difference: a ^ b
+implement<T: Ord + Clone> BitXor<BTreeSet<T>> for BTreeSet<T> {
+    type Output = BTreeSet<T>;
+
+    fn bitxor(self, rhs: BTreeSet<T>) -> BTreeSet<T> {
+        self.symmetric_difference(&rhs)
+    }
+}
+
+/// In-place union: a |= &b
+implement<T: Ord + Clone> BitOrAssign<&BTreeSet<T>> for BTreeSet<T> {
+    fn bitor_assign(&mut self, other: &BTreeSet<T>) {
+        self.extend_from_set(other);
+    }
+}
+
+/// In-place intersection: a &= &b
+implement<T: Ord + Clone> BitAndAssign<&BTreeSet<T>> for BTreeSet<T> {
+    fn bitand_assign(&mut self, other: &BTreeSet<T>) {
+        self.retain_from_set(other);
+    }
+}
+
+/// In-place difference: a -= &b
+implement<T: Ord + Clone> SubAssign<&BTreeSet<T>> for BTreeSet<T> {
+    fn sub_assign(&mut self, other: &BTreeSet<T>) {
+        self.remove_from_set(other);
+    }
+}
+
+/// In-place symmetric difference: a ^= &b
+implement<T: Ord + Clone> BitXorAssign<&BTreeSet<T>> for BTreeSet<T> {
+    fn bitxor_assign(&mut self, other: &BTreeSet<T>) {
+        self.symmetric_difference_update(other);
+    }
+}
+
+// =============================================================================
+// Entry API for BTreeMap
+// =============================================================================
+
+/// Entry in a BTreeMap for in-place operations.
+public type BTreeEntry<K: Ord, V> is
+    | Occupied(BTreeOccupiedEntry<K, V>)
+    | Vacant(BTreeVacantEntry<K, V>);
+
+public type BTreeOccupiedEntry<K: Ord, V> is {
+    map: &mut BTreeMap<K, V>,
+    key: K,
+};
+
+public type BTreeVacantEntry<K: Ord, V> is {
+    map: &mut BTreeMap<K, V>,
+    key: K,
+};
+
+implement<K: Ord, V> BTreeMap<K, V> {
+    /// Get entry for in-place operations.
+    public fn entry(&mut self, key: K) -> BTreeEntry<K, V> {
+        if self.contains_key(&key) {
+            BTreeEntry.Occupied(BTreeOccupiedEntry { map: self, key })
+        } else {
+            BTreeEntry.Vacant(BTreeVacantEntry { map: self, key })
+        }
+    }
+}
+
+implement<K: Ord, V> BTreeEntry<K, V> {
+    /// Insert default value if vacant, return mutable reference.
+    public fn or_insert(self, default: V) -> &mut V
+    where K: Clone, V: Clone
+    {
+        match self {
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Vacant(entry) => {
+                entry.map.insert(entry.key.clone(), default);
+                entry.map.get_mut(&entry.key).unwrap()
+            }
+        }
+    }
+
+    /// Insert with function if vacant, return mutable reference.
+    public fn or_insert_with<F: fn() -> V>(self, f: F) -> &mut V
+    where K: Clone, V: Clone
+    {
+        match self {
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Vacant(entry) => {
+                entry.map.insert(entry.key.clone(), f());
+                entry.map.get_mut(&entry.key).unwrap()
+            }
+        }
+    }
+
+    /// Insert a value computed from the key if vacant, return mutable reference.
+    public fn or_insert_with_key<F: fn(&K) -> V>(self, f: F) -> &mut V
+    where K: Clone, V: Clone
+    {
+        match self {
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Vacant(entry) => {
+                let value = f(&entry.key);
+                entry.map.insert(entry.key.clone(), value);
+                entry.map.get_mut(&entry.key).unwrap()
+            }
+        }
+    }
+
+    /// Insert default value if vacant, return mutable reference.
+    public fn or_default(self) -> &mut V
+    where K: Clone, V: Clone + Default
+    {
+        match self {
+            BTreeEntry.Occupied(entry) => entry.map.get_mut(&entry.key).unwrap(),
+            BTreeEntry.Vacant(entry) => {
+                entry.map.insert(entry.key.clone(), V.default());
+                entry.map.get_mut(&entry.key).unwrap()
+            }
+        }
+    }
+
+    /// Provides in-place mutable access to an occupied entry before any
+    /// potential inserts into the map.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// map.entry("key")
+    ///    .and_modify(|v| *v = *v + 1)
+    ///    .or_insert(0);
+    /// ```
+    public fn and_modify<F: fn(&mut V)>(self, f: F) -> BTreeEntry<K, V>
+    where K: Clone, V: Clone
+    {
+        match self {
+            BTreeEntry.Occupied(entry) => {
+                match entry.map.get_mut(&entry.key) {
+                    Some(v) => f(v),
+                    None => {}
+                }
+                BTreeEntry.Occupied(entry)
+            }
+            BTreeEntry.Vacant(entry) => BTreeEntry.Vacant(entry),
+        }
+    }
+
+    /// Returns a reference to this entry's key.
+    public fn key(&self) -> &K {
+        match self {
+            BTreeEntry.Occupied(entry) => &entry.key,
+            BTreeEntry.Vacant(entry) => &entry.key,
+        }
+    }
+}
+
+// =============================================================================
+// From conversions
+// =============================================================================
+
+implement<K: Ord, V> From<List<(K, V)>> for BTreeMap<K, V> {
+    fn from(list: List<(K, V)>) -> BTreeMap<K, V> {
+        let mut m = BTreeMap.new();
+        for pair in list {
+            m.insert(pair.0, pair.1);
+        }
+        m
+    }
+}
+
+implement<T: Ord> From<List<T>> for BTreeSet<T> {
+    fn from(list: List<T>) -> BTreeSet<T> {
+        let mut s = BTreeSet.new();
+        for item in list {
+            s.insert(item);
+        }
+        s
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_btreemap_basic() {
+    let mut map = BTreeMap.new();
+    assert(map.is_empty());
+
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    assert_eq(map.len(), 3);
+    assert_eq(map.get(&1), Some(&"one"));
+    assert_eq(map.get(&2), Some(&"two"));
+    assert_eq(map.get(&4), None);
+}
+
+@test
+fn test_btreemap_iteration_order() {
+    let mut map = BTreeMap.new();
+    map.insert(5, "five");
+    map.insert(1, "one");
+    map.insert(3, "three");
+    map.insert(2, "two");
+    map.insert(4, "four");
+
+    let keys: List<Int> = map.keys().cloned().collect();
+    assert_eq(keys, List.from([1, 2, 3, 4, 5]));
+}
+
+@test
+fn test_btreemap_remove() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+
+    assert_eq(map.remove(&1), Some("one"));
+    assert_eq(map.len(), 1);
+    assert_eq(map.get(&1), None);
+}
+
+@test
+fn test_btreeset_basic() {
+    let mut set = BTreeSet.new();
+    assert(set.insert(3));
+    assert(set.insert(1));
+    assert(set.insert(2));
+    assert(!set.insert(2));  // Duplicate
+
+    assert_eq(set.len(), 3);
+    assert(set.contains(&2));
+    assert(!set.contains(&4));
+}
+
+@test
+fn test_btreeset_iteration_order() {
+    let mut set = BTreeSet.new();
+    set.insert(5);
+    set.insert(1);
+    set.insert(3);
+
+    let values: List<Int> = set.iter().cloned().collect();
+    assert_eq(values, List.from([1, 3, 5]));
+}
+
+@test
+fn test_btreemap_first_last() {
+    let mut map = BTreeMap.new();
+    map.insert(2, "two");
+    map.insert(1, "one");
+    map.insert(3, "three");
+
+    assert_eq(map.first_key_value(), Some((&1, &"one")));
+    assert_eq(map.last_key_value(), Some((&3, &"three")));
+}

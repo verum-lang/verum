@@ -1,0 +1,54 @@
+// Test: Higher-Kinded Types (HKT) - Minimal Syntax Test  
+// Priority: Advanced
+// Expected output: Demonstrates HKT protocol syntax
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Functor<T> is protocol {
+    type Mapped<U>;
+    fn map<U>(self, f: fn(T) -> U) -> Self.Mapped<U>;
+};
+
+type Monad<T> is protocol {
+    type Bound<U>;
+    fn bind<U>(self, f: fn(T) -> Self.Bound<U>) -> Self.Bound<U>;
+};
+
+fn test_maybe() {
+    print(f"=== Maybe Functor ===");
+    let m1: Maybe<Int> = Maybe.Some(10);
+    let m2 = match m1 {
+        Maybe.Some(x) => Maybe.Some(x * 2),
+        Maybe.None => Maybe.None,
+    };
+    match m2 {
+        Maybe.Some(v) => print(f"Mapped: {v}"),
+        Maybe.None => print(f"None"),
+    }
+}
+
+fn test_result() {
+    print(f"=== Result Bifunctor ===");
+    let r1: Result<Int, Text> = Result.Ok(42);
+    let r2 = match r1 {
+        Result.Ok(x) => Result.Ok(x * 2),
+        Result.Err(e) => Result.Err(f"Error: {e}"),
+    };
+    match r2 {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Err: {e}"),
+    }
+}
+
+fn main() {
+    print(f"Starting HKT tests...");
+    test_maybe();
+    test_result();
+    print(f"All HKT tests complete!");
+}

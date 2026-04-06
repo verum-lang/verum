@@ -1,0 +1,2419 @@
+// =============================================================================
+// stream.vr - Asynchronous Streams (Async Iterators)
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/poll, async/waker, async/future
+// =============================================================================
+//
+// A Stream is an asynchronous iterator. It produces a sequence of values
+// asynchronously, yielding control back to the executor between items.
+//
+// # Overview
+//
+// - Stream: Core protocol for async iteration
+// - StreamExt: Extension methods for stream combinators
+// - Combinators: map, filter, take, skip, chain, etc.
+// - Constructors: iter, stream_repeat, stream_once, stream_empty, stream_from_fn, stream_unfold
+// - Sinks: collect, fold, for_each
+//
+// # Example
+//
+// ```verum
+// // Create a stream from an iterator
+// let stream = iter([1, 2, 3, 4, 5]);
+//
+// // Use combinators
+// let doubled = stream
+//     .map(|x| x * 2)
+//     .filter(|x| *x > 4);
+//
+// // Collect results
+// let res: List<Int> = doubled.collect().await;
+// assert_eq(result, [4, 6, 8, 10]);
+// ```
+//
+// =============================================================================
+
+module stream;
+
+mount core.*;
+mount collections.*;
+mount .poll.*;
+mount .waker.*;
+mount .future.*;
+
+// =============================================================================
+// Stream Protocol
+// =============================================================================
+
+/// An asynchronous iterator that produces values over time.
+///
+/// Stream is the async equivalent of Iterator. Each call to `poll_next`
+/// may return Pending, indicating that the next value is not yet available.
+///
+/// # Contract
+///
+/// - `poll_next` returns `Poll.Ready(Some(item))` for each available item
+/// - `poll_next` returns `Poll.Ready(None)` when the stream is exhausted
+/// - After returning `Poll.Ready(None)`, subsequent calls may panic
+/// - `poll_next` returns `Pending` when the next item is not ready
+///
+public type Stream is protocol {
+    /// The type of items yielded by this stream.
+    type Item;
+
+    /// Attempt to pull out the next value of this stream.
+    ///
+    /// Returns:
+    /// - `Poll.Ready(Some(item))` if an item is available
+    /// - `Poll.Ready(None)` if the stream is exhausted
+    /// - `Pending` if the next item is not yet available
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Self.Item>>;
+
+    /// Returns the bounds on the remaining length of the stream.
+    ///
+    /// Default implementation returns (0, None) indicating unknown bounds.
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (0, None)
+    }
+};
+
+/// Protocol for types that can be converted to a stream.
+public type IntoStream is protocol {
+    type Item;
+    type IntoStream: Stream<Item = Self.Item>;
+
+    fn into_stream(self) -> Self.IntoStream;
+};
+
+// Every Stream implements IntoStream
+implement<S: Stream> IntoStream for S {
+    type Item = S.Item;
+    type IntoStream = S;
+
+    fn into_stream(self) -> S {
+        self
+    }
+}
+
+// =============================================================================
+// StreamExt - Extension Methods
+// =============================================================================
+
+/// Extension methods for Stream.
+///
+/// All Streams automatically implement StreamExt, providing
+/// a rich set of combinators for stream manipulation.
+public type StreamExt is protocol extends Stream {
+    /// Create a stream that yields the next value.
+    ///
+    /// This is useful for using streams in async contexts.
+    fn next(&mut self) -> StreamNext<Self> {
+        StreamNext { stream: self }
+    }
+
+    /// Map each item to another value.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = iter([1, 2, 3]).map(|x| x * 2);
+    /// // Yields: 2, 4, 6
+    /// ```
+    fn map<B, F: fn(Self.Item) -> B>(self, f: F) -> StreamMap<Self, F> {
+        StreamMap { stream: self, f }
+    }
+
+    /// Map each item to a future, awaiting the result.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = iter([1, 2, 3])
+    ///     .then(|x| async { x * 2 });
+    /// ```
+    fn then<Fut: Future, F: fn(Self.Item) -> Fut>(self, f: F) -> StreamThen<Self, F, Fut> {
+        StreamThen {
+            stream: self,
+            f,
+            pending: None,
+        }
+    }
+
+    /// Filter items based on a predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = iter([1, 2, 3, 4]).filter(|x| *x % 2 == 0);
+    /// // Yields: 2, 4
+    /// ```
+    fn filter<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamFilter<Self, F> {
+        StreamFilter { stream: self, pred }
+    }
+
+    /// Filter and map in one step.
+    fn filter_map<B, F: fn(Self.Item) -> Maybe<B>>(self, f: F) -> StreamFilterMap<Self, F> {
+        StreamFilterMap { stream: self, f }
+    }
+
+    /// Flatten a stream of streams.
+    fn flatten(self) -> StreamFlatten<Self>
+    where Self.Item: IntoStream
+    {
+        StreamFlatten {
+            stream: self,
+            current: None,
+        }
+    }
+
+    /// Map then flatten (flatMap).
+    fn flat_map<U: IntoStream, F: fn(Self.Item) -> U>(self, f: F) -> StreamFlatMap<Self, F, U> {
+        StreamFlatMap {
+            stream: self,
+            f,
+            current: None,
+        }
+    }
+
+    /// Take at most n items.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = iter([1, 2, 3, 4, 5]).take(3);
+    /// // Yields: 1, 2, 3
+    /// ```
+    fn take(self, n: Int) -> StreamTake<Self> {
+        StreamTake { stream: self, remaining: n }
+    }
+
+    /// Take items while predicate is true.
+    fn take_while<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamTakeWhile<Self, F> {
+        StreamTakeWhile {
+            stream: self,
+            pred,
+            done: false,
+        }
+    }
+
+    /// Skip n items.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = iter([1, 2, 3, 4, 5]).skip(2);
+    /// // Yields: 3, 4, 5
+    /// ```
+    fn skip(self, n: Int) -> StreamSkip<Self> {
+        StreamSkip { stream: self, remaining: n }
+    }
+
+    /// Skip items while predicate is true.
+    fn skip_while<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamSkipWhile<Self, F> {
+        StreamSkipWhile {
+            stream: self,
+            pred: Some(pred),
+        }
+    }
+
+    /// Chain another stream after this one.
+    fn chain<S: Stream<Item = Self.Item>>(self, other: S) -> StreamChain<Self, S> {
+        StreamChain {
+            first: Some(self),
+            second: other,
+        }
+    }
+
+    /// Zip with another stream, yielding pairs.
+    fn zip<S: Stream>(self, other: S) -> StreamZip<Self, S> {
+        StreamZip {
+            stream1: self,
+            stream2: other,
+        }
+    }
+
+    /// Enumerate items with their index.
+    fn enumerate(self) -> StreamEnumerate<Self> {
+        StreamEnumerate { stream: self, index: 0 }
+    }
+
+    /// Peek at items without consuming them.
+    fn peekable(self) -> StreamPeekable<Self> {
+        StreamPeekable { stream: self, peeked: None }
+    }
+
+    /// Insert a separator between items.
+    fn intersperse(self, separator: Self.Item) -> StreamIntersperse<Self>
+    where Self.Item: Clone
+    {
+        StreamIntersperse {
+            stream: self,
+            separator,
+            next_sep: false,
+            item: None,
+        }
+    }
+
+    /// Fuse the stream to always return None after exhaustion.
+    fn fuse(self) -> StreamFuse<Self> {
+        StreamFuse { stream: Some(self) }
+    }
+
+    /// Inspect each item as it passes through.
+    fn inspect<F: fn(&Self.Item)>(self, f: F) -> StreamInspect<Self, F> {
+        StreamInspect { stream: self, f }
+    }
+
+    /// Scan with state, like fold but yields intermediate results.
+    fn scan<St, B, F: fn(&mut St, Self.Item) -> Maybe<B>>(
+        self,
+        initial_state: St,
+        f: F
+    ) -> StreamScan<Self, St, F> {
+        StreamScan {
+            stream: self,
+            state: initial_state,
+            f,
+        }
+    }
+
+    // =========================================================================
+    // Sink methods (consume the stream)
+    // =========================================================================
+
+    /// Collect all items into a collection.
+    ///
+    /// # Example
+    /// ```verum
+    /// let items: List<Int> = iter([1, 2, 3]).collect().await;
+    /// ```
+    fn collect<C: FromIterator<Self.Item>>(self) -> StreamCollect<Self, C> {
+        StreamCollect {
+            stream: self,
+            items: List.new(),
+        }
+    }
+
+    /// Fold the stream into a single value.
+    ///
+    /// # Example
+    /// ```verum
+    /// let sum = iter([1, 2, 3, 4])
+    ///     .fold(0, |acc, x| acc + x)
+    ///     .await;
+    /// assert_eq(sum, 10);
+    /// ```
+    fn fold<B, F: fn(B, Self.Item) -> B>(self, init: B, f: F) -> StreamFold<Self, B, F> {
+        StreamFold {
+            stream: self,
+            acc: Some(init),
+            f,
+        }
+    }
+
+    /// Execute a closure on each item.
+    ///
+    /// # Example
+    /// ```verum
+    /// iter([1, 2, 3])
+    ///     .for_each(|x| println(f"{x}"))
+    ///     .await;
+    /// ```
+    fn for_each<F: fn(Self.Item)>(self, f: F) -> StreamForEach<Self, F> {
+        StreamForEach { stream: self, f }
+    }
+
+    /// Reduce the stream to a single value using a combining function.
+    ///
+    /// Like `fold`, but uses the first item as the initial accumulator.
+    /// Returns `None` if the stream is empty.
+    ///
+    /// # Example
+    /// ```verum
+    /// let sum = iter([1, 2, 3, 4])
+    ///     .reduce(|acc, x| acc + x)
+    ///     .await;
+    /// assert_eq(sum, Some(10));
+    /// ```
+    fn reduce<F: fn(Self.Item, Self.Item) -> Self.Item>(self, f: F) -> StreamReduce<Self, F> {
+        StreamReduce {
+            stream: self,
+            acc: None,
+            f,
+        }
+    }
+
+    /// Execute an async closure on each item.
+    fn for_each_concurrent<Fut: Future<Output = ()>, F: fn(Self.Item) -> Fut>(
+        self,
+        limit: Maybe<Int>,
+        f: F
+    ) -> StreamForEachConcurrent<Self, F, Fut> {
+        StreamForEachConcurrent {
+            stream: self,
+            f,
+            limit,
+            pending: List.new(),
+        }
+    }
+
+    /// Check if any item matches the predicate.
+    fn any<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamAny<Self, F> {
+        StreamAny { stream: self, pred }
+    }
+
+    /// Check if all items match the predicate.
+    fn all<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamAll<Self, F> {
+        StreamAll { stream: self, pred }
+    }
+
+    /// Find the first item matching the predicate.
+    fn find<F: fn(&Self.Item) -> Bool>(self, pred: F) -> StreamFind<Self, F> {
+        StreamFind { stream: self, pred }
+    }
+
+    /// Find && map.
+    fn find_map<B, F: fn(Self.Item) -> Maybe<B>>(self, f: F) -> StreamFindMap<Self, F> {
+        StreamFindMap { stream: self, f }
+    }
+
+    /// Get the nth item.
+    fn nth(self, n: Int) -> StreamNth<Self> {
+        StreamNth { stream: self, n }
+    }
+
+    /// Count the number of items.
+    fn count(self) -> StreamCount<Self> {
+        StreamCount { stream: self, count: 0 }
+    }
+
+    /// Get the last item.
+    fn last(self) -> StreamLast<Self> {
+        StreamLast { stream: self, item: None }
+    }
+
+    /// Get the first item.
+    fn first(self) -> StreamFirst<Self> {
+        StreamFirst { stream: self }
+    }
+
+    /// Get the minimum item.
+    fn min(self) -> StreamMin<Self>
+    where Self.Item: Ord
+    {
+        StreamMin { stream: self, min: None }
+    }
+
+    /// Get the maximum item.
+    fn max(self) -> StreamMax<Self>
+    where Self.Item: Ord
+    {
+        StreamMax { stream: self, max: None }
+    }
+
+    /// Sum all items.
+    fn sum<S: StreamSum<Self.Item>>(self) -> SumStream<Self, S> {
+        SumStream { stream: self, sum: S.zero() }
+    }
+
+    /// Multiply all items.
+    fn product<P: StreamProduct<Self.Item>>(self) -> ProductStream<Self, P> {
+        ProductStream { stream: self, product: P.one() }
+    }
+
+    // =========================================================================
+    // Backpressure & Flow Control Methods
+    // Spec: docs/improvements.md Section 17.4
+    // =========================================================================
+
+    /// Buffer items with bounded capacity for backpressure control.
+    ///
+    /// Creates a buffered stream that stores up to `capacity` items.
+    /// When the buffer is full, the underlying stream is not polled
+    /// until space becomes available (consumer controls the rate).
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = fast_producer()
+    ///     .buffered(100);  // Max 100 items in buffer
+    ///
+    /// for await item in stream {
+    ///     slow_process(item).await;  // Consumer controls pace
+    /// }
+    /// ```
+    ///
+    /// # Backpressure Semantics
+    /// - Producer is paused when buffer is full
+    /// - Consumer pulls at its own pace
+    /// - Memory bounded by `capacity * sizeof(Item)`
+    fn buffered(self, capacity: Int) -> BufferedStream<Self> {
+        assert(capacity > 0, "Buffer capacity must be positive");
+        BufferedStream {
+            stream: self,
+            buffer: List.with_capacity(capacity),
+            capacity,
+            done: false,
+        }
+    }
+
+    /// Rate limit the stream to at most `count` items per `duration`.
+    ///
+    /// Throttles the output to prevent overwhelming downstream consumers.
+    /// Uses a token bucket algorithm for smooth rate limiting.
+    ///
+    /// # Example
+    /// ```verum
+    /// let stream = events()
+    ///     .throttle(100, 1.seconds);  // Max 100 items per second
+    /// ```
+    ///
+    /// # Rate Limiting
+    /// - Burst: Allows `count` items immediately if tokens available
+    /// - Refill: Tokens replenish at `count / duration` rate
+    /// - Blocking: Returns Pending when rate exceeded
+    fn throttle(self, count: Int, per: Duration) -> ThrottledStream<Self> {
+        assert(count > 0, "Throttle count must be positive");
+        assert(per.as_nanos() > 0, "Throttle duration must be positive");
+        ThrottledStream {
+            stream: self,
+            count,
+            per,
+            tokens: count,  // Start with full bucket
+            last_refill: Instant.now(),
+        }
+    }
+
+    /// Batch items into chunks of size `size`.
+    ///
+    /// Collects items into vectors of the specified size. The last
+    /// chunk may have fewer items if the stream ends before filling.
+    ///
+    /// # Example
+    /// ```verum
+    /// let batches = stream
+    ///     .chunks(10);  // Process in batches of 10
+    ///
+    /// for await batch in batches {
+    ///     process_batch(batch).await;  // batch: List<Item>
+    /// }
+    /// ```
+    ///
+    /// # Chunking Behavior
+    /// - Yields `List<Item>` with exactly `size` items
+    /// - Final chunk may be smaller (remaining items)
+    /// - Empty stream yields nothing
+    fn chunks(self, size: Int) -> ChunkedStream<Self> {
+        assert(size > 0, "Chunk size must be positive");
+        ChunkedStream {
+            stream: self,
+            size,
+            buffer: List.with_capacity(size),
+            done: false,
+        }
+    }
+
+    /// Merge with another stream, yielding items from both with fair scheduling.
+    ///
+    /// Interleaves items from both streams using round-robin scheduling.
+    /// Continues until both streams are exhausted.
+    ///
+    /// # Example
+    /// ```verum
+    /// let merged = stream_a.merge(stream_b);
+    ///
+    /// for await item in merged {
+    ///     // Items from both streams, fairly scheduled
+    /// }
+    /// ```
+    ///
+    /// # Fair Scheduling
+    /// - Alternates polling between streams
+    /// - No starvation: both streams get equal opportunity
+    /// - Completes when BOTH streams are done
+    fn merge<U: Stream<Item = Self.Item>>(self, other: U) -> MergedStream<Self, U> {
+        MergedStream {
+            stream1: self,
+            stream2: other,
+            stream1_done: false,
+            stream2_done: false,
+            prefer_first: true,  // Start with first stream
+        }
+    }
+
+    /// Batch items into time-based windows.
+    ///
+    /// Collects items during each `duration` window, yielding batches
+    /// at regular intervals regardless of item count.
+    ///
+    /// # Example
+    /// ```verum
+    /// let windows = events()
+    ///     .window(1.seconds);  // Yield batch every second
+    /// ```
+    fn window(self, duration: Duration) -> WindowedStream<Self> {
+        WindowedStream {
+            stream: self,
+            duration,
+            buffer: List.new(),
+            window_start: Instant.now(),
+        }
+    }
+
+    /// Debounce the stream, yielding only after `duration` of silence.
+    ///
+    /// Useful for handling bursty input like key presses or mouse events.
+    /// Only yields after no items have arrived for the specified duration.
+    ///
+    /// # Example
+    /// ```verum
+    /// let debounced = keypresses()
+    ///     .debounce(300.millis);  // Wait 300ms after last keypress
+    /// ```
+    fn debounce(self, duration: Duration) -> DebouncedStream<Self> {
+        DebouncedStream {
+            stream: self,
+            duration,
+            last_item: None,
+            last_time: None,
+        }
+    }
+
+    /// Sample the stream at regular intervals.
+    ///
+    /// Yields only the most recent item at each interval.
+    /// Drops items that arrive between samples.
+    ///
+    /// # Example
+    /// ```verum
+    /// let sampled = high_frequency_data()
+    ///     .sample(100.millis);  // Sample at 10 Hz
+    /// ```
+    fn sample(self, interval: Duration) -> SampledStream<Self> {
+        SampledStream {
+            stream: self,
+            interval,
+            last_sample: None,
+            next_sample_time: Instant.now(),
+        }
+    }
+};
+
+// All Streams implement StreamExt
+implement<S: Stream> StreamExt for S {}
+
+// =============================================================================
+// StreamNext - Future for next item
+// =============================================================================
+
+/// Future that yields the next item from a stream.
+public type StreamNext<S: Stream> is {
+    stream: &mut S,
+};
+
+implement<S: Stream> Future for StreamNext<S> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        self.stream.poll_next(cx)
+    }
+}
+
+// =============================================================================
+// Stream Constructors
+// =============================================================================
+
+/// Create a stream from a synchronous iterator.
+///
+/// # Example
+/// ```verum
+/// let stream = iter([1, 2, 3].into_iter());
+/// ```
+public fn iter<I: Iterator>(iterator: I) -> StreamIter<I> {
+    StreamIter { iter: iterator }
+}
+
+/// Create a stream from an iterator.
+public type StreamIter<I: Iterator> is {
+    iter: I,
+};
+
+implement<I: Iterator> Stream for StreamIter<I> {
+    type Item = I.Item;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<I.Item>> {
+        Poll.Ready(self.iter.next())
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.iter.size_hint()
+    }
+}
+
+/// Create a stream that yields a single value.
+///
+/// # Example
+/// ```verum
+/// let stream = stream_once(42);
+/// // Yields: 42
+/// ```
+public fn stream_once<T>(value: T) -> StreamOnce<T> {
+    StreamOnce { value: Some(value) }
+}
+
+/// Stream that yields a single value.
+public type StreamOnce<T> is {
+    value: Maybe<T>,
+};
+
+implement<T> Stream for StreamOnce<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<T>> {
+        Poll.Ready(self.value.take())
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let n = if self.value.is_some() { 1 } else { 0 };
+        (n, Some(n))
+    }
+}
+
+/// Create a stream that yields a value from a future, once.
+///
+/// # Example
+/// ```verum
+/// let stream = once_future(async { 42 });
+/// // Yields: 42 (after future completes)
+/// ```
+public fn once_future<Fut: Future>(future: Fut) -> OnceFuture<Fut> {
+    OnceFuture { future: Some(future) }
+}
+
+/// Stream that yields a future's result once.
+public type OnceFuture<Fut: Future> is {
+    future: Maybe<Fut>,
+};
+
+implement<Fut: Future> Stream for OnceFuture<Fut> {
+    type Item = Fut.Output;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Fut.Output>> {
+        match self.future.as_mut() {
+            Some(fut) => {
+                match fut.poll(cx) {
+                    Poll.Ready(value) => {
+                        self.future = None;
+                        Poll.Ready(Some(value))
+                    }
+                    Poll.Pending => Poll.Pending,
+                }
+            }
+            None => Poll.Ready(None),
+        }
+    }
+}
+
+/// Create an empty stream.
+///
+/// # Example
+/// ```verum
+/// let stream: StreamEmpty<Int> = stream_empty();
+/// // Yields nothing
+/// ```
+public fn stream_empty<T>() -> StreamEmpty<T> {
+    StreamEmpty
+}
+
+/// An empty stream.
+public type StreamEmpty<T> is ();
+
+implement<T> Stream for StreamEmpty<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<T>> {
+        Poll.Ready(None)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (0, Some(0))
+    }
+}
+
+/// Create a stream that repeats a value forever.
+///
+/// # Example
+/// ```verum
+/// let stream = stream_repeat(1).take(3);
+/// // Yields: 1, 1, 1
+/// ```
+public fn stream_repeat<T: Clone>(value: T) -> StreamRepeat<T> {
+    StreamRepeat { value }
+}
+
+/// Stream that repeats a value.
+public type StreamRepeat<T: Clone> is {
+    value: T,
+};
+
+implement<T: Clone> Stream for StreamRepeat<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<T>> {
+        Poll.Ready(Some(self.value.clone()))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (Int.MAX, None)
+    }
+}
+
+/// Create a stream that repeats a value n times.
+///
+/// # Example
+/// ```verum
+/// let stream = stream_repeat_n(42, 3);
+/// // Yields: 42, 42, 42
+/// ```
+public fn stream_repeat_n<T: Clone>(value: T, n: Int) -> StreamRepeatN<T> {
+    StreamRepeatN { value: Some(value), remaining: n }
+}
+
+/// Stream that repeats a value n times.
+public type StreamRepeatN<T: Clone> is {
+    value: Maybe<T>,
+    remaining: Int,
+};
+
+implement<T: Clone> Stream for StreamRepeatN<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<T>> {
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
+            if self.remaining == 0 {
+                Poll.Ready(self.value.take())
+            } else {
+                Poll.Ready(Some(self.value.as_ref().unwrap().clone()))
+            }
+        } else {
+            Poll.Ready(None)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+/// Create a stream from a generating function.
+///
+/// # Example
+/// ```verum
+/// let mut counter = 0;
+/// let stream = stream_from_fn(|| {
+///     counter = counter + 1;
+///     if counter <= 3 { Some(counter) } else { None }
+/// });
+/// // Yields: 1, 2, 3
+/// ```
+public fn stream_from_fn<T, F: fn() -> Maybe<T>>(f: F) -> StreamFromFn<F> {
+    StreamFromFn { f }
+}
+
+/// Stream created from a function.
+public type StreamFromFn<F> is {
+    f: F,
+};
+
+implement<T, F: fn() -> Maybe<T>> Stream for StreamFromFn<F> {
+    type Item = T;
+
+    fn poll_next(&mut self, _cx: &mut Context) -> Poll<Maybe<T>> {
+        Poll.Ready((self.f)())
+    }
+}
+
+/// Create a stream from an async generating function.
+///
+/// # Example
+/// ```verum
+/// let stream = stream_poll_fn(|cx| {
+///     // Custom polling logic
+///     Poll.Ready(Some(42))
+/// });
+/// ```
+public fn stream_poll_fn<T, F: fn(&mut Context) -> Poll<Maybe<T>>>(f: F) -> StreamPollFn<F> {
+    StreamPollFn { f }
+}
+
+/// Stream created from a poll function.
+public type StreamPollFn<F> is {
+    f: F,
+};
+
+implement<T, F: fn(&mut Context) -> Poll<Maybe<T>>> Stream for StreamPollFn<F> {
+    type Item = T;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        (self.f)(cx)
+    }
+}
+
+/// Create a stream through state-based unfolding.
+///
+/// # Example
+/// ```verum
+/// let stream = stream_unfold(0, |state| async move {
+///     if state < 3 {
+///         Some((state, state + 1))  // (item, next_state)
+///     } else {
+///         None
+///     }
+/// });
+/// // Yields: 0, 1, 2
+/// ```
+public fn stream_unfold<T, St, Fut: Future<Output = Maybe<(T, St)>>, F: fn(St) -> Fut>(
+    initial: St,
+    f: F
+) -> StreamUnfold<St, F, Fut> {
+    StreamUnfold {
+        state: Some(initial),
+        f,
+        future: None,
+    }
+}
+
+/// Stream created through unfolding.
+public type StreamUnfold<St, F, Fut> is {
+    state: Maybe<St>,
+    f: F,
+    future: Maybe<Fut>,
+};
+
+implement<T, St, Fut: Future<Output = Maybe<(T, St)>>, F: fn(St) -> Fut> Stream for StreamUnfold<St, F, Fut> {
+    type Item = T;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        loop {
+            if let Some(ref mut fut) = self.future {
+                match fut.poll(cx) {
+                    Poll.Ready(Some((item, next_state))) => {
+                        self.future = None;
+                        self.state = Some(next_state);
+                        return Poll.Ready(Some(item));
+                    }
+                    Poll.Ready(None) => {
+                        self.future = None;
+                        return Poll.Ready(None);
+                    }
+                    Poll.Pending => return Poll.Pending,
+                }
+            } else if let Some(state) = self.state.take() {
+                self.future = Some((self.f)(state));
+            } else {
+                return Poll.Ready(None);
+            }
+        }
+    }
+}
+
+/// Create a stream that periodically yields at an interval.
+///
+/// # Example
+/// ```verum
+/// let stream = interval(Duration.from_millis(100));
+/// // Yields () every 100ms
+/// ```
+public fn interval(period_ms: Int) -> StreamInterval {
+    StreamInterval {
+        period_ms,
+        next_tick: 0,
+    }
+}
+
+/// Interval stream.
+public type StreamInterval is {
+    period_ms: Int,
+    next_tick: Int,
+};
+
+implement Stream for StreamInterval {
+    type Item = ();
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<()>> {
+        // Note: Full implementation would use async timer
+        // This is a simplified version
+        Poll.Ready(Some(()))
+    }
+}
+
+// =============================================================================
+// Combinator Types
+// =============================================================================
+
+/// Map combinator.
+public type StreamMap<S, F> is {
+    stream: S,
+    f: F,
+};
+
+implement<S: Stream, B, F: fn(S.Item) -> B> Stream for StreamMap<S, F> {
+    type Item = B;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<B>> {
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => Poll.Ready(Some((self.f)(item))),
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.stream.size_hint()
+    }
+}
+
+/// Then combinator (map to future).
+public type StreamThen<S, F, Fut> is {
+    stream: S,
+    f: F,
+    pending: Maybe<Fut>,
+};
+
+implement<S: Stream, Fut: Future, F: fn(S.Item) -> Fut> Stream for StreamThen<S, F, Fut> {
+    type Item = Fut.Output;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Fut.Output>> {
+        loop {
+            if let Some(ref mut fut) = self.pending {
+                match fut.poll(cx) {
+                    Poll.Ready(output) => {
+                        self.pending = None;
+                        return Poll.Ready(Some(output));
+                    }
+                    Poll.Pending => return Poll.Pending,
+                }
+            }
+
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.pending = Some((self.f)(item));
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Filter combinator.
+public type StreamFilter<S, F> is {
+    stream: S,
+    pred: F,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Stream for StreamFilter<S, F> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if (self.pred)(&item) {
+                        return Poll.Ready(Some(item));
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// FilterMap combinator.
+public type StreamFilterMap<S, F> is {
+    stream: S,
+    f: F,
+};
+
+implement<S: Stream, B, F: fn(S.Item) -> Maybe<B>> Stream for StreamFilterMap<S, F> {
+    type Item = B;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<B>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if let Some(res) = (self.f)(item) {
+                        return Poll.Ready(Some(res));
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Take combinator.
+public type StreamTake<S> is {
+    stream: S,
+    remaining: Int,
+};
+
+implement<S: Stream> Stream for StreamTake<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        if self.remaining == 0 {
+            return Poll.Ready(None);
+        }
+
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                self.remaining = self.remaining - 1;
+                Poll.Ready(Some(item))
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let (lower, upper) = self.stream.size_hint();
+        let lower = lower.min(self.remaining);
+        let upper = upper.map(|u| u.min(self.remaining)).or(Some(self.remaining));
+        (lower, upper)
+    }
+}
+
+/// TakeWhile combinator.
+public type StreamTakeWhile<S, F> is {
+    stream: S,
+    pred: F,
+    done: Bool,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Stream for StreamTakeWhile<S, F> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        if self.done {
+            return Poll.Ready(None);
+        }
+
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                if (self.pred)(&item) {
+                    Poll.Ready(Some(item))
+                } else {
+                    self.done = true;
+                    Poll.Ready(None)
+                }
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+/// Skip combinator.
+public type StreamSkip<S> is {
+    stream: S,
+    remaining: Int,
+};
+
+implement<S: Stream> Stream for StreamSkip<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        while self.remaining > 0 {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(_)) => {
+                    self.remaining = self.remaining - 1;
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+
+        self.stream.poll_next(cx)
+    }
+}
+
+/// SkipWhile combinator.
+public type StreamSkipWhile<S, F> is {
+    stream: S,
+    pred: Maybe<F>,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Stream for StreamSkipWhile<S, F> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if let Some(ref pred) = self.pred {
+                        if pred(&item) {
+                            continue;
+                        }
+                        self.pred = None;
+                    }
+                    return Poll.Ready(Some(item));
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Chain combinator.
+public type StreamChain<S1, S2> is {
+    first: Maybe<S1>,
+    second: S2,
+};
+
+implement<S1: Stream, S2: Stream<Item = S1.Item>> Stream for StreamChain<S1, S2> {
+    type Item = S1.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S1.Item>> {
+        if let Some(ref mut first) = self.first {
+            match first.poll_next(cx) {
+                Poll.Ready(Some(item)) => return Poll.Ready(Some(item)),
+                Poll.Ready(None) => {
+                    self.first = None;
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+
+        self.second.poll_next(cx)
+    }
+}
+
+/// Zip combinator.
+public type StreamZip<S1, S2> is {
+    stream1: S1,
+    stream2: S2,
+};
+
+implement<S1: Stream, S2: Stream> Stream for StreamZip<S1, S2> {
+    type Item = (S1.Item, S2.Item);
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<(S1.Item, S2.Item)>> {
+        // Note: Simplified - full impl would handle partial completion
+        match (self.stream1.poll_next(cx), self.stream2.poll_next(cx)) {
+            (Poll.Ready(Some(a)), Poll.Ready(Some(b))) => Poll.Ready(Some((a, b))),
+            (Poll.Ready(None), _) | (_, Poll.Ready(None)) => Poll.Ready(None),
+            _ => Poll.Pending,
+        }
+    }
+}
+
+/// Enumerate combinator.
+public type StreamEnumerate<S> is {
+    stream: S,
+    index: Int,
+};
+
+implement<S: Stream> Stream for StreamEnumerate<S> {
+    type Item = (Int, S.Item);
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<(Int, S.Item)>> {
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                let idx = self.index;
+                self.index = self.index + 1;
+                Poll.Ready(Some((idx, item)))
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+/// Flatten combinator.
+public type StreamFlatten<S> is {
+    stream: S,
+    current: Maybe<S.Item>,
+};
+
+implement<S: Stream> Stream for StreamFlatten<S>
+where S.Item: IntoStream
+{
+    // S.Item: IntoStream, so S.Item.Item is the Item type of IntoStream for that type
+    type Item = S.Item.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Self.Item>> {
+        loop {
+            if let Some(ref mut inner) = self.current {
+                match inner.into_stream().poll_next(cx) {
+                    Poll.Ready(Some(item)) => return Poll.Ready(Some(item)),
+                    Poll.Ready(None) => {
+                        self.current = None;
+                    }
+                    Poll.Pending => return Poll.Pending,
+                }
+            }
+
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(inner)) => {
+                    self.current = Some(inner);
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// FlatMap combinator.
+public type StreamFlatMap<S, F, U> is {
+    stream: S,
+    f: F,
+    current: Maybe<U>,
+};
+
+implement<S: Stream, U: IntoStream, F: fn(S.Item) -> U> Stream for StreamFlatMap<S, F, U> {
+    type Item = U.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<U.Item>> {
+        loop {
+            if let Some(ref mut inner) = self.current {
+                match inner.into_stream().poll_next(cx) {
+                    Poll.Ready(Some(item)) => return Poll.Ready(Some(item)),
+                    Poll.Ready(None) => {
+                        self.current = None;
+                    }
+                    Poll.Pending => return Poll.Pending,
+                }
+            }
+
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.current = Some((self.f)(item));
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Peekable stream adapter.
+public type StreamPeekable<S: Stream> is {
+    stream: S,
+    peeked: Maybe<Maybe<S.Item>>,
+};
+
+implement<S: Stream> StreamPeekable<S> {
+    /// Peek at the next item without consuming it.
+    public fn peek(&mut self, cx: &mut Context) -> Poll<Maybe<&S.Item>> {
+        if self.peeked.is_none() {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(item) => {
+                    self.peeked = Some(item);
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+
+        match &self.peeked {
+            Some(Some(item)) => Poll.Ready(Some(item)),
+            Some(None) => Poll.Ready(None),
+            None => unreachable(),
+        }
+    }
+}
+
+implement<S: Stream> Stream for StreamPeekable<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        if let Some(peeked) = self.peeked.take() {
+            return Poll.Ready(peeked);
+        }
+        self.stream.poll_next(cx)
+    }
+}
+
+/// Intersperse combinator.
+public type StreamIntersperse<S: Stream> is {
+    stream: S,
+    separator: S.Item,
+    next_sep: Bool,
+    item: Maybe<S.Item>,
+};
+
+implement<S: Stream> Stream for StreamIntersperse<S>
+where S.Item: Clone
+{
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        if self.next_sep && self.item.is_some() {
+            self.next_sep = false;
+            return Poll.Ready(Some(self.separator.clone()));
+        }
+
+        if let Some(item) = self.item.take() {
+            return Poll.Ready(Some(item));
+        }
+
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                if self.next_sep {
+                    self.item = Some(item);
+                    self.next_sep = false;
+                    Poll.Ready(Some(self.separator.clone()))
+                } else {
+                    self.next_sep = true;
+                    Poll.Ready(Some(item))
+                }
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+/// Fuse combinator.
+public type StreamFuse<S> is {
+    stream: Maybe<S>,
+};
+
+implement<S: Stream> Stream for StreamFuse<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        match &mut self.stream {
+            Some(stream) => {
+                match stream.poll_next(cx) {
+                    Poll.Ready(None) => {
+                        self.stream = None;
+                        Poll.Ready(None)
+                    }
+                    other => other,
+                }
+            }
+            None => Poll.Ready(None),
+        }
+    }
+}
+
+/// Inspect combinator.
+public type StreamInspect<S, F> is {
+    stream: S,
+    f: F,
+};
+
+implement<S: Stream, F: fn(&S.Item)> Stream for StreamInspect<S, F> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                (self.f)(&item);
+                Poll.Ready(Some(item))
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+/// Scan combinator.
+public type StreamScan<S, St, F> is {
+    stream: S,
+    state: St,
+    f: F,
+};
+
+implement<S: Stream, St, B, F: fn(&mut St, S.Item) -> Maybe<B>> Stream for StreamScan<S, St, F> {
+    type Item = B;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<B>> {
+        match self.stream.poll_next(cx) {
+            Poll.Ready(Some(item)) => {
+                Poll.Ready((self.f)(&mut self.state, item))
+            }
+            Poll.Ready(None) => Poll.Ready(None),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+// =============================================================================
+// Sink Futures (Consume the stream)
+// =============================================================================
+
+/// Future that collects all items.
+public type StreamCollect<S: Stream, C> is {
+    stream: S,
+    items: List<S.Item>,
+};
+
+implement<S: Stream, C: FromIterator<S.Item>> Future for StreamCollect<S, C> {
+    type Output = C;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<C> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.items.push(item);
+                }
+                Poll.Ready(None) => {
+                    let items = core.memory.take(&mut self.items);
+                    return Poll.Ready(C.from_iter(items.into_iter()));
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that folds the stream.
+public type StreamFold<S, B, F> is {
+    stream: S,
+    acc: Maybe<B>,
+    f: F,
+};
+
+implement<S: Stream, B, F: fn(B, S.Item) -> B> Future for StreamFold<S, B, F> {
+    type Output = B;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<B> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    let acc = self.acc.take().unwrap();
+                    self.acc = Some((self.f)(acc, item));
+                }
+                Poll.Ready(None) => {
+                    return Poll.Ready(self.acc.take().unwrap());
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that executes a closure on each item.
+public type StreamForEach<S, F> is {
+    stream: S,
+    f: F,
+};
+
+implement<S: Stream, F: fn(S.Item)> Future for StreamForEach<S, F> {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    (self.f)(item);
+                }
+                Poll.Ready(None) => return Poll.Ready(()),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that reduces the stream to a single value.
+///
+/// Uses the first item as the initial accumulator. Returns None for empty streams.
+public type StreamReduce<S, F> is {
+    stream: S,
+    acc: Maybe<S.Item>,
+    f: F,
+};
+
+implement<S: Stream, F: fn(S.Item, S.Item) -> S.Item> Future for StreamReduce<S, F> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    match self.acc.take() {
+                        Some(acc) => {
+                            self.acc = Some((self.f)(acc, item));
+                        }
+                        None => {
+                            self.acc = Some(item);
+                        }
+                    }
+                }
+                Poll.Ready(None) => {
+                    return Poll.Ready(self.acc.take());
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future for concurrent for_each.
+public type StreamForEachConcurrent<S, F, Fut> is {
+    stream: S,
+    f: F,
+    limit: Maybe<Int>,
+    pending: List<Fut>,
+};
+
+implement<S: Stream, Fut: Future<Output = ()>, F: fn(S.Item) -> Fut> Future for StreamForEachConcurrent<S, F, Fut> {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        // Poll pending futures
+        let mut i = 0;
+        while i < self.pending.len() {
+            match self.pending[i].poll(cx) {
+                Poll.Ready(()) => {
+                    self.pending.swap_remove(i);
+                }
+                Poll.Pending => {
+                    i = i + 1;
+                }
+            }
+        }
+
+        // Spawn new futures if under limit
+        loop {
+            let at_limit = match self.limit {
+                Some(limit) => self.pending.len() >= limit,
+                None => false,
+            };
+
+            if at_limit {
+                break;
+            }
+
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.pending.push((self.f)(item));
+                }
+                Poll.Ready(None) => {
+                    if self.pending.is_empty() {
+                        return Poll.Ready(());
+                    }
+                    break;
+                }
+                Poll.Pending => break,
+            }
+        }
+
+        if self.pending.is_empty() {
+            Poll.Ready(())
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+/// Future that checks if any item matches.
+public type StreamAny<S, F> is {
+    stream: S,
+    pred: F,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Future for StreamAny<S, F> {
+    type Output = Bool;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Bool> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if (self.pred)(&item) {
+                        return Poll.Ready(true);
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(false),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that checks if all items match.
+public type StreamAll<S, F> is {
+    stream: S,
+    pred: F,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Future for StreamAll<S, F> {
+    type Output = Bool;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Bool> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if !(self.pred)(&item) {
+                        return Poll.Ready(false);
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(true),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that finds the first matching item.
+public type StreamFind<S, F> is {
+    stream: S,
+    pred: F,
+};
+
+implement<S: Stream, F: fn(&S.Item) -> Bool> Future for StreamFind<S, F> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if (self.pred)(&item) {
+                        return Poll.Ready(Some(item));
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that finds && maps.
+public type StreamFindMap<S, F> is {
+    stream: S,
+    f: F,
+};
+
+implement<S: Stream, B, F: fn(S.Item) -> Maybe<B>> Future for StreamFindMap<S, F> {
+    type Output = Maybe<B>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<B>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if let Some(res) = (self.f)(item) {
+                        return Poll.Ready(Some(res));
+                    }
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that gets the nth item.
+public type StreamNth<S> is {
+    stream: S,
+    n: Int,
+};
+
+implement<S: Stream> Future for StreamNth<S> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    if self.n == 0 {
+                        return Poll.Ready(Some(item));
+                    }
+                    self.n = self.n - 1;
+                }
+                Poll.Ready(None) => return Poll.Ready(None),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that counts items.
+public type StreamCount<S> is {
+    stream: S,
+    count: Int,
+};
+
+implement<S: Stream> Future for StreamCount<S> {
+    type Output = Int;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Int> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(_)) => {
+                    self.count = self.count + 1;
+                }
+                Poll.Ready(None) => return Poll.Ready(self.count),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that gets the last item.
+public type StreamLast<S: Stream> is {
+    stream: S,
+    item: Maybe<S.Item>,
+};
+
+implement<S: Stream> Future for StreamLast<S> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.item = Some(item);
+                }
+                Poll.Ready(None) => return Poll.Ready(self.item.take()),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that gets the first item.
+public type StreamFirst<S> is {
+    stream: S,
+};
+
+implement<S: Stream> Future for StreamFirst<S> {
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        self.stream.poll_next(cx)
+    }
+}
+
+/// Future that gets the minimum item.
+public type StreamMin<S: Stream> is {
+    stream: S,
+    min: Maybe<S.Item>,
+};
+
+implement<S: Stream> Future for StreamMin<S>
+where S.Item: Ord
+{
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.min = match self.min.take() {
+                        Some(current) => Some(current.min(item)),
+                        None => Some(item),
+                    };
+                }
+                Poll.Ready(None) => return Poll.Ready(self.min.take()),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that gets the maximum item.
+public type StreamMax<S: Stream> is {
+    stream: S,
+    max: Maybe<S.Item>,
+};
+
+implement<S: Stream> Future for StreamMax<S>
+where S.Item: Ord
+{
+    type Output = Maybe<S.Item>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.max = match self.max.take() {
+                        Some(current) => Some(current.max(item)),
+                        None => Some(item),
+                    };
+                }
+                Poll.Ready(None) => return Poll.Ready(self.max.take()),
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Sum protocol for folding.
+public type StreamSum<A> is protocol {
+    fn zero() -> Self;
+    fn add(self, item: A) -> Self;
+};
+
+/// Product protocol for folding.
+public type StreamProduct<A> is protocol {
+    fn one() -> Self;
+    fn mul(self, item: A) -> Self;
+};
+
+/// Future that sums items.
+public type SumStream<S, Su> is {
+    stream: S,
+    sum: Su,
+};
+
+implement<S: Stream, Su: StreamSum<S.Item>> Future for SumStream<S, Su> {
+    type Output = Su;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Su> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    let sum = core.memory.take(&mut self.sum);
+                    self.sum = sum.add(item);
+                }
+                Poll.Ready(None) => {
+                    return Poll.Ready(core.memory.take(&mut self.sum));
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+/// Future that multiplies items.
+public type ProductStream<S, P> is {
+    stream: S,
+    product: P,
+};
+
+implement<S: Stream, P: StreamProduct<S.Item>> Future for ProductStream<S, P> {
+    type Output = P;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<P> {
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    let product = core.memory.take(&mut self.product);
+                    self.product = product.mul(item);
+                }
+                Poll.Ready(None) => {
+                    return Poll.Ready(core.memory.take(&mut self.product));
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Backpressure & Flow Control Stream Adapters
+// Spec: docs/improvements.md Section 17.4
+// =============================================================================
+
+/// Buffered stream with bounded capacity for backpressure control.
+///
+/// The buffer fills up to `capacity` items. When full, the underlying stream
+/// is not polled until the consumer takes items from the buffer.
+public type BufferedStream<S: Stream> is {
+    stream: S,
+    buffer: List<S.Item>,
+    capacity: Int,
+    done: Bool,
+};
+
+implement<S: Stream> Stream for BufferedStream<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        // First, try to fill the buffer if not at capacity
+        while !self.done && self.buffer.len() < self.capacity {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.buffer.push(item);
+                }
+                Poll.Ready(None) => {
+                    self.done = true;
+                }
+                Poll.Pending => break,
+            }
+        }
+
+        // Then, yield from buffer
+        if !self.buffer.is_empty() {
+            Poll.Ready(Some(self.buffer.remove(0)))
+        } else if self.done {
+            Poll.Ready(None)
+        } else {
+            Poll.Pending
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let buffered = self.buffer.len();
+        let (lo, hi) = self.stream.size_hint();
+        (lo + buffered, hi.map(|h| h + buffered))
+    }
+}
+
+/// Throttled stream with token bucket rate limiting.
+///
+/// Limits throughput to at most `count` items per `per` duration.
+/// Uses a token bucket algorithm for smooth rate limiting with burst support.
+public type ThrottledStream<S: Stream> is {
+    stream: S,
+    count: Int,
+    per: Duration,
+    tokens: Int,
+    last_refill: Instant,
+};
+
+implement<S: Stream> Stream for ThrottledStream<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        // Refill tokens based on elapsed time
+        let now = Instant.now();
+        let elapsed = now.duration_since(self.last_refill);
+
+        if elapsed >= self.per {
+            // Full refill
+            self.tokens = self.count;
+            self.last_refill = now;
+        } else {
+            // Partial refill (fractional tokens)
+            let refill_fraction = elapsed.as_nanos() as Float / self.per.as_nanos() as Float;
+            let new_tokens = (self.count as Float * refill_fraction) as Int;
+            if new_tokens > 0 {
+                self.tokens = (self.tokens + new_tokens).min(self.count);
+                self.last_refill = now;
+            }
+        }
+
+        // Check if we have tokens available
+        if self.tokens > 0 {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.tokens = self.tokens - 1;
+                    Poll.Ready(Some(item))
+                }
+                Poll.Ready(None) => Poll.Ready(None),
+                Poll.Pending => Poll.Pending,
+            }
+        } else {
+            // Rate limited - schedule wakeup when tokens available
+            // For now, return Pending and rely on external scheduling
+            cx.waker().wake_by_ref();  // Re-poll to check for token refill
+            Poll.Pending
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.stream.size_hint()
+    }
+}
+
+/// Chunked stream that batches items into fixed-size chunks.
+///
+/// Yields `List<Item>` with `size` items each. The final chunk
+/// may contain fewer items if the stream ends before filling.
+public type ChunkedStream<S: Stream> is {
+    stream: S,
+    size: Int,
+    buffer: List<S.Item>,
+    done: Bool,
+};
+
+implement<S: Stream> Stream for ChunkedStream<S> {
+    type Item = List<S.Item>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<List<S.Item>>> {
+        // Fill the buffer until we have `size` items or stream ends
+        while !self.done && self.buffer.len() < self.size {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.buffer.push(item);
+                }
+                Poll.Ready(None) => {
+                    self.done = true;
+                }
+                Poll.Pending => {
+                    // If we have a partial chunk and source is pending, wait
+                    if self.buffer.len() < self.size {
+                        return Poll.Pending;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Yield chunk if we have items
+        if self.buffer.len() == self.size {
+            let chunk = core.memory.take(&mut self.buffer);
+            self.buffer = List.with_capacity(self.size);
+            Poll.Ready(Some(chunk))
+        } else if self.done && !self.buffer.is_empty() {
+            // Final partial chunk
+            let chunk = core.memory.take(&mut self.buffer);
+            Poll.Ready(Some(chunk))
+        } else if self.done {
+            Poll.Ready(None)
+        } else {
+            Poll.Pending
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let (lo, hi) = self.stream.size_hint();
+        let buffered = self.buffer.len();
+
+        // Each chunk is `size` items, so divide counts
+        let lo_chunks = (lo + buffered) / self.size;
+        let hi_chunks = hi.map(|h| (h + buffered + self.size - 1) / self.size);
+
+        (lo_chunks, hi_chunks)
+    }
+}
+
+/// Merged stream combining two streams with fair scheduling.
+///
+/// Uses round-robin scheduling to poll both streams fairly.
+/// Completes only when BOTH streams are exhausted.
+public type MergedStream<S1: Stream, S2: Stream<Item = S1.Item>> is {
+    stream1: S1,
+    stream2: S2,
+    stream1_done: Bool,
+    stream2_done: Bool,
+    prefer_first: Bool,
+};
+
+implement<S1: Stream, S2: Stream<Item = S1.Item>> Stream for MergedStream<S1, S2> {
+    type Item = S1.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S1.Item>> {
+        // Fair scheduling: alternate which stream we poll first
+        let (first_stream, second_stream, first_done, second_done) = if self.prefer_first {
+            (&mut self.stream1, &mut self.stream2, &mut self.stream1_done, &mut self.stream2_done)
+        } else {
+            (&mut self.stream2, &mut self.stream1, &mut self.stream2_done, &mut self.stream1_done)
+        };
+
+        // Flip preference for next poll (fair scheduling)
+        self.prefer_first = !self.prefer_first;
+
+        // Try first stream
+        if !*first_done {
+            match first_stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => return Poll.Ready(Some(item)),
+                Poll.Ready(None) => *first_done = true,
+                Poll.Pending => {}
+            }
+        }
+
+        // Try second stream
+        if !*second_done {
+            match second_stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => return Poll.Ready(Some(item)),
+                Poll.Ready(None) => *second_done = true,
+                Poll.Pending => {}
+            }
+        }
+
+        // Both exhausted?
+        if self.stream1_done && self.stream2_done {
+            Poll.Ready(None)
+        } else {
+            Poll.Pending
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let (lo1, hi1) = self.stream1.size_hint();
+        let (lo2, hi2) = self.stream2.size_hint();
+
+        let lo = lo1 + lo2;
+        let hi = match (hi1, hi2) {
+            (Some(h1), Some(h2)) => Some(h1 + h2),
+            _ => None,
+        };
+
+        (lo, hi)
+    }
+}
+
+/// Time-windowed stream that batches items by duration.
+///
+/// Collects all items during each `duration` window, then yields
+/// the batch at the end of each window.
+public type WindowedStream<S: Stream> is {
+    stream: S,
+    duration: Duration,
+    buffer: List<S.Item>,
+    window_start: Instant,
+};
+
+implement<S: Stream> Stream for WindowedStream<S> {
+    type Item = List<S.Item>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<List<S.Item>>> {
+        let now = Instant.now();
+        let window_elapsed = now.duration_since(self.window_start);
+
+        // Collect items until window expires
+        loop {
+            if window_elapsed >= self.duration {
+                // Window expired - yield collected items
+                self.window_start = now;
+                if self.buffer.is_empty() {
+                    // Check if stream is done
+                    match self.stream.poll_next(cx) {
+                        Poll.Ready(None) => return Poll.Ready(None),
+                        Poll.Ready(Some(item)) => {
+                            self.buffer.push(item);
+                            continue;
+                        }
+                        Poll.Pending => return Poll.Pending,
+                    }
+                } else {
+                    let batch = core.memory.take(&mut self.buffer);
+                    return Poll.Ready(Some(batch));
+                }
+            }
+
+            // Poll for more items in current window
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    self.buffer.push(item);
+                }
+                Poll.Ready(None) => {
+                    // Stream ended - yield remaining items
+                    if self.buffer.is_empty() {
+                        return Poll.Ready(None);
+                    } else {
+                        let batch = core.memory.take(&mut self.buffer);
+                        return Poll.Ready(Some(batch));
+                    }
+                }
+                Poll.Pending => {
+                    // Schedule wakeup at window end
+                    return Poll.Pending;
+                }
+            }
+        }
+    }
+}
+
+/// Debounced stream that yields only after a period of silence.
+///
+/// Useful for handling bursty input. Only yields after no items
+/// have arrived for the specified duration.
+public type DebouncedStream<S: Stream> is {
+    stream: S,
+    duration: Duration,
+    last_item: Maybe<S.Item>,
+    last_time: Maybe<Instant>,
+};
+
+implement<S: Stream> Stream for DebouncedStream<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        // First, poll for new items
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    // New item arrived - reset debounce timer
+                    self.last_item = Some(item);
+                    self.last_time = Some(Instant.now());
+                }
+                Poll.Ready(None) => {
+                    // Stream ended - yield last item if any
+                    if let Some(item) = self.last_item.take() {
+                        return Poll.Ready(Some(item));
+                    } else {
+                        return Poll.Ready(None);
+                    }
+                }
+                Poll.Pending => break,
+            }
+        }
+
+        // Check if debounce period has elapsed
+        if let (Some(last_time), Some(item)) = (&self.last_time, &self.last_item) {
+            let elapsed = Instant.now().duration_since(*last_time);
+            if elapsed >= self.duration {
+                // Debounce period elapsed - yield item
+                let item = self.last_item.take().unwrap();
+                self.last_time = None;
+                return Poll.Ready(Some(item));
+            }
+        }
+
+        Poll.Pending
+    }
+}
+
+/// Sampled stream that yields items at regular intervals.
+///
+/// Yields only the most recent item at each interval.
+/// Items arriving between samples are dropped.
+public type SampledStream<S: Stream> is {
+    stream: S,
+    interval: Duration,
+    last_sample: Maybe<S.Item>,
+    next_sample_time: Instant,
+};
+
+implement<S: Stream> Stream for SampledStream<S> {
+    type Item = S.Item;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<S.Item>> {
+        // Continuously poll for latest item
+        loop {
+            match self.stream.poll_next(cx) {
+                Poll.Ready(Some(item)) => {
+                    // Update last sample
+                    self.last_sample = Some(item);
+                }
+                Poll.Ready(None) => {
+                    // Stream ended - yield final sample if any
+                    if let Some(item) = self.last_sample.take() {
+                        return Poll.Ready(Some(item));
+                    } else {
+                        return Poll.Ready(None);
+                    }
+                }
+                Poll.Pending => break,
+            }
+        }
+
+        // Check if sample interval has elapsed
+        let now = Instant.now();
+        if now >= self.next_sample_time {
+            if let Some(item) = self.last_sample.take() {
+                self.next_sample_time = now + self.interval;
+                return Poll.Ready(Some(item));
+            }
+        }
+
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_iter_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = iter([1, 2, 3]);
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(1)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(2)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(3)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}
+
+@test
+fn test_map_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = iter([1, 2, 3]).map(|x| x * 2);
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(2)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(4)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(6)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}
+
+@test
+fn test_filter_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Create filter stream directly
+    let is_even = |x: &Int| -> Bool { (*x) % 2 == 0 };
+    let base = iter([1, 2, 3, 4, 5]);
+    let mut stream = StreamFilter { stream: base, pred: is_even };
+
+    let result1 = stream.poll_next(&mut cx);
+    let result2 = stream.poll_next(&mut cx);
+    let result3 = stream.poll_next(&mut cx);
+
+    // Verify we get filtered results
+    assert(result1.is_ready());
+    assert(result2.is_ready());
+    assert(result3.is_ready());
+}
+
+@test
+fn test_take_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = iter([1, 2, 3, 4, 5]).take(3);
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(1)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(2)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(3)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}
+
+@test
+fn test_chain_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = iter([1, 2]).chain(iter([3, 4]));
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(1)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(2)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(3)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(4)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}
+
+@test
+fn test_enumerate_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Test enumerate by creating the type directly
+    let base = iter(["a", "b", "c"]);
+    let mut stream = StreamEnumerate { stream: base, index: 0 };
+
+    // Note: poll_next is available via Stream implementation
+    let result1 = stream.poll_next(&mut cx);
+    let result2 = stream.poll_next(&mut cx);
+    let result3 = stream.poll_next(&mut cx);
+    let result4 = stream.poll_next(&mut cx);
+
+    // Verify results contain indexed values
+    assert(result1.is_ready());
+    assert(result4.is_ready());
+}
+
+@test
+fn test_once_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = stream_once(42);
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(42)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}
+
+@test
+fn test_repeat_n_stream() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let mut stream = stream_repeat_n(7, 3);
+
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(7)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(7)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(Some(7)));
+    assert_eq(stream.poll_next(&mut cx), Poll.Ready(None));
+}

@@ -1,0 +1,158 @@
+// Refinement Types example in Verum
+// Demonstrates compile-time and runtime safety with refinement types
+
+// Import standard library functions
+link std.io.stdio.println;
+link std.pure.math.sqrt;
+link core.base.result.Result;
+
+// Define refinement types using the 'is' syntax for domain constraints
+// Note: Verum uses 'is' for ALL type definitions (no struct/enum keywords)
+
+// Positive integer - must be greater than 0
+type Positive is Int { value > 0 };
+
+// Percentage - float between 0 and 100
+type Percentage is Float { value >= 0.0 && value <= 100.0 };
+
+// Non-empty text string
+type NonEmptyText is Text { len(value) > 0 };
+
+// Valid email must contain @ and .
+type ValidEmail is Text {
+    contains(value, "@") && contains(value, ".")
+};
+
+// Age must be between 0 and 150
+type Age is Int { value >= 0 && value <= 150 };
+
+// Bank account with invariants using the 'is' syntax
+type BankAccount is {
+    balance: Float { value >= 0.0 },  // Balance can't be negative
+    account_number: Text { len(value) == 10 },  // Account number must be 10 chars
+    owner: NonEmptyText,
+};
+
+// Function that only accepts positive numbers
+fn calculate_square_root(x: Positive) -> Float {
+    // No need to check if x > 0, guaranteed by type system
+    sqrt(x as Float)
+}
+
+// Division that can't divide by zero
+fn safe_divide(a: Float, b: Float { value != 0.0 }) -> Float {
+    a / b
+}
+
+// Calculate discount with percentage
+fn apply_discount(price: Positive, discount: Percentage) -> Float {
+    let discount_amount = (price as Float) * (discount / 100.0);
+    (price as Float) - discount_amount
+}
+
+// Create a bank account with validation
+fn create_account(
+    initial_balance: Float { value >= 0.0 },
+    account_number: Text,
+    owner: Text
+) -> Result<BankAccount, Text> {
+    // Validate account number length
+    if len(account_number) != 10 {
+        return Result.Err("Account number must be exactly 10 characters");
+    }
+
+    // Validate owner name
+    if len(owner) == 0 {
+        return Result.Err("Owner name cannot be empty");
+    }
+
+    Result.Ok(BankAccount {
+        balance: initial_balance,
+        account_number: account_number,
+        owner: owner as NonEmptyText,
+    })
+}
+
+// Transfer money between accounts with invariant preservation
+fn transfer(
+    from: &mut BankAccount,
+    to: &mut BankAccount,
+    amount: Positive
+) -> Result<(), Text> {
+    let amount_float = amount as Float;
+
+    // Check sufficient funds
+    if from.balance < amount_float {
+        return Result.Err("Insufficient funds");
+    }
+
+    // Perform transfer (invariants maintained automatically)
+    from.balance = from.balance - amount_float;
+    to.balance = to.balance + amount_float;
+
+    Result.Ok(())
+}
+
+// User type using 'is' syntax
+type User is {
+    id: Int,
+    name: Text,
+    email: ValidEmail,
+    age: Age,
+};
+
+fn main() {
+    // Using refinement types
+    let age: Age = 25;  // OK
+    // let invalid_age: Age = 200;  // Would fail at compile time with @verify
+    print(f"Valid age: {age}");
+
+    // Apply discount example
+    let price: Positive = 100;
+    let discount: Percentage = 15.0;
+    let final_price = apply_discount(price, discount);
+    print(f"Price after {discount}% discount: ${final_price}");
+
+    // Safe division
+    let result = safe_divide(10.0, 2.0);
+    print(f"10 / 2 = {result}");
+    // safe_divide(10.0, 0.0);  // Would fail type checking
+
+    // Bank account example
+    match create_account(1000.0, "1234567890", "Alice") {
+        Ok(mut alice_account) => {
+            print(f"Created account for {alice_account.owner} with balance ${alice_account.balance}");
+
+            match create_account(500.0, "0987654321", "Bob") {
+                Ok(mut bob_account) => {
+                    // Transfer money
+                    let transfer_amount: Positive = 250;
+                    match transfer(&mut alice_account, &mut bob_account, transfer_amount) {
+                        Ok(()) => {
+                            print(f"Transferred ${transfer_amount} from Alice to Bob");
+                            print(f"Alice's new balance: ${alice_account.balance}");
+                            print(f"Bob's new balance: ${bob_account.balance}");
+                        }
+                        Err(e) => print(f"Transfer failed: {e}")
+                    }
+                }
+                Err(e) => print(f"Failed to create Bob's account: {e}")
+            }
+        }
+        Err(e) => print(f"Failed to create Alice's account: {e}")
+    }
+
+    // Using runtime checks (when @verify not available)
+    let user_input = 42;  // Simulated user input
+    match Positive.try_from(user_input) {
+        Ok(positive_value) => {
+            let sqrt_result = calculate_square_root(positive_value);
+            print(f"Square root of {positive_value} is {sqrt_result}");
+        }
+        Err(_) => {
+            print(f"Invalid input: {user_input} must be positive");
+        }
+    }
+
+    print(f"\nRefinement types provide compile-time safety!");
+}

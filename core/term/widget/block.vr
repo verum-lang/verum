@@ -1,0 +1,229 @@
+// =============================================================================
+// block.vr - Block widget (borders, title, padding)
+// =============================================================================
+module block;
+
+mount super.protocol.{Widget, Styled};
+mount super.super.render.buffer.Buffer;
+mount super.super.render.cell.Cell;
+mount super.super.layout.rect.{Rect, Margin};
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+/// Border line style.
+public type BorderType is
+    | None
+    | Plain       // ─│┌┐└┘
+    | Rounded     // ─│╭╮╰╯
+    | Double      // ═║╔╗╚╝
+    | Thick       // ━┃┏┓┗┛
+    | Custom { chars: BorderChars };
+
+/// Characters used for drawing borders.
+public type BorderChars is {
+    top: Text,
+    bottom: Text,
+    left: Text,
+    right: Text,
+    top_left: Text,
+    top_right: Text,
+    bottom_left: Text,
+    bottom_right: Text,
+};
+
+/// Which sides have borders — bitfield.
+public type Borders is { bits: UInt8 };
+
+implement Borders {
+    public const NONE:   Borders = Borders { bits: 0 };
+    public const TOP:    Borders = Borders { bits: 1 };
+    public const RIGHT:  Borders = Borders { bits: 2 };
+    public const BOTTOM: Borders = Borders { bits: 4 };
+    public const LEFT:   Borders = Borders { bits: 8 };
+    public const ALL:    Borders = Borders { bits: 15 };
+
+    public fn has_top(&self) -> Bool { (self.bits & 1) != 0 }
+    public fn has_right(&self) -> Bool { (self.bits & 2) != 0 }
+    public fn has_bottom(&self) -> Bool { (self.bits & 4) != 0 }
+    public fn has_left(&self) -> Bool { (self.bits & 8) != 0 }
+
+    public fn union(self, other: Borders) -> Borders {
+        Borders { bits: self.bits | other.bits }
+    }
+}
+
+/// Text alignment.
+public type Alignment is Left | Center | Right;
+
+/// Block — universal container with border, title, and padding.
+/// Used as a wrapper for any widget.
+public type Block is {
+    title: Maybe<Text>,
+    title_alignment: Alignment,
+    borders: Borders,
+    border_type: BorderType,
+    border_style: Style,
+    style: Style,
+    padding: Margin,
+};
+
+implement Block {
+    public fn new() -> Block {
+        Block {
+            title: None,
+            title_alignment: Alignment.Left,
+            borders: Borders.NONE,
+            border_type: BorderType.Rounded,
+            border_style: Style.DEFAULT,
+            style: Style.DEFAULT,
+            padding: Margin.ZERO,
+        }
+    }
+
+    // Builder API (by-value self, returns Block)
+    public fn title(self, title: Text) -> Block {
+        Block { title: Some(title), ..self }
+    }
+
+    public fn title_alignment(self, align: Alignment) -> Block {
+        Block { title_alignment: align, ..self }
+    }
+
+    public fn borders(self, borders: Borders) -> Block {
+        Block { borders: borders, ..self }
+    }
+
+    public fn border_type(self, bt: BorderType) -> Block {
+        Block { border_type: bt, ..self }
+    }
+
+    public fn border_style(self, style: Style) -> Block {
+        Block { border_style: style, ..self }
+    }
+
+    public fn padding(self, padding: Margin) -> Block {
+        Block { padding: padding, ..self }
+    }
+
+    /// Compute the inner area (after border and padding).
+    public fn inner(&self, area: Rect) -> Rect {
+        let mut x = area.x;
+        let mut y = area.y;
+        let mut w = area.width;
+        let mut h = area.height;
+
+        if self.borders.has_top() { y = y + 1; h = h - 1; }
+        if self.borders.has_bottom() { h = h - 1; }
+        if self.borders.has_left() { x = x + 1; w = w - 1; }
+        if self.borders.has_right() { w = w - 1; }
+
+        let inner_rect = Rect.new(x, y, w.max(0), h.max(0));
+        inner_rect.inner(self.padding)
+    }
+}
+
+implement Styled for Block {
+    fn style(self, style: Style) -> Block {
+        Block { style: style, ..self }
+    }
+}
+
+implement Widget for Block {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if area.width < 1 || area.height < 1 { return; }
+
+        // Fill background
+        buf.set_style(area, self.style);
+
+        // Get border characters
+        let chars = get_border_chars(&self.border_type);
+
+        // Draw horizontal borders
+        if self.borders.has_top() {
+            for x in area.left()..area.right() {
+                buf.get_mut(x, area.top()).set_char(&chars.top, self.border_style);
+            }
+        }
+        if self.borders.has_bottom() && area.height > 1 {
+            for x in area.left()..area.right() {
+                buf.get_mut(x, area.bottom() - 1).set_char(&chars.bottom, self.border_style);
+            }
+        }
+
+        // Draw vertical borders
+        if self.borders.has_left() {
+            for y in area.top()..area.bottom() {
+                buf.get_mut(area.left(), y).set_char(&chars.left, self.border_style);
+            }
+        }
+        if self.borders.has_right() && area.width > 1 {
+            for y in area.top()..area.bottom() {
+                buf.get_mut(area.right() - 1, y).set_char(&chars.right, self.border_style);
+            }
+        }
+
+        // Draw corners
+        if self.borders.has_top() && self.borders.has_left() {
+            buf.get_mut(area.left(), area.top()).set_char(&chars.top_left, self.border_style);
+        }
+        if self.borders.has_top() && self.borders.has_right() && area.width > 1 {
+            buf.get_mut(area.right() - 1, area.top()).set_char(&chars.top_right, self.border_style);
+        }
+        if self.borders.has_bottom() && self.borders.has_left() && area.height > 1 {
+            buf.get_mut(area.left(), area.bottom() - 1).set_char(&chars.bottom_left, self.border_style);
+        }
+        if self.borders.has_bottom() && self.borders.has_right() && area.width > 1 && area.height > 1 {
+            buf.get_mut(area.right() - 1, area.bottom() - 1).set_char(&chars.bottom_right, self.border_style);
+        }
+
+        // Draw title
+        match self.title {
+            Some(title) => {
+                if self.borders.has_top() && area.width > 2 {
+                    let max_width = area.width - 2;
+                    let display = if title.len() > max_width {
+                        title.slice(0, max_width)
+                    } else {
+                        title
+                    };
+
+                    let title_x = match self.title_alignment {
+                        Left => area.left() + 1,
+                        Center => area.left() + (area.width - display.len()) / 2,
+                        Right => area.right() - 1 - display.len(),
+                    };
+
+                    buf.set_string(title_x, area.top(), &display, self.border_style);
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+/// Get the border characters for a given border type.
+fn get_border_chars(bt: &BorderType) -> BorderChars {
+    match bt {
+        None => BorderChars {
+            top: " ", bottom: " ", left: " ", right: " ",
+            top_left: " ", top_right: " ", bottom_left: " ", bottom_right: " ",
+        },
+        Plain => BorderChars {
+            top: "─", bottom: "─", left: "│", right: "│",
+            top_left: "┌", top_right: "┐", bottom_left: "└", bottom_right: "┘",
+        },
+        Rounded => BorderChars {
+            top: "─", bottom: "─", left: "│", right: "│",
+            top_left: "╭", top_right: "╮", bottom_left: "╰", bottom_right: "╯",
+        },
+        Double => BorderChars {
+            top: "═", bottom: "═", left: "║", right: "║",
+            top_left: "╔", top_right: "╗", bottom_left: "╚", bottom_right: "╝",
+        },
+        Thick => BorderChars {
+            top: "━", bottom: "━", left: "┃", right: "┃",
+            top_left: "┏", top_right: "┓", bottom_left: "┗", bottom_right: "┛",
+        },
+        Custom { chars } => chars.clone(),
+    }
+}

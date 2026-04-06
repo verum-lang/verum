@@ -1,0 +1,155 @@
+// =============================================================================
+// core/intrinsics/runtime/text.vr - Text/String Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Memory allocator
+//
+// String operations that require memory allocation.
+// For allocation-free byte operations, use memory.vr slice intrinsics.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.text;
+
+// =============================================================================
+// SECTION 1: Text Creation
+// =============================================================================
+
+/// Create Text from a static string literal.
+///
+/// Requires: Text type (allocation)
+@intrinsic("text_from_static")
+@inline(always)
+public fn text_from_static(s: &'static str) -> Text;
+
+// =============================================================================
+// SECTION 2: Parsing
+// =============================================================================
+
+/// Parse integer from text.
+///
+/// Requires: Text type
+@intrinsic("text_parse_int")
+public fn text_parse_int(text: &Text) -> Maybe<Int>;
+
+/// Parse float from text.
+///
+/// Requires: Text type
+@intrinsic("text_parse_float")
+public fn text_parse_float(text: &Text) -> Maybe<Float>;
+
+// =============================================================================
+// SECTION 3: Formatting
+// =============================================================================
+
+/// Convert integer to text.
+///
+/// Requires: Text allocation
+@intrinsic("int_to_text")
+public fn int_to_text(n: Int) -> Text;
+
+/// Convert float to text.
+///
+/// Requires: Text allocation
+@intrinsic("float_to_text")
+public fn float_to_text(f: Float) -> Text;
+
+// =============================================================================
+// SECTION 4: UTF-8/Character Operations
+// =============================================================================
+
+/// Decode a UTF-8 character from bytes at given index.
+@intrinsic("utf8_decode_char")
+public fn utf8_decode_char(bytes: &[Byte], byte_idx: Int) -> Char;
+
+/// Decode a UTF-8 character with length.
+/// Returns (character, byte_length).
+@intrinsic("utf8_decode_char_len")
+public fn utf8_decode_char_len(bytes: &[Byte], byte_idx: Int) -> (Char, Int);
+
+/// Encode a character as UTF-8 bytes.
+/// Returns the number of bytes written.
+@intrinsic("char_encode_utf8")
+public fn char_encode_utf8(ch: Char, buf: &mut [Byte]) -> Int;
+
+// =============================================================================
+// SECTION 5: Character Classification
+// =============================================================================
+
+/// Check if character is alphabetic.
+@intrinsic("char_is_alphabetic")
+@inline(always)
+public fn char_is_alphabetic(ch: Char) -> Bool;
+
+/// Check if character is numeric (digit).
+@intrinsic("char_is_numeric")
+@inline(always)
+public fn char_is_numeric(ch: Char) -> Bool;
+
+/// Check if character is alphanumeric.
+@intrinsic("char_is_alphanumeric")
+@inline(always)
+public fn char_is_alphanumeric(ch: Char) -> Bool;
+
+/// Check if character is whitespace.
+@intrinsic("char_is_whitespace")
+@inline(always)
+public fn char_is_whitespace(ch: Char) -> Bool;
+
+/// Check if character is a control character.
+@intrinsic("char_is_control")
+@inline(always)
+public fn char_is_control(ch: Char) -> Bool;
+
+/// Check if character is uppercase.
+@intrinsic("char_is_uppercase")
+@inline(always)
+public fn char_is_uppercase(ch: Char) -> Bool;
+
+/// Check if character is lowercase.
+@intrinsic("char_is_lowercase")
+@inline(always)
+public fn char_is_lowercase(ch: Char) -> Bool;
+
+// =============================================================================
+// SECTION 6: Character Conversion
+// =============================================================================
+
+/// Convert character to uppercase.
+@intrinsic("char_to_uppercase")
+@inline(always)
+public fn char_to_uppercase(ch: Char) -> Char;
+
+/// Convert character to lowercase.
+@intrinsic("char_to_lowercase")
+@inline(always)
+public fn char_to_lowercase(ch: Char) -> Char;
+
+/// Get Unicode general category of character.
+@intrinsic("char_general_category")
+public fn char_general_category(ch: Char) -> Int;
+
+/// Get debug escape sequence for character.
+///
+/// Requires: Text allocation
+@intrinsic("char_escape_debug")
+public fn char_escape_debug(ch: Char) -> Text;
+
+// =============================================================================
+// SECTION 7: Panic/Debug (with Text)
+// =============================================================================
+
+/// Trigger a panic with Text message.
+///
+/// Note: For no-alloc environments, use core.panic.panic(&[Byte]) instead.
+/// Requires: Text allocation
+@intrinsic("panic")
+public fn panic(message: &Text) -> !;
+
+/// Debug assertion with Text message.
+///
+/// Note: For no-alloc environments, use core.panic.debug_assert instead.
+/// Requires: Text allocation
+@intrinsic("debug_assert")
+public fn debug_assert(condition: Bool, message: &Text = &"debug assertion failed");

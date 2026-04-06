@@ -1,0 +1,794 @@
+// =============================================================================
+// token.vr - Token Stream and Token Representation
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Token Streams
+//
+// Token streams are the primary data structure for meta programming.
+// They represent source code as a sequence of tokens, enabling:
+//
+// - Code generation via quasi-quotation
+// - Macro input/output
+// - AST manipulation at token level
+//
+// ## Token Stream Operations
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                       TOKEN STREAM OPERATIONS                               │
+// ├─────────────────────────────────────────────────────────────────────────────┤
+// │                                                                             │
+// │  INPUT                    MANIPULATION                  OUTPUT             │
+// │  ─────                    ────────────                  ──────             │
+// │                                                                             │
+// │  TokenStream ──────►  parse() ──────►  AST  ──────►  emit()  ──► Output   │
+// │                           │             │                                   │
+// │                           └── transform ┘                                   │
+// │                                                                             │
+// │  quote { ... } ──►  TokenStream  ──►  append/prepend  ──►  TokenStream    │
+// │                                                                             │
+// │  $ident ──────────────────────────────────────────────────►  Substitution │
+// │  ${expr} ─────────────────────────────────────────────────►  Evaluation   │
+// │                                                                             │
+// └─────────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// =============================================================================
+
+module meta.token;
+
+mount core.{Result, Maybe, Text, List, Iterator};
+mount meta.span.{Span};
+
+// =============================================================================
+// TokenStream
+// =============================================================================
+
+/// Stream of tokens representing source code
+///
+/// TokenStream is the primary input/output type for meta functions.
+/// It represents a sequence of tokens that can be manipulated and
+/// converted to/from AST nodes.
+///
+/// ## Creation
+///
+/// ```verum
+/// // From quote (most common)
+/// let tokens = quote { fn foo() -> Int { 42 } };
+///
+/// // From string (parse at compile-time)
+/// let tokens = TokenStream.from_str("let x = 1;")?;
+///
+/// // Empty stream
+/// let empty = TokenStream.empty();
+///
+/// // Single token
+/// let single = TokenStream.from_token(Token.ident("foo"));
+/// ```
+///
+/// ## Manipulation
+///
+/// ```verum
+/// // Concatenation
+/// let combined = tokens1.append(tokens2);
+///
+/// // Iteration
+/// for token in tokens.iter() {
+///     process(token);
+/// }
+///
+/// // Conversion
+/// let trees = tokens.to_trees();
+/// ```
+@compiler_type
+public type TokenStream is {
+    /// Internal token buffer
+    tokens: List<TokenTree>,
+
+    /// Span covering entire stream
+    span: Span,
+};
+
+implement TokenStream {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Create empty token stream
+    public fn empty() -> Self {
+        Self {
+            tokens: List.new(),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create token stream from single token
+    public fn from_token(token: Token) -> Self {
+        Self {
+            tokens: List.of(TokenTree.Leaf(token)),
+            span: token.span,
+        }
+    }
+
+    /// Create token stream from token tree
+    public fn from_tree(tree: TokenTree) -> Self {
+        let span = tree.span();
+        Self {
+            tokens: List.of(tree),
+            span,
+        }
+    }
+
+    /// Create token stream from list of trees
+    public fn from_trees(trees: List<TokenTree>) -> Self {
+        let span = if trees.is_empty() {
+            Span.call_site()
+        } else {
+            trees.first().unwrap().span().join(trees.last().unwrap().span())
+        };
+
+        Self { tokens: trees, span }
+    }
+
+    /// Parse string as token stream
+    ///
+    /// # Arguments
+    /// - `source`: Verum source code as string
+    ///
+    /// # Returns
+    /// - `Ok(TokenStream)`: Parsed tokens
+    /// - `Err(LexError)`: Lexer error
+    @compiler_intrinsic
+    public fn from_str(source: Text) -> Result<Self, LexError>;
+
+    /// Create token stream from identifier
+    public fn ident(name: Text) -> Self {
+        Self.from_token(Token.ident(name))
+    }
+
+    /// Create token stream from literal
+    public fn literal(value: Literal) -> Self {
+        Self.from_token(Token.literal(value))
+    }
+
+    /// Create token stream from punctuation
+    public fn punct(ch: Char, spacing: Spacing) -> Self {
+        Self.from_token(Token.punct(ch, spacing))
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Check if stream is empty
+    public fn is_empty(&self) -> Bool {
+        self.tokens.is_empty()
+    }
+
+    /// Get number of top-level token trees
+    public fn len(&self) -> Int {
+        self.tokens.len()
+    }
+
+    /// Get span covering entire stream
+    public fn span(&self) -> Span {
+        self.span
+    }
+
+    /// Get first token tree
+    public fn first(&self) -> Maybe<&TokenTree> {
+        self.tokens.first()
+    }
+
+    /// Get last token tree
+    public fn last(&self) -> Maybe<&TokenTree> {
+        self.tokens.last()
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    /// Get reference to token trees for iteration
+    public fn trees(&self) -> &List<TokenTree> {
+        &self.tokens
+    }
+
+    /// Get mutable reference to token trees
+    public fn trees_mut(&mut self) -> &mut List<TokenTree> {
+        &mut self.tokens
+    }
+
+    /// Convert to vector of token trees (clone)
+    public fn to_trees(&self) -> List<TokenTree> {
+        self.tokens.clone()
+    }
+
+    /// Flatten to individual tokens (descends into groups)
+    public fn flatten(&self) -> List<Token> {
+        let mut result = List.new();
+        for tree in self.tokens.iter() {
+            result.extend(tree.flatten());
+        }
+        result
+    }
+
+    // =========================================================================
+    // Manipulation
+    // =========================================================================
+
+    /// Append another token stream
+    public fn append(mut self, other: Self) -> Self {
+        self.tokens.extend(other.tokens);
+        self.span = self.span.join(other.span);
+        self
+    }
+
+    /// Prepend another token stream
+    public fn prepend(self, mut other: Self) -> Self {
+        other.append(self)
+    }
+
+    /// Push single token tree
+    public fn push(mut self, tree: TokenTree) -> Self {
+        self.span = self.span.join(tree.span());
+        self.tokens.push(tree);
+        self
+    }
+
+    /// Insert token tree at index
+    public fn insert(mut self, index: Int, tree: TokenTree) -> Self {
+        self.tokens.insert(index, tree);
+        self.recalculate_span();
+        self
+    }
+
+    /// Remove token tree at index
+    public fn remove(mut self, index: Int) -> (Self, Maybe<TokenTree>) {
+        if index >= 0 && index < self.tokens.len() {
+            let tree = self.tokens.remove(index);
+            self.recalculate_span();
+            (self, Some(tree))
+        } else {
+            (self, None)
+        }
+    }
+
+    /// Take first n token trees
+    public fn take(mut self, n: Int) -> Self {
+        self.tokens.truncate(n);
+        self.recalculate_span();
+        self
+    }
+
+    /// Skip first n token trees
+    public fn skip(mut self, n: Int) -> Self {
+        if n > 0 {
+            self.tokens = self.tokens.into_iter().skip(n).collect();
+            self.recalculate_span();
+        }
+        self
+    }
+
+    /// Split at index
+    public fn split_at(self, index: Int) -> (Self, Self) {
+        let (left, right) = self.tokens.split_at(index);
+        (Self.from_trees(left), Self.from_trees(right))
+    }
+
+    /// Wrap in delimiter group
+    public fn wrap(self, delimiter: Delimiter) -> Self {
+        Self.from_tree(TokenTree.Grouped(Group {
+            delimiter,
+            tokens: self,
+            span: self.span,
+        }))
+    }
+
+    // =========================================================================
+    // Transformations
+    // =========================================================================
+
+    /// Map over token trees
+    public fn map<F>(self, f: F) -> Self
+    where
+        F: Fn(TokenTree) -> TokenTree,
+    {
+        let tokens = self.tokens.into_iter().map(f).collect();
+        Self.from_trees(tokens)
+    }
+
+    /// Filter token trees
+    public fn filter<P>(self, predicate: P) -> Self
+    where
+        P: Fn(&TokenTree) -> Bool,
+    {
+        let tokens = self.tokens.into_iter().filter(predicate).collect();
+        Self.from_trees(tokens)
+    }
+
+    /// Map and filter token trees
+    public fn filter_map<F>(self, f: F) -> Self
+    where
+        F: Fn(TokenTree) -> Maybe<TokenTree>,
+    {
+        let tokens = self.tokens.into_iter().filter_map(f).collect();
+        Self.from_trees(tokens)
+    }
+
+    /// Apply span to all tokens
+    public fn with_span(mut self, span: Span) -> Self {
+        self.span = span;
+        for tree in self.tokens.iter_mut() {
+            tree.set_span(span);
+        }
+        self
+    }
+
+    // =========================================================================
+    // Private helpers
+    // =========================================================================
+
+    fn recalculate_span(&mut self) {
+        if self.tokens.is_empty() {
+            self.span = Span.call_site();
+        } else {
+            self.span = self.tokens.first().unwrap().span()
+                .join(self.tokens.last().unwrap().span());
+        }
+    }
+}
+
+// Implement concatenation via +
+implement Add for TokenStream {
+    type Output = TokenStream;
+
+    fn add(self, other: Self) -> Self {
+        self.append(other)
+    }
+}
+
+// Implement Debug
+implement Debug for TokenStream {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        f.write_str("TokenStream(")?;
+        for (i, tree) in self.tokens.iter().enumerate() {
+            if i > 0 { f.write_str(" ")?; }
+            f.write_str(f"{tree:?}")?;
+        }
+        f.write_str(")")
+    }
+}
+
+// Implement Display (as source code)
+implement Display for TokenStream {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        for tree in self.tokens.iter() {
+            f.write_str(f"{tree}")?;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// TokenTree
+// =============================================================================
+
+/// Token tree: either a single token or a delimited group
+///
+/// Token trees preserve the balanced structure of delimiters,
+/// making them easier to work with than flat token sequences.
+@repr(UInt8)
+public type TokenTree is
+    /// Single token (identifier, literal, punctuation)
+    | Leaf(Token)
+    /// Delimited group of tokens
+    | Grouped(Group);
+
+implement TokenTree {
+    /// Get span of this tree
+    public fn span(&self) -> Span {
+        match self {
+            Leaf(t) => t.span,
+            Grouped(g) => g.span,
+        }
+    }
+
+    /// Set span of this tree
+    public fn set_span(&mut self, span: Span) {
+        match self {
+            Leaf(t) => t.span = span,
+            Grouped(g) => g.span = span,
+        }
+    }
+
+    /// Check if this is a token (not a group)
+    public fn is_token(&self) -> Bool {
+        match self {
+            Leaf(_) => true,
+            Grouped(_) => false,
+        }
+    }
+
+    /// Check if this is a group
+    public fn is_group(&self) -> Bool {
+        match self {
+            Leaf(_) => false,
+            Grouped(_) => true,
+        }
+    }
+
+    /// Get as token if this is a token
+    public fn as_token(&self) -> Maybe<&Token> {
+        match self {
+            Leaf(t) => Some(t),
+            Grouped(_) => None,
+        }
+    }
+
+    /// Get as group if this is a group
+    public fn as_group(&self) -> Maybe<&Group> {
+        match self {
+            Leaf(_) => None,
+            Grouped(g) => Some(g),
+        }
+    }
+
+    /// Flatten to individual tokens
+    public fn flatten(&self) -> List<Token> {
+        match self {
+            Leaf(t) => List.of(*t),
+            Grouped(g) => g.tokens.flatten(),
+        }
+    }
+}
+
+// =============================================================================
+// Token
+// =============================================================================
+
+/// Individual token
+public type Token is {
+    /// Token kind
+    kind: TokenKind,
+
+    /// Source span
+    span: Span,
+};
+
+implement Token {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Create identifier token
+    public fn ident(name: Text) -> Self {
+        Self {
+            kind: TokenKind.Ident(name),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create identifier token with span
+    public fn ident_spanned(name: Text, span: Span) -> Self {
+        Self {
+            kind: TokenKind.Ident(name),
+            span,
+        }
+    }
+
+    /// Create keyword token
+    public fn keyword(kw: Keyword) -> Self {
+        Self {
+            kind: TokenKind.Kw(kw),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create literal token
+    public fn literal(value: Literal) -> Self {
+        Self {
+            kind: TokenKind.Lit(value),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create punctuation token
+    public fn punct(ch: Char, spacing: Spacing) -> Self {
+        Self {
+            kind: TokenKind.Punct(ch, spacing),
+            span: Span.call_site(),
+        }
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Check if this is an identifier
+    public fn is_ident(&self) -> Bool {
+        match self.kind {
+            TokenKind.Ident(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Get identifier name if this is an identifier
+    public fn as_ident(&self) -> Maybe<Text> {
+        match &self.kind {
+            TokenKind.Ident(name) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a keyword
+    public fn is_keyword(&self) -> Bool {
+        match self.kind {
+            TokenKind.Kw(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a literal
+    public fn is_literal(&self) -> Bool {
+        match self.kind {
+            TokenKind.Lit(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is punctuation
+    public fn is_punct(&self) -> Bool {
+        match self.kind {
+            TokenKind.Punct(_, _) => true,
+            _ => false,
+        }
+    }
+
+    /// Get punctuation char if this is punctuation
+    public fn as_punct(&self) -> Maybe<(Char, Spacing)> {
+        match self.kind {
+            TokenKind.Punct(ch, sp) => Some((ch, sp)),
+            _ => None,
+        }
+    }
+
+    /// Set span
+    public fn with_span(mut self, span: Span) -> Self {
+        self.span = span;
+        self
+    }
+}
+
+// =============================================================================
+// TokenKind
+// =============================================================================
+
+/// Token classification
+@repr(UInt8)
+public type TokenKind is
+    /// Identifier (variable, type, function name)
+    | Ident(Text)
+    /// Keyword (fn, let, type, etc.)
+    | Kw(Keyword)
+    /// Literal (number, string, char, bool)
+    | Lit(Literal)
+    /// Punctuation (operators, delimiters)
+    | Punct(Char, Spacing)
+    /// Documentation comment
+    | DocComment(Text)
+    /// End of file
+    | Eof;
+
+// =============================================================================
+// Group
+// =============================================================================
+
+/// Delimited group of tokens
+public type Group is {
+    /// Delimiter type
+    delimiter: Delimiter,
+
+    /// Tokens inside the group
+    tokens: TokenStream,
+
+    /// Span of entire group including delimiters
+    span: Span,
+};
+
+implement Group {
+    /// Create new group
+    public fn new(delimiter: Delimiter, tokens: TokenStream) -> Self {
+        Self {
+            delimiter,
+            span: tokens.span(),
+            tokens,
+        }
+    }
+
+    /// Get delimiter
+    public fn delimiter(&self) -> Delimiter {
+        self.delimiter
+    }
+
+    /// Get inner tokens
+    public fn tokens(&self) -> &TokenStream {
+        &self.tokens
+    }
+
+    /// Get mutable inner tokens
+    public fn tokens_mut(&mut self) -> &mut TokenStream {
+        &mut self.tokens
+    }
+
+    /// Unwrap to inner tokens
+    public fn into_tokens(self) -> TokenStream {
+        self.tokens
+    }
+}
+
+// =============================================================================
+// Delimiter
+// =============================================================================
+
+/// Delimiter type for groups
+@repr(UInt8)
+public type Delimiter is
+    /// Parentheses: `( ... )`
+    | Parenthesis
+    /// Braces: `{ ... }`
+    | Brace
+    /// Brackets: `[ ... ]`
+    | Bracket
+    /// No delimiter (invisible grouping)
+    | Invisible;
+
+implement Delimiter {
+    /// Get opening character
+    public fn open(&self) -> Maybe<Char> {
+        match self {
+            Parenthesis => Some('('),
+            Brace => Some('{'),
+            Bracket => Some('['),
+            Invisible => None,
+        }
+    }
+
+    /// Get closing character
+    public fn close(&self) -> Maybe<Char> {
+        match self {
+            Parenthesis => Some(')'),
+            Brace => Some('}'),
+            Bracket => Some(']'),
+            Invisible => None,
+        }
+    }
+}
+
+// =============================================================================
+// Spacing
+// =============================================================================
+
+/// Punctuation spacing
+@repr(UInt8)
+public type Spacing is
+    /// Followed by another punct (no space): `&&`, `::`, `->`, etc.
+    | Joint
+    /// Followed by space or non-punct
+    | Alone;
+
+// =============================================================================
+// Keyword
+// =============================================================================
+
+/// Verum keywords
+@repr(UInt8)
+public type Keyword is
+    // Reserved keywords (v5.1)
+    | Let | Fn | Is
+    // Contextual keywords
+    | Type | Module | Import | Public | Private
+    | If | Else | Match | For | While | Loop | In
+    | Return | Break | Continue
+    | Meta | Pure | Async | Await
+    | Using | Provide | Context
+    | Implement | Extends | Protocol
+    | Where | As | Mut | Ref
+    | True | False | NoneKw | SomeKw
+    | Self_ | Super;
+
+// =============================================================================
+// Literal
+// =============================================================================
+
+/// Literal values
+@repr(UInt8)
+public type Literal is
+    /// Integer literal
+    | Int { value: Int, suffix: Maybe<Text> }
+    /// Float literal
+    | Float { value: Float64, suffix: Maybe<Text> }
+    /// String literal
+    | String { value: Text, kind: StringKind }
+    /// Character literal
+    | Char(Char)
+    /// Boolean literal
+    | Bool(Bool)
+    /// Byte string literal
+    | ByteString(Bytes);
+
+implement Literal {
+    /// Create integer literal
+    public fn int(value: Int) -> Self {
+        Literal.Int { value, suffix: None }
+    }
+
+    /// Create float literal
+    public fn float(value: Float64) -> Self {
+        Literal.Float { value, suffix: None }
+    }
+
+    /// Create string literal
+    public fn string(value: Text) -> Self {
+        Literal.String { value, kind: StringKind.Normal }
+    }
+
+    /// Create format string literal
+    public fn format_string(value: Text) -> Self {
+        Literal.String { value, kind: StringKind.Format }
+    }
+
+    /// Create raw string literal
+    public fn raw_string(value: Text) -> Self {
+        Literal.String { value, kind: StringKind.Raw }
+    }
+
+    /// Create char literal
+    public fn char(value: Char) -> Self {
+        Literal.Char(value)
+    }
+
+    /// Create bool literal
+    public fn bool(value: Bool) -> Self {
+        Literal.Bool(value)
+    }
+}
+
+/// String literal kind
+@repr(UInt8)
+public type StringKind is
+    /// Normal string: `"..."`
+    | Normal
+    /// Format string: `f"..."`
+    | Format
+    /// Raw string: `r"..."`
+    | Raw
+    /// Raw format string: `rf"..."`
+    | RawFormat;
+
+// =============================================================================
+// LexError
+// =============================================================================
+
+/// Lexer error
+public type LexError is {
+    /// Error message
+    message: Text,
+
+    /// Location of error
+    span: Span,
+};
+
+implement LexError {
+    public fn new(message: Text, span: Span) -> Self {
+        Self { message, span }
+    }
+}
+
+implement Display for LexError {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        f.write_str(f"{self.message} at {self.span:?}")
+    }
+}

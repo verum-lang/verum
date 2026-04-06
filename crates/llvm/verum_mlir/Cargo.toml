@@ -1,0 +1,23 @@
+[package]
+name = "verum_mlir"
+version = "21.0.0"
+edition = "2024"
+description = "Safe Rust bindings for MLIR, built from local LLVM sources"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/luxquant/axiom"
+categories = ["api-bindings"]
+
+[dependencies]
+verum_mlir_macro = { path = "../verum_mlir_macro" }
+verum_mlir_sys = { path = "../verum_mlir_sys" }
+
+[dev-dependencies]
+indoc = "2.0.7"
+insta = "1.46.1"
+pretty_assertions = { workspace = true }
+
+[features]
+default = []
+# Enable the BlockExt trait (requires ods feature)
+helpers = ["ods-dialects"]
+ods-dialects = []

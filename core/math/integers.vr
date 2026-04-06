@@ -1,0 +1,430 @@
+// =============================================================================
+// integers.vr - Integer Operations and Division Modes
+// =============================================================================
+// Layer: 0 (Foundation)
+//
+// Provides integer division with various rounding modes, modular arithmetic,
+// and number-theoretic operations.
+//
+// # Division Modes
+//
+// Different languages use different conventions for integer division:
+// - Truncate (toward zero): C, C++, Java, Rust
+// - Floor (toward -∞): Python, Ruby
+// - Euclidean (non-negative remainder): mathematical convention
+//
+// This module provides all three for interoperability.
+//
+// Spec: docs/architecture/math-spec.md Section 1.2
+// =============================================================================
+
+module core.math.integers;
+
+// =============================================================================
+// Division Modes
+// =============================================================================
+
+// Integer division rounding mode
+public type DivMode is
+    | Truncate    // Toward zero (default, matches Verum `/`)
+    | Floor       // Toward -∞
+    | Ceiling     // Toward +∞
+    | Euclidean;  // Non-negative remainder
+
+// =============================================================================
+// Division Operations
+// =============================================================================
+
+// Floor division (rounds toward -∞)
+// Result satisfies: result * b <= a < (result + 1) * b for b > 0
+//
+// Refinement type guarantees non-zero divisor at compile time.
+@inline(always)
+public fn div_floor(a: Int, b: Int{!= 0}) -> Int {
+    let q = a / b;  // Truncate division
+    let r = a % b;
+
+    // Adjust if remainder has opposite sign from divisor
+    if r != 0 && ((a < 0) != (b < 0)) {
+        q - 1
+    } else {
+        q
+    }
+}
+
+// Ceiling division (rounds toward +∞)
+// Result satisfies: (result - 1) * b < a <= result * b for b > 0
+@inline(always)
+public fn div_ceiling(a: Int, b: Int{!= 0}) -> Int {
+    let q = a / b;
+    let r = a % b;
+
+    // Adjust if remainder has same sign as divisor (and non-zero)
+    if r != 0 && ((a > 0) == (b > 0)) {
+        q + 1
+    } else {
+        q
+    }
+}
+
+// Euclidean division (non-negative remainder)
+// Result satisfies: a = result * b + r where 0 <= r < |b|
+@inline(always)
+public fn div_euclidean(a: Int, b: Int{!= 0}) -> Int {
+    let q = a / b;
+    let r = a % b;
+
+    if r < 0 {
+        if b > 0 { q - 1 } else { q + 1 }
+    } else {
+        q
+    }
+}
+
+// Euclidean modulo (always non-negative result)
+// Result satisfies: 0 <= result < |b|
+@inline(always)
+public fn mod_euclidean(a: Int, b: Int{!= 0}) -> Int{>= 0} {
+    let r = a % b;
+    if r < 0 {
+        r + (if b < 0 { -b } else { b })
+    } else {
+        r
+    }
+}
+
+// Floor modulo (Python-style)
+// Result has same sign as divisor (or is zero).
+@inline(always)
+public fn mod_floor(a: Int, b: Int{!= 0}) -> Int {
+    let r = a % b;
+    if r != 0 && ((r < 0) != (b < 0)) {
+        r + b
+    } else {
+        r
+    }
+}
+
+// =============================================================================
+// Division with Mode Selection
+// =============================================================================
+
+// Generic division with specified rounding mode
+public fn div(a: Int, b: Int{!= 0}, mode: DivMode) -> Int {
+    match mode {
+        DivMode.Truncate => a / b,
+        DivMode.Floor => div_floor(a, b),
+        DivMode.Ceiling => div_ceiling(a, b),
+        DivMode.Euclidean => div_euclidean(a, b),
+    }
+}
+
+// Quotient and remainder (divmod) with floor semantics
+// Returns (q, r) such that a = q * b + r and 0 <= r < |b|
+@inline(always)
+public fn divmod(a: Int, b: Int{!= 0}) -> (Int, Int) {
+    let q = div_euclidean(a, b);
+    let r = mod_euclidean(a, b);
+    (q, r)
+}
+
+// =============================================================================
+// Number-Theoretic Operations
+// =============================================================================
+
+// Greatest common divisor using Euclidean algorithm
+// gcd(a, 0) = |a|, gcd(0, 0) = 0
+public fn gcd(a: Int, b: Int) -> Int{>= 0} {
+    let mut a = if a < 0 { -a } else { a };
+    let mut b = if b < 0 { -b } else { b };
+
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+// Binary GCD (Stein's algorithm) - more efficient for large integers
+public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
+    if a == 0 { return if b < 0 { -b } else { b }; }
+    if b == 0 { return if a < 0 { -a } else { a }; }
+
+    let mut u = if a < 0 { -a } else { a };
+    let mut v = if b < 0 { -b } else { b };
+
+    // Remove common factors of 2
+    let shift = super.bits.ctz(u as UInt64).min(super.bits.ctz(v as UInt64));
+    u >>= super.bits.ctz(u as UInt64);
+    v >>= super.bits.ctz(v as UInt64);
+
+    while u != v {
+        if u > v {
+            u -= v;
+            u >>= super.bits.ctz(u as UInt64);
+        } else {
+            v -= u;
+            v >>= super.bits.ctz(v as UInt64);
+        }
+    }
+
+    u << shift
+}
+
+// Least common multiple
+// lcm(a, b) = |a * b| / gcd(a, b)
+public fn lcm(a: Int, b: Int) -> Int{>= 0} {
+    if a == 0 || b == 0 { return 0; }
+    let g = gcd(a, b);
+    let abs_a = if a < 0 { -a } else { a };
+    let abs_b = if b < 0 { -b } else { b };
+    (abs_a / g) * abs_b  // Divide first to avoid overflow
+}
+
+// Extended Euclidean algorithm
+// Returns (g, x, y) such that a*x + b*y = g = gcd(a, b)
+public fn gcd_extended(a: Int, b: Int) -> (Int, Int, Int) {
+    if b == 0 {
+        return (if a < 0 { -a } else { a }, if a < 0 { -1 } else { 1 }, 0);
+    }
+
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_s = 1;
+    let mut s = 0;
+    let mut old_t = 0;
+    let mut t = 1;
+
+    while r != 0 {
+        let q = old_r / r;
+
+        let temp_r = r;
+        r = old_r - q * r;
+        old_r = temp_r;
+
+        let temp_s = s;
+        s = old_s - q * s;
+        old_s = temp_s;
+
+        let temp_t = t;
+        t = old_t - q * t;
+        old_t = temp_t;
+    }
+
+    // Normalize: gcd is always non-negative
+    if old_r < 0 {
+        (-old_r, -old_s, -old_t)
+    } else {
+        (old_r, old_s, old_t)
+    }
+}
+
+// Modular multiplicative inverse
+// Returns x such that (a * x) mod m = 1
+// Returns Maybe.None if gcd(a, m) != 1
+public fn mod_inverse(a: Int, m: Int{> 0}) -> Maybe<Int> {
+    let (g, x, _) = gcd_extended(a, m);
+    if g != 1 {
+        Maybe.None
+    } else {
+        Maybe.Some(mod_euclidean(x, m))
+    }
+}
+
+// =============================================================================
+// Modular Exponentiation
+// =============================================================================
+
+// Modular exponentiation: (base^exp) mod m
+// Uses binary exponentiation for O(log exp) complexity.
+// Refinement type guarantees non-negative exponent and positive modulus.
+public fn pow_mod(base: Int, exp: Int{>= 0}, m: Int{> 0}) -> Int{>= 0} {
+    if m == 1 { return 0; }
+
+    let mut result = 1;
+    let mut base = mod_euclidean(base, m);
+    let mut exp = exp;
+
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result = mod_euclidean(result * base, m);
+        }
+        base = mod_euclidean(base * base, m);
+        exp >>= 1;
+    }
+
+    result
+}
+
+// =============================================================================
+// Primality and Factorization
+// =============================================================================
+
+// Check if n is prime (trial division)
+// For n > 1, returns true if n has no divisors other than 1 and n.
+public fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 { return true; }
+    if n % 2 == 0 { return false; }
+    if n < 9 { return true; }
+    if n % 3 == 0 { return false; }
+
+    let limit = (n as Float).sqrt() as Int + 1;
+    let mut i = 5;
+
+    while i <= limit {
+        if n % i == 0 || n % (i + 2) == 0 {
+            return false;
+        }
+        i += 6;
+    }
+
+    true
+}
+
+// Miller-Rabin primality test (probabilistic)
+// Returns true if n is probably prime with high confidence.
+// Deterministic for n < 3,317,044,064,679,887,385,961,981.
+public fn is_prime_miller_rabin(n: Int{> 1}) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 || n == 3 { return true; }
+    if n % 2 == 0 { return false; }
+
+    // Write n-1 as 2^r * d
+    let mut d = n - 1;
+    let mut r = 0;
+    while d % 2 == 0 {
+        d /= 2;
+        r += 1;
+    }
+
+    // Witnesses sufficient for deterministic test up to certain bounds
+    let witnesses = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+
+    for a in witnesses.iter() {
+        if *a >= n { continue; }
+
+        let mut x = pow_mod(*a, d, n);
+        if x == 1 || x == n - 1 { continue; }
+
+        let mut composite = true;
+        for _ in 0..(r - 1) {
+            x = pow_mod(x, 2, n);
+            if x == n - 1 {
+                composite = false;
+                break;
+            }
+        }
+
+        if composite { return false; }
+    }
+
+    true
+}
+
+// Next prime >= n
+public fn next_prime(n: Int) -> Int {
+    if n <= 2 { return 2; }
+
+    let mut candidate = if n % 2 == 0 { n + 1 } else { n };
+
+    while !is_prime_miller_rabin(candidate) {
+        candidate += 2;
+    }
+
+    candidate
+}
+
+// =============================================================================
+// Integer Square Root
+// =============================================================================
+
+// Integer square root (floor of sqrt)
+// Returns the largest integer k such that k*k <= n.
+// Refinement type guarantees non-negative input.
+public fn isqrt(n: Int{>= 0}) -> Int{>= 0} {
+    if n < 2 { return n; }
+
+    // Newton's method with integer arithmetic
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+
+    x
+}
+
+// Integer cube root (floor of cbrt)
+public fn icbrt(n: Int) -> Int {
+    if n == 0 { return 0; }
+
+    let sign = if n < 0 { -1 } else { 1 };
+    let n_abs = if n < 0 { -n } else { n };
+
+    // Newton's method
+    let mut x = n_abs;
+    let mut y = (2 * x + n_abs / (x * x)) / 3;
+
+    while y < x {
+        x = y;
+        y = (2 * x + n_abs / (x * x)) / 3;
+    }
+
+    sign * x
+}
+
+// =============================================================================
+// Factorial and Combinatorics
+// =============================================================================
+
+// Factorial n!
+// Returns 1 for n <= 1.
+// Panics for n > 20 (overflow).
+public fn factorial(n: Int{>= 0}) -> Int{>= 1} {
+    assert(n <= 20, "factorial overflow for n > 20");
+
+    let mut result = 1;
+    for i in 2..=n {
+        result *= i;
+    }
+    result
+}
+
+// Binomial coefficient C(n, k) = n! / (k! * (n-k)!)
+// Returns 0 for k < 0 or k > n.
+public fn binomial(n: Int{>= 0}, k: Int) -> Int{>= 0} {
+    if k < 0 || k > n { return 0; }
+    if k == 0 || k == n { return 1; }
+
+    // Use symmetry: C(n,k) = C(n,n-k)
+    let k = if k > n - k { n - k } else { k };
+
+    let mut result = 1;
+    for i in 0..k {
+        result = result * (n - i) / (i + 1);
+    }
+    result
+}
+
+// Falling factorial: n * (n-1) * ... * (n-k+1)
+// Also known as Pochhammer symbol (n)_k
+public fn falling_factorial(n: Int, k: Int{>= 0}) -> Int {
+    let mut result = 1;
+    for i in 0..k {
+        result *= n - i;
+    }
+    result
+}
+
+// Rising factorial: n * (n+1) * ... * (n+k-1)
+public fn rising_factorial(n: Int, k: Int{>= 0}) -> Int {
+    let mut result = 1;
+    for i in 0..k {
+        result *= n + i;
+    }
+    result
+}

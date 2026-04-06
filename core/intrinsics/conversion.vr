@@ -1,0 +1,131 @@
+// =============================================================================
+// core/intrinsics/conversion.vr - Type Conversion Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides type conversion intrinsics that map directly to
+// LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Integer/Float conversions: int_to_float, float_to_int
+// - Precision changes: fpext, fptrunc, sext, zext, itrunc
+// - Bit reinterpretation: bitcast
+// - Byte conversions: to_le_bytes, from_be_bytes, etc.
+// - Endianness: to_le, to_be, from_le, from_be
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.conversion;
+
+// =============================================================================
+// SECTION 1: Integer/Float Conversions
+// =============================================================================
+
+/// Convert signed integer to float
+public fn int_to_float<I, F>(x: I) -> F { @intrinsic("sitofp", x) }
+
+/// Convert unsigned integer to float
+public fn uint_to_float<U, F>(x: U) -> F { @intrinsic("uitofp", x) }
+
+/// Convert float to signed integer (truncating toward zero)
+public fn float_to_int<F, I>(x: F) -> I { @intrinsic("fptosi", x) }
+
+/// Convert float to unsigned integer (truncating toward zero)
+public fn float_to_uint<F, U>(x: F) -> U { @intrinsic("fptoui", x) }
+
+// =============================================================================
+// SECTION 2: Precision/Width Changes
+// =============================================================================
+
+/// Extend float precision (e.g., Float32 -> Float64)
+public fn fpext<S, D>(x: S) -> D { @intrinsic("fpext", x) }
+
+/// Truncate float precision (e.g., Float64 -> Float32)
+public fn fptrunc<S, D>(x: S) -> D { @intrinsic("fptrunc", x) }
+
+/// Sign-extend integer (e.g., Int8 -> Int64)
+public fn sext<S, D>(x: S) -> D { @intrinsic("sext", x) }
+
+/// Zero-extend integer (e.g., UInt8 -> UInt64)
+public fn zext<S, D>(x: S) -> D { @intrinsic("zext", x) }
+
+/// Truncate integer (e.g., Int64 -> Int8)
+public fn itrunc<S, D>(x: S) -> D { @intrinsic("trunc", x) }
+
+// =============================================================================
+// SECTION 3: Bit Reinterpretation
+// =============================================================================
+
+/// Reinterpret bits as different type (same size required)
+public fn bitcast<S, D>(x: S) -> D { @intrinsic("bitcast", x) }
+
+// =============================================================================
+// SECTION 4: Byte Conversions
+// =============================================================================
+
+/// Convert value to little-endian bytes (generic, 8-byte default for VBC)
+public fn to_le_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_le_bytes", x) }
+
+/// Convert value to big-endian bytes (generic, 8-byte default for VBC)
+public fn to_be_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_be_bytes", x) }
+
+/// Convert value to native-endian bytes
+public fn to_ne_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_ne_bytes", x) }
+
+/// Create value from little-endian bytes (generic, 8-byte default for VBC)
+public fn from_le_bytes<T, const N: USize>(bytes: [Byte; N]) -> T { @intrinsic("from_le_bytes", bytes) }
+
+/// Create value from big-endian bytes (generic, 8-byte default for VBC)
+public fn from_be_bytes<T, const N: USize>(bytes: [Byte; N]) -> T { @intrinsic("from_be_bytes", bytes) }
+
+/// Create value from native-endian bytes
+public fn from_ne_bytes<T, const N: USize>(bytes: [Byte; N]) -> T { @intrinsic("from_ne_bytes", bytes) }
+
+// Width-specific byte conversion intrinsics for VBC (no monomorphization needed)
+public fn to_le_bytes_2(x: Int) -> [Byte; 2] { @intrinsic("to_le_bytes_2", x) }
+public fn to_le_bytes_4(x: Int) -> [Byte; 4] { @intrinsic("to_le_bytes_4", x) }
+public fn to_le_bytes_8(x: Int) -> [Byte; 8] { @intrinsic("to_le_bytes_8", x) }
+public fn to_be_bytes_2(x: Int) -> [Byte; 2] { @intrinsic("to_be_bytes_2", x) }
+public fn to_be_bytes_4(x: Int) -> [Byte; 4] { @intrinsic("to_be_bytes_4", x) }
+public fn to_be_bytes_8(x: Int) -> [Byte; 8] { @intrinsic("to_be_bytes_8", x) }
+public fn from_le_bytes_2(bytes: [Byte; 2]) -> Int { @intrinsic("from_le_bytes_2", bytes) }
+public fn from_le_bytes_4(bytes: [Byte; 4]) -> Int { @intrinsic("from_le_bytes_4", bytes) }
+public fn from_le_bytes_8(bytes: [Byte; 8]) -> Int { @intrinsic("from_le_bytes_8", bytes) }
+public fn from_be_bytes_2(bytes: [Byte; 2]) -> Int { @intrinsic("from_be_bytes_2", bytes) }
+public fn from_be_bytes_4(bytes: [Byte; 4]) -> Int { @intrinsic("from_be_bytes_4", bytes) }
+public fn from_be_bytes_8(bytes: [Byte; 8]) -> Int { @intrinsic("from_be_bytes_8", bytes) }
+
+// =============================================================================
+// SECTION 5: Endianness Conversion
+// =============================================================================
+
+/// Convert to little-endian (no-op on LE, bswap on BE)
+public fn to_le<T>(x: T) -> T { @intrinsic("to_le", x) }
+
+/// Convert to big-endian (bswap on LE, no-op on BE)
+public fn to_be<T>(x: T) -> T { @intrinsic("to_be", x) }
+
+/// Convert from little-endian (no-op on LE, bswap on BE)
+public fn from_le<T>(x: T) -> T { @intrinsic("from_le", x) }
+
+/// Convert from big-endian (bswap on LE, no-op on BE)
+public fn from_be<T>(x: T) -> T { @intrinsic("from_be", x) }
+
+// =============================================================================
+// SECTION 5: Convenience Aliases
+// =============================================================================
+
+/// Convert integer to byte array (alias for to_ne_bytes)
+public fn int_to_bytes<T, const N: USize>(x: T) -> [Byte; N] { @intrinsic("to_ne_bytes", x) }
+
+/// Float32 to bits (reinterpret as UInt32)
+public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("bitcast", x) }
+/// Float32 from bits (reinterpret UInt32 as Float32)
+public fn f32_from_bits(x: UInt32) -> Float32 { @intrinsic("bitcast", x) }
+/// Float64 to bits (reinterpret as UInt64)
+public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("bitcast", x) }
+/// Float64 from bits (reinterpret UInt64 as Float64)
+public fn f64_from_bits(x: UInt64) -> Float64 { @intrinsic("bitcast", x) }

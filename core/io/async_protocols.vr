@@ -1,0 +1,226 @@
+// =============================================================================
+// async_protocols.vr - Async I/O Protocols
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, async/poll, async/waker, async/future, io/protocols
+// =============================================================================
+//
+// This module provides asynchronous I/O protocols:
+//
+// - AsyncRead: Non-blocking read protocol
+// - AsyncWrite: Non-blocking write protocol with flush and shutdown
+// - AsyncBufRead: Buffered async reading
+// - ReadFuture / WriteFuture: One-shot async read/write helpers
+//
+// # Example
+//
+// ```verum
+// fn read_data<R: AsyncRead>(reader: &mut R, cx: &mut Context) -> Poll<IoResult<Int>> {
+//     reader.poll_read(cx, &mut buf)
+// }
+// ```
+//
+// =============================================================================
+
+module async_protocols;
+
+mount core.*;
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.io.protocols.{IoResult, IoErrorKind, StreamError};
+
+// =============================================================================
+// AsyncRead Protocol
+// =============================================================================
+
+/// Non-blocking read protocol for asynchronous I/O.
+///
+/// Implementors provide `poll_read` which attempts to read data into a buffer
+/// without blocking. Returns `Poll.Pending` when no data is available yet.
+///
+/// Spec: docs/detailed/14-module-system.md - I/O protocols
+public type AsyncRead is protocol {
+    /// Attempt to read from this source into `buf`.
+    ///
+    /// Returns `Poll.Ready(Ok(n))` where `n` is the number of bytes read,
+    /// `Poll.Ready(Err(e))` on error, or `Poll.Pending` if data is not
+    /// yet available.
+    ///
+    /// When `Poll.Pending` is returned, the current task is registered
+    /// with the context's waker so it will be woken when data arrives.
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Int>) -> Poll<IoResult<Int>>;
+};
+
+// =============================================================================
+// AsyncWrite Protocol
+// =============================================================================
+
+/// Non-blocking write protocol for asynchronous I/O.
+///
+/// Implementors provide `poll_write`, `poll_flush`, and `poll_shutdown`
+/// for fully non-blocking write operations.
+public type AsyncWrite is protocol {
+    /// Attempt to write bytes from `buf` to this sink.
+    ///
+    /// Returns `Poll.Ready(Ok(n))` where `n` is the number of bytes written,
+    /// `Poll.Ready(Err(e))` on error, or `Poll.Pending` if the sink is not
+    /// ready to accept data.
+    fn poll_write(&mut self, cx: &mut Context, buf: &List<Int>) -> Poll<IoResult<Int>>;
+
+    /// Attempt to flush any buffered data to the underlying sink.
+    ///
+    /// Returns `Poll.Ready(Ok(()))` when all buffered data has been written,
+    /// or `Poll.Pending` if flushing is in progress.
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<IoResult<()>>;
+
+    /// Attempt to shut down this writer, signaling that no more data will
+    /// be written.
+    ///
+    /// Returns `Poll.Ready(Ok(()))` when shutdown is complete.
+    fn poll_shutdown(&mut self, cx: &mut Context) -> Poll<IoResult<()>>;
+};
+
+// =============================================================================
+// AsyncBufRead Protocol
+// =============================================================================
+
+/// Buffered async reading protocol.
+///
+/// Provides `poll_fill_buf` to access an internal buffer of bytes that have
+/// been read but not yet consumed, and `consume` to mark bytes as consumed.
+public type AsyncBufRead is protocol {
+    /// Attempt to return the contents of the internal buffer, filling it
+    /// with more data from the underlying reader if it is empty.
+    ///
+    /// Returns a slice of the available bytes.
+    fn poll_fill_buf(&mut self, cx: &mut Context) -> Poll<IoResult<List<Int>>>;
+
+    /// Tell the buffer that `amt` bytes have been consumed.
+    fn consume(&mut self, amt: Int);
+};
+
+// =============================================================================
+// ReadFuture - One-shot async read helper
+// =============================================================================
+
+/// A future that reads from an AsyncRead source into a buffer.
+///
+/// Created by `read_async()`. Resolves when at least one byte is read.
+///
+/// # Example
+/// ```verum
+/// let n = read_async(&mut reader, &mut buf).await;
+/// ```
+public type ReadFuture<R> is {
+    reader: R,
+    buf: List<Int>,
+};
+
+implement<R: AsyncRead> ReadFuture<R> {
+    /// Create a new ReadFuture.
+    public fn new(reader: R, buf: List<Int>) -> ReadFuture<R> {
+        ReadFuture { reader: reader, buf: buf }
+    }
+}
+
+implement<R: AsyncRead> Future for ReadFuture<R> {
+    type Output = IoResult<Int>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<IoResult<Int>> {
+        self.reader.poll_read(cx, &mut self.buf)
+    }
+}
+
+// =============================================================================
+// WriteFuture - One-shot async write helper
+// =============================================================================
+
+/// A future that writes data to an AsyncWrite sink.
+///
+/// Created by `write_async()`. Resolves when all data has been written.
+///
+/// # Example
+/// ```verum
+/// let n = write_async(&mut writer, &data).await;
+/// ```
+public type WriteFuture<W> is {
+    writer: W,
+    buf: List<Int>,
+    written: Int,
+};
+
+implement<W: AsyncWrite> WriteFuture<W> {
+    /// Create a new WriteFuture.
+    public fn new(writer: W, buf: List<Int>) -> WriteFuture<W> {
+        WriteFuture { writer: writer, buf: buf, written: 0 }
+    }
+}
+
+implement<W: AsyncWrite> Future for WriteFuture<W> {
+    type Output = IoResult<Int>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<IoResult<Int>> {
+        let remaining = self.buf.len() - self.written;
+        if remaining == 0 {
+            return Poll.Ready(Ok(self.written));
+        }
+        // Write remaining portion
+        let slice = self.buf.slice(self.written, self.buf.len());
+        match self.writer.poll_write(cx, &slice) {
+            Poll.Ready(Ok(n)) => {
+                self.written = self.written + n;
+                if self.written >= self.buf.len() {
+                    Poll.Ready(Ok(self.written))
+                } else {
+                    // Re-register waker and return pending to write more
+                    cx.waker().wake_by_ref();
+                    Poll.Pending
+                }
+            }
+            Poll.Ready(Err(e)) => Poll.Ready(Err(e)),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+// =============================================================================
+// FlushFuture - Async flush helper
+// =============================================================================
+
+/// A future that flushes an AsyncWrite sink.
+public type FlushFuture<W> is {
+    writer: W,
+};
+
+implement<W: AsyncWrite> FlushFuture<W> {
+    public fn new(writer: W) -> FlushFuture<W> {
+        FlushFuture { writer: writer }
+    }
+}
+
+implement<W: AsyncWrite> Future for FlushFuture<W> {
+    type Output = IoResult<()>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<IoResult<()>> {
+        self.writer.poll_flush(cx)
+    }
+}
+
+// =============================================================================
+// Factory Functions
+// =============================================================================
+
+/// Create an async read future from a reader and buffer.
+public fn read_async<R: AsyncRead>(reader: R, buf: List<Int>) -> ReadFuture<R> {
+    ReadFuture.new(reader, buf)
+}
+
+/// Create an async write future from a writer and data.
+public fn write_async<W: AsyncWrite>(writer: W, buf: List<Int>) -> WriteFuture<W> {
+    WriteFuture.new(writer, buf)
+}
+
+/// Create an async flush future from a writer.
+public fn flush_async<W: AsyncWrite>(writer: W) -> FlushFuture<W> {
+    FlushFuture.new(writer)
+}

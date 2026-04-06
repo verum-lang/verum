@@ -1,0 +1,48 @@
+// Test: MD-001 through MD-008 - Module system
+// Priority: Critical/High
+// Expected output: Module operations
+
+// Inline module
+module math {
+    pub fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    pub fn multiply(a: Int, b: Int) -> Int {
+        a * b
+    }
+}
+
+// Nested modules
+module outer {
+    pub module inner {
+        pub fn value() -> Int { 100 }
+    }
+}
+
+// Module with visibility
+module lib {
+    pub type Point is { x: Int, y: Int };
+
+    pub fn create() -> Point {
+        Point { x: 0, y: 0 }
+    }
+
+    // Private helper
+    fn internal_helper() -> Int {
+        42
+    }
+}
+
+fn main() {
+    // Using module function
+    print(f"{math.add(2, 3)}");
+    print(f"{math.multiply(4, 5)}");
+
+    // Nested module access
+    print(f"{outer.inner.value()}");
+
+    // Module types
+    let p = lib.create();
+    print(f"{p.x}");
+}

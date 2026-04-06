@@ -1,0 +1,329 @@
+// =============================================================================
+// mod.vr - Core module manifest
+// =============================================================================
+// Layer: 0 (Core)
+// The foundational layer of the Verum standard library.
+// Dependencies: mem/ (native CBGR allocator), sys/ (platform layer)
+//
+// As of V-LLSI migration, this module no longer depends on verum_bootstrap FFI.
+// All memory operations use the native CBGR allocator (mem/allocator.vr).
+// =============================================================================
+
+// Core module - provides fundamental types and protocols.
+//
+// # Submodules
+//
+// - `ordering` - Ordering enum for comparisons
+// - `maybe` - Maybe<T> optional type
+// - `result` - Result<T, E> error handling
+// - `protocols` - Core protocols (Eq, Ord, Hash, Clone, etc.)
+// - `primitives` - Methods on primitive types
+// - `memory` - Memory allocation (Heap<T>, Shared<T>)
+// - `iterator` - Iterator protocol and adapters
+// - `panic` - Panic, assert, and control flow
+//
+// # Prelude
+//
+// The most commonly used items are re-exported at module level:
+// - Types: `Maybe`, `Result`, `Ordering`, `Heap`, `Shared`
+// - Constructors: `None`, `Some`, `Ok`, `Err`, `Less`, `Equal`, `Greater`
+// - Protocols: `Eq`, `Ord`, `Clone`, `Debug`, `Display`, `Default`, `Hash`
+// - Functions: `panic`, `assert`, `unreachable`, `todo`
+
+module core.base;
+
+// =============================================================================
+// Submodule declarations
+// =============================================================================
+
+public module ordering;
+public module ops;
+public module maybe;
+public module result;
+public module protocols;
+public module primitives;
+public module memory;
+public module iterator;
+public module panic;
+public module env;
+public module data;  // Structured dynamic data
+public module cell;  // Interior mutability (Cell, RefCell)
+
+// =============================================================================
+// Prelude re-exports (commonly used items)
+// =============================================================================
+
+// From ordering
+public mount .ordering.Ordering;
+// Note: Variant constructors (Less, Equal, Greater) accessed via Ordering.Less etc.
+
+// From ops (carrier protocols for language constructs)
+public mount .ops.{
+    Try,
+    FromResidual,
+    ControlFlow,
+    // Note: Continue, Break variants accessed via ControlFlow.Continue etc.
+    Never,
+    Residual,
+};
+
+// From maybe
+public mount .maybe.Maybe;
+// Note: None, Some variants accessed via Maybe.None, Maybe.Some or pattern matching
+
+// From result
+public mount .result.Result;
+// Note: Ok, Err variants accessed via Result.Ok, Result.Err or pattern matching
+public mount .result.Error;
+
+// From protocols
+public mount .protocols.{
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Hasher,
+    DefaultHasher,
+    Clone,
+    Copy,
+    Default,
+    Debug,
+    Display,
+    Drop,
+    Deref,
+    DerefMut,
+    AsRef,
+    AsMut,
+    From,
+    Into,
+    TryFrom,
+    TryInto,
+    PartialEq,
+    Sized,
+    Send,
+    Sync,
+    Unpin,
+    Formatter,
+    FormatError,
+};
+
+// Operator protocols
+public mount .protocols.{
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Neg,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Not,
+    Shl,
+    Shr,
+    Index,
+    IndexMut,
+    Zero,
+    One,
+};
+
+// Numeric and category protocols
+public mount .protocols.{
+    Numeric,
+    SignedInteger,
+};
+
+// Atomic protocols (for generic atomic operations)
+public mount .protocols.{
+    Atomic,
+    Integer,
+    Any,
+};
+
+// Error description and type identity
+public mount .protocols.{
+    Describable,
+    ErrorSource,
+    TypeId,
+    FromStr,
+    ToString,
+    Borrow,
+    BorrowMut,
+};
+
+// Compound assignment protocols
+public mount .protocols.{
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    RemAssign,
+    BitAndAssign,
+    BitOrAssign,
+    BitXorAssign,
+    ShlAssign,
+    ShrAssign,
+};
+
+// From memory
+public mount .memory.{
+    Heap,
+    Shared,
+    Weak,
+    Cow,
+    Pin,
+    ManuallyDrop,
+    MaybeUninit,
+    drop,
+    forget,
+    swap,
+    replace,
+    take,
+    // Memory manipulation
+    copy,
+    copy_nonoverlapping,
+    fill,
+    zero,
+    memcmp,
+    // Raw pointer operations
+    ptr_read,
+    ptr_write,
+    ptr_offset,
+    drop_in_place,
+    is_null,
+    null_ptr,
+    // Slice utilities
+    slice_from_raw_parts,
+    slice_from_raw_parts_mut,
+};
+
+// Re-export AllocError for try_new error handling
+public mount super.mem.allocator.AllocError;
+
+// From cell
+public mount .cell.{
+    Cell,
+    RefCell,
+    Ref,
+    RefMut,
+    BorrowError,
+    BorrowMutError,
+    OnceCell,
+    LazyCell,
+};
+
+// From iterator
+public mount .iterator.{
+    Iterator,
+    DoubleEndedIterator,
+    Rev,
+    IntoIterator,
+    FromIterator,
+    Extend,
+    Range,
+    RangeInclusive,
+    range,
+    range_inclusive,
+    once,
+    once_with,
+    empty,
+    repeat,
+    repeat_n,
+    repeat_with,
+    count_from,
+    from_fn,
+    RepeatWith,
+    OnceWith,
+    ExactSizeIterator,
+    FusedIterator,
+    // Transducer types for composable transformations
+    Transducer,
+    StatefulTransducer,
+    Reducer,
+    ReduceResult,
+};
+
+// From panic
+public mount .panic.{
+    panic,
+    abort,
+    exit,
+    assert,
+    assert_eq,
+    assert_ne,
+    debug_assert,
+    debug_assert_eq,
+    unreachable,
+    unimplemented,
+    todo,
+    dbg,
+};
+
+// From env
+public mount .env.{
+    args,
+    args_count,
+    args_os,
+    Args,
+    var,
+    var_opt,
+    set_var,
+    remove_var,
+    VarError,
+    exit,
+    exit_success,
+    exit_failure,
+    home_dir,
+    user,
+    path,
+    temp_dir,
+    shell,
+    locale,
+};
+
+// =============================================================================
+// Re-export fundamental types from other modules
+// =============================================================================
+
+// From collections - semantic collection types (via module re-exports)
+public mount collections.List;
+public mount collections.Map;
+public mount collections.Set;
+
+// From text - string type (via module re-export)
+public mount text.Text;
+
+// TypeId for type identification (defined in protocols.vr)
+public mount .protocols.TypeId;
+
+// Byte alias for UInt8 (common type)
+public type Byte is UInt8;
+
+// Bytes alias for a list of bytes (common type for byte sequences)
+public type Bytes is List<Byte>;
+
+// =============================================================================
+// Type aliases for convenience
+// =============================================================================
+
+// Result with Text error (common case)
+public type TextResult<T> is Result<T, Text>;
+
+// Result with Error (boxed error)
+public type StdResult<T> is Result<T, Error>;
+
+// =============================================================================
+// Version info
+// =============================================================================
+
+// Core module version
+public const VERSION: &Text = "0.1.0";
+
+// Core module major version
+public const VERSION_MAJOR: Int = 0;
+
+// Core module minor version
+public const VERSION_MINOR: Int = 1;
+
+// Core module patch version
+public const VERSION_PATCH: Int = 0;

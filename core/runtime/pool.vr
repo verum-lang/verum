@@ -1,0 +1,94 @@
+// =============================================================================
+// runtime/pool.vr - Thread Pool for Lightweight Task Scheduling
+// =============================================================================
+// Layer: 4 (Runtime)
+// Dependencies: core
+// =============================================================================
+//
+// Provides a work-stealing thread pool backed by OS threads with a shared
+// task queue. Unlike spawn (which creates 1 OS thread per task), the pool
+// reuses a fixed set of worker threads.
+//
+// Usage:
+//   let pool = ThreadPool.new(4);         // 4 workers
+//   let h1 = pool.submit(compute, arg1);  // Submit tasks
+//   let h2 = pool.submit(compute, arg2);
+//   let r1 = h1.await();                  // Collect results
+//   let r2 = h2.await();
+//   pool.destroy();
+//
+//   // Or use the global pool:
+//   let h = ThreadPool.global_submit(compute, arg);
+//   let r = h.await();
+//
+// =============================================================================
+
+module pool;
+
+mount core.*;
+
+// =============================================================================
+// Thread Pool
+// =============================================================================
+
+/// A fixed-size thread pool for scheduling lightweight tasks.
+///
+/// Workers share a single bounded queue protected by a mutex+condvar.
+/// Capacity: 4096 pending tasks, up to 64 worker threads.
+public type ThreadPool is {
+    handle: Int,
+};
+
+/// A handle to a submitted task, used to retrieve the result.
+public type TaskHandle is {
+    handle: Int,
+};
+
+// Raw intrinsics (wired to C runtime)
+@intrinsic("pool_create")
+fn __pool_create_raw(num_workers: Int) -> Int;
+
+@intrinsic("pool_submit")
+fn __pool_submit_raw(pool: Int, func: Int, arg: Int) -> Int;
+
+@intrinsic("pool_await")
+fn __pool_await_raw(handle: Int) -> Int;
+
+@intrinsic("pool_destroy")
+fn __pool_destroy_raw(pool: Int) -> Int;
+
+@intrinsic("pool_global_submit")
+fn __pool_global_submit_raw(func: Int, arg: Int) -> Int;
+
+implement ThreadPool {
+    /// Create a new thread pool with the given number of worker threads.
+    /// If num_workers <= 0, defaults to 4.
+    public fn new(num_workers: Int) -> ThreadPool {
+        let h = __pool_create_raw(num_workers);
+        ThreadPool { handle: h }
+    }
+
+    /// Submit a task to the pool. Returns a TaskHandle to await the result.
+    public fn submit(&self, func: fn(Int) -> Int, arg: Int) -> TaskHandle {
+        let h = __pool_submit_raw(self.handle, func as Int, arg);
+        TaskHandle { handle: h }
+    }
+
+    /// Destroy the pool, joining all worker threads.
+    public fn destroy(&self) {
+        __pool_destroy_raw(self.handle);
+    }
+
+    /// Submit a task to the global (lazily initialized) thread pool.
+    public fn global_submit(func: fn(Int) -> Int, arg: Int) -> TaskHandle {
+        let h = __pool_global_submit_raw(func as Int, arg);
+        TaskHandle { handle: h }
+    }
+}
+
+implement TaskHandle {
+    /// Block until the task completes and return its result.
+    public fn await(&self) -> Int {
+        __pool_await_raw(self.handle)
+    }
+}

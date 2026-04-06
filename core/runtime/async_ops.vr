@@ -1,0 +1,113 @@
+module runtime.async_ops;
+
+/// Opaque handle for async join operations.
+public type JoinHandleOpaque is (Int);
+
+/// Opaque handle for executor.
+public type ExecutorHandle is (Int);
+
+/// Opaque handle for futures.
+public type FutureHandle is (Int);
+
+/// Opaque handle for supervisor.
+public type SupervisorHandleOpaque is (Int);
+
+/// Opaque handle for child spec.
+public type ChildSpecOpaque is (Int);
+
+/// Opaque handle for execution environment.
+public type ExecutionEnvOpaque is (Int);
+
+/// Opaque handle for recovery context.
+public type RecoveryContextOpaque is (Int);
+
+/// Opaque handle for circuit breaker.
+public type CircuitBreakerOpaque is (Int);
+
+/// Opaque handle for allocator.
+public type AllocHandle is (Int);
+
+/// Opaque handle for IO driver.
+public type IODriverHandle is (Int);
+
+/// Opaque handle for shared registry.
+public type SharedRegistryOpaque is (Int);
+
+/// Opaque handle for middleware chain.
+public type MiddlewareChainOpaque is (Int);
+
+/// Opaque handle for single-thread executor.
+public type SingleThreadExecutorOpaque is (Int);
+
+/// Recovery error type.
+public type RecoveryError is {
+    message: Text,
+};
+
+/// Spawn a task with an execution environment.
+@intrinsic("verum.runtime.spawn_with_env")
+public fn spawn_with_env(env: ExecutionEnvOpaque, f: fn() -> ()) -> JoinHandleOpaque;
+
+/// Spawn a task on the executor.
+@intrinsic("verum.runtime.executor_spawn")
+public fn executor_spawn(executor: ExecutorHandle, f: fn() -> ()) -> JoinHandleOpaque;
+
+/// Block on a future using the executor.
+@intrinsic("verum.runtime.executor_block_on")
+public fn executor_block_on(executor: ExecutorHandle, f: FutureHandle) -> Int;
+
+/// Poll a future synchronously.
+@intrinsic("verum.runtime.future_poll_sync")
+public fn future_poll_sync(f: FutureHandle) -> Int;
+
+/// Get the default executor.
+@intrinsic("verum.runtime.default_executor")
+public fn default_executor() -> ExecutorHandle;
+
+/// Async sleep in milliseconds.
+@intrinsic("verum.runtime.async_sleep_ms")
+public fn async_sleep_ms(ms: Int);
+
+/// Async sleep in nanoseconds.
+@intrinsic("verum.runtime.async_sleep_ns")
+public fn async_sleep_ns(ns: Int);
+
+/// Spawn a supervised task.
+@intrinsic("verum.runtime.spawn_supervised")
+public fn spawn_supervised(supervisor: SupervisorHandleOpaque, f: fn() -> ()) -> JoinHandleOpaque;
+
+/// Log escalation to supervisor.
+@intrinsic("verum.runtime.supervisor_log_escalation")
+public fn supervisor_log_escalation(supervisor: SupervisorHandleOpaque, msg: Text);
+
+/// Set parent supervisor.
+@intrinsic("verum.runtime.supervisor_set_parent")
+public fn supervisor_set_parent(child: SupervisorHandleOpaque, parent: SupervisorHandleOpaque);
+
+/// Execute with recovery context.
+@intrinsic("verum.runtime.exec_with_recovery")
+public fn exec_with_recovery(ctx: RecoveryContextOpaque, f: fn() -> ()) -> Int;
+
+/// Inline circuit breaker as reference.
+@intrinsic("verum.runtime.inline_cb_as_ref")
+public fn inline_cb_as_ref(cb: CircuitBreakerOpaque) -> &CircuitBreakerOpaque;
+
+/// Get the global allocator.
+@intrinsic("verum.runtime.global_allocator")
+public fn global_allocator() -> AllocHandle;
+
+/// Get the default IO driver.
+@intrinsic("verum.runtime.default_io_driver")
+public fn default_io_driver() -> IODriverHandle;
+
+/// Get the global shared registry.
+@intrinsic("verum.runtime.shared_registry_global")
+public fn shared_registry_global() -> SharedRegistryOpaque;
+
+/// Create an empty middleware chain.
+@intrinsic("verum.runtime.middleware_chain_empty")
+public fn middleware_chain_empty() -> MiddlewareChainOpaque;
+
+/// Block on a single-thread executor.
+@intrinsic("verum.runtime.single_thread_block_on")
+public fn single_thread_block_on(executor: SingleThreadExecutorOpaque, f: FutureHandle) -> Int;

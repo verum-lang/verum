@@ -1,0 +1,133 @@
+// =============================================================================
+// core/intrinsics/lowlevel/mod.vr - Low-Level Platform-Specific Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: LLVM AOT compilation
+//
+// This module provides low-level, architecture-specific intrinsics that
+// cannot execute in the VBC interpreter. Most functions are @llvm_only.
+//
+// # @llvm_only Attribute
+//
+// Functions marked @llvm_only:
+// - Contain inline assembly (`asm { }`)
+// - Access privileged CPU registers (ring 0)
+// - Use platform-specific hardware features
+//
+// Attempting to run @llvm_only functions in interpreter mode will produce:
+// "Cannot execute @llvm_only intrinsic '{name}' in interpreter mode. Use --tier aot."
+//
+// # Platform Modules
+//
+// - x86_64: SSE/AVX/AVX-512, CPUID, MSR, port I/O, CR* registers
+// - aarch64: NEON/SVE, system registers, barriers, cache operations
+// - kernel: Platform entry points, naked functions
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.lowlevel;
+
+// =============================================================================
+// Platform-specific modules
+// =============================================================================
+
+/// x86_64-specific intrinsics (SSE, AVX, CPUID, MSR, privileged)
+@cfg(target_arch = "x86_64")
+public module x86_64;
+
+/// ARM64-specific intrinsics (NEON, SVE, system registers, barriers)
+@cfg(target_arch = "aarch64")
+public module aarch64;
+
+/// Kernel entry points and naked functions
+public module kernel;
+
+// =============================================================================
+// Cross-platform CPU feature detection
+// =============================================================================
+
+/// Generic CPU feature flags that map to platform-specific capabilities.
+/// Use this for portable code that needs to select optimized paths.
+public type CpuCapabilities is {
+    // SIMD widths supported
+    has_128bit_simd: Bool,  // SSE, NEON
+    has_256bit_simd: Bool,  // AVX, SVE (256-bit)
+    has_512bit_simd: Bool,  // AVX-512, SVE (512-bit)
+
+    // Advanced features
+    has_fma: Bool,           // Fused multiply-add
+    has_aes: Bool,           // Hardware AES
+    has_sha: Bool,           // Hardware SHA
+    has_crc32: Bool,         // Hardware CRC32
+    has_popcnt: Bool,        // Population count
+    has_lzcnt: Bool,         // Leading zero count
+    has_atomic_16b: Bool,    // 16-byte atomic operations
+};
+
+/// Detect CPU capabilities at runtime (cross-platform).
+public fn detect_capabilities() -> CpuCapabilities {
+    @cfg(target_arch = "x86_64") {
+        let f = core.intrinsics.lowlevel.x86_64.cpu_features();
+        return CpuCapabilities {
+            has_128bit_simd: true,  // SSE2 always on x86_64
+            has_256bit_simd: f.has_avx2,
+            has_512bit_simd: f.has_avx512f,
+            has_fma: f.has_fma,
+            has_aes: f.has_aes,
+            has_sha: f.has_sha,
+            has_crc32: true,  // Always on x86_64
+            has_popcnt: f.has_popcnt,
+            has_lzcnt: f.has_lzcnt,
+            has_atomic_16b: f.has_cx16,
+        };
+    }
+
+    @cfg(target_arch = "aarch64") {
+        let f = core.intrinsics.lowlevel.aarch64.cpu_features();
+        return CpuCapabilities {
+            has_128bit_simd: true,  // NEON always present on aarch64
+            has_256bit_simd: f.has_sve && f.sve_width >= 256,
+            has_512bit_simd: f.has_sve && f.sve_width >= 512,
+            has_fma: true,  // Always present on aarch64
+            has_aes: f.has_aes,
+            has_sha: f.has_sha256,
+            has_crc32: f.has_crc32,
+            has_popcnt: true,  // Always present on aarch64
+            has_lzcnt: true,   // Always present on aarch64
+            has_atomic_16b: f.has_lse,
+        };
+    }
+
+    // Conservative defaults for unknown architectures
+    CpuCapabilities {
+        has_128bit_simd: false,
+        has_256bit_simd: false,
+        has_512bit_simd: false,
+        has_fma: false,
+        has_aes: false,
+        has_sha: false,
+        has_crc32: false,
+        has_popcnt: false,
+        has_lzcnt: false,
+        has_atomic_16b: false,
+    }
+}
+
+// =============================================================================
+// Cross-platform SIMD width constants
+// =============================================================================
+
+/// Maximum SIMD width in bits for the current platform.
+@cfg(target_arch = "x86_64")
+public const MAX_SIMD_WIDTH: Int = 512;   // AVX-512 (if available)
+@cfg(target_arch = "aarch64")
+public const MAX_SIMD_WIDTH: Int = 2048;  // SVE (up to 2048 bits)
+@cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))
+public const MAX_SIMD_WIDTH: Int = 128;   // Conservative default
+
+/// Preferred SIMD width for general use (balance of compatibility and performance).
+@cfg(target_arch = "x86_64")
+public const PREFERRED_SIMD_WIDTH: Int = 256;   // AVX2 widely available
+@cfg(not(target_arch = "x86_64"))
+public const PREFERRED_SIMD_WIDTH: Int = 128;   // NEON / conservative default

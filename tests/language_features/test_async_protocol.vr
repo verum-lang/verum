@@ -1,0 +1,19 @@
+// Test async protocols
+type AsyncFetcher is protocol {
+    async fn fetch(&self) -> Int;
+};
+
+type DataFetcher is { value: Int };
+
+implement AsyncFetcher for DataFetcher {
+    async fn fetch(&self) -> Int {
+        self.value * 10
+    }
+}
+
+fn main() {
+    print("Test: Async protocol");
+    let fetcher = DataFetcher { value: 42 };
+    let result = fetcher.fetch().await;
+    print(f"Fetched: {result}");
+}

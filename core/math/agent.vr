@@ -1,0 +1,1872 @@
+// =============================================================================
+// agent.vr - LLM Integration and Agent Systems (L9)
+// =============================================================================
+// Layer: 9 (Agent Systems)
+//
+// LLM integration, inference optimizations, and intelligent agent frameworks.
+//
+// # Architecture
+//
+// - Tokenization: BPE, SentencePiece tokenizers
+// - KV Cache: Efficient attention key-value storage
+// - Speculative Decoding: Draft model acceleration
+// - Continuous Batching: High-throughput serving
+// - Agent Framework: Tool use, ReAct, memory stores
+// - Inference Optimizations: Quantization, Flash Attention, PagedAttention
+//
+// # Performance
+//
+// - Flash Attention: O(n) memory instead of O(n²)
+// - PagedAttention: Up to 4x memory efficiency for serving
+// - Speculative Decoding: 2-3x speedup with 70-90% acceptance rate
+// - INT8/INT4 Quantization: 2-4x memory reduction
+//
+// Spec: docs/architecture/math-spec.md#45-48
+// =============================================================================
+
+module core.math.agent;
+
+mount core.math.tensor.{
+    DynTensor, zeros, ones, full, slice, slice_assign, cat, from_slice,
+    add, sub, mul, div, matmul, softmax, argmax, topk,
+    reshape, unsqueeze, squeeze, transpose, clamp,
+    sum_axis, mean_axis, min_axis, max_axis, norm_axis,
+    index_select,
+};
+mount core.math.nn.{Module, Linear};
+mount core.prelude.{
+    List, Map, Maybe, Bool, USize, Float, U32, U64, I8,
+    Text, Path, Error, Result, Value, Heap,
+};
+
+// =============================================================================
+// Tokenization
+// =============================================================================
+
+// Tokenizer protocol for encoding/decoding text to tokens
+public type Tokenizer is protocol {
+    fn encode(&self, text: &Text) -> List<U32>;
+    fn decode(&self, tokens: &[U32]) -> Text;
+    fn vocab_size(&self) -> USize;
+};
+
+// BPE (Byte-Pair Encoding) Tokenizer
+public type BPETokenizer is {
+    vocab: Map<Text, U32>,
+    merges: List<(Text, Text)>,
+    special_tokens: Map<Text, U32>,
+};
+
+implement BPETokenizer {
+    // Load BPE tokenizer from vocabulary and merges files
+    public fn from_file(vocab_path: &Path, merges_path: &Path) -> Self {
+        @vbc(TOKENIZER_LOAD_BPE, vocab_path, merges_path)
+    }
+
+    // Load from HuggingFace format
+    public fn from_pretrained(model_name: &Text) -> Self {
+        @vbc(TOKENIZER_LOAD_PRETRAINED, model_name)
+    }
+
+    // Add special token
+    public fn add_special_token(&mut self, token: Text, id: U32) {
+        self.special_tokens.insert(token, id);
+    }
+}
+
+implement Tokenizer for BPETokenizer {
+    fn encode(&self, text: &Text) -> List<U32> {
+        @vbc(TOKENIZER_ENCODE, self, text)
+    }
+
+    fn decode(&self, tokens: &[U32]) -> Text {
+        @vbc(TOKENIZER_DECODE, self, tokens)
+    }
+
+    fn vocab_size(&self) -> USize {
+        self.vocab.len() + self.special_tokens.len()
+    }
+}
+
+// SentencePiece tokenizer
+public type SentencePieceTokenizer is {
+    model_path: Path,
+    vocab_size: USize,
+};
+
+implement SentencePieceTokenizer {
+    // Load SentencePiece model
+    public fn from_file(model_path: &Path) -> Self {
+        @vbc(TOKENIZER_LOAD_SPM, model_path)
+    }
+}
+
+implement Tokenizer for SentencePieceTokenizer {
+    fn encode(&self, text: &Text) -> List<U32> {
+        @vbc(TOKENIZER_SPM_ENCODE, self, text)
+    }
+
+    fn decode(&self, tokens: &[U32]) -> Text {
+        @vbc(TOKENIZER_SPM_DECODE, self, tokens)
+    }
+
+    fn vocab_size(&self) -> USize {
+        self.vocab_size
+    }
+}
+
+// =============================================================================
+// KV Cache
+// =============================================================================
+
+// Attention Key-Value Store for autoregressive text generation
+//
+// ## What This Stores
+// In transformer models, each layer computes Key and Value projections.
+// During generation, we cache these to avoid recomputing for all previous tokens:
+// - Without cache: O(seq_len²) compute per new token
+// - With cache: O(seq_len) compute per new token
+//
+// ## Memory Layout
+// - key_cache[layer][batch, num_heads, seq_len, head_dim]
+// - value_cache[layer][batch, num_heads, seq_len, head_dim]
+public type KVCache is {
+    key_cache: List<DynTensor<Float>>,
+    value_cache: List<DynTensor<Float>>,
+    max_seq_len: USize,
+    current_len: USize,
+};
+
+// Semantic alias for KVCache
+public type AttentionKeyValueStore is KVCache;
+
+implement KVCache {
+    // Create new KV cache
+    public fn new(
+        num_layers: USize,
+        batch_size: USize,
+        num_heads: USize,
+        head_dim: USize,
+        max_seq_len: USize,
+    ) -> Self {
+        let key_cache = (0..num_layers).map(|_| {
+            zeros(&[batch_size, num_heads, max_seq_len, head_dim])
+        }).collect();
+
+        let value_cache = (0..num_layers).map(|_| {
+            zeros(&[batch_size, num_heads, max_seq_len, head_dim])
+        }).collect();
+
+        KVCache { key_cache, value_cache, max_seq_len, current_len: 0 }
+    }
+
+    // Update cache with new key/value for a layer
+    public fn update(&mut self, layer_idx: USize, key: &DynTensor<Float>, value: &DynTensor<Float>) {
+        let seq_len = key.shape()[2];
+        let end = self.current_len + seq_len;
+
+        // Slice assign
+        slice_assign(&mut self.key_cache[layer_idx], &[.., .., self.current_len..end, ..], key);
+        slice_assign(&mut self.value_cache[layer_idx], &[.., .., self.current_len..end, ..], value);
+    }
+
+    // Get cached key/value for a layer
+    public fn get(&self, layer_idx: USize) -> (DynTensor<Float>, DynTensor<Float>) {
+        let k = slice(&self.key_cache[layer_idx], &[.., .., 0..self.current_len, ..]);
+        let v = slice(&self.value_cache[layer_idx], &[.., .., 0..self.current_len, ..]);
+        (k, v)
+    }
+
+    // Advance position
+    public fn advance(&mut self, n: USize) {
+        self.current_len += n;
+    }
+
+    // Reset cache
+    public fn reset(&mut self) {
+        self.current_len = 0;
+    }
+
+    // Get current sequence length
+    public fn len(&self) -> USize {
+        self.current_len
+    }
+}
+
+// =============================================================================
+// Paged KV Cache
+// =============================================================================
+
+// Memory-Efficient Paged Attention Store for serving multiple concurrent requests
+//
+// ## Why Paged?
+// Standard KVCache allocates contiguous memory per request, leading to:
+// - Fragmentation when requests have varying sequence lengths
+// - Memory waste from pre-allocation to max_seq_len
+//
+// PagedKVCache uses fixed-size blocks like OS virtual memory:
+// - Each block holds `block_size` tokens of KV data
+// - Blocks allocated on demand as sequence grows
+// - Multiple requests can share physical memory blocks
+//
+// ## Memory Savings
+// - Up to 4x memory efficiency for high-throughput serving
+// - Enables continuous batching without memory bubbles
+public type PagedKVCache is {
+    block_size: USize,
+    num_blocks: USize,
+    key_blocks: DynTensor<Float>,    // [num_blocks, num_heads, block_size, head_dim]
+    value_blocks: DynTensor<Float>,
+    block_tables: Map<U64, List<USize>>,  // request_id -> block indices
+    free_blocks: List<USize>,
+};
+
+// Semantic alias for PagedKVCache
+public type PagedAttentionStore is PagedKVCache;
+
+implement PagedKVCache {
+    // Create new paged KV cache
+    public fn new(
+        num_blocks: USize,
+        block_size: USize,
+        num_heads: USize,
+        head_dim: USize,
+    ) -> Self {
+        PagedKVCache {
+            block_size,
+            num_blocks,
+            key_blocks: zeros(&[num_blocks, num_heads, block_size, head_dim]),
+            value_blocks: zeros(&[num_blocks, num_heads, block_size, head_dim]),
+            block_tables: Map.new(),
+            free_blocks: (0..num_blocks).collect(),
+        }
+    }
+
+    // Allocate blocks for new request
+    public fn allocate(&mut self, request_id: U64, num_tokens: USize) -> Result<(), Error> {
+        let num_blocks_needed = (num_tokens + self.block_size - 1) / self.block_size;
+
+        if self.free_blocks.len() < num_blocks_needed {
+            return Err(Error.new("Not enough free blocks"));
+        }
+
+        let allocated: List<_> = (0..num_blocks_needed)
+            .map(|_| self.free_blocks.pop().unwrap())
+            .collect();
+
+        self.block_tables.insert(request_id, allocated);
+        Ok(())
+    }
+
+    // Free blocks for completed request
+    public fn free(&mut self, request_id: U64) {
+        if let Maybe.Some(blocks) = self.block_tables.remove(&request_id) {
+            self.free_blocks.extend(blocks);
+        }
+    }
+
+    // Copy-on-write for beam search
+    public fn copy_on_write(&mut self, src_request: U64, dst_request: U64) {
+        if let Maybe.Some(blocks) = self.block_tables.get(&src_request) {
+            // Reference same blocks (copy-on-write semantics)
+            self.block_tables.insert(dst_request, blocks.clone());
+        }
+    }
+
+    // Get block table for request
+    public fn get_block_table(&self, request_id: U64) -> Maybe<&List<USize>> {
+        self.block_tables.get(&request_id)
+    }
+
+    // Get number of free blocks
+    public fn free_block_count(&self) -> USize {
+        self.free_blocks.len()
+    }
+}
+
+// =============================================================================
+// Speculative Decoding
+// =============================================================================
+
+// Speculative decoder using draft model for acceleration
+// Uses a small, fast draft model to propose multiple tokens,
+// then verifies them in parallel with the target model
+public type SpeculativeDecoder<D, T> is {
+    draft_model: D,     // Small, fast model
+    target_model: T,    // Large, accurate model
+    num_speculative: USize,  // Number of tokens to speculate
+};
+
+implement<D, T> SpeculativeDecoder<D, T>
+where
+    D: Module<DynTensor<USize>, DynTensor<Float>>,
+    T: Module<DynTensor<USize>, DynTensor<Float>>,
+{
+    // Create new speculative decoder
+    public fn new(draft_model: D, target_model: T, num_speculative: USize) -> Self {
+        SpeculativeDecoder { draft_model, target_model, num_speculative }
+    }
+
+    // Generate next tokens with speculation
+    // Returns (accepted_tokens, num_accepted)
+    public fn generate_step(
+        &self,
+        input_ids: &DynTensor<USize>,
+        draft_cache: &mut KVCache,
+        target_cache: &mut KVCache,
+    ) -> (List<U32>, USize) {
+        // Generate K speculative tokens with draft model
+        let mut speculative_tokens = List.new();
+        let mut draft_input = input_ids.clone();
+
+        for _ in 0..self.num_speculative {
+            let logits = self.draft_model.forward(draft_input.clone());
+            let next_token = argmax(&logits.slice(&[.., -1, ..])).item() as U32;
+            speculative_tokens.push(next_token);
+            draft_input = cat(&[&draft_input, &tensor_u32(&[next_token]).unsqueeze(0)], -1);
+        }
+
+        // Verify all speculative tokens at once with target model
+        let spec_tensor = tensor_u32(&speculative_tokens);
+        let full_input = cat(&[input_ids, &spec_tensor.unsqueeze(0)], -1);
+        let target_logits = self.target_model.forward(full_input);
+
+        // Check which tokens match
+        let mut accepted = 0;
+        let input_len = input_ids.shape()[1];
+        for i in 0..self.num_speculative {
+            let target_token = argmax(&target_logits.slice(&[.., input_len + i, ..])).item() as U32;
+            if target_token == speculative_tokens[i] {
+                accepted += 1;
+            } else {
+                // First mismatch - use target's prediction
+                speculative_tokens.truncate(i);
+                speculative_tokens.push(target_token);
+                accepted = i + 1;
+                break;
+            }
+        }
+
+        (speculative_tokens.slice(0, accepted).to_list(), accepted)
+    }
+
+    // Set number of speculative tokens
+    public fn with_speculation(mut self, n: USize) -> Self {
+        self.num_speculative = n;
+        self
+    }
+}
+
+// =============================================================================
+// Continuous Batching
+// =============================================================================
+
+// Request for continuous batching
+public type Request is {
+    id: U64,
+    input_ids: List<U32>,
+    max_new_tokens: USize,
+    generated: List<U32>,
+    is_complete: Bool,
+};
+
+// End-of-sequence token
+public const EOS_TOKEN: U32 = 2;
+
+// Continuous batching scheduler for high-throughput LLM serving
+public type ContinuousBatcher<M> is {
+    model: M,
+    pending_requests: List<Request>,
+    active_requests: List<Request>,
+    max_batch_size: USize,
+    kv_caches: Map<U64, KVCache>,
+    next_request_id: U64,
+};
+
+implement<M: Module<DynTensor<USize>, DynTensor<Float>>> ContinuousBatcher<M> {
+    // Create new continuous batcher
+    public fn new(model: M, max_batch_size: USize) -> Self {
+        ContinuousBatcher {
+            model,
+            pending_requests: List.new(),
+            active_requests: List.new(),
+            max_batch_size,
+            kv_caches: Map.new(),
+            next_request_id: 0,
+        }
+    }
+
+    // Add request to queue
+    public fn add_request(&mut self, input_ids: List<U32>, max_new_tokens: USize) -> U64 {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        self.pending_requests.push(Request {
+            id,
+            input_ids,
+            max_new_tokens,
+            generated: List.new(),
+            is_complete: false,
+        });
+        id
+    }
+
+    // Run one iteration of generation
+    // Returns list of (request_id, generated_tokens) for completed requests
+    public fn step(&mut self) -> List<(U64, List<U32>)> {
+        // Admit new requests if capacity available
+        while self.active_requests.len() < self.max_batch_size && !self.pending_requests.is_empty() {
+            let request = self.pending_requests.remove(0);
+            // Initialize KV cache for this request
+            self.kv_caches.insert(request.id, KVCache.new(32, 1, 32, 128, 4096));
+            self.active_requests.push(request);
+        }
+
+        if self.active_requests.is_empty() {
+            return List.new();
+        }
+
+        // Batch inputs
+        let (batched_input, _attention_mask) = self.prepare_batch();
+
+        // Forward pass
+        let logits = self.model.forward(batched_input);
+
+        // Sample next tokens
+        let next_tokens = sample_tokens(&logits);
+
+        // Update each request
+        let mut completed = List.new();
+        for (i, request) in self.active_requests.iter_mut().enumerate() {
+            let token = next_tokens[i];
+            request.generated.push(token);
+
+            // Check completion
+            if token == EOS_TOKEN || request.generated.len() >= request.max_new_tokens {
+                request.is_complete = true;
+                completed.push((request.id, request.generated.clone()));
+                // Free KV cache
+                self.kv_caches.remove(&request.id);
+            }
+        }
+
+        // Remove completed requests
+        self.active_requests.retain(|r| !r.is_complete);
+
+        completed
+    }
+
+    // Prepare batched input from active requests
+    fn prepare_batch(&self) -> (DynTensor<USize>, DynTensor<Float>) {
+        // For simplicity, pad to max length in batch
+        let max_len = self.active_requests.iter()
+            .map(|r| r.input_ids.len() + r.generated.len())
+            .max()
+            .unwrap_or(0);
+
+        let batch_size = self.active_requests.len();
+        let mut input_data = List.new();
+        let mut mask_data = List.new();
+
+        for request in &self.active_requests {
+            let mut tokens: List<USize> = request.input_ids.iter()
+                .chain(request.generated.iter())
+                .map(|&t| t as USize)
+                .collect();
+            let orig_len = tokens.len();
+
+            // Pad
+            while tokens.len() < max_len {
+                tokens.push(0);
+            }
+            input_data.extend(tokens);
+
+            // Attention mask
+            for i in 0..max_len {
+                mask_data.push(if i < orig_len { 1.0 } else { 0.0 });
+            }
+        }
+
+        let input = from_slice_usize(&input_data).reshape(&[batch_size, max_len]);
+        let mask = from_slice(&mask_data).reshape(&[batch_size, max_len]);
+        (input, mask)
+    }
+
+    // Get number of pending requests
+    public fn pending_count(&self) -> USize {
+        self.pending_requests.len()
+    }
+
+    // Get number of active requests
+    public fn active_count(&self) -> USize {
+        self.active_requests.len()
+    }
+}
+
+// =============================================================================
+// Agent Framework
+// =============================================================================
+
+// Tool that an agent can use
+public type Tool is protocol {
+    fn name(&self) -> Text;
+    fn description(&self) -> Text;
+    fn execute(&self, args: &Map<Text, Value>) -> Result<Value, Error>;
+};
+
+// Agent protocol
+public type Agent is protocol {
+    fn think(&mut self, observation: &Text) -> Text;
+    fn act(&mut self, action: &Text) -> Result<Value, Error>;
+    fn reset(&mut self);
+};
+
+// Message role in conversation
+public type Role is System | User | Assistant | ToolResult;
+
+// Conversation message
+public type Message is {
+    role: Role,
+    content: Text,
+};
+
+// LLM-based agent with tool use capability
+public type LLMAgent<M, Tok> is {
+    model: M,
+    tokenizer: Tok,
+    tools: Map<Text, Heap<Tool>>,
+    memory: List<Message>,
+    system_prompt: Text,
+    max_tokens: USize,
+};
+
+implement<M, Tok> LLMAgent<M, Tok>
+where
+    M: Module<DynTensor<USize>, DynTensor<Float>>,
+    Tok: Tokenizer,
+{
+    // Create new LLM agent
+    public fn new(model: M, tokenizer: Tok, system_prompt: Text) -> Self {
+        LLMAgent {
+            model,
+            tokenizer,
+            tools: Map.new(),
+            memory: List.new(),
+            system_prompt,
+            max_tokens: 1024,
+        }
+    }
+
+    // Register a tool for the agent to use
+    public fn register_tool<T: Tool>(&mut self, tool: T) {
+        self.tools.insert(tool.name(), Heap(tool));
+    }
+
+    // Set maximum generation tokens
+    public fn with_max_tokens(mut self, max_tokens: USize) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    // Generate response
+    public fn generate(&self, prompt: &Text) -> Text {
+        let mut messages = self.memory.clone();
+        messages.push(Message { role: Role.User, content: prompt.clone() });
+
+        let input = format_messages(&messages, &self.system_prompt);
+        let tokens = self.tokenizer.encode(&input);
+        let input_tensor = from_slice_u32(&tokens).unsqueeze(0);
+
+        let mut generated = List.new();
+        let mut current_input = input_tensor;
+
+        for _ in 0..self.max_tokens {
+            let logits = self.model.forward(current_input.clone());
+            let next_token = sample_top_p(&logits.slice(&[.., -1, ..]), 0.9);
+
+            if next_token == EOS_TOKEN {
+                break;
+            }
+            generated.push(next_token);
+            current_input = cat(&[&current_input, &tensor_u32(&[next_token]).unsqueeze(0)], -1);
+        }
+
+        self.tokenizer.decode(&generated)
+    }
+}
+
+implement<M, Tok> Agent for LLMAgent<M, Tok>
+where
+    M: Module<DynTensor<USize>, DynTensor<Float>>,
+    Tok: Tokenizer,
+{
+    fn think(&mut self, observation: &Text) -> Text {
+        self.memory.push(Message { role: Role.User, content: observation.clone() });
+        let response = self.generate(observation);
+        self.memory.push(Message { role: Role.Assistant, content: response.clone() });
+        response
+    }
+
+    fn act(&mut self, action: &Text) -> Result<Value, Error> {
+        // Parse action to find tool and arguments
+        let (tool_name, args) = parse_tool_call(action)?;
+
+        if let Maybe.Some(tool) = self.tools.get(&tool_name) {
+            let result = tool.execute(&args)?;
+            self.memory.push(Message {
+                role: Role.ToolResult,
+                content: format_value(&result),
+            });
+            Ok(result)
+        } else {
+            Err(Error.new(f"Unknown tool: {tool_name}"))
+        }
+    }
+
+    fn reset(&mut self) {
+        self.memory.clear();
+    }
+}
+
+// =============================================================================
+// ReAct Agent
+// =============================================================================
+
+// ReAct agent (Reasoning + Acting)
+// Implements the think-act-observe loop for multi-step reasoning
+public type ReActAgent<M, Tok> is {
+    llm_agent: LLMAgent<M, Tok>,
+    max_iterations: USize,
+};
+
+implement<M, Tok> ReActAgent<M, Tok>
+where
+    M: Module<DynTensor<USize>, DynTensor<Float>>,
+    Tok: Tokenizer,
+{
+    // Create new ReAct agent
+    public fn new(model: M, tokenizer: Tok) -> Self {
+        let system_prompt = "You are a helpful assistant that can use tools to accomplish tasks.\nFor each step, you should:\n1. Thought: Reason about what to do next\n2. Action: Use a tool with the format: Action: tool_name(arg1=\"value1\", arg2=\"value2\")\n3. Observation: See the result of your action\n\nContinue until you have enough information to provide a final answer.\nWhen ready, respond with: Final Answer: your answer";
+
+        ReActAgent {
+            llm_agent: LLMAgent.new(model, tokenizer, system_prompt),
+            max_iterations: 10,
+        }
+    }
+
+    // Set maximum iterations
+    public fn with_max_iterations(mut self, max_iter: USize) -> Self {
+        self.max_iterations = max_iter;
+        self
+    }
+
+    // Register a tool
+    public fn register_tool<T: Tool>(&mut self, tool: T) {
+        self.llm_agent.register_tool(tool);
+    }
+
+    // Run ReAct loop
+    public fn run(&mut self, task: &Text) -> Result<Text, Error> {
+        let mut observation = task.clone();
+
+        for _ in 0..self.max_iterations {
+            // Think
+            let response = self.llm_agent.think(&observation);
+
+            // Check for final answer
+            if response.contains("Final Answer:") {
+                let parts: List<_> = response.split("Final Answer:").collect();
+                if parts.len() > 1 {
+                    let answer = parts[1].trim();
+                    return Ok(answer.to_text());
+                }
+            }
+
+            // Extract and execute action
+            if let Maybe.Some(action) = extract_action(&response) {
+                match self.llm_agent.act(&action) {
+                    Ok(result) => {
+                        observation = f"Observation: {format_value(&result)}";
+                    }
+                    Err(e) => {
+                        observation = f"Error: {e.message()}";
+                    }
+                }
+            } else {
+                observation = "Please provide an action or final answer.".to_text();
+            }
+        }
+
+        Err(Error.new("Max iterations reached without final answer"))
+    }
+}
+
+// =============================================================================
+// Memory Store
+// =============================================================================
+
+// Vector memory store for retrieval-augmented generation (RAG)
+public type MemoryStore<E> is {
+    embeddings: DynTensor<Float>,   // [num_memories, embed_dim]
+    contents: List<Text>,
+    metadata: List<Map<Text, Value>>,
+    embed_model: E,
+    embed_dim: USize,
+};
+
+implement<E: Module<Text, DynTensor<Float>>> MemoryStore<E> {
+    // Create new memory store
+    public fn new(embed_model: E, embed_dim: USize) -> Self {
+        MemoryStore {
+            embeddings: zeros(&[0, embed_dim]),
+            contents: List.new(),
+            metadata: List.new(),
+            embed_model,
+            embed_dim,
+        }
+    }
+
+    // Add memory
+    public fn add(&mut self, content: Text, metadata: Map<Text, Value>) {
+        let embedding = self.embed_model.forward(content.clone());
+        self.embeddings = cat(&[&self.embeddings, &embedding.unsqueeze(0)], 0);
+        self.contents.push(content);
+        self.metadata.push(metadata);
+    }
+
+    // Add multiple memories
+    public fn add_batch(&mut self, contents: List<Text>, metadata_list: List<Map<Text, Value>>) {
+        for (content, meta) in contents.iter().zip(metadata_list.iter()) {
+            self.add(content.clone(), meta.clone());
+        }
+    }
+
+    // Retrieve top-k similar memories
+    public fn retrieve(&self, query: &Text, k: USize) -> List<(Text, Float)> {
+        if self.contents.is_empty() {
+            return List.new();
+        }
+
+        let query_embed = self.embed_model.forward(query.clone());
+
+        // Cosine similarity
+        let query_norm = div(&query_embed, &norm(&query_embed));
+        let embed_norms = div(&self.embeddings, &norm_axis(&self.embeddings, -1).unsqueeze(-1));
+        let similarities = matmul(&embed_norms, &query_norm.unsqueeze(-1)).squeeze(-1);
+
+        // Top-k
+        let (values, indices) = topk(&similarities, k.min(self.contents.len()), -1);
+
+        indices.iter().enumerate().map(|(i, &idx)| {
+            (self.contents[idx as USize].clone(), values.item_at(i))
+        }).collect()
+    }
+
+    // Remove memories by filter
+    public fn remove(&mut self, filter: fn(&Map<Text, Value>) -> Bool) {
+        let keep_indices: List<USize> = self.metadata.iter()
+            .enumerate()
+            .filter(|(_, m)| !filter(m))
+            .map(|(i, _)| i)
+            .collect();
+
+        if keep_indices.len() == self.contents.len() {
+            return; // Nothing to remove
+        }
+
+        self.embeddings = index_select(&self.embeddings, 0, &from_slice_usize(&keep_indices));
+        self.contents = keep_indices.iter().map(|&i| self.contents[i].clone()).collect();
+        self.metadata = keep_indices.iter().map(|&i| self.metadata[i].clone()).collect();
+    }
+
+    // Get number of stored memories
+    public fn len(&self) -> USize {
+        self.contents.len()
+    }
+
+    // Check if store is empty
+    public fn is_empty(&self) -> Bool {
+        self.contents.is_empty()
+    }
+}
+
+// =============================================================================
+// Quantization
+// =============================================================================
+
+// Quantized linear layer for memory-efficient inference
+public type QuantizedLinear is {
+    weight: DynTensor<I8>,         // Quantized weights
+    scale: DynTensor<Float>,       // Per-channel scale
+    zero_point: DynTensor<I8>,     // Per-channel zero point
+    bias: Maybe<DynTensor<Float>>,
+    in_features: USize,
+    out_features: USize,
+};
+
+implement QuantizedLinear {
+    // Quantize from float linear layer
+    public fn from_float(src: &Linear, bits: USize) -> Self {
+        let valid = (bits == 4) || (bits == 8);
+        assert(valid, "only 4-bit and 8-bit quantization supported");
+
+        let weight = src.weight();
+        let (quantized, scale, zero_point) = quantize_per_channel(weight, bits);
+
+        QuantizedLinear {
+            weight: quantized,
+            scale,
+            zero_point,
+            bias: src.bias().cloned(),
+            in_features: src.in_features(),
+            out_features: src.out_features(),
+        }
+    }
+}
+
+implement Module<DynTensor<Float>, DynTensor<Float>> for QuantizedLinear {
+    fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float> {
+        // Dequantize-multiply-accumulate in optimized kernel
+        let mut output = quantized_matmul(&input, &self.weight, &self.scale, &self.zero_point);
+
+        if let Maybe.Some(bias) = &self.bias {
+            output = add(&output, bias);
+        }
+        output
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        // Quantized weights not trainable
+        List.new()
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        List.new()
+    }
+}
+
+// Per-channel quantization
+public fn quantize_per_channel(
+    t: &DynTensor<Float>,
+    bits: USize,
+) -> (DynTensor<I8>, DynTensor<Float>, DynTensor<I8>) {
+    let shift = bits - 1;
+    let qmin = -((1 << shift) as Float);
+    let qmax = (((1 << shift) - 1) as Float);
+
+    // Compute scale and zero point per output channel
+    let min_val = min_axis(t, -1);
+    let max_val = max_axis(t, -1);
+
+    let range = sub(&max_val, &min_val);
+    let scale = div(&range, &full_like(&range, qmax - qmin));
+    let zero_point_f = sub(&full_like(&min_val, qmin), &div(&min_val, &scale));
+    let zero_point_clamped = clamp(&zero_point_f, qmin, qmax);
+    let zero_point: DynTensor<I8> = zero_point_clamped.cast();
+
+    // Quantize
+    let scaled = div(t, &unsqueeze(&scale, -1));
+    let zp_unsqueezed = unsqueeze(&zero_point, -1);
+    let zp_float: DynTensor<Float> = zp_unsqueezed.cast();
+    let shifted = add(&scaled, &zp_float);
+    let shifted_clamped = clamp(&shifted, qmin, qmax);
+    let quantized: DynTensor<I8> = shifted_clamped.cast();
+
+    (quantized, scale, zero_point)
+}
+
+// =============================================================================
+// Flash Attention
+// =============================================================================
+
+// Flash Attention (memory-efficient, fused kernel)
+// Complexity: O(batch · heads · seq_q · seq_k · head_dim)
+// Memory: O(batch · heads · seq_q · head_dim) - linear in sequence length
+// @cost O(batch * heads * seq_q * seq_k * head_dim), memory: O(batch * heads * seq_q * head_dim)
+public fn flash_attention(
+    q: &DynTensor<Float>,  // [batch, heads, seq_q, head_dim]
+    k: &DynTensor<Float>,  // [batch, heads, seq_k, head_dim]
+    v: &DynTensor<Float>,  // [batch, heads, seq_k, head_dim]
+    causal: Bool,
+) -> DynTensor<Float> {
+    // Uses tiled computation to avoid materializing full attention matrix
+    // O(n) memory instead of O(n²)
+    @vbc(TENSOR_FLASH_ATTENTION, q, k, v, causal)
+}
+
+// Flash Attention with KV cache
+public fn flash_attention_with_cache(
+    q: &DynTensor<Float>,
+    kv_cache: &KVCache,
+    layer_idx: USize,
+    causal: Bool,
+) -> DynTensor<Float> {
+    let (k, v) = kv_cache.get(layer_idx);
+    flash_attention(q, &k, &v, causal)
+}
+
+// Paged attention kernel
+// Complexity: O(batch · heads · context_len · head_dim) per query token
+// Memory: O(num_blocks · heads · block_size · head_dim) - shared across requests
+// @cost O(batch * heads * context_len * head_dim)
+public fn paged_attention(
+    q: &DynTensor<Float>,
+    kv_cache: &PagedKVCache,
+    block_table: &[USize],
+    context_len: USize,
+) -> DynTensor<Float> {
+    @vbc(TENSOR_PAGED_ATTENTION, q, kv_cache, block_table, context_len)
+}
+
+// =============================================================================
+// Sampling Functions
+// =============================================================================
+
+// Sample tokens using top-p (nucleus) sampling
+public fn sample_top_p(logits: &DynTensor<Float>, p: Float) -> U32 {
+    @vbc(SAMPLE_TOP_P, logits, p)
+}
+
+// Sample tokens using temperature
+public fn sample_temperature(logits: &DynTensor<Float>, temperature: Float) -> U32 {
+    @vbc(SAMPLE_TEMPERATURE, logits, temperature)
+}
+
+// Greedy sampling (argmax)
+public fn sample_greedy(logits: &DynTensor<Float>) -> U32 {
+    argmax(logits).item() as U32
+}
+
+// Sample multiple tokens from logits
+fn sample_tokens(logits: &DynTensor<Float>) -> List<U32> {
+    let shape = logits.shape();
+    let batch_size = shape[0];
+    let mut result: List<U32> = List.new();
+    for i in 0..batch_size {
+        result.push(sample_greedy(&logits.slice(&[i..i+1, -1, ..])));
+    }
+    result
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+// Format messages for model input
+fn format_messages(messages: &List<Message>, system_prompt: &Text) -> Text {
+    let mut result = f"<|system|>\n{system_prompt}\n<|end|>\n";
+    for msg in messages {
+        let role_str = match msg.role {
+            Role.System => "system",
+            Role.User => "user",
+            Role.Assistant => "assistant",
+            Role.ToolResult => "tool",
+        };
+        result = f"{result}<|{role_str}|>\n{msg.content}\n<|end|>\n";
+    }
+    result
+}
+
+// Parse tool call from action string
+fn parse_tool_call(action: &Text) -> Result<(Text, Map<Text, Value>), Error> {
+    @vbc(PARSE_TOOL_CALL, action)
+}
+
+// Extract action from response
+fn extract_action(response: &Text) -> Maybe<Text> {
+    if let Maybe.Some(start) = response.find("Action:") {
+        let after_action = response.slice_from(start + 7);
+        if let Maybe.Some(end) = after_action.find("\n") {
+            Maybe.Some(after_action.slice_to(end).trim().to_text())
+        } else {
+            Maybe.Some(after_action.trim().to_text())
+        }
+    } else {
+        Maybe.None
+    }
+}
+
+// Format value for display
+fn format_value(value: &Value) -> Text {
+    @vbc(FORMAT_VALUE, value)
+}
+
+// Create tensor from U32 slice
+fn tensor_u32(values: &[U32]) -> DynTensor<USize> {
+    from_slice_usize(&values.iter().map(|&v| v as USize).collect<List<_>>())
+}
+
+// Create tensor from U32 list
+fn from_slice_u32(values: &List<U32>) -> DynTensor<USize> {
+    from_slice_usize(&values.iter().map(|&v| v as USize).collect<List<_>>())
+}
+
+// Create tensor from USize slice
+fn from_slice_usize(values: &List<USize>) -> DynTensor<USize> {
+    @vbc(TENSOR_FROM_SLICE_USIZE, values)
+}
+
+// Quantized matrix multiplication
+fn quantized_matmul(
+    input: &DynTensor<Float>,
+    weight: &DynTensor<I8>,
+    scale: &DynTensor<Float>,
+    zero_point: &DynTensor<I8>,
+) -> DynTensor<Float> {
+    @vbc(QUANTIZED_MATMUL, input, weight, scale, zero_point)
+}
+
+// Tensor norm
+fn norm(x: &DynTensor<Float>) -> DynTensor<Float> {
+    @vbc(TENSOR_NORM, x)
+}
+
+// Full tensor like another
+fn full_like(x: &DynTensor<Float>, value: Float) -> DynTensor<Float> {
+    full(&x.shape(), value)
+}
+
+// Generate unique request ID
+fn generate_request_id() -> U64 {
+    @vbc(GENERATE_REQUEST_ID)
+}
+
+// =============================================================================
+// Prompt Engineering APIs (Section 49)
+// =============================================================================
+
+// Message content types for multimodal interactions
+public type MessageContent is
+    | TextContent(Text)
+    | ImageUrl { url: Text, detail: ImageDetail }
+    | FunctionCallContent { name: Text, arguments: Text }
+    | FunctionResultContent { name: Text, content: Text }
+    | MultiPart(List<MessageContent>);
+
+// Image detail level for vision models
+public type ImageDetail is Auto | Low | High;
+
+// Structured chat message with typed content
+public type ChatMessage is {
+    role: Role,
+    content: MessageContent,
+    name: Maybe<Text>,  // Optional function/tool name
+};
+
+implement ChatMessage {
+    // Create text message
+    public fn text(role: Role, content: Text) -> Self {
+        ChatMessage {
+            role,
+            content: MessageContent.TextContent(content),
+            name: Maybe.None,
+        }
+    }
+
+    // Create system message
+    public fn system(content: Text) -> Self {
+        Self.text(Role.System, content)
+    }
+
+    // Create user message
+    public fn user(content: Text) -> Self {
+        Self.text(Role.User, content)
+    }
+
+    // Create assistant message
+    public fn assistant(content: Text) -> Self {
+        Self.text(Role.Assistant, content)
+    }
+
+    // Create function result message
+    public fn tool_result(name: Text, content: Text) -> Self {
+        ChatMessage {
+            role: Role.ToolResult,
+            content: MessageContent.FunctionResultContent { name: name.clone(), content },
+            name: Maybe.Some(name),
+        }
+    }
+}
+
+// Protocol for types that can be converted to a Map<Text, Text>
+public type ToMap is protocol {
+    fn to_map(&self) -> Map<Text, Text>;
+};
+
+// Prompt template with typed placeholders
+// Supports {placeholder} syntax for variable substitution
+public type PromptTemplate<Params> is {
+    template: Text,
+    _phantom: Params,
+};
+
+implement<Params: ToMap + Default> PromptTemplate<Params> {
+    // Create template from string with {placeholder} syntax
+    public fn new(template: Text) -> Self {
+        PromptTemplate {
+            template,
+            _phantom: Params.default(),
+        }
+    }
+
+    // Render template with provided parameters
+    public fn render(&self, params: &Params) -> Text {
+        let mut result = self.template.clone();
+        for (key, value) in params.to_map() {
+            let placeholder = f"{{{key}}}";
+            result = result.replace(&placeholder, &value);
+        }
+        result
+    }
+
+    // Validate that all placeholders in template are provided by params
+    public fn validate(&self, params: &Params) -> Result<(), Error> {
+        let param_map = params.to_map();
+        let mut missing = List.new();
+
+        // Find all {key} patterns
+        let mut i = 0;
+        while i < self.template.len() {
+            if let Maybe.Some(start) = self.template.find_from("{", i) {
+                if let Maybe.Some(end) = self.template.find_from("}", start) {
+                    let key = self.template.slice(start + 1, end);
+                    if !param_map.contains_key(&key) {
+                        missing.push(key);
+                    }
+                    i = end + 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(Error.new(f"Missing template parameters: {missing.join(\", \")}"))
+        }
+    }
+}
+
+// Few-shot prompt builder for in-context learning
+// Constructs prompts with example input/output pairs
+public type FewShotPrompt is {
+    system: Text,
+    examples: List<(Text, Text)>,  // (input, expected_output)
+    prefix: Maybe<Text>,
+    suffix: Maybe<Text>,
+    input_label: Text,
+    output_label: Text,
+};
+
+implement FewShotPrompt {
+    // Create new few-shot prompt builder
+    public fn new(system: Text) -> Self {
+        FewShotPrompt {
+            system,
+            examples: List.new(),
+            prefix: Maybe.None,
+            suffix: Maybe.None,
+            input_label: "Input".to_text(),
+            output_label: "Output".to_text(),
+        }
+    }
+
+    // Add an example input/output pair
+    public fn add_example(&mut self, input: Text, output: Text) -> &mut Self {
+        self.examples.push((input, output));
+        self
+    }
+
+    // Set prefix text added before each query
+    public fn with_prefix(&mut self, prefix: Text) -> &mut Self {
+        self.prefix = Maybe.Some(prefix);
+        self
+    }
+
+    // Set suffix text added after each query
+    public fn with_suffix(&mut self, suffix: Text) -> &mut Self {
+        self.suffix = Maybe.Some(suffix);
+        self
+    }
+
+    // Set custom labels for input/output
+    public fn with_labels(&mut self, input_label: Text, output_label: Text) -> &mut Self {
+        self.input_label = input_label;
+        self.output_label = output_label;
+        self
+    }
+
+    // Build chat messages for the prompt with given query
+    public fn build(&self, query: Text) -> List<ChatMessage> {
+        let mut messages = List.new();
+
+        // System message
+        messages.push(ChatMessage.system(self.system.clone()));
+
+        // Examples as user/assistant pairs
+        for (input, output) in &self.examples {
+            messages.push(ChatMessage.user(input.clone()));
+            messages.push(ChatMessage.assistant(output.clone()));
+        }
+
+        // Query with optional prefix/suffix
+        let mut query_text = query;
+        if let Maybe.Some(prefix) = &self.prefix {
+            query_text = f"{prefix}\n{query_text}";
+        }
+        if let Maybe.Some(suffix) = &self.suffix {
+            query_text = f"{query_text}\n{suffix}";
+        }
+
+        messages.push(ChatMessage.user(query_text));
+
+        messages
+    }
+
+    // Build as a single text prompt (for non-chat models)
+    public fn build_text(&self, query: Text) -> Text {
+        let mut result = f"System: {self.system}\n\n";
+
+        for (input, output) in &self.examples {
+            result = f"{result}{self.input_label}: {input}\n{self.output_label}: {output}\n\n";
+        }
+
+        let mut query_text = query;
+        if let Maybe.Some(prefix) = &self.prefix {
+            query_text = f"{prefix}\n{query_text}";
+        }
+        if let Maybe.Some(suffix) = &self.suffix {
+            query_text = f"{query_text}\n{suffix}";
+        }
+
+        f"{result}{self.input_label}: {query_text}\n{self.output_label}:"
+    }
+
+    // Get number of examples
+    public fn example_count(&self) -> USize {
+        self.examples.len()
+    }
+}
+
+// Chain-of-Thought prompting for step-by-step reasoning
+// Extends FewShotPrompt with reasoning traces
+public type ChainOfThoughtPrompt is {
+    base: FewShotPrompt,
+    reasoning_prefix: Text,
+    answer_prefix: Text,
+};
+
+implement ChainOfThoughtPrompt {
+    // Create new CoT prompt builder
+    public fn new(system: Text) -> Self {
+        ChainOfThoughtPrompt {
+            base: FewShotPrompt.new(system),
+            reasoning_prefix: "Let me think through this step by step:".to_text(),
+            answer_prefix: "Therefore, the answer is:".to_text(),
+        }
+    }
+
+    // Set custom reasoning prefix
+    public fn with_reasoning_prefix(&mut self, prefix: Text) -> &mut Self {
+        self.reasoning_prefix = prefix;
+        self
+    }
+
+    // Set custom answer prefix
+    public fn with_answer_prefix(&mut self, prefix: Text) -> &mut Self {
+        self.answer_prefix = prefix;
+        self
+    }
+
+    // Add CoT example with explicit reasoning trace
+    public fn add_cot_example(
+        &mut self,
+        input: Text,
+        reasoning: Text,
+        answer: Text,
+    ) -> &mut Self {
+        let full_output = f"{self.reasoning_prefix}\n{reasoning}\n\n{self.answer_prefix} {answer}";
+        self.base.add_example(input, full_output);
+        self
+    }
+
+    // Build chat messages for query
+    public fn build(&self, query: Text) -> List<ChatMessage> {
+        self.base.build(query)
+    }
+
+    // Build as text prompt
+    public fn build_text(&self, query: Text) -> Text {
+        self.base.build_text(query)
+    }
+
+    // Extract answer from CoT response
+    public fn extract_answer(&self, response: Text) -> Maybe<Text> {
+        if let Maybe.Some(start) = response.find(&self.answer_prefix) {
+            let after_prefix = response.slice_from(start + self.answer_prefix.len());
+            let trimmed = after_prefix.trim();
+            if !trimmed.is_empty() {
+                return Maybe.Some(trimmed.to_text());
+            }
+        }
+        Maybe.None
+    }
+}
+
+// Structured output prompt for JSON mode
+// Ensures LLM outputs match a specified schema
+public type StructuredOutputPrompt<Schema> is {
+    system: Text,
+    schema_description: Text,
+    examples: List<(Text, Value)>,  // (input, expected JSON output)
+    _phantom: Schema,
+};
+
+implement<Schema: JsonSchema + Default> StructuredOutputPrompt<Schema> {
+    // Create new structured output prompt
+    public fn new(system: Text) -> Self {
+        let schema_json = Schema.json_schema_string();
+        let schema_description = f"You must respond with valid JSON matching this schema:\n```json\n{schema_json}\n```";
+
+        StructuredOutputPrompt {
+            system: f"{system}\n\n{schema_description}",
+            schema_description,
+            examples: List.new(),
+            _phantom: Schema.default(),
+        }
+    }
+
+    // Add an example with structured output
+    public fn add_example(&mut self, input: Text, output: Value) -> &mut Self {
+        self.examples.push((input, output));
+        self
+    }
+
+    // Build chat messages for query
+    public fn build(&self, query: Text) -> List<ChatMessage> {
+        let mut messages = List.new();
+
+        messages.push(ChatMessage.system(self.system.clone()));
+
+        for (input, output) in &self.examples {
+            messages.push(ChatMessage.user(input.clone()));
+            messages.push(ChatMessage.assistant(output.to_json()));
+        }
+
+        messages.push(ChatMessage.user(query));
+
+        messages
+    }
+
+    // Parse structured response from LLM output
+    public fn parse_response(&self, response: Text) -> Result<Schema, ParseError> {
+        // Extract JSON from response (handles markdown code blocks)
+        let json = extract_json(&response)?;
+        Schema.from_json(&json)
+    }
+}
+
+// Extract JSON from text that may include markdown code blocks
+fn extract_json(text: &Text) -> Result<Text, ParseError> {
+    // Try to find JSON in code block first
+    if let Maybe.Some(start) = text.find("```json") {
+        let after_marker = text.slice_from(start + 7);
+        if let Maybe.Some(end) = after_marker.find("```") {
+            return Ok(after_marker.slice_to(end).trim().to_text());
+        }
+    }
+
+    // Try generic code block
+    if let Maybe.Some(start) = text.find("```") {
+        let after_marker = text.slice_from(start + 3);
+        // Skip optional language identifier
+        let content_start = if let Maybe.Some(nl) = after_marker.find("\n") {
+            after_marker.slice_from(nl + 1)
+        } else {
+            after_marker
+        };
+        if let Maybe.Some(end) = content_start.find("```") {
+            return Ok(content_start.slice_to(end).trim().to_text());
+        }
+    }
+
+    // Try to find raw JSON object/array
+    let trimmed = text.trim();
+    if (trimmed.starts_with("{") && trimmed.ends_with("}")) ||
+       (trimmed.starts_with("[") && trimmed.ends_with("]")) {
+        return Ok(trimmed.to_text());
+    }
+
+    Err(ParseError.new("Could not extract JSON from response"))
+}
+
+// =============================================================================
+// Function Calling Protocol (Section 50)
+// =============================================================================
+
+// JSON Schema representation for function parameters
+public type JsonSchema is {
+    schema_type: Text,
+    description: Maybe<Text>,
+    properties: Maybe<Map<Text, JsonSchema>>,
+    required: Maybe<List<Text>>,
+    items: Maybe<Heap<JsonSchema>>,
+    enum_values: Maybe<List<Text>>,
+};
+
+implement JsonSchema {
+    // Create string schema
+    public fn string() -> Self {
+        JsonSchema {
+            schema_type: "string".to_text(),
+            description: Maybe.None,
+            properties: Maybe.None,
+            required: Maybe.None,
+            items: Maybe.None,
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Create number schema
+    public fn number() -> Self {
+        JsonSchema {
+            schema_type: "number".to_text(),
+            description: Maybe.None,
+            properties: Maybe.None,
+            required: Maybe.None,
+            items: Maybe.None,
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Create integer schema
+    public fn integer() -> Self {
+        JsonSchema {
+            schema_type: "integer".to_text(),
+            description: Maybe.None,
+            properties: Maybe.None,
+            required: Maybe.None,
+            items: Maybe.None,
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Create boolean schema
+    public fn boolean() -> Self {
+        JsonSchema {
+            schema_type: "boolean".to_text(),
+            description: Maybe.None,
+            properties: Maybe.None,
+            required: Maybe.None,
+            items: Maybe.None,
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Create array schema
+    public fn array(items: JsonSchema) -> Self {
+        JsonSchema {
+            schema_type: "array".to_text(),
+            description: Maybe.None,
+            properties: Maybe.None,
+            required: Maybe.None,
+            items: Maybe.Some(Heap(items)),
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Create object schema from field definitions
+    public fn object(fields: List<(Text, JsonSchema, Bool)>) -> Self {
+        let mut properties = Map.new();
+        let mut required = List.new();
+
+        for (name, schema, is_required) in fields {
+            properties.insert(name.clone(), schema);
+            if is_required {
+                required.push(name);
+            }
+        }
+
+        JsonSchema {
+            schema_type: "object".to_text(),
+            description: Maybe.None,
+            properties: Maybe.Some(properties),
+            required: if required.is_empty() { Maybe.None } else { Maybe.Some(required) },
+            items: Maybe.None,
+            enum_values: Maybe.None,
+        }
+    }
+
+    // Add description
+    public fn with_description(mut self, desc: Text) -> Self {
+        self.description = Maybe.Some(desc);
+        self
+    }
+
+    // Set enum values (for strings)
+    public fn with_enum(mut self, values: List<Text>) -> Self {
+        self.enum_values = Maybe.Some(values);
+        self
+    }
+
+    // Convert to JSON string
+    public fn to_json(&self) -> Text {
+        @vbc(JSON_SCHEMA_TO_JSON, self)
+    }
+}
+
+// Protocol for types that can generate JSON schema
+public type JsonSchemaType is protocol {
+    fn json_schema() -> JsonSchema;
+    fn json_schema_string() -> Text {
+        Self.json_schema().to_json()
+    }
+    fn required_fields() -> List<Text> {
+        List.new()
+    }
+};
+
+// Function schema for LLM tool use
+public type FunctionSchema is {
+    name: Text,
+    description: Text,
+    parameters: JsonSchema,
+};
+
+implement FunctionSchema {
+    // Create function schema
+    public fn new(name: Text, description: Text, parameters: JsonSchema) -> Self {
+        FunctionSchema { name, description, parameters }
+    }
+
+    // Convert to JSON for LLM API
+    public fn to_json(&self) -> Text {
+        @vbc(FUNCTION_SCHEMA_TO_JSON, self)
+    }
+}
+
+// Function call parsed from LLM response
+public type FunctionCall is {
+    id: Text,           // Call ID for matching responses
+    name: Text,
+    arguments: Text,    // JSON string
+};
+
+implement FunctionCall {
+    // Create function call
+    public fn new(id: Text, name: Text, arguments: Text) -> Self {
+        FunctionCall { id, name, arguments }
+    }
+
+    // Parse arguments as JSON
+    public fn parse_arguments<T: Deserialize>(&self) -> Result<T, ParseError> {
+        T.from_json(&self.arguments)
+    }
+}
+
+// Result of a function call execution
+public type FunctionCallResult is {
+    call_id: Text,
+    output: Result<Value, Error>,
+};
+
+implement FunctionCallResult {
+    // Create successful result
+    public fn success(call_id: Text, value: Value) -> Self {
+        FunctionCallResult { call_id, output: Ok(value) }
+    }
+
+    // Create error result
+    public fn error(call_id: Text, err: Error) -> Self {
+        FunctionCallResult { call_id, output: Err(err) }
+    }
+
+    // Convert to message content
+    public fn to_message_content(&self) -> MessageContent {
+        let content = match &self.output {
+            Ok(v) => v.to_json(),
+            Err(e) => f"Error: {e.message()}",
+        };
+        MessageContent.FunctionResultContent {
+            name: self.call_id.clone(),
+            content,
+        }
+    }
+}
+
+// Protocol for tools that can be executed
+public type ExecutableTool is protocol {
+    fn schema(&self) -> FunctionSchema;
+    fn execute(&self, arguments: Text) -> Result<Value, Error>;
+};
+
+// Generic callable tool with typed parameters and output
+public type CallableTool<Params, Output> is {
+    name: Text,
+    description: Text,
+    func: fn(Params) -> Output,
+};
+
+implement<Params: JsonSchemaType + Deserialize, Output: Serialize> CallableTool<Params, Output> {
+    // Create tool from function
+    public fn new(
+        name: Text,
+        description: Text,
+        func: fn(Params) -> Output,
+    ) -> Self {
+        CallableTool { name, description, func }
+    }
+
+    // Get the function schema
+    public fn schema(&self) -> FunctionSchema {
+        FunctionSchema {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            parameters: Params.json_schema(),
+        }
+    }
+
+    // Execute with JSON arguments
+    public fn execute(&self, arguments: Text) -> Result<Value, Error> {
+        let params: Params = Params.from_json(&arguments)?;
+        let output = (self.func)(params);
+        Ok(output.to_value())
+    }
+}
+
+implement<Params: JsonSchemaType + Deserialize, Output: Serialize> ExecutableTool for CallableTool<Params, Output> {
+    fn schema(&self) -> FunctionSchema {
+        self.schema()
+    }
+
+    fn execute(&self, arguments: Text) -> Result<Value, Error> {
+        self.execute(arguments)
+    }
+}
+
+// Function calling agent with structured tool use
+public type FunctionCallingAgent<M, Tok> is {
+    model: M,
+    tokenizer: Tok,
+    tools: Map<Text, Heap<ExecutableTool>>,
+    max_tool_calls: USize,
+    tool_choice: ToolChoice,
+};
+
+// Tool selection mode
+public type ToolChoice is
+    | Auto           // Model decides whether to use tools
+    | Required       // Model must use at least one tool
+    | None           // Tools disabled for this call
+    | Specific(Text); // Must use specific tool by name
+
+implement<M, Tok> FunctionCallingAgent<M, Tok>
+where
+    M: Module<DynTensor<USize>, DynTensor<Float>>,
+    Tok: Tokenizer,
+{
+    // Create new function calling agent
+    public fn new(model: M, tokenizer: Tok) -> Self {
+        FunctionCallingAgent {
+            model,
+            tokenizer,
+            tools: Map.new(),
+            max_tool_calls: 10,
+            tool_choice: ToolChoice.Auto,
+        }
+    }
+
+    // Register a tool
+    public fn register_tool<T: ExecutableTool>(&mut self, tool: T) {
+        self.tools.insert(tool.schema().name.clone(), Heap(tool));
+    }
+
+    // Set maximum tool calls per generation
+    public fn with_max_tool_calls(mut self, max: USize) -> Self {
+        self.max_tool_calls = max;
+        self
+    }
+
+    // Set tool choice mode
+    public fn with_tool_choice(mut self, choice: ToolChoice) -> Self {
+        self.tool_choice = choice;
+        self
+    }
+
+    // Get schemas for all registered tools
+    public fn tool_schemas(&self) -> List<FunctionSchema> {
+        self.tools.values().map(|t| t.schema()).collect()
+    }
+
+    // Generate response with function calling
+    public fn generate_with_tools(
+        &self,
+        messages: List<ChatMessage>,
+    ) -> Result<ChatMessage, Error> {
+        let tools_json = self.tools.values()
+            .map(|t| t.schema().to_json())
+            .collect<List<_>>();
+
+        let mut conversation = messages;
+        let mut tool_calls_count = 0;
+
+        loop {
+            // Generate response with tool awareness
+            let response = self.generate_response(&conversation, &tools_json)?;
+
+            // Check for function calls in response
+            match parse_function_calls(&response) {
+                Maybe.Some(calls) if tool_calls_count < self.max_tool_calls => {
+                    // Add assistant message with function calls
+                    conversation.push(ChatMessage {
+                        role: Role.Assistant,
+                        content: MessageContent.TextContent(response.clone()),
+                        name: Maybe.None,
+                    });
+
+                    // Execute each function call
+                    for call in &calls {
+                        let result = if let Maybe.Some(tool) = self.tools.get(&call.name) {
+                            tool.execute(call.arguments.clone())
+                        } else {
+                            Err(Error.new(f"Unknown tool: {call.name}"))
+                        };
+
+                        // Add function result to conversation
+                        let result_obj = FunctionCallResult {
+                            call_id: call.id.clone(),
+                            output: result,
+                        };
+                        conversation.push(ChatMessage {
+                            role: Role.ToolResult,
+                            content: result_obj.to_message_content(),
+                            name: Maybe.Some(call.name.clone()),
+                        });
+                    }
+                    tool_calls_count += calls.len();
+                }
+                _ => {
+                    // No function calls or max reached - return final response
+                    return Ok(ChatMessage {
+                        role: Role.Assistant,
+                        content: MessageContent.TextContent(response),
+                        name: Maybe.None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Generate response (internal)
+    fn generate_response(
+        &self,
+        messages: &List<ChatMessage>,
+        tools_json: &List<Text>,
+    ) -> Result<Text, Error> {
+        // Format messages for model
+        let input_text = format_chat_messages(messages, tools_json);
+        let tokens = self.tokenizer.encode(&input_text);
+        let input_tensor = from_slice_u32(&tokens).unsqueeze(0);
+
+        let mut generated = List.new();
+        let mut current_input = input_tensor;
+
+        // Generate until EOS or max tokens
+        for _ in 0..1024 {
+            let logits = self.model.forward(current_input.clone());
+            let next_token = sample_greedy(&logits.slice(&[.., -1, ..]));
+
+            if next_token == EOS_TOKEN {
+                break;
+            }
+            generated.push(next_token);
+            current_input = cat(&[&current_input, &tensor_u32(&[next_token]).unsqueeze(0)], -1);
+        }
+
+        Ok(self.tokenizer.decode(&generated))
+    }
+}
+
+// Parse function calls from model response
+fn parse_function_calls(response: &Text) -> Maybe<List<FunctionCall>> {
+    @vbc(PARSE_FUNCTION_CALLS, response)
+}
+
+// Format chat messages with tool information
+fn format_chat_messages(messages: &List<ChatMessage>, tools_json: &List<Text>) -> Text {
+    let mut result = "".to_text();
+
+    // Add tools section if tools available
+    if !tools_json.is_empty() {
+        result = f"Available tools:\n";
+        for tool_json in tools_json {
+            result = f"{result}{tool_json}\n";
+        }
+        result = f"{result}\n";
+    }
+
+    // Add messages
+    for msg in messages {
+        let role_str = match msg.role {
+            Role.System => "system",
+            Role.User => "user",
+            Role.Assistant => "assistant",
+            Role.ToolResult => "tool",
+        };
+        let content_str = match &msg.content {
+            MessageContent.TextContent(t) => t.clone(),
+            MessageContent.ImageUrl { url, .. } => f"[Image: {url}]",
+            MessageContent.FunctionCallContent { name, arguments } => f"[Call: {name}({arguments})]",
+            MessageContent.FunctionResultContent { name, content } => f"[Result from {name}]: {content}",
+            MessageContent.MultiPart(parts) => {
+                parts.iter().map(|p| format_content_part(p)).collect<List<_>>().join("\n")
+            }
+        };
+        result = f"{result}<|{role_str}|>\n{content_str}\n<|end|>\n";
+    }
+
+    result
+}
+
+// Format a single content part
+fn format_content_part(content: &MessageContent) -> Text {
+    match content {
+        MessageContent.TextContent(t) => t.clone(),
+        MessageContent.ImageUrl { url, .. } => f"[Image: {url}]",
+        MessageContent.FunctionCallContent { name, arguments } => f"[Call: {name}({arguments})]",
+        MessageContent.FunctionResultContent { name, content } => f"[Result from {name}]: {content}",
+        MessageContent.MultiPart(parts) => {
+            parts.iter().map(|p| format_content_part(p)).collect<List<_>>().join("\n")
+        }
+    }
+}
+
+// Parse error type
+public type ParseError is {
+    message: Text,
+    position: Maybe<USize>,
+};
+
+implement ParseError {
+    // Create new parse error
+    public fn new(message: Text) -> Self {
+        ParseError { message, position: Maybe.None }
+    }
+
+    // Create parse error with position
+    public fn at(message: Text, pos: USize) -> Self {
+        ParseError { message, position: Maybe.Some(pos) }
+    }
+}
+
+implement Error for ParseError {
+    fn message(&self) -> Text {
+        if let Maybe.Some(pos) = self.position {
+            f"{self.message} at position {pos}"
+        } else {
+            self.message.clone()
+        }
+    }
+}

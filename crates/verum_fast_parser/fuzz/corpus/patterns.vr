@@ -1,0 +1,38 @@
+fn main() {
+    let x = 42;
+    let (a, b) = (1, 2);
+    let (first, _, third) = (1, 2, 3);
+    let Point { x, y } = point;
+
+    match value {
+        0 => print("zero"),
+        1 | 2 | 3 => print("small"),
+        n if n > 100 => print("large"),
+        _ => print("other"),
+    };
+
+    match option {
+        Some(x) => x,
+        None => 0,
+    };
+
+    match tree {
+        Leaf(v) => v,
+        Node { left, right } => 0,
+    };
+
+    match list {
+        [] => 0,
+        [x] => x,
+        [x, ..rest] => x,
+    };
+
+    match pair {
+        (0, 0) => "origin",
+        (x, 0) => "x-axis",
+        (0, y) => "y-axis",
+        (x, y) => "other",
+    };
+
+    let Color.Red = color;
+}

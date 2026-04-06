@@ -1,0 +1,1202 @@
+// =============================================================================
+// net/http.vr - HTTP Client Protocols and Types
+// =============================================================================
+// Layer: 6 (Application Protocol)
+// Dependencies: core, io, net/tcp, net/dns, text
+// =============================================================================
+//
+// Defines the protocols and types for HTTP communication. This module
+// provides the protocol definitions and basic types; actual HTTP/1.1
+// and HTTP/2 implementations are built on top of these abstractions.
+//
+// # Design Philosophy
+//
+// Verum's HTTP module follows the protocol-first approach:
+// 1. Define protocols (HttpClient, HttpHandler) for extensibility
+// 2. Provide concrete types (Request, Response, Headers) for data
+// 3. Leave implementation details to cog libraries (like verum-http)
+//
+// This allows different HTTP implementations (HTTP/1.1, HTTP/2, HTTP/3)
+// to share the same type system while differing in transport details.
+//
+// # Example - Simple GET Request (with HttpClient implementation)
+// ```verum
+// let client = HttpClient.new();
+// let response = client.get("https://api.example.com/data").await?;
+// print(f"Status: {response.status}");
+// print(f"Body: {response.body_text()}");
+// ```
+//
+// =============================================================================
+
+module core.net.http;
+
+mount core.*;
+mount core.collections.{Map, List};
+mount core.text.{Text};
+mount core.io.{Read, Write};
+mount .tcp.{TcpStream};
+mount .addr.{SocketAddr};
+
+// =============================================================================
+// HTTP Method
+// =============================================================================
+
+/// HTTP request method.
+///
+/// Represents the standard HTTP methods as defined in RFC 7231 and RFC 5789.
+public type Method is
+    | Get
+    | Head
+    | Post
+    | Put
+    | Delete
+    | Connect
+    | Options
+    | Trace
+    | Patch;
+
+implement Method {
+    /// Get the method as a string (e.g., "GET", "POST").
+    public fn as_str(&self) -> Text {
+        match self {
+            Get     => "GET",
+            Head    => "HEAD",
+            Post    => "POST",
+            Put     => "PUT",
+            Delete  => "DELETE",
+            Connect => "CONNECT",
+            Options => "OPTIONS",
+            Trace   => "TRACE",
+            Patch   => "PATCH",
+        }
+    }
+
+    /// Parse a method from a string.
+    public fn from_str(s: &Text) -> Maybe<Method> {
+        match s.to_uppercase().as_str() {
+            "GET"     => Some(Method.Get),
+            "HEAD"    => Some(Method.Head),
+            "POST"    => Some(Method.Post),
+            "PUT"     => Some(Method.Put),
+            "DELETE"  => Some(Method.Delete),
+            "CONNECT" => Some(Method.Connect),
+            "OPTIONS" => Some(Method.Options),
+            "TRACE"   => Some(Method.Trace),
+            "PATCH"   => Some(Method.Patch),
+            _         => None,
+        }
+    }
+
+    /// Check if this method is safe (no side effects).
+    public fn is_safe(&self) -> Bool {
+        match self {
+            Get | Head | Options | Trace => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this method is idempotent.
+    public fn is_idempotent(&self) -> Bool {
+        match self {
+            Get | Head | Put | Delete | Options | Trace => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this method typically has a request body.
+    public fn has_body(&self) -> Bool {
+        match self {
+            Post | Put | Patch => true,
+            _ => false,
+        }
+    }
+}
+
+implement Eq for Method {
+    fn eq(&self, other: &Method) -> Bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+implement Clone for Method {
+    fn clone(&self) -> Method { *self }
+}
+
+implement Copy for Method {}
+
+implement Debug for Method {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+implement Display for Method {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+// =============================================================================
+// HTTP Status Code
+// =============================================================================
+
+/// HTTP response status code.
+///
+/// Stores the numeric status code (100-599) and provides convenience
+/// methods for checking status categories.
+public type StatusCode is {
+    code: Int,
+};
+
+implement StatusCode {
+    /// Create a status code from a numeric value.
+    public fn new(code: Int) -> StatusCode {
+        assert(code >= 100 && code < 600, "Invalid HTTP status code");
+        StatusCode { code: code }
+    }
+
+    /// Get the numeric code.
+    public fn code(&self) -> Int {
+        self.code
+    }
+
+    /// Check if this is an informational response (1xx).
+    public fn is_informational(&self) -> Bool {
+        self.code >= 100 && self.code < 200
+    }
+
+    /// Check if this is a successful response (2xx).
+    public fn is_success(&self) -> Bool {
+        self.code >= 200 && self.code < 300
+    }
+
+    /// Check if this is a redirection response (3xx).
+    public fn is_redirection(&self) -> Bool {
+        self.code >= 300 && self.code < 400
+    }
+
+    /// Check if this is a client error response (4xx).
+    public fn is_client_error(&self) -> Bool {
+        self.code >= 400 && self.code < 500
+    }
+
+    /// Check if this is a server error response (5xx).
+    public fn is_server_error(&self) -> Bool {
+        self.code >= 500 && self.code < 600
+    }
+
+    /// Get the standard reason phrase for this status code.
+    public fn reason_phrase(&self) -> Text {
+        match self.code {
+            100 => "Continue",
+            101 => "Switching Protocols",
+            200 => "OK",
+            201 => "Created",
+            202 => "Accepted",
+            204 => "No Content",
+            301 => "Moved Permanently",
+            302 => "Found",
+            304 => "Not Modified",
+            307 => "Temporary Redirect",
+            308 => "Permanent Redirect",
+            400 => "Bad Request",
+            401 => "Unauthorized",
+            403 => "Forbidden",
+            404 => "Not Found",
+            405 => "Method Not Allowed",
+            408 => "Request Timeout",
+            409 => "Conflict",
+            410 => "Gone",
+            413 => "Payload Too Large",
+            415 => "Unsupported Media Type",
+            422 => "Unprocessable Entity",
+            429 => "Too Many Requests",
+            500 => "Internal Server Error",
+            501 => "Not Implemented",
+            502 => "Bad Gateway",
+            503 => "Service Unavailable",
+            504 => "Gateway Timeout",
+            _   => "Unknown",
+        }
+    }
+
+    // Common status codes as constants
+    public fn ok() -> StatusCode { StatusCode { code: 200 } }
+    public fn created() -> StatusCode { StatusCode { code: 201 } }
+    public fn no_content() -> StatusCode { StatusCode { code: 204 } }
+    public fn bad_request() -> StatusCode { StatusCode { code: 400 } }
+    public fn unauthorized() -> StatusCode { StatusCode { code: 401 } }
+    public fn forbidden() -> StatusCode { StatusCode { code: 403 } }
+    public fn not_found() -> StatusCode { StatusCode { code: 404 } }
+    public fn internal_server_error() -> StatusCode { StatusCode { code: 500 } }
+}
+
+implement Eq for StatusCode {
+    fn eq(&self, other: &StatusCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Ord for StatusCode {
+    fn cmp(&self, other: &StatusCode) -> Ordering {
+        self.code.cmp(&other.code)
+    }
+}
+
+implement Clone for StatusCode {
+    fn clone(&self) -> StatusCode { StatusCode { code: self.code } }
+}
+
+implement Copy for StatusCode {}
+
+implement Debug for StatusCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.code} {self.reason_phrase()}")
+    }
+}
+
+implement Display for StatusCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.code}")
+    }
+}
+
+// =============================================================================
+// HTTP Version
+// =============================================================================
+
+/// HTTP protocol version.
+public type Version is
+    | Http10
+    | Http11
+    | Http2
+    | Http3;
+
+implement Version {
+    /// Get the version as a string.
+    public fn as_str(&self) -> Text {
+        match self {
+            Http10 => "HTTP/1.0",
+            Http11 => "HTTP/1.1",
+            Http2  => "HTTP/2",
+            Http3  => "HTTP/3",
+        }
+    }
+}
+
+implement Eq for Version {
+    fn eq(&self, other: &Version) -> Bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+implement Clone for Version {
+    fn clone(&self) -> Version { *self }
+}
+
+implement Copy for Version {}
+
+implement Debug for Version {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+implement Display for Version {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.as_str())
+    }
+}
+
+// =============================================================================
+// HTTP Headers
+// =============================================================================
+
+/// HTTP headers collection.
+///
+/// Headers are stored as a list of (name, value) pairs to preserve
+/// ordering and support duplicate headers. Header names are stored
+/// in lowercase for case-insensitive comparison.
+///
+/// # Example
+/// ```verum
+/// let mut headers = Headers.new();
+/// headers.set("Content-Type", "application/json");
+/// headers.set("Authorization", "Bearer token123");
+///
+/// if let Some(ct) = headers.get("content-type") {
+///     print(f"Content type: {ct}");
+/// }
+/// ```
+public type Headers is {
+    entries: List<(Text, Text)>,
+};
+
+implement Headers {
+    /// Create an empty headers collection.
+    public fn new() -> Headers {
+        Headers { entries: List.new() }
+    }
+
+    /// Create headers with pre-allocated capacity.
+    public fn with_capacity(cap: Int) -> Headers {
+        Headers { entries: List.with_capacity(cap) }
+    }
+
+    /// Get the first value for a header name (case-insensitive).
+    public fn get(&self, name: &Text) -> Maybe<&Text> {
+        let lower = name.to_lowercase();
+        for (k, v) in &self.entries {
+            if k == &lower {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    /// Get all values for a header name (case-insensitive).
+    public fn get_all(&self, name: &Text) -> List<&Text> {
+        let lower = name.to_lowercase();
+        let mut result = List.new();
+        for (k, v) in &self.entries {
+            if k == &lower {
+                result.push(v);
+            }
+        }
+        result
+    }
+
+    /// Set a header value, replacing any existing values for this name.
+    public fn set(&mut self, name: &Text, value: &Text) {
+        let lower = name.to_lowercase();
+        // Remove existing entries with this name
+        self.entries.retain(|(k, _)| k != &lower);
+        self.entries.push((lower, value.clone()));
+    }
+
+    /// Append a header value without removing existing values.
+    public fn append(&mut self, name: &Text, value: &Text) {
+        let lower = name.to_lowercase();
+        self.entries.push((lower, value.clone()));
+    }
+
+    /// Remove all values for a header name.
+    public fn remove(&mut self, name: &Text) {
+        let lower = name.to_lowercase();
+        self.entries.retain(|(k, _)| k != &lower);
+    }
+
+    /// Check if a header exists.
+    public fn contains(&self, name: &Text) -> Bool {
+        self.get(name).is_some()
+    }
+
+    /// Get the number of header entries.
+    public fn len(&self) -> Int {
+        self.entries.len()
+    }
+
+    /// Check if the headers collection is empty.
+    public fn is_empty(&self) -> Bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterate over all (name, value) pairs.
+    public fn iter(&self) -> &List<(Text, Text)> {
+        &self.entries
+    }
+}
+
+implement Debug for Headers {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Headers {")?;
+        for (i, (k, v)) in self.entries.iter().enumerate() {
+            if i > 0 { f.write_str(",")?; }
+            f.write_str(f" {k}: {v}")?;
+        }
+        f.write_str(" }")
+    }
+}
+
+implement Display for Headers {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        for (k, v) in self.entries.iter() {
+            f.write_str(f"{k}: {v}\r\n")?;
+        }
+        Ok(())
+    }
+}
+
+implement Clone for Headers {
+    fn clone(&self) -> Headers {
+        Headers { entries: self.entries.clone() }
+    }
+}
+
+// =============================================================================
+// HTTP Request
+// =============================================================================
+
+/// An HTTP request.
+///
+/// Contains the method, URL, headers, and optional body.
+///
+/// # Example
+/// ```verum
+/// let req = Request.get("https://api.example.com/users")
+///     .header("Accept", "application/json")
+///     .build();
+/// ```
+public type Request is {
+    method: Method,
+    url: Text,
+    version: Version,
+    headers: Headers,
+    body: Maybe<List<Byte>>,
+};
+
+implement Request {
+    /// Create a new request with the given method and URL.
+    public fn new(method: Method, url: Text) -> Request {
+        Request {
+            method: method,
+            url: url,
+            version: Version.Http11,
+            headers: Headers.new(),
+            body: None,
+        }
+    }
+
+    /// Create a GET request.
+    public fn get(url: Text) -> Request {
+        Request.new(Method.Get, url)
+    }
+
+    /// Create a POST request.
+    public fn post(url: Text) -> Request {
+        Request.new(Method.Post, url)
+    }
+
+    /// Create a PUT request.
+    public fn put(url: Text) -> Request {
+        Request.new(Method.Put, url)
+    }
+
+    /// Create a DELETE request.
+    public fn delete(url: Text) -> Request {
+        Request.new(Method.Delete, url)
+    }
+
+    /// Set a header on this request.
+    public fn header(self, name: &Text, value: &Text) -> Request {
+        let mut req = self;
+        req.headers.set(name, value);
+        req
+    }
+
+    /// Set the request body as bytes.
+    public fn body_bytes(self, data: List<Byte>) -> Request {
+        Request { body: Some(data), ..self }
+    }
+
+    /// Set the request body as text.
+    public fn body_text(self, text: Text) -> Request {
+        let bytes = text.into_bytes();
+        let mut req = Request { body: Some(bytes), ..self };
+        if !req.headers.contains(&"content-type") {
+            req.headers.set(&"content-type", &"text/plain; charset=utf-8");
+        }
+        req
+    }
+
+    /// Set the request body as JSON text.
+    public fn body_json(self, json: Text) -> Request {
+        let bytes = json.into_bytes();
+        let mut req = Request { body: Some(bytes), ..self };
+        req.headers.set(&"content-type", &"application/json");
+        req
+    }
+
+    /// Set the HTTP version.
+    public fn version(self, version: Version) -> Request {
+        Request { version: version, ..self }
+    }
+}
+
+implement Debug for Request {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.method} {self.url} {self.version}")
+    }
+}
+
+implement Display for Request {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.method} {self.url} {self.version}")
+    }
+}
+
+// =============================================================================
+// HTTP Response
+// =============================================================================
+
+/// An HTTP response.
+///
+/// Contains the status code, headers, and body.
+public type Response is {
+    status: StatusCode,
+    version: Version,
+    headers: Headers,
+    body: List<Byte>,
+};
+
+implement Response {
+    /// Get the response body as text (UTF-8).
+    public fn body_text(&self) -> Text {
+        Text.from_utf8_lossy(&self.body)
+    }
+
+    /// Get the response body as raw bytes.
+    public fn body_bytes(&self) -> &[Byte] {
+        &self.body
+    }
+
+    /// Get the Content-Length header value, if present.
+    public fn content_length(&self) -> Maybe<Int> {
+        self.headers.get(&"content-length")
+            .and_then(|v| v.parse_int().ok())
+    }
+
+    /// Get the Content-Type header value, if present.
+    public fn content_type(&self) -> Maybe<&Text> {
+        self.headers.get(&"content-type")
+    }
+
+    /// Check if the response indicates success (2xx).
+    public fn is_success(&self) -> Bool {
+        self.status.is_success()
+    }
+
+    /// Check if the response indicates an error (4xx or 5xx).
+    public fn is_error(&self) -> Bool {
+        self.status.is_client_error() || self.status.is_server_error()
+    }
+}
+
+implement Debug for Response {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.version} {self.status.code} {self.status.reason_phrase()}")
+    }
+}
+
+implement Display for Response {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.version} {self.status.code} {self.status.reason_phrase()}")
+    }
+}
+
+// =============================================================================
+// HTTP Client Protocol
+// =============================================================================
+
+/// Protocol for HTTP client implementations.
+///
+/// This protocol defines the interface that all HTTP client
+/// implementations must satisfy. Different implementations can
+/// provide HTTP/1.1, HTTP/2, or HTTP/3 transport.
+///
+/// # Example Implementation
+/// ```verum
+/// type SimpleHttpClient is { ... };
+///
+/// implement HttpClient for SimpleHttpClient {
+///     async fn send(&self, request: Request) -> Result<Response, HttpError> {
+///         // ... implementation ...
+///     }
+/// }
+/// ```
+public type HttpClient is protocol {
+    /// Send an HTTP request and return the response.
+    async fn send(&self, request: Request) -> Result<Response, HttpError>;
+};
+
+/// Protocol for HTTP request handlers (server-side).
+///
+/// Implementations of this protocol handle incoming HTTP requests
+/// and produce responses.
+public type HttpHandler is protocol {
+    /// Handle an incoming HTTP request.
+    async fn handle(&self, request: Request) -> Result<Response, HttpError>;
+};
+
+// =============================================================================
+// HTTP Error
+// =============================================================================
+
+/// Errors that can occur during HTTP operations.
+public type HttpError is
+    /// Connection to server failed.
+    | ConnectionFailed(Text)
+    /// DNS resolution failed.
+    | DnsError(Text)
+    /// Request timed out.
+    | Timeout
+    /// Invalid URL.
+    | InvalidUrl(Text)
+    /// Invalid response from server.
+    | InvalidResponse(Text)
+    /// I/O error during communication.
+    | IoError(Text)
+    /// TLS/SSL error.
+    | TlsError(Text)
+    /// Too many redirects.
+    | TooManyRedirects
+    /// Request body too large.
+    | BodyTooLarge;
+
+implement Debug for HttpError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionFailed(msg) => f.write_str(f"HttpError.ConnectionFailed({msg})"),
+            DnsError(msg) => f.write_str(f"HttpError.DnsError({msg})"),
+            Timeout => f.write_str("HttpError.Timeout"),
+            InvalidUrl(msg) => f.write_str(f"HttpError.InvalidUrl({msg})"),
+            InvalidResponse(msg) => f.write_str(f"HttpError.InvalidResponse({msg})"),
+            IoError(msg) => f.write_str(f"HttpError.IoError({msg})"),
+            TlsError(msg) => f.write_str(f"HttpError.TlsError({msg})"),
+            TooManyRedirects => f.write_str("HttpError.TooManyRedirects"),
+            BodyTooLarge => f.write_str("HttpError.BodyTooLarge"),
+        }
+    }
+}
+
+implement Display for HttpError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionFailed(msg) => f.write_str(f"connection failed: {msg}"),
+            DnsError(msg) => f.write_str(f"DNS error: {msg}"),
+            Timeout => f.write_str("request timed out"),
+            InvalidUrl(msg) => f.write_str(f"invalid URL: {msg}"),
+            InvalidResponse(msg) => f.write_str(f"invalid response: {msg}"),
+            IoError(msg) => f.write_str(f"I/O error: {msg}"),
+            TlsError(msg) => f.write_str(f"TLS error: {msg}"),
+            TooManyRedirects => f.write_str("too many redirects"),
+            BodyTooLarge => f.write_str("request body too large"),
+        }
+    }
+}
+
+implement Describable for HttpError {
+    fn description(&self) -> Text {
+        match self {
+            ConnectionFailed(msg) => f"connection failed: {msg}",
+            DnsError(msg) => f"DNS error: {msg}",
+            Timeout => "request timed out",
+            InvalidUrl(msg) => f"invalid URL: {msg}",
+            InvalidResponse(msg) => f"invalid response: {msg}",
+            IoError(msg) => f"I/O error: {msg}",
+            TlsError(msg) => f"TLS error: {msg}",
+            TooManyRedirects => "too many redirects",
+            BodyTooLarge => "request body too large",
+        }
+    }
+}
+
+// =============================================================================
+// URL Parsing (Basic)
+// =============================================================================
+
+/// Parsed URL components.
+///
+/// A minimal URL parser for HTTP client use. For full RFC 3986 compliance,
+/// use a dedicated URL parsing cog.
+public type Url is {
+    scheme: Text,
+    host: Text,
+    port: Maybe<Int>,
+    path: Text,
+    query: Maybe<Text>,
+    fragment: Maybe<Text>,
+};
+
+implement Url {
+    /// Parse a URL string.
+    ///
+    /// Supports http:// and https:// schemes.
+    public fn parse(s: &Text) -> Result<Url, HttpError> {
+        // Extract scheme
+        let (scheme, rest) = if s.starts_with("https://") {
+            ("https", s.slice(8, s.len()))
+        } else if s.starts_with("http://") {
+            ("http", s.slice(7, s.len()))
+        } else {
+            return Err(HttpError.InvalidUrl("missing scheme (http:// or https://)"));
+        };
+
+        // Split host from path
+        let (authority, path_and_rest) = match rest.find("/") {
+            Some(idx) => (rest.slice(0, idx), rest.slice(idx, rest.len())),
+            None => (rest.clone(), "/"),
+        };
+
+        // Parse host:port
+        let (host, port) = if authority.contains(":") {
+            match authority.rsplit_once(':') {
+                Some((h, p)) => {
+                    match p.parse_int() {
+                        Ok(port_num) => (h.clone(), Some(port_num)),
+                        Err(_) => (authority.clone(), None),
+                    }
+                }
+                None => (authority.clone(), None),
+            }
+        } else {
+            (authority.clone(), None)
+        };
+
+        // Split path from query and fragment
+        let (path_str, query, fragment) = {
+            let (p, frag) = match path_and_rest.find("#") {
+                Some(idx) => (path_and_rest.slice(0, idx), Some(path_and_rest.slice(idx + 1, path_and_rest.len()))),
+                None => (path_and_rest.clone(), None),
+            };
+
+            match p.find("?") {
+                Some(idx) => (p.slice(0, idx), Some(p.slice(idx + 1, p.len())), frag),
+                None => (p, None, frag),
+            }
+        };
+
+        Ok(Url {
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: path_str,
+            query: query,
+            fragment: fragment,
+        })
+    }
+
+    /// Get the effective port (using default for scheme if not specified).
+    public fn effective_port(&self) -> Int {
+        match self.port {
+            Some(p) => p,
+            None => {
+                if self.scheme == "https" { 443 }
+                else { 80 }
+            }
+        }
+    }
+
+    /// Reconstruct the URL as a string.
+    public fn to_string(&self) -> Text {
+        let mut result = f"{self.scheme}://{self.host}";
+        if let Some(port) = self.port {
+            result = f"{result}:{port}";
+        }
+        result = f"{result}{self.path}";
+        if let Some(query) = &self.query {
+            result = f"{result}?{query}";
+        }
+        if let Some(fragment) = &self.fragment {
+            result = f"{result}#{fragment}";
+        }
+        result
+    }
+
+    /// Check if this is an HTTPS URL.
+    public fn is_https(&self) -> Bool {
+        self.scheme == "https"
+    }
+}
+
+implement Debug for Url {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.to_string())
+    }
+}
+
+implement Display for Url {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.to_string())
+    }
+}
+
+implement Clone for Url {
+    fn clone(&self) -> Url {
+        Url {
+            scheme: self.scheme.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            path: self.path.clone(),
+            query: self.query.clone(),
+            fragment: self.fragment.clone(),
+        }
+    }
+}
+
+implement Eq for Url {
+    fn eq(&self, other: &Url) -> Bool {
+        self.to_string() == other.to_string()
+    }
+}
+
+// =============================================================================
+// HTTP Cookie
+// =============================================================================
+
+/// An HTTP cookie.
+///
+/// Represents a single cookie with name, value, and optional attributes.
+///
+/// # Example
+/// ```verum
+/// let cookie = Cookie.new("session_id", "abc123")
+///     .with_path("/")
+///     .with_secure(true)
+///     .with_http_only(true);
+/// ```
+public type Cookie is {
+    name: Text,
+    value: Text,
+    domain: Maybe<Text>,
+    path: Maybe<Text>,
+    max_age: Maybe<Int>,
+    secure: Bool,
+    http_only: Bool,
+    same_site: Maybe<SameSite>,
+};
+
+/// SameSite cookie attribute.
+public type SameSite is
+    | Strict
+    | Lax
+    | NoneSameSite;
+
+implement Cookie {
+    /// Create a new cookie with the given name and value.
+    public fn new(name: Text, value: Text) -> Cookie {
+        Cookie {
+            name: name,
+            value: value,
+            domain: None,
+            path: None,
+            max_age: None,
+            secure: false,
+            http_only: false,
+            same_site: None,
+        }
+    }
+
+    /// Set the domain attribute.
+    public fn with_domain(self, domain: Text) -> Cookie {
+        Cookie { domain: Some(domain), ..self }
+    }
+
+    /// Set the path attribute.
+    public fn with_path(self, path: Text) -> Cookie {
+        Cookie { path: Some(path), ..self }
+    }
+
+    /// Set the max-age attribute (in seconds).
+    public fn with_max_age(self, seconds: Int) -> Cookie {
+        Cookie { max_age: Some(seconds), ..self }
+    }
+
+    /// Set the Secure flag.
+    public fn with_secure(self, secure: Bool) -> Cookie {
+        Cookie { secure: secure, ..self }
+    }
+
+    /// Set the HttpOnly flag.
+    public fn with_http_only(self, http_only: Bool) -> Cookie {
+        Cookie { http_only: http_only, ..self }
+    }
+
+    /// Set the SameSite attribute.
+    public fn with_same_site(self, same_site: SameSite) -> Cookie {
+        Cookie { same_site: Some(same_site), ..self }
+    }
+
+    /// Format the cookie as a Set-Cookie header value.
+    public fn to_set_cookie_header(&self) -> Text {
+        let mut result = f"{self.name}={self.value}";
+        if let Some(domain) = &self.domain {
+            result = f"{result}; Domain={domain}";
+        }
+        if let Some(path) = &self.path {
+            result = f"{result}; Path={path}";
+        }
+        if let Some(max_age) = self.max_age {
+            result = f"{result}; Max-Age={max_age}";
+        }
+        if self.secure {
+            result = f"{result}; Secure";
+        }
+        if self.http_only {
+            result = f"{result}; HttpOnly";
+        }
+        if let Some(ss) = &self.same_site {
+            let ss_str = match ss {
+                Strict => "Strict",
+                Lax => "Lax",
+                NoneSameSite => "None",
+            };
+            result = f"{result}; SameSite={ss_str}";
+        }
+        result
+    }
+
+    /// Format the cookie as a Cookie header value (name=value only).
+    public fn to_cookie_header(&self) -> Text {
+        f"{self.name}={self.value}"
+    }
+}
+
+implement Clone for Cookie {
+    fn clone(&self) -> Cookie {
+        Cookie {
+            name: self.name.clone(),
+            value: self.value.clone(),
+            domain: self.domain.clone(),
+            path: self.path.clone(),
+            max_age: self.max_age,
+            secure: self.secure,
+            http_only: self.http_only,
+            same_site: self.same_site.clone(),
+        }
+    }
+}
+
+implement Debug for Cookie {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Cookie({self.name}={self.value})")
+    }
+}
+
+implement Display for Cookie {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.to_cookie_header())
+    }
+}
+
+// =============================================================================
+// Connection Pool
+// =============================================================================
+
+/// Configuration for HTTP connection pooling.
+///
+/// Connection pooling reuses TCP connections across multiple requests
+/// to the same host, reducing latency and resource usage.
+///
+/// # Example
+/// ```verum
+/// let pool_config = PoolConfig.new()
+///     .with_max_idle(100)
+///     .with_max_per_host(10)
+///     .with_idle_timeout(Duration.secs(90));
+/// ```
+public type PoolConfig is {
+    /// Maximum number of total idle connections.
+    max_idle: Int,
+    /// Maximum number of idle connections per host.
+    max_per_host: Int,
+    /// How long to keep idle connections alive.
+    idle_timeout_ms: Int,
+    /// Maximum lifetime of a connection (0 = unlimited).
+    max_lifetime_ms: Int,
+};
+
+implement PoolConfig {
+    /// Create a pool configuration with sensible defaults.
+    public fn new() -> PoolConfig {
+        PoolConfig {
+            max_idle: 100,
+            max_per_host: 10,
+            idle_timeout_ms: 90_000,
+            max_lifetime_ms: 0,
+        }
+    }
+
+    /// Set the maximum number of total idle connections.
+    public fn with_max_idle(self, max: Int) -> PoolConfig {
+        PoolConfig { max_idle: max, ..self }
+    }
+
+    /// Set the maximum number of idle connections per host.
+    public fn with_max_per_host(self, max: Int) -> PoolConfig {
+        PoolConfig { max_per_host: max, ..self }
+    }
+
+    /// Set the idle connection timeout in milliseconds.
+    public fn with_idle_timeout_ms(self, ms: Int) -> PoolConfig {
+        PoolConfig { idle_timeout_ms: ms, ..self }
+    }
+
+    /// Set the maximum connection lifetime in milliseconds.
+    public fn with_max_lifetime_ms(self, ms: Int) -> PoolConfig {
+        PoolConfig { max_lifetime_ms: ms, ..self }
+    }
+}
+
+implement Clone for PoolConfig {
+    fn clone(&self) -> PoolConfig {
+        PoolConfig {
+            max_idle: self.max_idle,
+            max_per_host: self.max_per_host,
+            idle_timeout_ms: self.idle_timeout_ms,
+            max_lifetime_ms: self.max_lifetime_ms,
+        }
+    }
+}
+
+implement Debug for PoolConfig {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PoolConfig {{ max_idle: {self.max_idle}, max_per_host: {self.max_per_host}, idle_timeout_ms: {self.idle_timeout_ms} }}")
+    }
+}
+
+/// A pooled HTTP connection key (scheme + host + port).
+type PoolKey is {
+    scheme: Text,
+    host: Text,
+    port: Int,
+};
+
+implement PoolKey {
+    fn from_url(url: &Url) -> PoolKey {
+        PoolKey {
+            scheme: url.scheme.clone(),
+            host: url.host.clone(),
+            port: url.effective_port(),
+        }
+    }
+}
+
+implement Eq for PoolKey {
+    fn eq(&self, other: &PoolKey) -> Bool {
+        self.scheme == other.scheme
+            && self.host == other.host
+            && self.port == other.port
+    }
+}
+
+implement Hash for PoolKey {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_str(&self.scheme);
+        hasher.write_str(&self.host);
+        hasher.write_int(self.port);
+    }
+}
+
+implement Clone for PoolKey {
+    fn clone(&self) -> PoolKey {
+        PoolKey {
+            scheme: self.scheme.clone(),
+            host: self.host.clone(),
+            port: self.port,
+        }
+    }
+}
+
+// =============================================================================
+// HTTP Client Configuration
+// =============================================================================
+
+/// Configuration for an HTTP client.
+///
+/// # Example
+/// ```verum
+/// let config = ClientConfig.new()
+///     .with_timeout_ms(30_000)
+///     .with_max_redirects(10)
+///     .with_pool(PoolConfig.new().with_max_idle(50));
+/// ```
+public type ClientConfig is {
+    /// Request timeout in milliseconds (0 = no timeout).
+    timeout_ms: Int,
+    /// Connection timeout in milliseconds.
+    connect_timeout_ms: Int,
+    /// Maximum number of redirects to follow.
+    max_redirects: Int,
+    /// Whether to follow redirects automatically.
+    follow_redirects: Bool,
+    /// Connection pool configuration.
+    pool_config: PoolConfig,
+    /// Default headers to include in every request.
+    default_headers: Headers,
+    /// User-Agent header value.
+    user_agent: Text,
+};
+
+implement ClientConfig {
+    /// Create a client configuration with sensible defaults.
+    public fn new() -> ClientConfig {
+        ClientConfig {
+            timeout_ms: 30_000,
+            connect_timeout_ms: 10_000,
+            max_redirects: 10,
+            follow_redirects: true,
+            pool_config: PoolConfig.new(),
+            default_headers: Headers.new(),
+            user_agent: "Verum/1.0",
+        }
+    }
+
+    /// Set the request timeout in milliseconds.
+    public fn with_timeout_ms(self, ms: Int) -> ClientConfig {
+        ClientConfig { timeout_ms: ms, ..self }
+    }
+
+    /// Set the connection timeout in milliseconds.
+    public fn with_connect_timeout_ms(self, ms: Int) -> ClientConfig {
+        ClientConfig { connect_timeout_ms: ms, ..self }
+    }
+
+    /// Set the maximum number of redirects.
+    public fn with_max_redirects(self, max: Int) -> ClientConfig {
+        ClientConfig { max_redirects: max, ..self }
+    }
+
+    /// Set whether to follow redirects.
+    public fn with_follow_redirects(self, follow: Bool) -> ClientConfig {
+        ClientConfig { follow_redirects: follow, ..self }
+    }
+
+    /// Set the connection pool configuration.
+    public fn with_pool(self, pool: PoolConfig) -> ClientConfig {
+        ClientConfig { pool_config: pool, ..self }
+    }
+
+    /// Add a default header.
+    public fn with_default_header(self, name: &Text, value: &Text) -> ClientConfig {
+        let mut config = self;
+        config.default_headers.set(name, value);
+        config
+    }
+
+    /// Set the User-Agent header value.
+    public fn with_user_agent(self, ua: Text) -> ClientConfig {
+        ClientConfig { user_agent: ua, ..self }
+    }
+}
+
+implement Clone for ClientConfig {
+    fn clone(&self) -> ClientConfig {
+        ClientConfig {
+            timeout_ms: self.timeout_ms,
+            connect_timeout_ms: self.connect_timeout_ms,
+            max_redirects: self.max_redirects,
+            follow_redirects: self.follow_redirects,
+            pool_config: self.pool_config.clone(),
+            default_headers: self.default_headers.clone(),
+            user_agent: self.user_agent.clone(),
+        }
+    }
+}
+
+implement Debug for ClientConfig {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ClientConfig {{ timeout_ms: {self.timeout_ms}, max_redirects: {self.max_redirects} }}")
+    }
+}

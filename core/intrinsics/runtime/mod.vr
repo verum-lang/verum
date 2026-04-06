@@ -1,0 +1,52 @@
+// =============================================================================
+// core/intrinsics/runtime/mod.vr - Runtime-Dependent Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Runtime system
+//
+// This module provides intrinsics that require runtime support:
+// - async: Async runtime operations (spawn, await)
+// - tls: Thread-local storage access
+// - syscall: Direct kernel syscall interface
+// - cbgr: CBGR memory safety validation
+// - time: High-resolution timing (OS-dependent)
+// - sync: Synchronization primitives (futex, spinlock)
+// - text: Text/string operations (allocation-dependent)
+// - tier: VBC tier management
+//
+// These intrinsics cannot run in bare-metal/no-std environments without
+// the corresponding runtime support.
+//
+// # @requires_runtime Attribute
+//
+// Functions in these modules are implicitly @requires_runtime, meaning
+// they need the Verum runtime to be available.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime;
+
+/// Async runtime intrinsics: spawn, executor, futures
+public mount async_ops.*;
+
+/// Thread-local storage intrinsics
+public mount tls.*;
+
+/// Direct syscall interface
+public mount syscall.*;
+
+/// CBGR memory safety validation
+public mount cbgr.*;
+
+/// High-resolution timing (OS-dependent)
+public mount time.*;
+
+/// Synchronization primitives
+public mount sync.*;
+
+/// Text/string operations (allocation-dependent)
+public mount text.*;
+
+/// VBC tier management
+public mount tier.*;

@@ -1,0 +1,2333 @@
+// =============================================================================
+// map.vr - Hash Map (Map<K, V>)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core (memory, maybe, result, protocols, iterator)
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI memory operations:
+// - Uses core/memory.vr native allocator (CBGR-backed)
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// Map<K, V> is a hash map implementation using Robin Hood hashing.
+// Semantic naming: Map not HashMap (describes purpose, not implementation).
+//
+// Performance:
+// - Average O(1) for get, insert, remove
+// - Worst case O(n) for pathological hash distributions
+//
+// =============================================================================
+
+module core.collections.map;
+mount core.*;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+// Initial capacity (power of 2).
+const INITIAL_CAPACITY: Int = 16;
+
+// Load factor threshold for resize (7/8 = 87.5%).
+const LOAD_FACTOR_NUM: Int = 7;
+const LOAD_FACTOR_DEN: Int = 8;
+
+// Tombstone marker for deleted entries.
+const TOMBSTONE: Int = -1;
+
+// Empty slot marker.
+const EMPTY: Int = 0;
+
+// Slot size in bytes: 4 fields * 8 bytes per Value = 32 bytes.
+// WORKAROUND: Using explicit constant because Type.size property doesn't work
+// correctly for user-defined generic types in VBC codegen.
+const SLOT_SIZE: Int = 32;
+const SLOT_ALIGN: Int = 8;
+
+// =============================================================================
+// Slot (Internal hash table entry)
+// =============================================================================
+
+// Hash map slot (open addressing storage).
+// Not to be confused with MapEntry which is the public entry API.
+type Slot<K, V> is {
+    key: K,
+    value: V,
+    hash: Int,    // Cached hash, 0 = empty, -1 = tombstone
+    psl: Int,     // Probe sequence length (Robin Hood)
+};
+
+implement<K, V> Slot<K, V> {
+    fn is_empty(&self) -> Bool {
+        self.hash == EMPTY
+    }
+
+    fn is_tombstone(&self) -> Bool {
+        self.hash == TOMBSTONE
+    }
+
+    fn is_occupied(&self) -> Bool {
+        self.hash > 0
+    }
+}
+
+// =============================================================================
+// Entry API (Public)
+// =============================================================================
+
+/// A view into a single entry in a map, which may be vacant or occupied.
+///
+/// This is returned by the `entry()` method on Map.
+///
+/// # Example
+/// ```verum
+/// let mut map = Map.new();
+/// map.entry("key").or_insert(42);
+/// map.entry("key").and_modify(|v| *v += 1);
+/// ```
+public type MapEntry<K: Hash + Eq, V> is
+    | Occupied(OccupiedEntry<K, V>)
+    | Vacant(VacantEntry<K, V>);
+
+/// An occupied entry in a map.
+public type OccupiedEntry<K: Hash + Eq, V> is {
+    /// Pointer to the map
+    map: &mut Map<K, V>,
+    /// Index in the hash table
+    idx: Int,
+    /// Cached key reference
+    key: K,
+};
+
+/// A vacant entry in a map.
+public type VacantEntry<K: Hash + Eq, V> is {
+    /// Pointer to the map
+    map: &mut Map<K, V>,
+    /// Cached hash
+    hash: Int,
+    /// The key to be inserted
+    key: K,
+};
+
+implement<K: Hash + Eq, V> MapEntry<K, V> {
+    /// Get the key for this entry.
+    public fn key(&self) -> &K {
+        match self {
+            Occupied(entry) => &entry.key,
+            Vacant(entry) => &entry.key,
+        }
+    }
+
+    /// Ensure a value exists with a default, && return mutable reference.
+    ///
+    /// # Example
+    /// ```verum
+    /// let count = map.entry(word).or_insert(0);
+    /// *count += 1;
+    /// ```
+    public fn or_insert(self, default: V) -> &mut V {
+        match self {
+            Occupied(entry) => entry.get_mut(),
+            Vacant(entry) => entry.insert(default),
+        }
+    }
+
+    /// Ensure a value exists with a computed default.
+    ///
+    /// The closure is only called if the entry is vacant.
+    public fn or_insert_with<F: fn() -> V>(self, default: F) -> &mut V {
+        match self {
+            Occupied(entry) => entry.get_mut(),
+            Vacant(entry) => entry.insert(default()),
+        }
+    }
+
+    /// Ensure a value exists with a default computed from the key.
+    ///
+    /// Note: Uses internal restructuring to avoid borrow checker conflicts.
+    public fn or_insert_with_key<F: fn(&K) -> V>(self, default: F) -> &mut V {
+        match self {
+            Occupied(entry) => entry.get_mut(),
+            Vacant(entry) => {
+                // Destructure entry to get components separately
+                let VacantEntry { map, hash, key } = entry;
+                // Compute value from key reference
+                let value = default(&key);
+                // Insert manually to avoid borrow conflict
+                map.insert_internal(key, value, hash);
+
+                // Find the inserted entry and return reference directly
+                let mask = map.cap - 1;
+                let mut idx = (hash as Int) & mask;
+
+                loop {
+                    if unsafe { (*map.entries.offset(idx)).hash > 0 } &&
+                       unsafe { (*map.entries.offset(idx)).hash } == hash {
+                        return unsafe { &mut (*map.entries.offset(idx)).value };
+                    }
+                    idx = (idx + 1) & mask;
+                }
+            }
+        }
+    }
+
+    /// Modify an existing value if present.
+    ///
+    /// # Example
+    /// ```verum
+    /// map.entry(key).and_modify(|v| *v += 1).or_insert(1);
+    /// ```
+    public fn and_modify<F: fn(&mut V)>(self, f: F) -> MapEntry<K, V> {
+        match self {
+            Occupied(mut entry) => {
+                f(entry.get_mut());
+                Occupied(entry)
+            }
+            Vacant(entry) => Vacant(entry),
+        }
+    }
+
+    /// Insert default value if empty, returning mutable reference.
+    public fn or_default(self) -> &mut V
+    where V: Default
+    {
+        self.or_insert_with(|| V.default())
+    }
+}
+
+implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
+    /// Get the key for this entry.
+    public fn key(&self) -> &K {
+        &self.key
+    }
+
+    /// Get a reference to the value.
+    /// Returns a reference with lifetime tied to the underlying map entry.
+    public fn get(&self) -> &V {
+        // Return reference directly to avoid intermediate local lifetime issue
+        unsafe { &(*self.map.entries.offset(self.idx)).value }
+    }
+
+    /// Get a mutable reference to the value.
+    /// Returns a mutable reference with lifetime tied to the underlying map entry.
+    public fn get_mut(&mut self) -> &mut V {
+        // Return reference directly to avoid intermediate local lifetime issue
+        unsafe { &mut (*self.map.entries.offset(self.idx)).value }
+    }
+
+    /// Take ownership of the value, removing it from the map.
+    public fn remove(self) -> V {
+        self.remove_entry().1
+    }
+
+    /// Take ownership of both key && value.
+    public fn remove_entry(self) -> (K, V) {
+        let slot = unsafe { &mut *self.map.entries.offset(self.idx) };
+        let key = slot.key;
+        let value = slot.value;
+        slot.hash = TOMBSTONE;
+        self.map.len = self.map.len - 1;
+        self.map.tombstones = self.map.tombstones + 1;
+
+        if self.map.tombstones > self.map.cap / 4 {
+            self.map.compact();
+        }
+
+        (key, value)
+    }
+
+    /// Replace the value, returning the old value.
+    public fn insert(&mut self, value: V) -> V {
+        let slot = unsafe { &mut *self.map.entries.offset(self.idx) };
+        let old = slot.value;
+        slot.value = value;
+        old
+    }
+
+    /// Convert to mutable reference to value.
+    public fn into_mut(self) -> &mut V {
+        // Return reference directly to avoid intermediate local lifetime issue
+        unsafe { &mut (*self.map.entries.offset(self.idx)).value }
+    }
+}
+
+implement<K: Hash + Eq, V> VacantEntry<K, V> {
+    /// Get the key that would be used when inserting.
+    public fn key(&self) -> &K {
+        &self.key
+    }
+
+    /// Take ownership of the key.
+    public fn into_key(self) -> K {
+        self.key
+    }
+
+    /// Insert a value, returning mutable reference to it.
+    public fn insert(self, value: V) -> &mut V {
+        let key = self.key;
+        let hash = self.hash;
+        self.map.insert_internal(key, value, hash);
+
+        // Find the inserted entry and return reference directly
+        let mask = self.map.cap - 1;
+        let mut idx = (hash as Int) & mask;
+
+        loop {
+            if unsafe { (*self.map.entries.offset(idx)).hash > 0 } &&
+               unsafe { (*self.map.entries.offset(idx)).hash } == hash {
+                return unsafe { &mut (*self.map.entries.offset(idx)).value };
+            }
+            idx = (idx + 1) & mask;
+        }
+    }
+}
+
+// =============================================================================
+// Map<K, V>
+// =============================================================================
+
+// Hash map with Robin Hood hashing.
+public type Map<K: Hash + Eq, V> is {
+    entries: &unsafe Slot<K, V>,
+    len: Int,
+    cap: Int,
+    tombstones: Int,
+};
+
+implement<K: Hash + Eq, V> Map<K, V> {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    // Create empty map.
+    public fn new() -> Map<K, V> {
+        Map {
+            entries: null_ptr(),
+            len: 0,
+            cap: 0,
+            tombstones: 0,
+        }
+    }
+
+    /// Create a map from an array of key-value pairs.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = Map.from([("a", 1), ("b", 2)]);
+    /// assert_eq(m.len(), 2);
+    /// ```
+    public fn from(pairs: [(K, V); _]) -> Map<K, V> {
+        let mut m = Map.new();
+        if pairs.len() > 0 {
+            let cap = pairs.len().next_power_of_two().max(INITIAL_CAPACITY);
+            m.resize(cap);
+            for pair in pairs {
+                m.insert(pair.0, pair.1);
+            }
+        }
+        m
+    }
+
+    // Create with preallocated capacity.
+    public fn with_capacity(capacity: Int) -> Map<K, V> {
+        let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
+        let mut map = Map.new();
+        map.resize(cap);
+        map
+    }
+
+    /// Create a Map from a list of key-value pairs.
+    /// If duplicate keys exist, the last value wins.
+    public fn from_entries(entries: &List<(K, V)>) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut map = Map.with_capacity(entries.len());
+        let mut i = 0;
+        while i < entries.len() {
+            let pair = &entries[i];
+            map.insert(pair.0.clone(), pair.1.clone());
+            i = i + 1;
+        }
+        map
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    // Number of entries.
+    public fn len(&self) -> Int {
+        self.len
+    }
+
+    // Allocated capacity.
+    public fn capacity(&self) -> Int {
+        self.cap
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    // =========================================================================
+    // Lookup
+    // =========================================================================
+
+    // Get value by key. Returns the value or 0/default if not found.
+    // Takes key by value (avoids &K deref limitation in AOT codegen).
+    public fn get(&self, key: K) -> V {
+        if self.cap == 0 {
+            return 0 as V;
+        }
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &*self.entries.offset(idx) };
+
+            if entry.hash == 0 {
+                return 0 as V;
+            }
+
+            if entry.hash > 0 && entry.hash == hash && entry.key == key {
+                return entry.value;
+            }
+
+            if entry.hash > 0 && psl > entry.psl {
+                return 0 as V;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return 0 as V;
+            }
+        }
+    }
+
+    /// Get value by key, returning Maybe<V>.
+    ///
+    /// Unlike `get()` which returns a zero-value on miss, this method
+    /// returns `None` when the key is not found.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// assert_eq(m.get_optional(1), Some(10));
+    /// assert_eq(m.get_optional(99), None);
+    /// ```
+    public fn get_optional(&self, key: K) -> Maybe<V> {
+        if self.cap == 0 {
+            return None;
+        }
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &*self.entries.offset(idx) };
+
+            if entry.hash == 0 {
+                return None;
+            }
+
+            if entry.hash > 0 && entry.hash == hash && entry.key == key {
+                return Some(entry.value);
+            }
+
+            if entry.hash > 0 && psl > entry.psl {
+                return None;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return None;
+            }
+        }
+    }
+
+    /// Get the key-value pair for a given key.
+    ///
+    /// Returns references to the key and value stored in the map,
+    /// or None if the key is not present. Used internally by Set.get.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([("hello", 1), ("world", 2)]);
+    /// match m.get_key_value("hello") {
+    ///     Some(pair) => assert_eq(*pair.1, 1),
+    ///     None => panic("key not found"),
+    /// }
+    /// ```
+    public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
+        if self.cap == 0 {
+            return None;
+        }
+
+        let hash = self.make_hash_val(*key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &*self.entries.offset(idx) };
+
+            if entry.hash == 0 {
+                return None;
+            }
+
+            if entry.hash > 0 && entry.hash == hash && entry.key == *key {
+                return Some((&entry.key, &entry.value));
+            }
+
+            if entry.hash > 0 && psl > entry.psl {
+                return None;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return None;
+            }
+        }
+    }
+
+    // Check if key exists.
+    public fn contains_key(&self, key: K) -> Bool {
+        if self.cap == 0 {
+            return false;
+        }
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &*self.entries.offset(idx) };
+
+            if (entry.hash == 0) {
+                return false;
+            }
+
+            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
+                return true;
+            }
+
+            if (entry.hash > 0) && psl > entry.psl {
+                return false;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return false;
+            }
+        }
+    }
+
+    // =========================================================================
+    // Modification
+    // =========================================================================
+
+    // Insert key-value pair.
+    // Returns old value if key was present.
+    public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
+        self.ensure_capacity();
+        let hash = self.make_hash_val(key);
+        self.insert_internal(key, value, hash)
+    }
+
+    /// Get an entry for in-place manipulation.
+    ///
+    /// This is the primary way to perform insert-or-update operations efficiently.
+    ///
+    /// # Example
+    /// ```verum
+    /// // Count word occurrences
+    /// for word in words {
+    ///     *map.entry(word).or_insert(0) += 1;
+    /// }
+    /// ```
+    public fn entry(&mut self, key: K) -> MapEntry<K, V> {
+        self.ensure_capacity();
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let slot = unsafe { &*self.entries.offset(idx) };
+
+            if (slot.hash == 0) || (slot.hash == TOMBSTONE) {
+                // Found empty slot - key is not present
+                return Vacant(VacantEntry {
+                    map: self,
+                    hash: hash,
+                    key: key,
+                });
+            }
+
+            if (slot.hash > 0) && slot.hash == hash && slot.key == key {
+                // Found existing key
+                return Occupied(OccupiedEntry {
+                    map: self,
+                    idx: idx,
+                    key: key,
+                });
+            }
+
+            // Robin Hood: if current PSL > stored PSL, key not present
+            if (slot.hash > 0) && psl > slot.psl {
+                return Vacant(VacantEntry {
+                    map: self,
+                    hash: hash,
+                    key: key,
+                });
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            // Safety: prevent infinite loop
+            if psl > self.cap {
+                return Vacant(VacantEntry {
+                    map: self,
+                    hash: hash,
+                    key: key,
+                });
+            }
+        }
+    }
+
+    // Remove by key.
+    // Returns removed value if present.
+    public fn remove(&mut self, key: K) -> V {
+        if self.cap == 0 {
+            return 0 as V;
+        }
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &mut *self.entries.offset(idx) };
+
+            if (entry.hash == 0) {
+                return 0 as V;
+            }
+
+            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
+                // Found - mark as tombstone
+                let value = entry.value;
+                entry.hash = TOMBSTONE;
+                self.len = self.len - 1;
+                self.tombstones = self.tombstones + 1;
+
+                // Compact if too many tombstones
+                if self.tombstones > self.cap / 4 {
+                    self.compact();
+                }
+
+                return value;
+            }
+
+            if (entry.hash > 0) && psl > entry.psl {
+                return 0 as V;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return 0 as V;
+            }
+        }
+    }
+
+    // Remove by key and return both key and value.
+    // Returns removed (key, value) pair if present.
+    public fn remove_entry(&mut self, key: K) -> Maybe<(K, V)> {
+        if self.cap == 0 {
+            return None;
+        }
+
+        let hash = self.make_hash_val(key);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &mut *self.entries.offset(idx) };
+
+            if (entry.hash == 0) {
+                return None;
+            }
+
+            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
+                // Found - mark as tombstone
+                let k = entry.key;
+                let v = entry.value;
+                entry.hash = TOMBSTONE;
+                self.len = self.len - 1;
+                self.tombstones = self.tombstones + 1;
+
+                // Compact if too many tombstones
+                if self.tombstones > self.cap / 4 {
+                    self.compact();
+                }
+
+                return Some((k, v));
+            }
+
+            if (entry.hash > 0) && psl > entry.psl {
+                return None;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+
+            if psl > self.cap {
+                return None;
+            }
+        }
+    }
+
+    // Clear all entries.
+    public fn clear(&mut self) {
+        if self.cap == 0 {
+            return;
+        }
+
+        // Drop all entries
+        for i in range(0, self.cap) {
+            let entry = unsafe { &mut *self.entries.offset(i) };
+            if (entry.hash > 0) {
+                unsafe {
+                    drop_in_place(&mut entry.key);
+                    drop_in_place(&mut entry.value);
+                }
+            }
+            entry.hash = EMPTY;
+            entry.psl = 0;
+        }
+
+        self.len = 0;
+        self.tombstones = 0;
+    }
+
+    // =========================================================================
+    // Capacity Management
+    // =========================================================================
+
+    /// Reserves capacity for at least `additional` more elements.
+    /// The collection may reserve more space to avoid frequent reallocations.
+    public fn reserve(&mut self, additional: Int) {
+        let needed = self.len + additional;
+        // Account for load factor: need capacity such that
+        // needed < (cap * LOAD_FACTOR_NUM) / LOAD_FACTOR_DEN
+        let min_cap = (needed * LOAD_FACTOR_DEN) / LOAD_FACTOR_NUM + 1;
+        if min_cap > self.cap {
+            // Round up to power of 2 for better hash distribution
+            let mut new_cap = if self.cap == 0 { INITIAL_CAPACITY } else { self.cap };
+            while new_cap < min_cap {
+                new_cap = new_cap * 2;
+            }
+            self.resize(new_cap);
+        }
+    }
+
+    /// Shrinks the capacity as much as possible while maintaining the load factor.
+    /// After calling, the capacity will be the minimum needed for current elements.
+    public fn shrink_to_fit(&mut self) {
+        if self.len == 0 {
+            if self.cap > 0 {
+                unsafe {
+                    dealloc(
+                        self.entries as &unsafe Byte,
+                        self.cap * SLOT_SIZE,
+                        SLOT_ALIGN,
+                    );
+                }
+                self.entries = unsafe { null_ptr() as &unsafe Slot<K, V> };
+                self.cap = 0;
+                self.tombstones = 0;
+            }
+            return;
+        }
+        let min_cap = (self.len * LOAD_FACTOR_DEN) / LOAD_FACTOR_NUM + 1;
+        let mut new_cap = INITIAL_CAPACITY;
+        while new_cap < min_cap {
+            new_cap = new_cap * 2;
+        }
+        if new_cap < self.cap {
+            self.resize(new_cap);
+        }
+    }
+
+    /// Shrinks the capacity to at least `min_capacity`.
+    /// If the current capacity is less than the lower limit, this is a no-op.
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        let min_for_load = (self.len * LOAD_FACTOR_DEN) / LOAD_FACTOR_NUM + 1;
+        let target = if min_capacity > min_for_load { min_capacity } else { min_for_load };
+        let mut new_cap = INITIAL_CAPACITY;
+        while new_cap < target {
+            new_cap = new_cap * 2;
+        }
+        if new_cap < self.cap {
+            self.resize(new_cap);
+        }
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    // Iterator over key-value pairs.
+    public fn iter(&self) -> MapIter<K, V> {
+        MapIter {
+            entries: self.entries,
+            cap: self.cap,
+            idx: 0,
+            remaining: self.len,
+        }
+    }
+
+    // Iterator over keys.
+    public fn keys(&self) -> MapKeys<K, V> {
+        MapKeys { iter: self.iter() }
+    }
+
+    // Iterator over values.
+    public fn values(&self) -> MapValues<K, V> {
+        MapValues { iter: self.iter() }
+    }
+
+    // Mutable iterator over values.
+    public fn values_mut(&mut self) -> MapValuesMut<K, V> {
+        MapValuesMut {
+            entries: self.entries,
+            cap: self.cap,
+            idx: 0,
+            remaining: self.len,
+        }
+    }
+
+    // Consume map, return list of keys.
+    public fn into_keys(self) -> List<K> {
+        let mut keys: List<K> = List.with_capacity(self.len);
+        for i in range(0, self.cap) {
+            let entry = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key = entry.key;
+                keys.push(key);
+            }
+        }
+        keys
+    }
+
+    // Consume map, return list of values.
+    public fn into_values(self) -> List<V> {
+        let mut values: List<V> = List.with_capacity(self.len);
+        for i in range(0, self.cap) {
+            let entry = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let value = entry.value;
+                values.push(value);
+            }
+        }
+        values
+    }
+
+    /// Draining iterator that removes all entries from the map.
+    /// Returns an iterator that yields ownership of all key-value pairs.
+    /// After iteration completes, the map is empty but retains its capacity.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut map = Map.new();
+    /// map.insert("a", 1);
+    /// map.insert("b", 2);
+    ///
+    /// for (k, v) in map.drain() {
+    ///     print(f"Removed: {k} = {v}");
+    /// }
+    ///
+    /// assert(map.is_empty());
+    /// ```
+    public fn drain(&mut self) -> MapDrain<K, V> {
+        MapDrain {
+            map: self,
+            idx: 0,
+        }
+    }
+
+    /// Retains only the entries that satisfy the predicate.
+    ///
+    /// In other words, removes all entries for which `f(&key, &mut value)` returns `false`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut map = Map.new();
+    /// map.insert("a", 1);
+    /// map.insert("b", 2);
+    /// map.insert("c", 3);
+    ///
+    /// // Keep only entries with even values
+    /// map.retain(|_k, v| *v % 2 == 0);
+    ///
+    /// assert_eq(map.len(), 1);
+    /// assert(map.contains_key(&"b"));
+    /// ```
+    public fn retain<F: fn(&K, &mut V) -> Bool>(&mut self, f: F) {
+        if self.cap == 0 {
+            return;
+        }
+
+        for i in range(0, self.cap) {
+            // Check if occupied and should be removed
+            let should_remove = {
+                let entry = unsafe { &mut *self.entries.offset(i) };
+                if (entry.hash > 0) {
+                    !f(&entry.key, &mut entry.value)
+                } else {
+                    false
+                }
+            };
+
+            if should_remove {
+                // Separate borrow scope for removal
+                let entry = unsafe { &mut *self.entries.offset(i) };
+                unsafe {
+                    drop_in_place(&mut entry.key);
+                    drop_in_place(&mut entry.value);
+                }
+                entry.hash = TOMBSTONE;
+                entry.psl = 0;
+                self.len = self.len - 1;
+                self.tombstones = self.tombstones + 1;
+            }
+        }
+
+        // Compact if too many tombstones
+        if self.tombstones > self.cap / 4 {
+            self.compact();
+        }
+    }
+
+    /// Get a mutable reference to the value for `key`, inserting `default` if not present.
+    public fn get_or_insert(&mut self, key: K, default: V) -> &mut V {
+        self.entry(key).or_insert(default)
+    }
+
+    /// Get a mutable reference to the value for `key`, inserting the result of `f` if not present.
+    public fn get_or_insert_with<F: fn() -> V>(&mut self, key: K, f: F) -> &mut V {
+        self.entry(key).or_insert_with(f)
+    }
+
+    /// Get a mutable reference to the value for `key`, inserting `V::default()` if not present.
+    public fn get_or_default(&mut self, key: K) -> &mut V
+    where V: Default
+    {
+        self.entry(key).or_default()
+    }
+
+    /// Try to insert a key-value pair. Returns Err with the existing value
+    /// if the key already exists, or Ok with a mutable reference to the
+    /// newly inserted value.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut m: Map<Text, Int> = Map.new();
+    /// assert(m.try_insert("a", 1).is_ok());
+    /// assert(m.try_insert("a", 2).is_err());
+    /// ```
+    public fn try_insert(&mut self, key: K, value: V) -> Result<&mut V, V> {
+        match self.entry(key) {
+            Occupied(entry) => {
+                Err(value)
+            }
+            Vacant(entry) => {
+                Ok(entry.insert(value))
+            }
+        }
+    }
+
+    /// Check if the map contains a given value. O(n) linear scan.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut m: Map<Text, Int> = Map.new();
+    /// m.insert("a", 42);
+    /// assert(m.contains_value(&42));
+    /// assert(!m.contains_value(&99));
+    /// ```
+    public fn contains_value(&self, value: &V) -> Bool
+    where V: Eq
+    {
+        for i in range(0, self.cap) {
+            let entry = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) && entry.value == *value {
+                return true;
+            }
+        }
+        false
+    }
+
+    // =========================================================================
+    // Mutable Iteration
+    // =========================================================================
+
+    /// Returns a mutable iterator over (&K, &mut V) pairs.
+    ///
+    /// Keys are immutable (changing keys would break hash invariants).
+    /// Values can be mutated freely.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// for (key, val) in m.iter_mut() {
+    ///     *val = *val * 2;
+    /// }
+    /// ```
+    public fn iter_mut(&mut self) -> MapIterMut<K, V> {
+        MapIterMut {
+            entries: unsafe { self.entries as &unsafe Slot<K, V> },
+            cap: self.cap,
+            idx: 0,
+            remaining: self.len,
+        }
+    }
+
+    // =========================================================================
+    // Extract / Filter / Merge
+    // =========================================================================
+
+    /// Removes all entries matching the predicate and returns them as a list
+    /// of (K, V) pairs. Retained entries preserve their position.
+    ///
+    /// Similar to `retain` but returns the removed entries.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut m = map([(1, "a"), (2, "b"), (3, "c")]);
+    /// let removed = m.extract_if(|k, _v| *k % 2 == 0);
+    /// // m now has: {1: "a", 3: "c"}
+    /// // removed: [(2, "b")]
+    /// ```
+    public fn extract_if<F: fn(&K, &V) -> Bool>(&mut self, f: F) -> List<(K, V)> {
+        let mut extracted: List<(K, V)> = List.new();
+
+        if self.cap == 0 {
+            return extracted;
+        }
+
+        for i in range(0, self.cap) {
+            let should_extract = {
+                let entry = unsafe { &*self.entries.offset(i) };
+                if (entry.hash > 0) {
+                    f(&entry.key, &entry.value)
+                } else {
+                    false
+                }
+            };
+
+            if should_extract {
+                let entry = unsafe { &mut *self.entries.offset(i) };
+                let key = entry.key;
+                let value = entry.value;
+                extracted.push((key, value));
+                entry.hash = TOMBSTONE;
+                entry.psl = 0;
+                self.len = self.len - 1;
+                self.tombstones = self.tombstones + 1;
+            }
+        }
+
+        // Compact if too many tombstones
+        if self.tombstones > self.cap / 4 {
+            self.compact();
+        }
+
+        extracted
+    }
+
+    /// Merge another map into this one, using a conflict resolution function
+    /// when both maps contain the same key.
+    ///
+    /// # Arguments
+    ///
+    /// - `other` - The map to merge from (consumed).
+    /// - `resolve` - Function called with (existing_value, incoming_value) when
+    ///   a key exists in both maps. Returns the value to keep.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = map([(1, 10), (2, 20)]);
+    /// let b = map([(2, 200), (3, 300)]);
+    /// a.merge(b, |existing, incoming| existing + incoming);
+    /// // a = {1: 10, 2: 220, 3: 300}
+    /// ```
+    public fn merge<F: fn(V, V) -> V>(&mut self, mut other: Map<K, V>, resolve: F) {
+        for (k, v) in other.drain() {
+            match self.get_mut(&k) {
+                Some(existing) => {
+                    let old = unsafe { ptr_read(existing as &unsafe V) };
+                    unsafe { ptr_write(existing as &unsafe V, resolve(old, v)); }
+                }
+                None => {
+                    self.insert(k, v);
+                }
+            }
+        }
+    }
+
+    /// Get value by key, or return a default value if not found.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// assert_eq(m.get_or_default(&1, 0), 10);
+    /// assert_eq(m.get_or_default(&3, 0), 0);
+    /// ```
+    public fn get_or_default(&self, key: &K, default: V) -> V
+    where V: Clone
+    {
+        match self.get(key) {
+            Some(v) => v.clone(),
+            None => default,
+        }
+    }
+
+    /// Filter and transform values, returning a new map.
+    /// Applies f to each (key, value) pair; keeps entries where f returns Some.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20), (3, 30)]);
+    /// let filtered = m.filter_map(|k, v| if *v > 15 { Some(*v * 2) } else { None });
+    /// // filtered = {2: 40, 3: 60}
+    /// ```
+    /// Return a new Map containing only entries matching the predicate.
+    public fn filter<F: fn(&K, &V) -> Bool>(&self, f: F) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.key, &entry.value) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Filter entries keeping only those whose keys satisfy the predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, "a"), (2, "b"), (3, "c")]);
+    /// let evens = m.filter_keys(|k| *k % 2 == 0);
+    /// assert_eq(evens.len(), 1);
+    /// ```
+    public fn filter_keys<F: fn(&K) -> Bool>(&self, f: F) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.key) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Filter entries keeping only those whose values satisfy the predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([("a", 1), ("b", 2), ("c", 3)]);
+    /// let big = m.filter_values(|v| *v > 1);
+    /// assert_eq(big.len(), 2);
+    /// ```
+    public fn filter_values<F: fn(&V) -> Bool>(&self, f: F) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.value) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Map keys to new keys using a function, keeping values unchanged.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, "a"), (2, "b")]);
+    /// let m2 = m.map_keys(|k| *k * 10);
+    /// assert(m2.contains_key(10));
+    /// ```
+    public fn map_keys<K2: Hash + Eq, F: fn(&K) -> K2>(&self, f: F) -> Map<K2, V>
+    where V: Clone
+    {
+        let mut result: Map<K2, V> = Map.new();
+        if self.cap > 0 {
+            result.reserve(self.len);
+            for i in range(0, self.cap) {
+                let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+                if (entry.hash > 0) {
+                    result.insert(f(&entry.key), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    public fn filter_map<U, F: fn(&K, &V) -> Maybe<U>>(&self, f: F) -> Map<K, U>
+    where K: Clone
+    {
+        let mut result: Map<K, U> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                match f(key, value) {
+                    Some(new_val) => {
+                        result.insert(key.clone(), new_val);
+                    }
+                    None => {}
+                }
+            }
+        }
+        result
+    }
+
+    // =========================================================================
+    // Additional Methods
+    // =========================================================================
+
+    /// Update the map with all entries from another map.
+    ///
+    /// For keys that exist in both maps, the value from `other` overwrites
+    /// the existing value. This is equivalent to Python's `dict.update()`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut m = map([(1, "a"), (2, "b")]);
+    /// let other = map([(2, "x"), (3, "y")]);
+    /// m.update(&other);
+    /// assert_eq(m.get(&2), Some(&"x"));
+    /// assert_eq(m.get(&3), Some(&"y"));
+    /// ```
+    public fn update(&mut self, other: &Map<K, V>)
+    where K: Clone, V: Clone
+    {
+        for i in range(0, other.cap) {
+            let entry: &Slot<K, V> = unsafe { &*other.entries.offset(i) };
+            if (entry.hash > 0) {
+                self.insert(entry.key.clone(), entry.value.clone());
+            }
+        }
+    }
+
+    /// Remove and return an arbitrary key-value pair from the map.
+    ///
+    /// Returns `None` if the map is empty.
+    /// Useful for iteratively draining entries one at a time.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut m = map([(1, "a"), (2, "b")]);
+    /// let pair = m.pop_entry();
+    /// assert(pair is Some);
+    /// assert_eq(m.len(), 1);
+    /// ```
+    public fn pop_entry(&mut self) -> Maybe<(K, V)> {
+        if self.len == 0 {
+            None
+        } else {
+            // Find first occupied slot
+            let mut result: Maybe<(K, V)> = None;
+            let mut i = 0;
+            while i < self.cap {
+                let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+                if (entry.hash > 0) && result is None {
+                    let key = entry.key;
+                    let value = entry.value;
+                    let slot: &mut Slot<K, V> = unsafe { &mut *self.entries.offset(i) };
+                    slot.hash = -1;  // Mark as tombstone
+                    self.len = self.len - 1;
+                    result = Some((key, value));
+                    i = self.cap;  // break
+                } else {
+                    i = i + 1;
+                }
+            }
+            result
+        }
+    }
+
+    // =========================================================================
+    // Functional Operations
+    // =========================================================================
+
+    /// Create a new map with values transformed by a function.
+    /// The function receives references to both key and value.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// fn double(k: &Int, v: &Int) -> Int { *v * 2 }
+    /// let m2 = m.map_values(double);
+    /// assert_eq(*m2.get(&1).unwrap(), 20);
+    /// ```
+    public fn map_values<U, F: fn(&K, &V) -> U>(&self, f: F) -> Map<K, U>
+    where K: Clone
+    {
+        let mut result: Map<K, U> = Map.new();
+        if self.cap > 0 {
+            result.reserve(self.len);
+            for i in range(0, self.cap) {
+                let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+                if (entry.hash > 0) {
+                    result.insert(entry.key.clone(), f(&entry.key, &entry.value));
+                }
+            }
+        }
+        result
+    }
+
+    /// Split the map into two maps based on a predicate.
+    /// Returns (matching, not_matching).
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20), (3, 30)]);
+    /// let pair = m.partition(|k, v| *v > 15);
+    /// assert_eq(pair.0.len(), 2); // 20 and 30
+    /// assert_eq(pair.1.len(), 1); // 10
+    /// ```
+    public fn partition<F: fn(&K, &V) -> Bool>(&self, f: F) -> (Map<K, V>, Map<K, V>)
+    where K: Clone, V: Clone
+    {
+        let mut yes: Map<K, V> = Map.new();
+        let mut no: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.key, &entry.value) {
+                    yes.insert(entry.key.clone(), entry.value.clone());
+                } else {
+                    no.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        (yes, no)
+    }
+
+    /// Returns true if any entry satisfies the predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// assert(m.any(|k, v| *v > 15));
+    /// ```
+    public fn any<F: fn(&K, &V) -> Bool>(&self, f: F) -> Bool {
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.key, &entry.value) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Returns true if all entries satisfy the predicate.
+    /// Returns true for empty maps (vacuously true).
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// assert(m.all(|k, v| *v > 0));
+    /// ```
+    public fn all<F: fn(&K, &V) -> Bool>(&self, f: F) -> Bool {
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if !f(&entry.key, &entry.value) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Find the first entry matching a predicate.
+    /// Returns the key-value pair, or None if no match.
+    /// Note: order is implementation-defined (hash table order).
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// let result = m.find(|k, v| *v == 20);
+    /// assert(result.is_some());
+    /// ```
+    public fn find<F: fn(&K, &V) -> Bool>(&self, f: F) -> Maybe<(&K, &V)> {
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if f(&entry.key, &entry.value) {
+                    return Some((&entry.key, &entry.value));
+                }
+            }
+        }
+        None
+    }
+
+    // =========================================================================
+    // Set-like Key Operations
+    // =========================================================================
+
+    /// Returns a new map containing entries from self whose keys
+    /// are NOT present in other.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m1 = map([(1, 10), (2, 20), (3, 30)]);
+    /// let m2 = map([(2, 200), (4, 400)]);
+    /// let diff = m1.difference(&m2);
+    /// // diff = {1: 10, 3: 30}
+    /// ```
+    public fn difference(&self, other: &Map<K, V>) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if !other.contains_key(&entry.key) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new map containing entries from self whose keys
+    /// ARE present in other. Values come from self.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m1 = map([(1, 10), (2, 20), (3, 30)]);
+    /// let m2 = map([(2, 200), (3, 300)]);
+    /// let inter = m1.intersection(&m2);
+    /// // inter = {2: 20, 3: 30}
+    /// ```
+    public fn intersection(&self, other: &Map<K, V>) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if other.contains_key(&entry.key) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new map containing entries whose keys are in exactly
+    /// one of self or other (XOR on keys). Values come from whichever
+    /// map contains the key.
+    ///
+    /// # Example
+    /// ```verum
+    /// let m1 = map([(1, 10), (2, 20)]);
+    /// let m2 = map([(2, 200), (3, 300)]);
+    /// let sym = m1.symmetric_difference(&m2);
+    /// // sym = {1: 10, 3: 300}
+    /// ```
+    public fn symmetric_difference(&self, other: &Map<K, V>) -> Map<K, V>
+    where K: Clone, V: Clone
+    {
+        let mut result: Map<K, V> = Map.new();
+        // Add entries from self not in other
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if !other.contains_key(&entry.key) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        // Add entries from other not in self
+        for i in range(0, other.cap) {
+            let entry: &Slot<K, V> = unsafe { &*other.entries.offset(i) };
+            if (entry.hash > 0) {
+                if !self.contains_key(&entry.key) {
+                    result.insert(entry.key.clone(), entry.value.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Swap keys and values, returning a new Map<V, K>.
+    /// If multiple keys map to the same value, one is kept (non-deterministic).
+    ///
+    /// # Example
+    /// ```verum
+    /// let m = map([(1, 10), (2, 20)]);
+    /// let inv = m.invert();
+    /// assert_eq(*inv.get(&10).unwrap(), 1);
+    /// ```
+    public fn invert(&self) -> Map<V, K>
+    where V: Hash + Eq + Clone, K: Clone
+    {
+        let mut result: Map<V, K> = Map.new();
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                result.insert(entry.value.clone(), entry.key.clone());
+            }
+        }
+        result
+    }
+
+    /// Fold over all key-value pairs, accumulating a result.
+    public fn fold<U>(&self, init: U, f: fn(U, &K, &V) -> U) -> U {
+        let mut acc = init;
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            acc = f(acc, k, v);
+        }
+        acc
+    }
+
+    /// Apply a function to each key-value pair for its side effects.
+    public fn for_each<F: fn(&K, &V)>(&self, f: F) {
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            f(k, v);
+        }
+    }
+
+    // =========================================================================
+    // Conversion
+    // =========================================================================
+
+    /// Return all key-value pairs as a List.
+    /// Alias for `to_entries`. The order of entries is unspecified.
+    public fn entries(&self) -> List<(K, V)>
+    where K: Clone, V: Clone
+    {
+        self.to_entries()
+    }
+
+    /// Convert map to a list of key-value pairs.
+    /// The order of entries is unspecified.
+    public fn to_entries(&self) -> List<(K, V)>
+    where K: Clone, V: Clone
+    {
+        let mut result: List<(K, V)> = List.with_capacity(self.len);
+        let mut iter = self.iter();
+        while let Some(pair) = iter.next() {
+            result.push((pair.0.clone(), pair.1.clone()));
+        }
+        result
+    }
+
+    /// Collect all keys into a List.
+    /// The order of keys is unspecified.
+    public fn keys_list(&self) -> List<K>
+    where K: Clone
+    {
+        let mut result: List<K> = List.with_capacity(self.len);
+        let mut iter = self.keys();
+        while let Some(k) = iter.next() {
+            result.push(k.clone());
+        }
+        result
+    }
+
+    /// Collect all values into a List.
+    /// The order of values is unspecified.
+    public fn values_list(&self) -> List<V>
+    where V: Clone
+    {
+        let mut result: List<V> = List.with_capacity(self.len);
+        let mut iter = self.values();
+        while let Some(v) = iter.next() {
+            result.push(v.clone());
+        }
+        result
+    }
+
+    // =========================================================================
+    // Internal Methods
+    // =========================================================================
+
+    // Compute hash (ensure non-zero, non-tombstone).
+    fn make_hash_val(&self, key: K) -> Int {
+        let h = key.hash_value();
+        // Ensure hash is positive && not 0 or -1 (our special markers)
+        let h = (h as Int).abs();
+        if h <= 1 { h + 2 } else { h }
+    }
+
+    // Ensure capacity for insertion.
+    fn ensure_capacity(&mut self) {
+        if self.cap == 0 {
+            self.resize(INITIAL_CAPACITY);
+            return;
+        }
+
+        // Check load factor
+        let threshold = (self.cap * LOAD_FACTOR_NUM) / LOAD_FACTOR_DEN;
+        if self.len + self.tombstones >= threshold {
+            let new_cap = if self.len * 2 > self.cap {
+                self.cap * 2
+            } else {
+                self.cap
+            };
+            self.resize(new_cap);
+        }
+    }
+
+    // Insert with known hash.
+    fn insert_internal(&mut self, mut key: K, mut value: V, mut hash: Int) -> Maybe<V> {
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            let entry = unsafe { &mut *self.entries.offset(idx) };
+
+            if (entry.hash == 0) || (entry.hash == TOMBSTONE) {
+                // Found empty slot
+                if (entry.hash == TOMBSTONE) {
+                    self.tombstones = self.tombstones - 1;
+                }
+                entry.key = key;
+                entry.value = value;
+                entry.hash = hash;
+                entry.psl = psl;
+                self.len = self.len + 1;
+                return None;
+            }
+
+            if entry.hash == hash && entry.key == key {
+                // Key exists - replace value
+                let old = entry.value;
+                entry.value = value;
+                return Some(old);
+            }
+
+            // Robin Hood: swap if our PSL is greater
+            if psl > entry.psl {
+                // Swap via direct field access (ptr_read/ptr_write don't work
+                // on inline struct fields since &entry.field creates a stack ref)
+                let tmp_key = entry.key;
+                let tmp_value = entry.value;
+                let tmp_hash = entry.hash;
+                let tmp_psl = entry.psl;
+                entry.key = key;
+                entry.value = value;
+                entry.hash = hash;
+                entry.psl = psl;
+                key = tmp_key;
+                value = tmp_value;
+                hash = tmp_hash;
+                psl = tmp_psl;
+            }
+
+            psl = psl + 1;
+            idx = (idx + 1) & mask;
+        }
+    }
+
+    // Resize hash table.
+    fn resize(&mut self, new_cap: Int) {
+        let old_entries = self.entries;
+        let old_cap = self.cap;
+
+        // Allocate new table
+        let size = new_cap * SLOT_SIZE;
+        let align = 8;
+        self.entries = unsafe {
+            alloc_zeroed(size, align) as &unsafe Slot<K, V>
+        };
+        self.cap = new_cap;
+        self.len = 0;
+        self.tombstones = 0;
+
+        // Rehash old entries
+        if old_cap > 0 {
+            for i in range(0, old_cap) {
+                let entry = unsafe { &*old_entries.offset(i) };
+                if (entry.hash > 0) {
+                    let key = entry.key;
+                    let value = entry.value;
+                    self.insert_internal(key, value, entry.hash);
+                }
+            }
+
+            // Free old table
+            unsafe {
+                dealloc(
+                    old_entries as &unsafe Byte,
+                    old_cap * SLOT_SIZE,
+                    SLOT_ALIGN,
+                );
+            }
+        }
+    }
+
+    // Compact by removing tombstones.
+    fn compact(&mut self) {
+        self.resize(self.cap);
+    }
+}
+
+// =============================================================================
+// Drop Implementation
+// =============================================================================
+
+implement<K: Hash + Eq, V> Drop for Map<K, V> {
+    fn drop(&mut self) {
+        if self.cap > 0 {
+            // Drop all entries
+            for i in range(0, self.cap) {
+                let entry = unsafe { &mut *self.entries.offset(i) };
+                if (entry.hash > 0) {
+                    unsafe {
+                        drop_in_place(&mut entry.key);
+                        drop_in_place(&mut entry.value);
+                    }
+                }
+            }
+
+            // Free table
+            unsafe {
+                dealloc(
+                    self.entries as &unsafe Byte,
+                    self.cap * SLOT_SIZE,
+                    SLOT_ALIGN,
+                );
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Clone Implementation
+// =============================================================================
+
+implement<K: Hash + Eq + Clone, V: Clone> Clone for Map<K, V> {
+    fn clone(&self) -> Map<K, V> {
+        let mut new_map = Map.with_capacity(self.len);
+        // Direct iteration over entries to avoid associated type resolution issues
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                new_map.insert(key.clone(), value.clone());
+            }
+        }
+        new_map
+    }
+}
+
+// =============================================================================
+// Index Implementation
+// =============================================================================
+
+implement<K: Hash + Eq, V> Index<K> for Map<K, V> {
+    type Output = V;
+
+    fn index(&self, key: K) -> &V {
+        match self.get_key_value(&key) {
+            Some(pair) => pair.1,
+            None => panic("Key not found in Map"),
+        }
+    }
+}
+
+// =============================================================================
+// Eq && Debug
+// =============================================================================
+
+implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
+    fn eq(&self, other: &Map<K, V>) -> Bool {
+        if self.len != other.len {
+            return false;
+        }
+
+        // Direct iteration over entries to avoid associated type resolution issues
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                match other.get(key) {
+                    Some(other_v) => {
+                        // Use == operator which resolves to Eq.eq
+                        if !(*value == *other_v) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        }
+
+        true
+    }
+}
+
+implement<K: Hash + Eq, V: Hash> Hash for Map<K, V> {
+    fn hash(&self, hasher: &mut Hasher) {
+        // Hash the length first
+        hasher.write_int(self.len);
+        // Since map ordering is non-deterministic, XOR all pair hashes
+        // to produce an order-independent hash.
+        let mut combined: Int = 0;
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if entry.hash > 0 {
+                let mut pair_hasher = DefaultHasher.new();
+                entry.key.hash(&mut pair_hasher);
+                entry.value.hash(&mut pair_hasher);
+                combined = combined ^ pair_hasher.finish();
+            }
+        }
+        hasher.write_int(combined);
+    }
+}
+
+implement<K: Hash + Eq + Debug, V: Debug> Debug for Map<K, V> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let mut debug_map = f.debug_map();
+        // Direct iteration over entries to avoid associated type resolution issues
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                debug_map.entry(key, value);
+            }
+        }
+        debug_map.finish()
+    }
+}
+
+implement<K: Hash + Eq + Display, V: Display> Display for Map<K, V> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                if !first {
+                    f.write_str(", ")?;
+                }
+                first = false;
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                key.fmt(f)?;
+                f.write_str(": ")?;
+                value.fmt(f)?;
+            }
+        }
+        f.write_str("}")
+    }
+}
+
+// =============================================================================
+// Default
+// =============================================================================
+
+implement<K: Hash + Eq, V> Default for Map<K, V> {
+    fn default() -> Map<K, V> {
+        Map.new()
+    }
+}
+
+// =============================================================================
+// FromIterator
+// =============================================================================
+
+implement<K: Hash + Eq, V> FromIterator<(K, V)> for Map<K, V> {
+    fn from_iter<I: Iterator<Item = (K, V)>>(iter: I) -> Map<K, V> {
+        let mut map = Map.new();
+        let mut it = iter;
+        loop {
+            match it.next() {
+                None => break,
+                Some(pair) => {
+                    // Cast pair to tuple type explicitly
+                    let tuple: (K, V) = pair;
+                    map.insert(tuple.0, tuple.1);
+                }
+            }
+        }
+        map
+    }
+}
+
+// =============================================================================
+// Extend
+// =============================================================================
+
+implement<K: Hash + Eq, V> Extend<(K, V)> for Map<K, V> {
+    fn extend<I: Iterator<Item = (K, V)>>(&mut self, iter: I) {
+        let mut it = iter;
+        loop {
+            match it.next() {
+                None => break,
+                Some(pair) => {
+                    // Cast pair to tuple type explicitly
+                    let tuple: (K, V) = pair;
+                    self.insert(tuple.0, tuple.1);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+// Iterator over key-value pairs.
+public type MapIter<K, V> is {
+    entries: &unsafe Slot<K, V>,
+    cap: Int,
+    idx: Int,
+    remaining: Int,
+};
+
+implement<K, V> Iterator for MapIter<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Maybe<(K, V)> {
+        while self.idx < self.cap {
+            let entry = unsafe { &*self.entries.offset(self.idx) };
+            self.idx = self.idx + 1;
+
+            if (entry.hash > 0) {
+                self.remaining = self.remaining - 1;
+                return Some((entry.key, entry.value));
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+implement<K, V> ExactSizeIterator for MapIter<K, V> {
+    fn len(&self) -> Int { self.remaining }
+}
+
+// Iterator over keys.
+public type MapKeys<K, V> is {
+    iter: MapIter<K, V>,
+};
+
+implement<K, V> Iterator for MapKeys<K, V> {
+    type Item = K;
+
+    fn next(&mut self) -> Maybe<K> {
+        match self.iter.next() {
+            None => None,
+            Some(pair) => Some(pair.0),
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.iter.size_hint()
+    }
+}
+
+// Iterator over values.
+public type MapValues<K, V> is {
+    iter: MapIter<K, V>,
+};
+
+implement<K, V> Iterator for MapValues<K, V> {
+    type Item = V;
+
+    fn next(&mut self) -> Maybe<V> {
+        match self.iter.next() {
+            None => None,
+            Some(pair) => Some(pair.1),
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.iter.size_hint()
+    }
+}
+
+implement<K, V> ExactSizeIterator for MapKeys<K, V> {
+    fn len(&self) -> Int { self.iter.remaining }
+}
+
+implement<K, V> ExactSizeIterator for MapValues<K, V> {
+    fn len(&self) -> Int { self.iter.remaining }
+}
+
+// Mutable iterator over values.
+public type MapValuesMut<K, V> is {
+    entries: &unsafe Slot<K, V>,
+    cap: Int,
+    idx: Int,
+    remaining: Int,
+};
+
+implement<K, V> Iterator for MapValuesMut<K, V> {
+    type Item = &mut V;
+
+    fn next(&mut self) -> Maybe<&mut V> {
+        while self.idx < self.cap {
+            let entry = unsafe { &mut *self.entries.offset(self.idx) };
+            self.idx = self.idx + 1;
+
+            if (entry.hash > 0) {
+                self.remaining = self.remaining - 1;
+                return Some(&mut entry.value);
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+implement<K, V> ExactSizeIterator for MapValuesMut<K, V> {
+    fn len(&self) -> Int { self.remaining }
+}
+
+// Mutable iterator over (&K, &mut V) pairs.
+public type MapIterMut<K, V> is {
+    entries: &unsafe Slot<K, V>,
+    cap: Int,
+    idx: Int,
+    remaining: Int,
+};
+
+implement<K, V> Iterator for MapIterMut<K, V> {
+    type Item = (&K, &mut V);
+
+    fn next(&mut self) -> Maybe<(&K, &mut V)> {
+        while self.idx < self.cap {
+            let entry = unsafe { &mut *self.entries.offset(self.idx) };
+            self.idx = self.idx + 1;
+
+            if (entry.hash > 0) {
+                self.remaining = self.remaining - 1;
+                return Some((&entry.key, &mut entry.value));
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+implement<K, V> ExactSizeIterator for MapIterMut<K, V> {
+    fn len(&self) -> Int { self.remaining }
+}
+
+// =============================================================================
+// IntoIterator for Iterator Types
+// =============================================================================
+
+implement<K, V> IntoIterator for MapIter<K, V> {
+    type Item = (K, V);
+    type IntoIter = MapIter<K, V>;
+
+    fn into_iter(self) -> MapIter<K, V> {
+        self
+    }
+}
+
+implement<K, V> IntoIterator for MapKeys<K, V> {
+    type Item = K;
+    type IntoIter = MapKeys<K, V>;
+
+    fn into_iter(self) -> MapKeys<K, V> {
+        self
+    }
+}
+
+implement<K, V> IntoIterator for MapValues<K, V> {
+    type Item = V;
+    type IntoIter = MapValues<K, V>;
+
+    fn into_iter(self) -> MapValues<K, V> {
+        self
+    }
+}
+
+implement<K, V> IntoIterator for MapValuesMut<K, V> {
+    type Item = &mut V;
+    type IntoIter = MapValuesMut<K, V>;
+
+    fn into_iter(self) -> MapValuesMut<K, V> {
+        self
+    }
+}
+
+implement<K, V> IntoIterator for MapIterMut<K, V> {
+    type Item = (&K, &mut V);
+    type IntoIter = MapIterMut<K, V>;
+
+    fn into_iter(self) -> MapIterMut<K, V> {
+        self
+    }
+}
+
+// =============================================================================
+// Drain Iterator
+// =============================================================================
+
+/// Draining iterator that removes entries from the map.
+/// Takes ownership of all entries, leaving the map empty but with capacity intact.
+public type MapDrain<K: Hash + Eq, V> is {
+    map: &mut Map<K, V>,
+    idx: Int,
+};
+
+implement<K: Hash + Eq, V> Iterator for MapDrain<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Maybe<(K, V)> {
+        while self.idx < self.map.cap {
+            let entry = unsafe { &mut *self.map.entries.offset(self.idx) };
+            self.idx = self.idx + 1;
+
+            if (entry.hash > 0) {
+                // Take ownership of key and value
+                let key = entry.key;
+                let value = entry.value;
+                entry.hash = EMPTY;
+                entry.psl = 0;
+                self.map.len = self.map.len - 1;
+                return Some((key, value));
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.map.len, Some(self.map.len))
+    }
+}
+
+implement<K: Hash + Eq, V> IntoIterator for MapDrain<K, V> {
+    type Item = (K, V);
+    type IntoIter = MapDrain<K, V>;
+
+    fn into_iter(self) -> MapDrain<K, V> {
+        self
+    }
+}
+
+implement<K: Hash + Eq, V> Drop for MapDrain<K, V> {
+    fn drop(&mut self) {
+        // Consume any remaining entries to ensure proper cleanup
+        while self.next().is_some() {}
+        // Reset tombstone count since we've cleaned everything
+        self.map.tombstones = 0;
+    }
+}
+
+// =============================================================================
+// IntoIterator
+// =============================================================================
+
+implement<K: Hash + Eq, V> IntoIterator for Map<K, V> {
+    type Item = (K, V);
+    type IntoIter = MapIntoIter<K, V>;
+
+    fn into_iter(self) -> MapIntoIter<K, V> {
+        MapIntoIter {
+            map: self,
+            idx: 0,
+        }
+    }
+}
+
+// Owning iterator.
+public type MapIntoIter<K, V> is {
+    map: Map<K, V>,
+    idx: Int,
+};
+
+implement<K: Hash + Eq, V> Iterator for MapIntoIter<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Maybe<(K, V)> {
+        while self.idx < self.map.cap {
+            let entry = unsafe { &*self.map.entries.offset(self.idx) };
+            self.idx = self.idx + 1;
+
+            if (entry.hash > 0) {
+                self.map.len = self.map.len - 1;
+                let key = entry.key;
+                let value = entry.value;
+                return Some((key, value));
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.map.len, Some(self.map.len))
+    }
+}
+
+implement<K: Hash + Eq, V> Drop for MapIntoIter<K, V> {
+    fn drop(&mut self) {
+        // Drop remaining entries
+        while self.next().is_some() {}
+        // Map's drop will free memory but we've already consumed entries
+        self.map.len = 0;
+    }
+}
+
+// =============================================================================
+// ExactSizeIterator for Drain and IntoIter
+// =============================================================================
+
+implement<K: Hash + Eq, V> ExactSizeIterator for MapDrain<K, V> {
+    fn len(&self) -> Int { self.map.len }
+}
+
+implement<K: Hash + Eq, V> ExactSizeIterator for MapIntoIter<K, V> {
+    fn len(&self) -> Int { self.map.len }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<K, V> FusedIterator for MapIter<K, V> {}
+implement<K, V> FusedIterator for MapKeys<K, V> {}
+implement<K, V> FusedIterator for MapValues<K, V> {}
+implement<K, V> FusedIterator for MapValuesMut<K, V> {}
+implement<K, V> FusedIterator for MapIterMut<K, V> {}
+implement<K: Hash + Eq, V> FusedIterator for MapDrain<K, V> {}
+implement<K: Hash + Eq, V> FusedIterator for MapIntoIter<K, V> {}
+
+// =============================================================================
+// From conversions
+// =============================================================================
+
+implement<K: Hash + Eq, V> From<List<(K, V)>> for Map<K, V> {
+    fn from(list: List<(K, V)>) -> Map<K, V> {
+        let mut m = Map.with_capacity(list.len());
+        for pair in list {
+            m.insert(pair.0, pair.1);
+        }
+        m
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Create map from pairs.
+public fn map<K: Hash + Eq, V>(pairs: [(K, V); _]) -> Map<K, V> {
+    let mut m = Map.with_capacity(pairs.len());
+    for i in range(0, pairs.len()) {
+        let pair = pairs[i];
+        let k: K = pair.0;
+        let v: V = pair.1;
+        m.insert(k, v);
+    }
+    m
+}
+
+/// Create a Map from a list of keys, each mapped to the same default value.
+public fn map_from_keys<K: Hash + Eq, V: Clone>(keys: &[K], default: V) -> Map<K, V>
+where K: Clone
+{
+    let mut m: Map<K, V> = Map.with_capacity(keys.len());
+    for i in range(0, keys.len()) {
+        m.insert(keys[i].clone(), default.clone());
+    }
+    m
+}
+
+/// Count elements by a key function.
+public fn count_by<T, K: Hash + Eq, I: Iterator<Item = T>>(iter: I, key_fn: fn(&T) -> K) -> Map<K, Int> {
+    let mut counts: Map<K, Int> = Map.new();
+    for item in iter {
+        let k = key_fn(&item);
+        let count = counts.entry(k).or_insert(0);
+        *count = *count + 1;
+    }
+    counts
+}
+
+/// Group elements by a key function.
+public fn group_by<T, K: Hash + Eq, I: Iterator<Item = T>>(iter: I, key_fn: fn(&T) -> K) -> Map<K, List<T>> {
+    let mut groups: Map<K, List<T>> = Map.new();
+    for item in iter {
+        let k = key_fn(&item);
+        let group = groups.get_or_insert_with(k, || List.new());
+        group.push(item);
+    }
+    groups
+}

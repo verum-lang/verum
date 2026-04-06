@@ -1,0 +1,291 @@
+// =============================================================================
+// dialog.vr - Centered modal dialog widget with state
+// =============================================================================
+module dialog;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.block.{Block, Borders, BorderType, Alignment};
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// =============================================================================
+// DialogButton — a button with normal and focused styles
+// =============================================================================
+
+/// A dialog button with label, normal style, and focused style.
+public type DialogButton is {
+    label: Text,
+    style: Style,
+    focused_style: Style,
+};
+
+implement DialogButton {
+    /// Create a new button with default styles.
+    public fn new(label: Text) -> DialogButton {
+        DialogButton {
+            label: label,
+            style: Style.new().fg(Color.White),
+            focused_style: Style.new().fg(Color.Black).bg(Color.White).bold(),
+        }
+    }
+
+    /// Create a button with specific styles.
+    public fn styled(label: Text, style: Style, focused_style: Style) -> DialogButton {
+        DialogButton { label: label, style: style, focused_style: focused_style }
+    }
+
+    /// Set the normal button style.
+    public fn style(self, style: Style) -> DialogButton {
+        DialogButton { style: style, ..self }
+    }
+
+    /// Set the focused button style.
+    public fn focused_style(self, style: Style) -> DialogButton {
+        DialogButton { focused_style: style, ..self }
+    }
+
+    /// Get the display width of this button: "[ label ]" = label.len() + 4.
+    public fn width(&self) -> Int {
+        self.label.len() + 4
+    }
+}
+
+// =============================================================================
+// DialogState — tracks which button is focused
+// =============================================================================
+
+/// State for the dialog, tracking which button has focus.
+public type DialogState is {
+    focused_button: Int,
+};
+
+implement DialogState {
+    /// Create a new dialog state with focus on the first button.
+    public fn new() -> DialogState {
+        DialogState { focused_button: 0 }
+    }
+
+    /// Create a dialog state with a specific focused button.
+    public fn with_focus(index: Int) -> DialogState {
+        DialogState { focused_button: index }
+    }
+
+    /// Move focus to the next button.
+    public fn next(&mut self, total_buttons: Int) {
+        if total_buttons > 0 {
+            self.focused_button = (self.focused_button + 1) % total_buttons;
+        }
+    }
+
+    /// Move focus to the previous button.
+    public fn previous(&mut self, total_buttons: Int) {
+        if total_buttons > 0 {
+            self.focused_button = if self.focused_button == 0 {
+                total_buttons - 1
+            } else {
+                self.focused_button - 1
+            };
+        }
+    }
+
+    /// Get the index of the currently focused button.
+    public fn focused(&self) -> Int {
+        self.focused_button
+    }
+}
+
+// =============================================================================
+// Dialog — centered modal popup
+// =============================================================================
+
+/// Dialog — a centered modal popup with title, body text, and buttons.
+/// Renders itself as a percentage of the available area width.
+/// Uses StatefulWidget with DialogState for button focus tracking.
+public type Dialog is {
+    title: Maybe<Text>,
+    body: List<Line>,
+    buttons: List<DialogButton>,
+    style: Style,
+    border_type: BorderType,
+    width_percent: Int,
+    button_spacing: Int,
+};
+
+implement Dialog {
+    /// Create a new dialog with body text and default OK/Cancel buttons.
+    public fn new(body: Text) -> Dialog {
+        let mut default_buttons = List.new();
+        default_buttons.push(DialogButton.new("OK"));
+        default_buttons.push(DialogButton.new("Cancel"));
+        let mut lines = List.new();
+        lines.push(Line.raw(body));
+        Dialog {
+            title: None,
+            body: lines,
+            buttons: default_buttons,
+            style: Style.DEFAULT,
+            border_type: BorderType.Rounded,
+            width_percent: 50,
+            button_spacing: 2,
+        }
+    }
+
+    /// Set the dialog title.
+    public fn title(self, title: Text) -> Dialog {
+        Dialog { title: Some(title), ..self }
+    }
+
+    /// Set the body text as a list of lines.
+    public fn body(self, body: List<Line>) -> Dialog {
+        Dialog { body: body, ..self }
+    }
+
+    /// Set the body from a single text string (splits on newlines).
+    public fn body_text(self, text: Text) -> Dialog {
+        let mut lines = List.new();
+        let parts = text.split("\n");
+        for part in &parts {
+            lines.push(Line.raw(part.clone()));
+        }
+        Dialog { body: lines, ..self }
+    }
+
+    /// Set the buttons.
+    public fn buttons(self, buttons: List<DialogButton>) -> Dialog {
+        Dialog { buttons: buttons, ..self }
+    }
+
+    /// Set the dialog style.
+    public fn style(self, style: Style) -> Dialog {
+        Dialog { style: style, ..self }
+    }
+
+    /// Set the border type.
+    public fn border_type(self, bt: BorderType) -> Dialog {
+        Dialog { border_type: bt, ..self }
+    }
+
+    /// Set the dialog width as a percentage of the available area [1-100].
+    public fn width_percent(self, p: Int) -> Dialog {
+        Dialog { width_percent: p.clamp(1, 100), ..self }
+    }
+
+    /// Set the spacing between buttons.
+    public fn button_spacing(self, spacing: Int) -> Dialog {
+        Dialog { button_spacing: spacing.max(0), ..self }
+    }
+}
+
+implement StatefulWidget for Dialog {
+    type State = DialogState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut DialogState) {
+        if area.width < 6 || area.height < 5 { return; }
+
+        // Calculate dialog width from percentage
+        let dialog_width = ((area.width * self.width_percent) / 100).max(6).min(area.width);
+
+        // Dialog height = body lines + 4 (border top + border bottom + button row + padding)
+        let dialog_height = (self.body.len() + 4).min(area.height);
+
+        // Center the dialog in the area
+        let dialog_x = area.x + (area.width - dialog_width) / 2;
+        let dialog_y = area.y + (area.height - dialog_height) / 2;
+        let dialog_rect = Rect.new(dialog_x, dialog_y, dialog_width, dialog_height);
+
+        // Clear the dialog area with background style
+        buf.set_style(dialog_rect, self.style);
+
+        // Draw border with optional title
+        let border_block = match self.title {
+            Some(ref t) => {
+                Block.new()
+                    .title(t.clone())
+                    .title_alignment(Alignment.Center)
+                    .borders(Borders.ALL)
+                    .border_type(self.border_type)
+                    .style(self.style)
+            }
+            None => {
+                Block.new()
+                    .borders(Borders.ALL)
+                    .border_type(self.border_type)
+                    .style(self.style)
+            }
+        };
+
+        let inner = border_block.inner(dialog_rect);
+        border_block.render(dialog_rect, buf);
+
+        if inner.width < 1 || inner.height < 1 { return; }
+
+        // Render body text (leave 1 row at bottom for buttons)
+        let body_max_lines = (inner.height - 1).max(0);
+        let mut y = inner.y;
+        let mut line_idx = 0;
+
+        for line in &self.body {
+            if line_idx >= body_max_lines { break; }
+            if y >= inner.bottom() - 1 { break; }
+
+            // Center each line horizontally
+            let line_width = line.width();
+            let line_x = inner.x + (inner.width - line_width).max(0) / 2;
+            let mut x = line_x;
+
+            for span in &line.spans {
+                let combined = self.style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined);
+            }
+
+            y = y + 1;
+            line_idx = line_idx + 1;
+        }
+
+        // Render buttons centered on the last row of the inner area
+        if self.buttons.len() > 0 {
+            let button_y = inner.bottom() - 1;
+
+            // Calculate total button row width
+            let total_button_width = compute_button_row_width(&self.buttons, self.button_spacing);
+            let mut bx = inner.x + (inner.width - total_button_width).max(0) / 2;
+
+            for i in 0..self.buttons.len() {
+                let button = &self.buttons[i];
+                let is_focused = i == state.focused_button;
+
+                // Use per-button focused/normal style
+                let btn_style = if is_focused {
+                    button.focused_style
+                } else {
+                    button.style
+                };
+
+                // Draw "[ label ]"
+                bx = buf.set_string(bx, button_y, "[ ", btn_style);
+                bx = buf.set_string(bx, button_y, &button.label, btn_style);
+                bx = buf.set_string(bx, button_y, " ]", btn_style);
+
+                // Add spacing between buttons
+                if i < self.buttons.len() - 1 {
+                    bx = bx + self.button_spacing;
+                }
+            }
+        }
+    }
+}
+
+/// Compute total width of the button row: sum of button widths + spacing.
+fn compute_button_row_width(buttons: &List<DialogButton>, spacing: Int) -> Int {
+    if buttons.len() == 0 { return 0; }
+    let mut total = 0;
+    for button in buttons {
+        total = total + button.width();
+    }
+    // Add spacing between buttons
+    total = total + spacing * (buttons.len() - 1);
+    total
+}

@@ -1,0 +1,255 @@
+// =============================================================================
+// async/mod.vr - Asynchronous programming module
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, collections, io, sync
+// =============================================================================
+//
+// This module provides asynchronous programming support:
+//
+// - poll.vr: Poll state for futures
+// - waker.vr: Waker and Context for async runtime
+// - future.vr: Future protocol and combinators
+// - task.vr: Task spawning and joining
+// - channel.vr: Async MPSC channels
+// - executor.vr: Simple async executor
+// - select.vr: Select expression support
+//
+// =============================================================================
+
+module async;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module poll;
+public module waker;
+public module future;
+public module task;
+public module channel;
+public module executor;
+public module select;
+public module stream;
+public module nursery;
+public module generator;
+public module broadcast;
+public module intrinsics;
+
+// Timer and interval utilities
+public module timer;
+
+// Enhanced spawn with retry and circuit breaker
+public module spawn_with;
+// Spawn configuration types
+public module spawn_config;
+
+// Parallel collection processing
+public module parallel;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// From poll
+public mount .poll.Poll;
+// Note: Ready/Pending are variant constructors - access via Poll.Ready/Poll.Pending
+
+// From waker
+public mount .waker.Waker;
+public mount .waker.Context;
+public mount .waker.RawWaker;
+public mount .waker.RawWakerVTable;
+
+// From future
+public mount .future.Future;
+public mount .future.IntoFuture;
+
+// From task
+public mount .task.Task;
+public mount .task.JoinHandle;
+public mount .task.spawn;
+public mount .task.spawn_detached;
+
+// From channel
+public mount .channel.channel;
+public mount .channel.Sender;
+public mount .channel.Receiver;
+public mount .channel.SendError;
+public mount .channel.RecvError;
+public mount .channel.TryRecvError;
+
+// From executor
+public mount .executor.Runtime;
+public mount .executor.block_on;
+
+// From select
+public mount .select.Either;
+public mount .select.select_either;
+public mount .select.race;
+public mount .select.select_all;
+public mount .select.SelectAllResult;
+public mount .select.join;
+public mount .select.join3;
+public mount .select.join4;
+public mount .select.join_all;
+public mount .select.timeout;
+public mount .select.TimeoutError;
+public mount .select.try_first;
+public mount .select.yield_now;
+public mount .select.pending_forever;
+public mount .select.ready;
+public mount .select.ReadyFuture;
+
+// From stream
+public mount .stream.Stream;
+public mount .stream.StreamExt;
+public mount .stream.IntoStream;
+
+// From generator
+public mount .generator.Generator;
+public mount .generator.AsyncGenerator;
+public mount .generator.generator_from_fn;
+public mount .generator.generator_unfold;
+public mount .generator.generator_range;
+public mount .generator.generator_repeat;
+public mount .generator.generator_successors;
+
+// From intrinsics (async-specific low-level operations)
+public mount .intrinsics.Executor;
+public mount .intrinsics.spawn_with_env;
+public mount .intrinsics.executor_spawn;
+public mount .intrinsics.executor_block_on;
+public mount .intrinsics.future_poll_sync;
+public mount .intrinsics.async_sleep_ms;
+public mount .intrinsics.async_sleep_ns;
+
+// From timer
+public mount .timer.Sleep;
+public mount .timer.SleepUntil;
+public mount .timer.Interval;
+public mount .timer.Delay;
+public mount .timer.Timeout;
+public mount .timer.TimeoutError;
+public mount .timer.Debounce;
+public mount .timer.Throttle;
+public mount .timer.sleep;
+public mount .timer.sleep_ms;
+public mount .timer.sleep_secs;
+public mount .timer.sleep_until;
+public mount .timer.delay;
+public mount .timer.timeout;
+public mount .timer.timeout_ms;
+
+// From nursery (structured concurrency)
+public mount .nursery.Nursery;
+public mount .nursery.NurseryError;
+public mount .nursery.NurseryErrorBehavior;
+public mount .nursery.NurseryOptions;
+public mount .nursery.TaskHandle;
+public mount .nursery.with_nursery;
+public mount .nursery.with_nursery_timeout;
+// From broadcast (multi-consumer broadcast channel)
+public mount .broadcast.BroadcastSender;
+public mount .broadcast.BroadcastReceiver;
+public mount .broadcast.broadcast_channel;
+public mount .broadcast.SendError;
+public mount .broadcast.RecvError;
+public mount .broadcast.TryRecvResult;
+
+// From stream (additional re-exports)
+public mount .stream.StreamReduce;
+
+public mount .stream.iter;
+public mount .stream.once;
+public mount .stream.once_future;
+public mount .stream.empty;
+public mount .stream.repeat;
+public mount .stream.repeat_n;
+public mount .stream.from_fn;
+public mount .stream.poll_fn;
+public mount .stream.unfold;
+public mount .stream.interval;
+public mount .stream.Iter;
+public mount .stream.StreamOnce;
+public mount .stream.StreamEmpty;
+public mount .stream.StreamRepeat;
+public mount .stream.StreamRepeatN;
+public mount .stream.StreamFromFn;
+public mount .stream.StreamUnfold;
+public mount .stream.Interval;
+public mount .stream.Map;
+public mount .stream.Filter;
+public mount .stream.FilterMap;
+public mount .stream.Take;
+public mount .stream.Skip;
+public mount .stream.Chain;
+public mount .stream.Zip;
+public mount .stream.Enumerate;
+public mount .stream.Flatten;
+public mount .stream.Fuse;
+public mount .stream.Peekable;
+
+// From spawn_config
+public mount .spawn_config.SpawnConfig;
+public mount .spawn_config.RecoveryStrategy;
+public mount .spawn_config.RetryConfig;
+public mount .spawn_config.CircuitBreakerConfig;
+public mount .spawn_config.RestartPolicy;
+public mount .spawn_config.IsolationLevel;
+public mount .spawn_config.Priority;
+
+// From spawn_with (retry and circuit breaker)
+public mount .spawn_with.execute_with_retry;
+public mount .spawn_with.execute_with_retry_config;
+public mount .spawn_with.CircuitBreaker;
+public mount .spawn_with.CircuitState;
+
+// From parallel (parallel collection processing)
+public mount .parallel.parallel_map;
+public mount .parallel.parallel_filter_map;
+public mount .parallel.parallel_for_each;
+public mount .parallel.parallel_reduce;
+
+// =============================================================================
+// Prelude exports
+// =============================================================================
+
+public module prelude {
+    public mount super.Future;
+    public mount super.Poll;
+    // Note: Ready/Pending are variant constructors - access via Poll.Ready/Poll.Pending
+    public mount super.Task;
+    public mount super.spawn;
+    public mount super.block_on;
+    public mount super.channel;
+    public mount super.Sender;
+    public mount super.Receiver;
+
+    // Selection combinators
+    public mount super.select_either;
+    public mount super.join;
+    public mount super.join_all;
+    public mount super.timeout;
+    public mount super.yield_now;
+
+    // Streams
+    public mount super.Stream;
+    public mount super.StreamExt;
+    public mount super.iter;
+
+    // Generators
+    public mount super.Generator;
+    public mount super.AsyncGenerator;
+
+    // Timer
+    public mount super.sleep;
+    public mount super.sleep_ms;
+    public mount super.timeout;
+
+    // Structured Concurrency
+    public mount super.Nursery;
+    public mount super.NurseryError;
+    public mount super.NurseryOptions;
+    public mount super.TaskHandle;
+}

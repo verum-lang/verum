@@ -1,0 +1,287 @@
+// =============================================================================
+// broadcast.vr - Broadcast Channel
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, collections, async/poll, async/waker
+// =============================================================================
+//
+// A multi-producer, multi-consumer broadcast channel. Each value sent by any
+// sender is received by ALL active receivers.
+//
+// # Architecture
+//
+// Uses a ring buffer with a shared state. Each receiver tracks its own
+// position in the buffer independently. When a sender writes, it advances
+// the global write position. Receivers catch up to the write position at
+// their own pace.
+//
+// If a slow receiver falls behind by more than the capacity, it will
+// receive a Lagged error indicating how many messages were missed.
+//
+// # Example
+//
+// ```verum
+// let (tx, rx1) = broadcast_channel(16);
+// let rx2 = tx.subscribe();
+//
+// tx.send(42);
+//
+// assert_eq(rx1.recv(), Ok(42));
+// assert_eq(rx2.recv(), Ok(42));
+// ```
+//
+// =============================================================================
+
+module broadcast;
+
+mount core.*;
+mount core.collections.*;
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// Error returned when sending to a closed broadcast channel.
+public type SendError<T> is {
+    /// The value that failed to send.
+    value: T,
+};
+
+/// Error returned when receiving from a broadcast channel.
+public type RecvError is
+    | Closed          // All senders have been dropped
+    | Lagged(Int);    // Receiver fell behind by N messages
+
+/// Result of a non-blocking receive attempt.
+public type TryRecvResult<T> is
+    | Value(T)        // Successfully received a value
+    | Empty           // No values available right now
+    | Closed          // Channel is closed
+    | Lagged(Int);    // Receiver fell behind
+
+// =============================================================================
+// Shared Inner State
+// =============================================================================
+
+/// Internal shared state for the broadcast channel.
+///
+/// Uses a ring buffer of fixed capacity. The write_pos is a monotonically
+/// increasing counter; actual buffer index is write_pos % capacity.
+type BroadcastInner<T> is {
+    /// Ring buffer storage
+    buffer: List<Maybe<T>>,
+    /// Capacity of the ring buffer
+    capacity: Int,
+    /// Current write position (monotonically increasing)
+    write_pos: Int,
+    /// Number of active senders
+    sender_count: Int,
+    /// Number of active receivers
+    receiver_count: Int,
+    /// Whether the channel has been closed
+    closed: Bool,
+};
+
+/// Create a new shared inner state.
+fn new_inner<T>(capacity: Int) -> BroadcastInner<T> {
+    let mut buf: List<Maybe<T>> = [];
+    let mut i = 0;
+    while i < capacity {
+        buf.push(None);
+        i = i + 1;
+    }
+    BroadcastInner {
+        buffer: buf,
+        capacity: capacity,
+        write_pos: 0,
+        sender_count: 1,
+        receiver_count: 1,
+        closed: false,
+    }
+}
+
+// =============================================================================
+// BroadcastSender
+// =============================================================================
+
+/// Sender half of a broadcast channel.
+///
+/// Can be cloned to create additional senders. All senders share the same
+/// underlying channel. When all senders are dropped, the channel is closed.
+///
+/// Use `subscribe()` to create new receivers.
+public type BroadcastSender<T> is {
+    inner: Shared<BroadcastInner<T>>,
+};
+
+implement<T> BroadcastSender<T> {
+    /// Send a value to all current receivers.
+    ///
+    /// Returns `Ok(receiver_count)` with the number of active receivers,
+    /// or `Err(SendError)` if there are no active receivers.
+    ///
+    /// The value is cloned for each receiver.
+    public fn send(&mut self, value: T) -> Result<Int, SendError<T>> {
+        let inner = &mut *self.inner;
+        if inner.receiver_count == 0 {
+            return Err(SendError { value: value });
+        }
+
+        let idx = inner.write_pos % inner.capacity;
+        inner.buffer[idx] = Some(value);
+        inner.write_pos = inner.write_pos + 1;
+
+        Ok(inner.receiver_count)
+    }
+
+    /// Create a new receiver that will receive all future messages.
+    ///
+    /// The new receiver starts from the current write position and will
+    /// NOT receive any previously sent messages.
+    public fn subscribe(&self) -> BroadcastReceiver<T> {
+        let inner = &mut *self.inner;
+        inner.receiver_count = inner.receiver_count + 1;
+
+        BroadcastReceiver {
+            inner: self.inner,
+            read_pos: inner.write_pos,
+        }
+    }
+
+    /// Get the number of active receivers.
+    public fn receiver_count(&self) -> Int {
+        let inner = &*self.inner;
+        inner.receiver_count
+    }
+
+    /// Close the channel. All subsequent receives will return `Closed`.
+    public fn close(&mut self) {
+        let inner = &mut *self.inner;
+        inner.closed = true;
+    }
+}
+
+// =============================================================================
+// BroadcastReceiver
+// =============================================================================
+
+/// Receiver half of a broadcast channel.
+///
+/// Each receiver independently tracks its position in the ring buffer.
+/// All receivers see all messages sent after they were created.
+public type BroadcastReceiver<T> is {
+    inner: Shared<BroadcastInner<T>>,
+    /// This receiver's current read position
+    read_pos: Int,
+};
+
+implement<T> BroadcastReceiver<T> {
+    /// Receive the next value from the channel.
+    ///
+    /// Returns `Ok(value)` if a message is available, or an error:
+    /// - `Err(Closed)` if all senders are dropped and no messages remain
+    /// - `Err(Lagged(n))` if this receiver fell behind by n messages;
+    ///   the read position is advanced to the oldest available message
+    public fn recv(&mut self) -> Result<T, RecvError> {
+        let inner = &*self.inner;
+
+        // Check if we've fallen behind
+        let behind = inner.write_pos - self.read_pos;
+        if behind > inner.capacity {
+            let missed = behind - inner.capacity;
+            // Jump to the oldest available message
+            self.read_pos = inner.write_pos - inner.capacity;
+            return Err(RecvError.Lagged(missed));
+        }
+
+        // Check if there's data available
+        if self.read_pos >= inner.write_pos {
+            if inner.closed || inner.sender_count == 0 {
+                return Err(RecvError.Closed);
+            }
+            // No data yet — in a real async implementation this would
+            // register with a waker and return Pending
+            return Err(RecvError.Closed);
+        }
+
+        let idx = self.read_pos % inner.capacity;
+        self.read_pos = self.read_pos + 1;
+
+        match inner.buffer[idx] {
+            Some(val) => Ok(val),
+            None => Err(RecvError.Closed),
+        }
+    }
+
+    /// Attempt to receive without blocking.
+    ///
+    /// Returns immediately with the current state.
+    public fn try_recv(&mut self) -> TryRecvResult<T> {
+        let inner = &*self.inner;
+
+        // Check lagged
+        let behind = inner.write_pos - self.read_pos;
+        if behind > inner.capacity {
+            let missed = behind - inner.capacity;
+            self.read_pos = inner.write_pos - inner.capacity;
+            return TryRecvResult.Lagged(missed);
+        }
+
+        // Check empty
+        if self.read_pos >= inner.write_pos {
+            if inner.closed || inner.sender_count == 0 {
+                return TryRecvResult.Closed;
+            }
+            return TryRecvResult.Empty;
+        }
+
+        let idx = self.read_pos % inner.capacity;
+        self.read_pos = self.read_pos + 1;
+
+        match inner.buffer[idx] {
+            Some(val) => TryRecvResult.Value(val),
+            None => TryRecvResult.Closed,
+        }
+    }
+
+    /// Get the number of messages available to read.
+    public fn len(&self) -> Int {
+        let inner = &*self.inner;
+        let behind = inner.write_pos - self.read_pos;
+        if behind > inner.capacity {
+            inner.capacity
+        } else {
+            behind
+        }
+    }
+
+    /// Check if there are no messages available.
+    public fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+}
+
+// =============================================================================
+// Factory Function
+// =============================================================================
+
+/// Create a new broadcast channel with the given capacity.
+///
+/// Returns a (sender, receiver) pair. Additional receivers can be created
+/// by calling `sender.subscribe()`.
+///
+/// The capacity determines the maximum number of messages that can be
+/// buffered before slow receivers start lagging.
+///
+/// # Example
+/// ```verum
+/// let (tx, rx) = broadcast_channel(32);
+/// tx.send("hello");
+/// assert_eq(rx.recv(), Ok("hello"));
+/// ```
+public fn broadcast_channel<T>(capacity: Int) -> (BroadcastSender<T>, BroadcastReceiver<T>) {
+    let inner = Shared(new_inner(capacity));
+    let sender = BroadcastSender { inner: inner };
+    let receiver = BroadcastReceiver { inner: inner, read_pos: 0 };
+    (sender, receiver)
+}

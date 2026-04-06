@@ -1,0 +1,63 @@
+// =============================================================================
+// event/mod.vr - Layer 1: Event System
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: core.time, core.io, core.term.raw
+// =============================================================================
+//
+// Terminal event system: keyboard, mouse, resize, paste, and focus events.
+// Includes a full ANSI input sequence parser (CSI/SS3/OSC FSM), platform
+// event source (poll/read), and sync/async EventStream.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
+// =============================================================================
+
+module event;
+
+mount core.time.Duration;
+mount core.io.{IoResult, StreamError, IoErrorKind};
+
+// =============================================================================
+// Sub-modules
+// =============================================================================
+
+/// Event types: Event, KeyEvent, MouseEvent, ResizeEvent, etc.
+public module types;
+
+/// Key codes and modifier bitfield.
+public module keys;
+
+/// ANSI input sequence parser (FSM).
+public module parser;
+
+/// Platform event source (poll/read with timeout).
+public module source;
+
+/// EventStream: sync poll + blocking read.
+public module stream;
+
+/// Mouse protocol helpers (SGR parsing, enable/disable sequences).
+public module mouse;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// Event types
+public mount .types.{
+    Event, KeyEvent, KeyEventKind,
+    MouseEvent, MouseEventKind, MouseButton,
+    ResizeEvent,
+};
+
+// Key codes and modifiers
+public mount .keys.{KeyCode, Modifiers};
+
+// Parser
+public mount .parser.InputParser;
+
+// Stream
+public mount .stream.{EventStream, AsyncEventStream};
+
+// Mouse helpers
+public mount .mouse.{parse_sgr_mouse, mouse_enable_sequence, mouse_disable_sequence};

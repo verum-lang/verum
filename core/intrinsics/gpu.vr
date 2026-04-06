@@ -1,0 +1,199 @@
+// =============================================================================
+// core/intrinsics/gpu.vr - GPU Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides GPU operations that map to VBC GPU opcodes.
+// On the interpreter, all operations use CPU fallback (malloc/free for memory,
+// no-ops for synchronization, direct function calls for kernel launch).
+//
+// # Operations
+//
+// - Device: gpu_get_device, gpu_set_device, gpu_device_reset, gpu_mem_info
+// - Memory: gpu_malloc, gpu_free, gpu_memcpy, gpu_memset, gpu_pin_memory
+// - Streams: gpu_stream_create, gpu_stream_destroy, gpu_sync
+// - Events: gpu_event_create, gpu_event_destroy, gpu_event_record, gpu_event_elapsed
+// - Kernel: gpu_launch
+// - Enumeration: gpu_enumerate_cuda, gpu_enumerate_metal, gpu_enumerate_rocm
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.gpu;
+
+// =============================================================================
+// SECTION 1: Device Management
+// =============================================================================
+
+/// Get current GPU device ID
+public fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+/// Set current GPU device
+public fn gpu_set_device(device_id: Int) -> Int { @intrinsic("GPU_SET_DEVICE", device_id) }
+
+/// Reset GPU device state
+public fn gpu_device_reset() -> Int { @intrinsic("GPU_DEVICE_RESET") }
+
+/// Get GPU memory info (returns total, free)
+public fn gpu_mem_info() -> Int { @intrinsic("GPU_MEM_INFO") }
+
+/// Check if peer access is possible between devices
+public fn gpu_can_peer(dev_a: Int, dev_b: Int) -> Int { @intrinsic("GPU_CAN_PEER", dev_a, dev_b) }
+
+/// Enable peer access between devices
+public fn gpu_enable_peer(dev_a: Int, dev_b: Int) -> Int { @intrinsic("GPU_ENABLE_PEER", dev_a, dev_b) }
+
+/// Disable peer access between devices
+public fn gpu_disable_peer(dev_a: Int, dev_b: Int) -> Int { @intrinsic("GPU_DISABLE_PEER", dev_a, dev_b) }
+
+// =============================================================================
+// SECTION 2: Memory Operations
+// =============================================================================
+
+/// Allocate GPU device memory
+public fn gpu_malloc(size: Int, memory_space: Int) -> Int { @intrinsic("GPU_MALLOC", size, memory_space) }
+
+/// Allocate managed GPU memory (accessible from host and device)
+public fn gpu_malloc_managed(size: Int) -> Int { @intrinsic("GPU_MALLOC_MANAGED", size) }
+
+/// Free GPU memory
+public fn gpu_free(ptr: Int) -> Int { @intrinsic("GPU_FREE", ptr) }
+
+/// Pin host memory for faster transfers
+public fn gpu_pin_memory(ptr: Int, size: Int) -> Int { @intrinsic("GPU_PIN_MEMORY", ptr, size) }
+
+/// Unpin host memory
+public fn gpu_unpin_memory(ptr: Int) -> Int { @intrinsic("GPU_UNPIN_MEMORY", ptr) }
+
+/// Prefetch memory to device
+public fn gpu_prefetch(ptr: Int, size: Int, device: Int) -> Int { @intrinsic("GPU_PREFETCH", ptr, size, device) }
+
+/// Synchronous GPU memory copy
+public fn gpu_memcpy(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY", dst, src, size) }
+
+/// Asynchronous GPU memory copy
+public fn gpu_memcpy_async(dst: Int, src: Int, size: Int, stream: Int) -> Int { @intrinsic("GPU_MEMCPY_ASYNC", dst, src, size, stream) }
+
+/// Host-to-device memory copy
+public fn gpu_memcpy_h2d(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY_H2D", dst, src, size) }
+
+/// Device-to-host memory copy
+public fn gpu_memcpy_d2h(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY_D2H", dst, src, size) }
+
+/// Device-to-device memory copy
+public fn gpu_memcpy_d2d(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY_D2D", dst, src, size) }
+
+/// GPU memory set
+public fn gpu_memset(ptr: Int, value: Int, size: Int) -> Int { @intrinsic("GPU_MEMSET", ptr, value, size) }
+
+/// Asynchronous GPU memory set
+public fn gpu_memset_async(ptr: Int, value: Int, size: Int, stream: Int) -> Int { @intrinsic("GPU_MEMSET_ASYNC", ptr, value, size, stream) }
+
+// =============================================================================
+// SECTION 3: Stream Management
+// =============================================================================
+
+/// Create GPU stream
+public fn gpu_stream_create() -> Int { @intrinsic("GPU_STREAM_CREATE") }
+
+/// Create GPU stream with priority
+public fn gpu_stream_create_prio(priority: Int) -> Int { @intrinsic("GPU_STREAM_CREATE_PRIO", priority) }
+
+/// Destroy GPU stream
+public fn gpu_stream_destroy(stream: Int) -> Int { @intrinsic("GPU_STREAM_DESTROY", stream) }
+
+/// Query stream completion status
+public fn gpu_stream_query(stream: Int) -> Int { @intrinsic("GPU_STREAM_QUERY", stream) }
+
+/// Make stream wait on event
+public fn gpu_stream_wait_event(stream: Int, event: Int) -> Int { @intrinsic("GPU_STREAM_WAIT_EVENT", stream, event) }
+
+/// Synchronize stream (wait for all operations to complete)
+public fn gpu_sync(stream: Int) -> Int { @intrinsic("GPU_SYNC", stream) }
+
+/// Synchronize all streams on all devices
+public fn gpu_sync_all() -> Int { @intrinsic("GPU_SYNC_ALL") }
+
+// =============================================================================
+// SECTION 4: Event Management
+// =============================================================================
+
+/// Create GPU event
+public fn gpu_event_create() -> Int { @intrinsic("GPU_EVENT_CREATE") }
+
+/// Create GPU event with flags
+public fn gpu_event_create_f(flags: Int) -> Int { @intrinsic("GPU_EVENT_CREATE_F", flags) }
+
+/// Destroy GPU event
+public fn gpu_event_destroy(event: Int) -> Int { @intrinsic("GPU_EVENT_DESTROY", event) }
+
+/// Record event on stream
+public fn gpu_event_record(event: Int, stream: Int) -> Int { @intrinsic("GPU_EVENT_RECORD", event, stream) }
+
+/// Synchronize event (wait for event to complete)
+public fn gpu_event_sync(event: Int) -> Int { @intrinsic("GPU_EVENT_SYNC", event) }
+
+/// Query event completion status
+public fn gpu_event_query(event: Int) -> Int { @intrinsic("GPU_EVENT_QUERY", event) }
+
+/// Get elapsed time between two events (in milliseconds)
+public fn gpu_event_elapsed(start: Int, end: Int) -> Int { @intrinsic("GPU_EVENT_ELAPSED", start, end) }
+
+// =============================================================================
+// SECTION 5: Kernel Launch
+// =============================================================================
+
+/// Launch GPU kernel
+public fn gpu_launch(kernel_id: Int, grid: Int, block: Int, shared_mem: Int, stream: Int, args: Int) -> Int { @intrinsic("GPU_LAUNCH", kernel_id, grid, block, shared_mem, stream, args) }
+
+/// Launch cooperative GPU kernel
+public fn gpu_launch_coop(kernel_id: Int, grid: Int, block: Int, shared_mem: Int, stream: Int, args: Int) -> Int { @intrinsic("GPU_LAUNCH_COOP", kernel_id, grid, block, shared_mem, stream, args) }
+
+// =============================================================================
+// SECTION 6: Device Enumeration
+// =============================================================================
+
+/// Enumerate CUDA-capable devices
+public fn gpu_enumerate_cuda() -> Int { @intrinsic("GPU_ENUMERATE_CUDA") }
+
+/// Enumerate Metal-capable devices (macOS/iOS)
+public fn gpu_enumerate_metal() -> Int { @intrinsic("GPU_ENUMERATE_METAL") }
+
+/// Enumerate ROCm-capable devices (AMD)
+public fn gpu_enumerate_rocm() -> Int { @intrinsic("GPU_ENUMERATE_ROCM") }
+
+/// Enumerate Vulkan-capable devices
+public fn gpu_enumerate_vulkan() -> Int { @intrinsic("GPU_ENUMERATE_VULKAN") }
+
+// =============================================================================
+// SECTION 7: Graph Operations
+// =============================================================================
+
+/// Create GPU graph
+public fn gpu_graph_create() -> Int { @intrinsic("GPU_GRAPH_CREATE") }
+
+/// Begin graph capture
+public fn gpu_graph_begin(stream: Int) -> Int { @intrinsic("GPU_GRAPH_BEGIN", stream) }
+
+/// End graph capture
+public fn gpu_graph_end(stream: Int) -> Int { @intrinsic("GPU_GRAPH_END", stream) }
+
+/// Instantiate graph for execution
+public fn gpu_graph_inst(graph: Int) -> Int { @intrinsic("GPU_GRAPH_INST", graph) }
+
+/// Launch graph execution
+public fn gpu_graph_launch(exec: Int, stream: Int) -> Int { @intrinsic("GPU_GRAPH_LAUNCH", exec, stream) }
+
+/// Destroy GPU graph
+public fn gpu_graph_destroy(graph: Int) -> Int { @intrinsic("GPU_GRAPH_DESTROY", graph) }
+
+// =============================================================================
+// SECTION 8: Profiling Markers
+// =============================================================================
+
+/// Push profiling marker
+public fn gpu_marker_push(name: Int) -> Int { @intrinsic("GPU_MARKER_PUSH", name) }
+
+/// Pop profiling marker
+public fn gpu_marker_pop() -> Int { @intrinsic("GPU_MARKER_POP") }

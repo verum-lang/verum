@@ -1,0 +1,78 @@
+// =============================================================================
+// runtime/ctx_bridge.vr — Bridge between AOT CtxGet/CtxProvide and core/sys TLS
+// =============================================================================
+// Layer: 1 (Runtime)
+// Dependencies: sys.common (ctx_get, ctx_set)
+// =============================================================================
+//
+// This module provides the bridge functions that AOT-compiled code calls for
+// context operations. Instead of hardcoded LLVM IR in platform_ir.rs, the AOT
+// pipeline calls these compiled .vr functions which delegate to the platform's
+// TLS-based slot storage.
+//
+// Architecture:
+//   CtxGet VBC opcode → instruction.rs → env_ctx_get() → ctx_get() → TLS slot
+//   CtxProvide opcode → instruction.rs → env_ctx_provide() → ctx_set() → TLS slot
+//   Spawn opcode      → instruction.rs → fork_current_env() → shallow copy
+//
+// This eliminates hardcoded context logic from the compiler, routing all
+// context operations through compiled Verum code.
+// =============================================================================
+
+module core.runtime.ctx_bridge;
+mount sys.common.{ctx_get, ctx_set};
+
+// =============================================================================
+// Context Get/Set Bridge
+// =============================================================================
+
+/// Get a context value from the current execution environment by slot ID.
+/// Returns the context value as Int (pointer), or 0 if not set.
+/// Called by AOT-compiled CtxGet instruction.
+public fn env_ctx_get(slot_id: Int) -> Int {
+    ctx_get(slot_id)
+}
+
+/// Set a context value in the current execution environment.
+/// Called by AOT-compiled CtxProvide instruction.
+public fn env_ctx_set(slot_id: Int, value: Int) {
+    ctx_set(slot_id, value);
+}
+
+/// Remove a context value from the current execution environment.
+/// Called by AOT-compiled CtxEnd instruction.
+public fn env_ctx_end(slot_id: Int) {
+    ctx_set(slot_id, 0);
+}
+
+// =============================================================================
+// Environment Fork for Spawn
+// =============================================================================
+
+/// Get the number of active context slots in the current environment.
+/// Used by spawn to know how many slots to copy to the child.
+public fn env_active_slot_count() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 256 {
+        if ctx_get(i) != 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+/// Copy all active context slots from the current thread to a new thread.
+/// Called by the spawn trampoline after thread creation.
+/// Takes a packed array of (slot_id, value) pairs.
+public fn env_install_parent_contexts(slots_ptr: Int, count: Int) {
+    let mut i = 0;
+    while i < count {
+        // Each entry is 16 bytes: [slot_id: i64, value: i64]
+        let slot_id = __load_i64(slots_ptr + i * 16);
+        let value = __load_i64(slots_ptr + i * 16 + 8);
+        ctx_set(slot_id, value);
+        i = i + 1;
+    }
+}

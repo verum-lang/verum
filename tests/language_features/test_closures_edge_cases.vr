@@ -1,0 +1,70 @@
+// Test closure edge cases and type inference
+
+fn main() {
+    // Test 1: Type inference for closure parameters
+    print("=== Test 1: Type inference ===");
+    let inferred = |x| x + 1;  // Should infer x: Int
+    print(f"inferred(5) = {inferred(5)}");
+
+    // Test 2: Nested closures with captures
+    print("\n=== Test 2: Nested closures ===");
+    let outer = 10;
+    let f1 = |x: Int| {
+        let inner = 5;
+        let f2 = |y: Int| x + y + outer + inner;
+        f2(3)
+    };
+    print(f"nested result = {f1(2)}");
+
+    // Test 3: Closure stored in variable, called later
+    print("\n=== Test 3: Stored closure ===");
+    let multiplier = 3;
+    let stored = |x: Int| x * multiplier;
+    let values = [1, 2, 3, 4, 5];
+    for val in values {
+        print(f"{val} * {multiplier} = {stored(val)}");
+    }
+
+    // Test 4: Closure with conditional
+    print("\n=== Test 4: Conditional closure ===");
+    let classify = |n: Int| {
+        if n > 0 {
+            "positive"
+        } else if n < 0 {
+            "negative"
+        } else {
+            "zero"
+        }
+    };
+    print(f"classify(5) = {classify(5)}");
+    print(f"classify(-3) = {classify(-3)}");
+    print(f"classify(0) = {classify(0)}");
+
+    // Test 5: Closure with match expression
+    print("\n=== Test 5: Match in closure ===");
+    let describe = |n: Int| match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "many",
+    };
+    print(f"describe(0) = {describe(0)}");
+    print(f"describe(1) = {describe(1)}");
+    print(f"describe(5) = {describe(5)}");
+
+    // Test 6: Multiple closures with same capture
+    print("\n=== Test 6: Shared capture ===");
+    let shared = 100;
+    let add_shared = |x: Int| x + shared;
+    let sub_shared = |x: Int| x - shared;
+    let mul_shared = |x: Int| x * shared;
+    print(f"add: {add_shared(50)}");
+    print(f"sub: {sub_shared(150)}");
+    print(f"mul: {mul_shared(2)}");
+
+    // Test 7: Closure calling closure
+    print("\n=== Test 7: Closure calling closure ===");
+    let double = |x: Int| x * 2;
+    let quad = |x: Int| double(double(x));
+    print(f"quad(3) = {quad(3)}");
+}

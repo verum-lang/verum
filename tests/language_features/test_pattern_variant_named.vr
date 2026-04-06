@@ -1,0 +1,13 @@
+type Color is
+    | Rgb { r: Int, g: Int, b: Int }
+    | Rgba { r: Int, g: Int, b: Int, a: Int };
+
+fn main() {
+    // Test: Named field variant pattern
+    let color = Color.Rgba { r: 100, g: 150, b: 200, a: 255 };
+    match color {
+        Color.Rgba { r, g, b, a } => print(f"RGBA: {r}, {g}, {b}, {a}"),
+        Color.Rgb { r, g, b } => print(f"RGB: {r}, {g}, {b}"),
+    }
+    print(f"Named field variant pattern test complete!");
+}

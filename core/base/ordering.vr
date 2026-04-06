@@ -1,0 +1,178 @@
+// =============================================================================
+// ordering.vr - Ordering enum for comparison results
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: protocols.vr (for Eq, Clone, Copy, Default, Debug, Display)
+// =============================================================================
+
+// Import protocols used by impl blocks
+
+module core.base.ordering;
+mount core.result.{Result, Ok, Err};
+mount core.protocols.{Eq, Clone, Copy, Default, Debug, Display, Formatter, FormatError};
+
+/// Result of a comparison operation.
+/// Used by the Ord protocol to express ordering relationships.
+public type Ordering is Less | Equal | Greater;
+
+implement Ordering {
+    /// Returns true if the ordering is Less.
+    public fn is_less(&self) -> Bool {
+        match self {
+            Less => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the ordering is Equal.
+    public fn is_equal(&self) -> Bool {
+        match self {
+            Equal => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the ordering is Greater.
+    public fn is_greater(&self) -> Bool {
+        match self {
+            Greater => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the ordering is Less or Equal.
+    public fn is_le(&self) -> Bool {
+        match self {
+            Less => true,
+            Equal => true,
+            Greater => false,
+        }
+    }
+
+    /// Returns true if the ordering is Greater or Equal.
+    public fn is_ge(&self) -> Bool {
+        match self {
+            Less => false,
+            Equal => true,
+            Greater => true,
+        }
+    }
+
+    /// Reverses the ordering: Less becomes Greater and vice versa.
+    public fn reverse(self) -> Ordering {
+        match self {
+            Less => Greater,
+            Equal => Equal,
+            Greater => Less,
+        }
+    }
+
+    /// Chains two orderings: returns `other` if self is Equal, otherwise returns self.
+    /// Useful for lexicographic comparison of multiple fields.
+    public fn then(self, other: Ordering) -> Ordering {
+        match self {
+            Equal => other,
+            _ => self,
+        }
+    }
+
+    /// Chains with a lazily computed ordering.
+    public fn then_with<F: fn() -> Ordering>(self, f: F) -> Ordering {
+        match self {
+            Equal => f(),
+            _ => self,
+        }
+    }
+
+    /// Converts to an integer: -1 for Less, 0 for Equal, 1 for Greater.
+    public fn to_int(self) -> Int {
+        match self {
+            Less => -1,
+            Equal => 0,
+            Greater => 1,
+        }
+    }
+
+    /// Creates an Ordering from an integer comparison result.
+    /// Negative -> Less, Zero -> Equal, Positive -> Greater.
+    public fn from_int(n: Int) -> Ordering {
+        if n < 0 { Less }
+        else if n > 0 { Greater }
+        else { Equal }
+    }
+}
+
+// =============================================================================
+// Equality for Ordering
+// =============================================================================
+
+implement Eq for Ordering {
+    fn eq(&self, other: &Ordering) -> Bool {
+        match (self, other) {
+            (Less, Less) => true,
+            (Equal, Equal) => true,
+            (Greater, Greater) => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Clone for Ordering
+// =============================================================================
+
+implement Clone for Ordering {
+    fn clone(&self) -> Ordering {
+        match self {
+            Less => Less,
+            Equal => Equal,
+            Greater => Greater,
+        }
+    }
+}
+
+// =============================================================================
+// Copy marker (Ordering is trivially copyable)
+// =============================================================================
+
+implement Copy for Ordering {}
+
+// =============================================================================
+// Default for Ordering
+// =============================================================================
+
+implement Default for Ordering {
+    fn default() -> Ordering {
+        Equal
+    }
+}
+
+// =============================================================================
+// Debug for Ordering
+// =============================================================================
+
+implement Debug for Ordering {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Less => "Less",
+            Equal => "Equal",
+            Greater => "Greater",
+        };
+        f.write_str(s)
+    }
+}
+
+// =============================================================================
+// Display for Ordering
+// =============================================================================
+
+implement Display for Ordering {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Less => "<",
+            Equal => "=",
+            Greater => ">",
+        };
+        f.write_str(s)
+    }
+}

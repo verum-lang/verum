@@ -1,0 +1,438 @@
+// Test: Control Flow - All control flow constructs
+// Priority: Critical
+// Expected output: Control flow operations
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+fn main() {
+    // ========== IF/ELSE ==========
+
+    // 1. Simple if
+    let x = 10;
+    if x > 5 {
+        print(f"x is greater than 5");
+    }
+
+    // 2. If-else
+    if x > 20 {
+        print(f"x > 20");
+    } else {
+        print(f"x <= 20");
+    }
+
+    // 3. If-else-if chain
+    let score = 85;
+    if score >= 90 {
+        print(f"Grade: A");
+    } else if score >= 80 {
+        print(f"Grade: B");
+    } else if score >= 70 {
+        print(f"Grade: C");
+    } else {
+        print(f"Grade: F");
+    }
+
+    // 4. If expression
+    let message = if x > 5 {
+        "greater"
+    } else {
+        "not greater"
+    };
+    print(f"Message: {message}");
+
+    // 5. Nested if
+    let a = 5;
+    let b = 10;
+    if a > 0 {
+        if b > 0 {
+            print(f"Both positive");
+        }
+    }
+
+    // 6. If with complex condition
+    if a > 0 && b > 0 && a < b {
+        print(f"a is positive and less than b");
+    }
+
+    // 7. If-let pattern
+    let maybe_val: Maybe<Int> = Maybe.Some(42);
+    if let Maybe.Some(v) = maybe_val {
+        print(f"If-let value: {v}");
+    }
+
+    // 8. If-let with else
+    if let Maybe.Some(v) = maybe_val {
+        print(f"Got some: {v}");
+    } else {
+        print(f"Got none");
+    }
+
+    // 9. If-let with multiple conditions
+    let maybe_x: Maybe<Int> = Maybe.Some(5);
+    let maybe_y: Maybe<Int> = Maybe.Some(10);
+    if let Maybe.Some(x) = maybe_x && let Maybe.Some(y) = maybe_y {
+        print(f"Both some: {x}, {y}");
+    }
+
+    // ========== MATCH ==========
+
+    // 10. Basic match
+    let color = 1;
+    match color {
+        0 => print(f"Red"),
+        1 => print(f"Green"),
+        2 => print(f"Blue"),
+        _ => print(f"Other"),
+    }
+
+    // 11. Match with guards (if)
+    let num = 15;
+    match num {
+        n if n < 0 => print(f"Negative"),
+        n if n == 0 => print(f"Zero"),
+        n if n > 0 && n < 10 => print(f"Small positive"),
+        n if n >= 10 => print(f"Large positive"),
+        _ => print(f"Unreachable"),
+    }
+
+    // 12. Match with guards (where)
+    match num {
+        n where n < 10 => print(f"Small"),
+        n where n >= 10 => print(f"Large"),
+    }
+
+    // 13. Match on Maybe
+    match maybe_val {
+        Maybe.Some(v) => print(f"Match some: {v}"),
+        Maybe.None => print(f"Match none"),
+    }
+
+    // 14. Match on Result
+    let result: Result<Int, Text> = Result.Ok(100);
+    match result {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // 15. Match with multiple patterns
+    let digit = 5;
+    match digit {
+        1 | 2 | 3 => print(f"Low"),
+        4 | 5 | 6 => print(f"Mid"),
+        7 | 8 | 9 => print(f"High"),
+        _ => print(f"Other"),
+    }
+
+    // 16. Match with range
+    match score {
+        0..=59 => print(f"Fail"),
+        60..=100 => print(f"Pass"),
+        _ => print(f"Invalid"),
+    }
+
+    // 17. Match expression
+    let status = match x {
+        0 => "zero",
+        1..=10 => "small",
+        _ => "large",
+    };
+    print(f"Status: {status}");
+
+    // ========== WHILE LOOP ==========
+
+    // 18. Basic while loop
+    let mut counter = 0;
+    while counter < 5 {
+        print(f"Counter: {counter}");
+        counter = counter + 1;
+    }
+
+    // 19. While with complex condition
+    let mut i = 0;
+    let mut j = 10;
+    while i < 5 && j > 5 {
+        print(f"i={i}, j={j}");
+        i = i + 1;
+        j = j - 1;
+    }
+
+    // 20. While with break
+    let mut n = 0;
+    while true {
+        if n >= 3 {
+            break;
+        }
+        print(f"n: {n}");
+        n = n + 1;
+    }
+
+    // 21. While with continue
+    let mut m = 0;
+    while m < 5 {
+        m = m + 1;
+        if m % 2 == 0 {
+            continue;
+        }
+        print(f"Odd: {m}");
+    }
+
+    // ========== FOR LOOP ==========
+
+    // 22. For loop over range
+    for i in 0..5 {
+        print(f"For range: {i}");
+    }
+
+    // 23. For loop over inclusive range
+    for i in 1..=5 {
+        print(f"For inclusive: {i}");
+    }
+
+    // 24. For loop over array
+    let nums = [1, 2, 3, 4, 5];
+    for num in nums {
+        print(f"Array item: {num}");
+    }
+
+    // 25. For loop with pattern
+    let pairs = [(1, "a"), (2, "b"), (3, "c")];
+    for (num, letter) in pairs {
+        print(f"Pair: {num} -> {letter}");
+    }
+
+    // 26. For loop with break
+    for i in 0..10 {
+        if i == 5 {
+            break;
+        }
+        print(f"Breaking at: {i}");
+    }
+
+    // 27. For loop with continue
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        print(f"Odd in for: {i}");
+    }
+
+    // 28. Nested for loops
+    for i in 0..3 {
+        for j in 0..3 {
+            print(f"({i}, {j})");
+        }
+    }
+
+    // ========== LOOP (infinite) ==========
+
+    // 29. Loop with break
+    let mut count = 0;
+    loop {
+        if count >= 3 {
+            break;
+        }
+        print(f"Loop count: {count}");
+        count = count + 1;
+    }
+
+    // 30. Loop with break value
+    let result = loop {
+        count = count + 1;
+        if count > 5 {
+            break count;
+        }
+    };
+    print(f"Loop result: {result}");
+
+    // 31. Loop with continue
+    let mut iter = 0;
+    loop {
+        iter = iter + 1;
+        if iter > 5 {
+            break;
+        }
+        if iter % 2 == 0 {
+            continue;
+        }
+        print(f"Loop odd: {iter}");
+    }
+
+    // ========== RETURN ==========
+
+    // 32. Early return
+    fn check_positive(n: Int) -> Bool {
+        if n <= 0 {
+            return false;
+        }
+        true
+    }
+    print(f"Is positive: {check_positive(5)}");
+
+    // 33. Return with value
+    fn get_value() -> Int {
+        return 42;
+    }
+    print(f"Returned value: {get_value()}");
+
+    // 34. Multiple returns
+    fn classify(n: Int) -> Text {
+        if n < 0 {
+            return "negative";
+        }
+        if n == 0 {
+            return "zero";
+        }
+        return "positive";
+    }
+    print(f"Classify 5: {classify(5)}");
+    print(f"Classify -3: {classify(-3)}");
+
+    // ========== BREAK with labels ==========
+
+    // 35. Nested loops with labeled break
+    'outer: for i in 0..3 {
+        for j in 0..3 {
+            if i == 1 && j == 1 {
+                break 'outer;
+            }
+            print(f"Nested: ({i}, {j})");
+        }
+    }
+
+    // ========== DEFER ==========
+
+    // 36. Defer statement
+    {
+        defer {
+            print(f"Deferred cleanup");
+        };
+        print(f"Before defer");
+    }
+
+    // 37. Multiple defers (LIFO order)
+    {
+        defer {
+            print(f"Defer 1");
+        };
+        defer {
+            print(f"Defer 2");
+        };
+        defer {
+            print(f"Defer 3");
+        };
+        print(f"Main block");
+    }
+
+    // 38. Defer with return
+    fn with_defer() -> Int {
+        defer {
+            print(f"Function cleanup");
+        };
+        return 42;
+    }
+    print(f"With defer: {with_defer()}");
+
+    // ========== TRY/RECOVER/FINALLY ==========
+
+    // 39. Try block
+    try {
+        print(f"Try block");
+    }
+
+    // 40. Try with recover
+    try {
+        print(f"Try with error");
+        // Simulate error
+    } recover {
+        _ => print(f"Recovered from error"),
+    }
+
+    // 41. Try with finally
+    try {
+        print(f"Try with finally");
+    } finally {
+        print(f"Finally block");
+    }
+
+    // 42. Try with recover and finally
+    try {
+        print(f"Complete try");
+    } recover {
+        _ => print(f"Error handler"),
+    } finally {
+        print(f"Cleanup");
+    }
+
+    // ========== LET-ELSE ==========
+
+    // 43. Let-else with return
+    fn unwrap_or_return(m: Maybe<Int>) -> Int {
+        let Maybe.Some(value) = m else {
+            return 0;
+        };
+        value
+    }
+    print(f"Unwrapped: {unwrap_or_return(Maybe.Some(42))}");
+    print(f"Unwrapped: {unwrap_or_return(Maybe.None)}");
+
+    // ========== COMPLEX COMBINATIONS ==========
+
+    // 44. If inside while
+    let mut k = 0;
+    while k < 5 {
+        if k % 2 == 0 {
+            print(f"Even k: {k}");
+        }
+        k = k + 1;
+    }
+
+    // 45. Match inside for
+    let values = [Maybe.Some(1), Maybe.None, Maybe.Some(3)];
+    for val in values {
+        match val {
+            Maybe.Some(v) => print(f"Has value: {v}"),
+            Maybe.None => print(f"No value"),
+        }
+    }
+
+    // 46. For inside match
+    match x {
+        0..=10 => {
+            for i in 0..x {
+                print(f"In match for: {i}");
+            }
+        },
+        _ => print(f"Too large"),
+    }
+
+    // 47. Break from nested structure
+    'search: for i in 0..5 {
+        for j in 0..5 {
+            if i * j == 6 {
+                print(f"Found: ({i}, {j})");
+                break 'search;
+            }
+        }
+    }
+
+    // 48. Complex control flow
+    let mut sum = 0;
+    for i in 1..=10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        if i > 7 {
+            break;
+        }
+        sum = sum + i;
+    }
+    print(f"Sum of odds < 7: {sum}");
+
+    print(f"All control flow tests complete");
+}

@@ -1,0 +1,302 @@
+// =============================================================================
+// core/intrinsics/arithmetic.vr - Arithmetic Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides arithmetic intrinsics that map directly to LLVM/CPU
+// instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Basic arithmetic: add, sub, mul, div, rem, neg, abs
+// - Checked arithmetic: checked_add, checked_sub, etc. (returns Maybe<T>)
+// - Overflow-checked: overflowing_add, etc. (returns (T, Bool))
+// - Wrapping arithmetic: wrapping_add, etc. (modular arithmetic)
+// - Saturating arithmetic: saturating_add, etc. (clamps at min/max)
+// - Comparison: eq, ne, lt, le, gt, ge, min, max, clamp
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.arithmetic;
+
+// =============================================================================
+// SECTION 1: Basic Arithmetic
+// =============================================================================
+
+/// Integer/float addition
+public fn add<T>(a: T, b: T) -> T { @intrinsic("add", a, b) }
+
+/// Integer/float subtraction
+public fn sub<T>(a: T, b: T) -> T { @intrinsic("sub", a, b) }
+
+/// Integer/float multiplication
+public fn mul<T>(a: T, b: T) -> T { @intrinsic("mul", a, b) }
+
+/// Integer/float division
+public fn div<T>(a: T, b: T) -> T { @intrinsic("div", a, b) }
+
+/// Integer remainder
+public fn rem<T>(a: T, b: T) -> T { @intrinsic("rem", a, b) }
+
+/// Negation
+public fn neg<T>(x: T) -> T { @intrinsic("neg", x) }
+
+/// Absolute value (signed types)
+public fn abs<T>(x: T) -> T { @intrinsic("abs", x) }
+
+/// Absolute value (signed types) - alias for abs
+public fn abs_signed<T>(x: T) -> T { @intrinsic("abs", x) }
+
+/// Signum (-1, 0, or 1)
+public fn signum<T>(x: T) -> T { @intrinsic("signum", x) }
+
+// =============================================================================
+// SECTION 2: Checked Arithmetic
+// =============================================================================
+// These operations return None on overflow instead of wrapping or panicking.
+
+/// Checked addition (returns None on overflow)
+public fn checked_add<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_add", a, b) }
+
+/// Checked subtraction (returns None on underflow)
+public fn checked_sub<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_sub", a, b) }
+
+/// Checked multiplication (returns None on overflow)
+public fn checked_mul<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_mul", a, b) }
+
+/// Checked division (returns None on division by zero)
+public fn checked_div<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_div", a, b) }
+
+/// Checked remainder (returns None on division by zero)
+public fn checked_rem<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_rem", a, b) }
+
+/// Checked negation (returns None if self is MIN)
+public fn checked_neg<T>(x: T) -> Maybe<T> { @intrinsic("checked_neg", x) }
+
+/// Checked left shift (returns None if shift >= bit width)
+public fn checked_shl<T>(x: T, n: UInt32) -> Maybe<T> { @intrinsic("checked_shl", x, n) }
+
+/// Checked right shift (returns None if shift >= bit width)
+public fn checked_shr<T>(x: T, n: UInt32) -> Maybe<T> { @intrinsic("checked_shr", x, n) }
+
+// --- UInt64-specific checked arithmetic (uses unsigned overflow detection) ---
+/// Checked unsigned 64-bit addition (returns None on overflow)
+public fn checked_add_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_add_u64", a, b) }
+
+/// Checked unsigned 64-bit subtraction (returns None on underflow)
+public fn checked_sub_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_sub_u64", a, b) }
+
+/// Checked unsigned 64-bit multiplication (returns None on overflow)
+public fn checked_mul_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_mul_u64", a, b) }
+
+// =============================================================================
+// SECTION 3: Overflow-Checked Arithmetic
+// =============================================================================
+// These return (result, overflowed) tuple for explicit overflow handling.
+
+/// Add with overflow check. Returns (result, overflowed).
+public fn add_overflow<T>(a: T, b: T) -> (T, Bool) { @intrinsic("add_overflow", a, b) }
+
+/// Subtract with overflow check. Returns (result, overflowed).
+public fn sub_overflow<T>(a: T, b: T) -> (T, Bool) { @intrinsic("sub_overflow", a, b) }
+
+/// Multiply with overflow check. Returns (result, overflowed).
+public fn mul_overflow<T>(a: T, b: T) -> (T, Bool) { @intrinsic("mul_overflow", a, b) }
+
+/// Add returning (result, overflow_flag)
+public fn overflowing_add<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_add", a, b) }
+
+/// Subtract returning (result, overflow_flag)
+public fn overflowing_sub<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_sub", a, b) }
+
+/// Multiply returning (result, overflow_flag)
+public fn overflowing_mul<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_mul", a, b) }
+
+/// Negate returning (result, overflow_flag)
+public fn overflowing_neg<T>(x: T) -> (T, Bool) { @intrinsic("overflowing_neg", x) }
+
+/// Left shift returning (result, overflow_flag)
+public fn overflowing_shl<T>(x: T, n: UInt32) -> (T, Bool) { @intrinsic("overflowing_shl", x, n) }
+
+/// Right shift returning (result, overflow_flag)
+public fn overflowing_shr<T>(x: T, n: UInt32) -> (T, Bool) { @intrinsic("overflowing_shr", x, n) }
+
+// =============================================================================
+// SECTION 4: Wrapping Arithmetic
+// =============================================================================
+// These operations wrap on overflow (modular arithmetic).
+
+/// Wrapping addition
+public fn wrapping_add<T>(a: T, b: T) -> T { @intrinsic("wrapping_add", a, b) }
+
+/// Wrapping subtraction
+public fn wrapping_sub<T>(a: T, b: T) -> T { @intrinsic("wrapping_sub", a, b) }
+
+/// Wrapping multiplication
+public fn wrapping_mul<T>(a: T, b: T) -> T { @intrinsic("wrapping_mul", a, b) }
+
+/// Wrapping division (panics on division by zero, wraps MIN / -1)
+public fn wrapping_div<T>(a: T, b: T) -> T { @intrinsic("wrapping_div", a, b) }
+
+/// Wrapping remainder
+public fn wrapping_rem<T>(a: T, b: T) -> T { @intrinsic("wrapping_rem", a, b) }
+
+/// Wrapping negation
+public fn wrapping_neg<T>(x: T) -> T { @intrinsic("wrapping_neg", x) }
+
+/// Wrapping absolute value
+public fn wrapping_abs<T>(x: T) -> T { @intrinsic("wrapping_abs", x) }
+
+/// Wrapping left shift
+public fn wrapping_shl<T>(x: T, n: UInt32) -> T { @intrinsic("wrapping_shl", x, n) }
+
+/// Wrapping right shift
+public fn wrapping_shr<T>(x: T, n: UInt32) -> T { @intrinsic("wrapping_shr", x, n) }
+
+// --- Type-specific wrapping intrinsics (proper bit-width truncation) ---
+
+/// Wrapping add for UInt8
+public fn wrapping_add_u8(a: UInt8, b: UInt8) -> UInt8 { @intrinsic("wrapping_add_u8", a, b) }
+/// Wrapping sub for UInt8
+public fn wrapping_sub_u8(a: UInt8, b: UInt8) -> UInt8 { @intrinsic("wrapping_sub_u8", a, b) }
+/// Wrapping add for Int8
+public fn wrapping_add_i8(a: Int8, b: Int8) -> Int8 { @intrinsic("wrapping_add_i8", a, b) }
+/// Wrapping sub for Int8
+public fn wrapping_sub_i8(a: Int8, b: Int8) -> Int8 { @intrinsic("wrapping_sub_i8", a, b) }
+/// Wrapping neg for Int8
+public fn wrapping_neg_i8(x: Int8) -> Int8 { @intrinsic("wrapping_neg_i8", x) }
+/// Wrapping add for UInt32
+public fn wrapping_add_u32(a: UInt32, b: UInt32) -> UInt32 { @intrinsic("wrapping_add_u32", a, b) }
+/// Wrapping sub for UInt32
+public fn wrapping_sub_u32(a: UInt32, b: UInt32) -> UInt32 { @intrinsic("wrapping_sub_u32", a, b) }
+/// Wrapping shl for UInt32
+public fn wrapping_shl_u32(x: UInt32, n: UInt32) -> UInt32 { @intrinsic("wrapping_shl_u32", x, n) }
+/// Wrapping shr for UInt32
+public fn wrapping_shr_u32(x: UInt32, n: UInt32) -> UInt32 { @intrinsic("wrapping_shr_u32", x, n) }
+
+// =============================================================================
+// SECTION 5: Saturating Arithmetic
+// =============================================================================
+// These operations saturate at MIN/MAX instead of wrapping.
+
+/// Saturating addition (clamps at min/max)
+public fn saturating_add<T>(a: T, b: T) -> T { @intrinsic("saturating_add", a, b) }
+
+/// Saturating subtraction
+public fn saturating_sub<T>(a: T, b: T) -> T { @intrinsic("saturating_sub", a, b) }
+
+/// Saturating multiplication
+public fn saturating_mul<T>(a: T, b: T) -> T { @intrinsic("saturating_mul", a, b) }
+
+/// Saturating division
+public fn saturating_div<T>(a: T, b: T) -> T { @intrinsic("saturating_div", a, b) }
+
+/// Saturating negation
+public fn saturating_neg<T>(x: T) -> T { @intrinsic("saturating_neg", x) }
+
+/// Saturating absolute value
+public fn saturating_abs<T>(x: T) -> T { @intrinsic("saturating_abs", x) }
+
+// --- Type-specific saturating intrinsics ---
+
+// UInt8
+public fn saturating_add_u8(a: UInt8, b: UInt8) -> UInt8 { @intrinsic("saturating_add_u8", a, b) }
+public fn saturating_sub_u8(a: UInt8, b: UInt8) -> UInt8 { @intrinsic("saturating_sub_u8", a, b) }
+public fn saturating_mul_u8(a: UInt8, b: UInt8) -> UInt8 { @intrinsic("saturating_mul_u8", a, b) }
+// Int8
+public fn saturating_add_i8(a: Int8, b: Int8) -> Int8 { @intrinsic("saturating_add_i8", a, b) }
+public fn saturating_sub_i8(a: Int8, b: Int8) -> Int8 { @intrinsic("saturating_sub_i8", a, b) }
+public fn saturating_mul_i8(a: Int8, b: Int8) -> Int8 { @intrinsic("saturating_mul_i8", a, b) }
+// UInt16
+public fn saturating_add_u16(a: UInt16, b: UInt16) -> UInt16 { @intrinsic("saturating_add_u16", a, b) }
+public fn saturating_sub_u16(a: UInt16, b: UInt16) -> UInt16 { @intrinsic("saturating_sub_u16", a, b) }
+public fn saturating_mul_u16(a: UInt16, b: UInt16) -> UInt16 { @intrinsic("saturating_mul_u16", a, b) }
+// Int16
+public fn saturating_add_i16(a: Int16, b: Int16) -> Int16 { @intrinsic("saturating_add_i16", a, b) }
+public fn saturating_sub_i16(a: Int16, b: Int16) -> Int16 { @intrinsic("saturating_sub_i16", a, b) }
+public fn saturating_mul_i16(a: Int16, b: Int16) -> Int16 { @intrinsic("saturating_mul_i16", a, b) }
+// UInt32
+public fn saturating_add_u32(a: UInt32, b: UInt32) -> UInt32 { @intrinsic("saturating_add_u32", a, b) }
+public fn saturating_sub_u32(a: UInt32, b: UInt32) -> UInt32 { @intrinsic("saturating_sub_u32", a, b) }
+public fn saturating_mul_u32(a: UInt32, b: UInt32) -> UInt32 { @intrinsic("saturating_mul_u32", a, b) }
+// Int32
+public fn saturating_add_i32(a: Int32, b: Int32) -> Int32 { @intrinsic("saturating_add_i32", a, b) }
+public fn saturating_sub_i32(a: Int32, b: Int32) -> Int32 { @intrinsic("saturating_sub_i32", a, b) }
+public fn saturating_mul_i32(a: Int32, b: Int32) -> Int32 { @intrinsic("saturating_mul_i32", a, b) }
+// Int64
+public fn saturating_add_i64(a: Int64, b: Int64) -> Int64 { @intrinsic("saturating_add_i64", a, b) }
+public fn saturating_sub_i64(a: Int64, b: Int64) -> Int64 { @intrinsic("saturating_sub_i64", a, b) }
+
+// =============================================================================
+// SECTION 6: Comparison
+// =============================================================================
+
+/// Equality comparison
+public fn eq<T>(a: T, b: T) -> Bool { @intrinsic("eq", a, b) }
+
+/// Inequality comparison
+public fn ne<T>(a: T, b: T) -> Bool { @intrinsic("ne", a, b) }
+
+/// Less than comparison
+public fn lt<T>(a: T, b: T) -> Bool { @intrinsic("lt", a, b) }
+
+/// Less than or equal comparison
+public fn le<T>(a: T, b: T) -> Bool { @intrinsic("le", a, b) }
+
+/// Greater than comparison
+public fn gt<T>(a: T, b: T) -> Bool { @intrinsic("gt", a, b) }
+
+/// Greater than or equal comparison
+public fn ge<T>(a: T, b: T) -> Bool { @intrinsic("ge", a, b) }
+
+/// Minimum of two values
+public fn min<T>(a: T, b: T) -> T { @intrinsic("minnum", a, b) }
+
+/// Maximum of two values
+public fn max<T>(a: T, b: T) -> T { @intrinsic("maxnum", a, b) }
+
+/// Clamp value between min and max
+public fn clamp<T>(x: T, min_val: T, max_val: T) -> T {
+    min(max(x, min_val), max_val)
+}
+
+// =============================================================================
+// SECTION 7: Wide/Extended Arithmetic
+// =============================================================================
+
+/// Full-width multiply: returns (low_bits, high_bits)
+/// e.g., for u64 * u64 -> (u64, u64) representing u128 result
+public fn widening_mul<T>(a: T, b: T) -> (T, T) { @intrinsic("widening_mul", a, b) }
+
+/// Signed full-width multiply
+public fn widening_mul_signed<T>(a: T, b: T) -> (T, T) { @intrinsic("widening_mul_signed", a, b) }
+
+/// Carrying add: (a + b + carry_in) -> (sum, carry_out)
+public fn carrying_add<T>(a: T, b: T, carry: Bool) -> (T, Bool) { @intrinsic("carrying_add", a, b, carry) }
+
+/// Borrowing sub: (a - b - borrow_in) -> (diff, borrow_out)
+public fn borrowing_sub<T>(a: T, b: T, borrow: Bool) -> (T, Bool) { @intrinsic("borrowing_sub", a, b, borrow) }
+
+// =============================================================================
+// SECTION 8: Integer Utilities
+// =============================================================================
+
+/// Count leading sign bits (not including the sign bit itself)
+public fn leading_sign_bits<T>(x: T) -> Int { @intrinsic("leading_sign_bits", x) }
+
+/// Integer log2 (floor)
+public fn ilog2<T>(x: T) -> Int { @intrinsic("ilog2", x) }
+
+/// Integer log10 (floor)
+public fn ilog10<T>(x: T) -> Int { @intrinsic("ilog10", x) }
+
+/// Check if value is power of 2
+public fn is_power_of_two<T>(x: T) -> Bool { @intrinsic("is_power_of_two", x) }
+
+/// Next power of 2 (returns None if overflow)
+public fn checked_next_power_of_two<T>(x: T) -> Maybe<T> { @intrinsic("checked_next_power_of_two", x) }
+
+/// Next power of 2 (wraps on overflow)
+public fn wrapping_next_power_of_two<T>(x: T) -> T { @intrinsic("wrapping_next_power_of_two", x) }

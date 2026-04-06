@@ -1,0 +1,14 @@
+// Test protocol extends
+// Priority: Debug
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Copy is protocol extends Clone {
+    // Marker
+};
+
+fn main() {
+    print(f"Protocol extends test");
+}

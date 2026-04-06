@@ -1,0 +1,46 @@
+[package]
+name = "verum_error"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Centralized error handling system for Verum language platform"
+
+[dependencies]
+# Error handling
+thiserror = { workspace = true }
+anyhow = { version = "1.0", optional = true }
+
+# Verum core dependencies
+verum_common = { workspace = true }
+
+# Async runtime for Level 3 (fault tolerance)
+tokio = { workspace = true, features = ["full"], optional = true }
+futures = { version = "0.3", optional = true }
+parking_lot = { workspace = true }
+
+# Backtrace support
+backtrace = { version = "0.3", optional = true }
+
+# Serialization for error reporting
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+criterion = { workspace = true }
+serial_test = "3.2"
+
+[features]
+default = ["std"]
+std = ["backtrace", "serde", "serde_json", "futures"]
+anyhow-compat = ["anyhow"]
+async-support = ["tokio", "futures"]
+full = ["std", "anyhow-compat", "async-support"]
+
+[lib]
+name = "verum_error"
+path = "src/lib.rs"
+

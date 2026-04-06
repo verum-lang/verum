@@ -1,0 +1,865 @@
+// =============================================================================
+// protocols.vr - I/O Protocols
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core (result, maybe, protocols)
+// =============================================================================
+//
+// This module defines the fundamental I/O protocols:
+// - Read: for reading bytes from sources
+// - Write: for writing bytes to sinks
+// - Seek: for random access
+// - BufRead: for buffered reading
+//
+// =============================================================================
+
+module core.io.protocols;
+mount core.*;
+
+// =============================================================================
+// I/O Error
+// =============================================================================
+
+// I/O error type.
+public type StreamError is {
+    kind: IoErrorKind,
+    message: Maybe<Text>,
+};
+
+// I/O error kinds.
+public type IoErrorKind is
+    | NotFound           // File or resource not found
+    | PermissionDenied   // Access denied
+    | ConnectionRefused  // Network connection refused
+    | ConnectionReset    // Connection reset by peer
+    | ConnectionAborted  // Connection aborted
+    | NotConnected       // Not connected
+    | AddrInUse          // Address already in use
+    | AddrNotAvailable   // Address not available
+    | BrokenPipe         // Broken pipe
+    | AlreadyExists      // Entity already exists
+    | WouldBlock         // Operation would block
+    | InvalidInput       // Invalid input parameter
+    | InvalidData        // Invalid data encountered
+    | TimedOut           // Operation timed out
+    | WriteZero          // Write returned zero
+    | Interrupted        // Operation interrupted
+    | UnexpectedEof      // Unexpected end of file
+    | OutOfMemory        // Out of memory
+    | Unsupported        // Operation not supported
+    | Other;             // Other error
+
+implement StreamError {
+    // Create error from kind.
+    public fn new(kind: IoErrorKind) -> StreamError {
+        StreamError {
+            kind: kind,
+            message: None,
+        }
+    }
+
+    // Create error with message.
+    public fn with_message(kind: IoErrorKind, msg: Text) -> StreamError {
+        StreamError {
+            kind: kind,
+            message: Some(msg),
+        }
+    }
+
+    // Get error kind.
+    public fn kind(&self) -> IoErrorKind {
+        self.kind
+    }
+
+    // Get error message if present.
+    public fn message(&self) -> Maybe<&Text> {
+        self.message.as_ref()
+    }
+
+    // Create from OS error code.
+    public fn from_raw_os_error(code: Int) -> StreamError {
+        let kind = match code {
+            2 => NotFound,           // ENOENT
+            13 => PermissionDenied,  // EACCES
+            17 => AlreadyExists,     // EEXIST
+            11 => WouldBlock,        // EAGAIN
+            32 => BrokenPipe,        // EPIPE
+            110 => TimedOut,         // ETIMEDOUT
+            111 => ConnectionRefused, // ECONNREFUSED
+            104 => ConnectionReset,   // ECONNRESET
+            _ => Other,
+        };
+        StreamError.new(kind)
+    }
+
+    // Create from errno (alias for from_raw_os_error).
+    public fn from_errno(errno: Int) -> StreamError {
+        StreamError.from_raw_os_error(errno)
+    }
+
+    // Create an "Other" error with message (convenience constructor).
+    public fn Other(msg: Text) -> StreamError {
+        StreamError {
+            kind: IoErrorKind.Other,
+            message: Some(msg),
+        }
+    }
+}
+
+implement Debug for StreamError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("StreamError { kind: ")?;
+        self.kind.fmt_debug(f)?;
+        match &self.message {
+            Some(msg) => {
+                f.write_str(", message: \"")?;
+                f.write_str(msg)?;
+                f.write_str("\"")?;
+            }
+            None => {}
+        }
+        f.write_str(" }")
+    }
+}
+
+implement Debug for IoErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            NotFound => "NotFound",
+            PermissionDenied => "PermissionDenied",
+            ConnectionRefused => "ConnectionRefused",
+            ConnectionReset => "ConnectionReset",
+            ConnectionAborted => "ConnectionAborted",
+            NotConnected => "NotConnected",
+            AddrInUse => "AddrInUse",
+            AddrNotAvailable => "AddrNotAvailable",
+            BrokenPipe => "BrokenPipe",
+            AlreadyExists => "AlreadyExists",
+            WouldBlock => "WouldBlock",
+            InvalidInput => "InvalidInput",
+            InvalidData => "InvalidData",
+            TimedOut => "TimedOut",
+            WriteZero => "WriteZero",
+            Interrupted => "Interrupted",
+            UnexpectedEof => "UnexpectedEof",
+            OutOfMemory => "OutOfMemory",
+            Other => "Other",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Clone for StreamError {
+    fn clone(&self) -> StreamError {
+        StreamError {
+            kind: self.kind,
+            message: self.message.clone(),
+        }
+    }
+}
+
+implement Display for StreamError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match &self.message {
+            Some(msg) => {
+                f.write_str(msg)
+            }
+            None => {
+                self.kind.fmt(f)
+            }
+        }
+    }
+}
+
+implement Display for IoErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            NotFound => "entity not found",
+            PermissionDenied => "permission denied",
+            ConnectionRefused => "connection refused",
+            ConnectionReset => "connection reset",
+            ConnectionAborted => "connection aborted",
+            NotConnected => "not connected",
+            AddrInUse => "address in use",
+            AddrNotAvailable => "address not available",
+            BrokenPipe => "broken pipe",
+            AlreadyExists => "entity already exists",
+            WouldBlock => "operation would block",
+            InvalidInput => "invalid input parameter",
+            InvalidData => "invalid data",
+            TimedOut => "operation timed out",
+            WriteZero => "write zero",
+            Interrupted => "operation interrupted",
+            UnexpectedEof => "unexpected end of file",
+            OutOfMemory => "out of memory",
+            Unsupported => "unsupported",
+            Other => "other error",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for IoErrorKind {
+    fn eq(&self, other: &IoErrorKind) -> Bool {
+        match (self, other) {
+            (NotFound, NotFound) => true,
+            (PermissionDenied, PermissionDenied) => true,
+            (ConnectionRefused, ConnectionRefused) => true,
+            (ConnectionReset, ConnectionReset) => true,
+            (ConnectionAborted, ConnectionAborted) => true,
+            (NotConnected, NotConnected) => true,
+            (AddrInUse, AddrInUse) => true,
+            (AddrNotAvailable, AddrNotAvailable) => true,
+            (BrokenPipe, BrokenPipe) => true,
+            (AlreadyExists, AlreadyExists) => true,
+            (WouldBlock, WouldBlock) => true,
+            (InvalidInput, InvalidInput) => true,
+            (InvalidData, InvalidData) => true,
+            (TimedOut, TimedOut) => true,
+            (WriteZero, WriteZero) => true,
+            (Interrupted, Interrupted) => true,
+            (UnexpectedEof, UnexpectedEof) => true,
+            (OutOfMemory, OutOfMemory) => true,
+            (Unsupported, Unsupported) => true,
+            (Other, Other) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Clone for IoErrorKind {
+    fn clone(&self) -> IoErrorKind {
+        match self {
+            NotFound => IoErrorKind.NotFound,
+            PermissionDenied => IoErrorKind.PermissionDenied,
+            ConnectionRefused => IoErrorKind.ConnectionRefused,
+            ConnectionReset => IoErrorKind.ConnectionReset,
+            ConnectionAborted => IoErrorKind.ConnectionAborted,
+            NotConnected => IoErrorKind.NotConnected,
+            AddrInUse => IoErrorKind.AddrInUse,
+            AddrNotAvailable => IoErrorKind.AddrNotAvailable,
+            BrokenPipe => IoErrorKind.BrokenPipe,
+            AlreadyExists => IoErrorKind.AlreadyExists,
+            WouldBlock => IoErrorKind.WouldBlock,
+            InvalidInput => IoErrorKind.InvalidInput,
+            InvalidData => IoErrorKind.InvalidData,
+            TimedOut => IoErrorKind.TimedOut,
+            WriteZero => IoErrorKind.WriteZero,
+            Interrupted => IoErrorKind.Interrupted,
+            UnexpectedEof => IoErrorKind.UnexpectedEof,
+            OutOfMemory => IoErrorKind.OutOfMemory,
+            Unsupported => IoErrorKind.Unsupported,
+            Other => IoErrorKind.Other,
+        }
+    }
+}
+
+implement Eq for StreamError {
+    fn eq(&self, other: &StreamError) -> Bool {
+        self.kind == other.kind && self.message == other.message
+    }
+}
+
+implement Eq for SeekFrom {
+    fn eq(&self, other: &SeekFrom) -> Bool {
+        match (self, other) {
+            (Start(a), Start(b)) => a == b,
+            (End(a), End(b)) => a == b,
+            (Current(a), Current(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Clone for SeekFrom {
+    fn clone(&self) -> SeekFrom {
+        match self {
+            Start(n) => Start(*n),
+            End(n) => End(*n),
+            Current(n) => Current(*n),
+        }
+    }
+}
+
+implement Debug for SeekFrom {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Start(n) => {
+                f.write_str("Start(")?;
+                n.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            End(n) => {
+                f.write_str("End(")?;
+                n.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Current(n) => {
+                f.write_str("Current(")?;
+                n.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Result Type for I/O
+// =============================================================================
+
+// I/O result type alias.
+public type IoResult<T> is Result<T, StreamError>;
+
+// =============================================================================
+// SeekFrom
+// =============================================================================
+
+// Position for seek operations.
+public type SeekFrom is
+    | Start(Int)    // Offset from start of stream
+    | End(Int)      // Offset from end of stream (usually negative)
+    | Current(Int); // Offset from current position
+
+// =============================================================================
+// Read Protocol
+// =============================================================================
+
+// Protocol for reading bytes.
+public type Read is protocol {
+    // Read bytes into buffer.
+    // Returns number of bytes read, || 0 at EOF.
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int>;
+
+    // Read exact number of bytes.
+    // Returns error if EOF reached before buf is filled.
+    fn read_exact(&mut self, buf: &mut [Byte]) -> IoResult<()> {
+        let mut total = 0;
+        while total < buf.len() {
+            let n = self.read(&mut buf[total..])?;
+            if n == 0 {
+                return Err(StreamError.new(IoErrorKind.UnexpectedEof));
+            }
+            total = total + n;
+        }
+        Ok(())
+    }
+
+    // Read all bytes until EOF.
+    fn read_to_end(&mut self, buf: &mut List<Byte>) -> IoResult<Int> {
+        let mut total = 0;
+        let mut tmp = [0_u8; 1024];
+        loop {
+            let n = self.read(&mut tmp)?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            total = total + n;
+        }
+        Ok(total)
+    }
+
+    // Read all bytes as text (UTF-8).
+    fn read_to_string(&mut self, buf: &mut Text) -> IoResult<Int> {
+        let mut bytes = List.new();
+        let n = self.read_to_end(&mut bytes)?;
+        match Text.from_utf8(bytes.as_slice()) {
+            Ok(s) => {
+                buf.push_str(&s);
+                Ok(n)
+            }
+            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+        }
+    }
+
+    // Create iterator over bytes.
+    fn bytes(self) -> BytesIter<Self>
+    where Self: Sized
+    {
+        BytesIter { reader: self }
+    }
+
+    // Chain with another reader.
+    fn chain<R: Read>(self, next: R) -> Chain<Self, R>
+    where Self: Sized
+    {
+        Chain {
+            first: Some(self),
+            second: next,
+        }
+    }
+
+    // Take limited bytes.
+    fn take(self, limit: Int) -> Take<Self>
+    where Self: Sized
+    {
+        Take {
+            inner: self,
+            limit: limit,
+        }
+    }
+};
+
+// =============================================================================
+// Write Protocol
+// =============================================================================
+
+// Protocol for writing bytes.
+public type Write is protocol {
+    // Write bytes from buffer.
+    // Returns number of bytes written.
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int>;
+
+    // Flush any buffered data.
+    fn flush(&mut self) -> IoResult<()>;
+
+    // Write all bytes.
+    // Returns error if !all bytes could be written.
+    fn write_all(&mut self, buf: &[Byte]) -> IoResult<()> {
+        let mut written = 0;
+        while written < buf.len() {
+            let n = self.write(&buf[written..])?;
+            if n == 0 {
+                return Err(StreamError.new(IoErrorKind.WriteZero));
+            }
+            written = written + n;
+        }
+        Ok(())
+    }
+
+    // Write formatted text.
+    fn write_fmt(&mut self, s: &Text) -> IoResult<()> {
+        self.write_all(s.as_bytes())
+    }
+};
+
+// =============================================================================
+// Seek Protocol
+// =============================================================================
+
+// Protocol for random access.
+public type Seek is protocol {
+    // Seek to position.
+    // Returns new position from start.
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int>;
+
+    // Get current position.
+    fn stream_position(&mut self) -> IoResult<Int> {
+        self.seek(Current(0))
+    }
+
+    // Rewind to beginning.
+    fn rewind(&mut self) -> IoResult<()> {
+        self.seek(Start(0))?;
+        Ok(())
+    }
+
+    // Get stream length.
+    fn stream_len(&mut self) -> IoResult<Int> {
+        let old_pos = self.stream_position()?;
+        let len = self.seek(End(0))?;
+        self.seek(Start(old_pos))?;
+        Ok(len)
+    }
+};
+
+// =============================================================================
+// BufRead Protocol
+// =============================================================================
+
+// Protocol for buffered reading.
+public type BufRead is protocol extends Read {
+    // Get internal buffer.
+    fn fill_buf(&mut self) -> IoResult<&[Byte]>;
+
+    // Consume n bytes from buffer.
+    fn consume(&mut self, amt: Int);
+
+    // Check if buffer has data.
+    fn has_data_left(&mut self) -> IoResult<Bool> {
+        Ok(!self.fill_buf()?.is_empty())
+    }
+
+    // Read until delimiter.
+    fn read_until(&mut self, delim: Byte, buf: &mut List<Byte>) -> IoResult<Int> {
+        let mut total = 0;
+        loop {
+            let available = self.fill_buf()?;
+            if available.is_empty() {
+                break;
+            }
+
+            // Find delimiter
+            let mut found = false;
+            let mut consumed = 0;
+            for (i, b) in available.iter().enumerate() {
+                consumed = i + 1;
+                buf.push(*b);
+                total = total + 1;
+                if *b == delim {
+                    found = true;
+                    break;
+                }
+            }
+
+            self.consume(consumed);
+
+            if found {
+                break;
+            }
+        }
+        Ok(total)
+    }
+
+    // Read line (until newline).
+    fn read_line(&mut self, buf: &mut Text) -> IoResult<Int> {
+        let mut bytes = List.new();
+        let n = self.read_until(b'\n', &mut bytes)?;
+        match Text.from_utf8(bytes.as_slice()) {
+            Ok(s) => {
+                buf.push_str(&s);
+                Ok(n)
+            }
+            Err(_) => Err(StreamError.new(IoErrorKind.InvalidData)),
+        }
+    }
+
+    // Iterator over lines.
+    fn lines(self) -> LinesIter<Self>
+    where Self: Sized
+    {
+        LinesIter { reader: self }
+    }
+
+    // Split on delimiter.
+    fn split(self, delim: Byte) -> SplitIter<Self>
+    where Self: Sized
+    {
+        SplitIter {
+            reader: self,
+            delim: delim,
+        }
+    }
+};
+
+// =============================================================================
+// Iterator Types
+// =============================================================================
+
+// Iterator over bytes.
+public type BytesIter<R: Read> is {
+    reader: R,
+};
+
+implement<R: Read> Iterator for BytesIter<R> {
+    type Item = IoResult<Byte>;
+
+    fn next(&mut self) -> Maybe<IoResult<Byte>> {
+        let mut buf = [0_u8; 1];
+        match self.reader.read(&mut buf) {
+            Ok(0) => None,
+            Ok(_) => Some(Ok(buf[0])),
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+// Iterator over lines.
+public type LinesIter<R: BufRead> is {
+    reader: R,
+};
+
+implement<R: BufRead> Iterator for LinesIter<R> {
+    type Item = IoResult<Text>;
+
+    fn next(&mut self) -> Maybe<IoResult<Text>> {
+        let mut line = Text.new();
+        match self.reader.read_line(&mut line) {
+            Ok(0) => None,
+            Ok(_) => {
+                // Remove trailing newline
+                if line.ends_with("\n") {
+                    line.pop();
+                    if line.ends_with("\r") {
+                        line.pop();
+                    }
+                }
+                Some(Ok(line))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+// Iterator for split.
+public type SplitIter<R: BufRead> is {
+    reader: R,
+    delim: Byte,
+};
+
+implement<R: BufRead> Iterator for SplitIter<R> {
+    type Item = IoResult<List<Byte>>;
+
+    fn next(&mut self) -> Maybe<IoResult<List<Byte>>> {
+        let mut buf = List.new();
+        match self.reader.read_until(self.delim, &mut buf) {
+            Ok(0) => None,
+            Ok(_) => {
+                // Remove delimiter if present
+                if buf.last() == Some(&self.delim) {
+                    buf.pop();
+                }
+                Some(Ok(buf))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+// Chain reader.
+public type Chain<T: Read, U: Read> is {
+    first: Maybe<T>,
+    second: U,
+};
+
+implement<T: Read, U: Read> Read for Chain<T, U> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        match &mut self.first {
+            Some(first) => {
+                let n = first.read(buf)?;
+                if n == 0 {
+                    self.first = None;
+                    self.second.read(buf)
+                } else {
+                    Ok(n)
+                }
+            }
+            None => self.second.read(buf),
+        }
+    }
+}
+
+// Take limited reader.
+public type Take<T: Read> is {
+    inner: T,
+    limit: Int,
+};
+
+implement<T: Read> Read for Take<T> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        if self.limit == 0 {
+            return Ok(0);
+        }
+
+        let max_len = buf.len().min(self.limit);
+        let n = self.inner.read(&mut buf[..max_len])?;
+        self.limit = self.limit - n;
+        Ok(n)
+    }
+}
+
+implement<T: Read> Take<T> {
+    // Get remaining bytes limit.
+    public fn limit(&self) -> Int {
+        self.limit
+    }
+
+    // Set new limit.
+    public fn set_limit(&mut self, limit: Int) {
+        self.limit = limit;
+    }
+
+    // Get reference to inner reader.
+    public fn get_ref(&self) -> &T {
+        &self.inner
+    }
+
+    // Get mutable reference to inner reader.
+    public fn get_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+
+    // Consume && return inner reader.
+    public fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+// =============================================================================
+// Empty && Repeat Readers
+// =============================================================================
+
+// Empty reader (always EOF).
+public type Empty is ();
+
+implement Read for Empty {
+    fn read(&mut self, _buf: &mut [Byte]) -> IoResult<Int> {
+        Ok(0)
+    }
+}
+
+implement BufRead for Empty {
+    fn fill_buf(&mut self) -> IoResult<&[Byte]> {
+        Ok(&[])
+    }
+
+    fn consume(&mut self, _amt: Int) {}
+}
+
+// Create empty reader.
+public fn empty_reader() -> Empty {
+    Empty
+}
+
+// Repeat byte forever.
+public type ByteRepeat is {
+    byte: Byte,
+};
+
+implement Read for ByteRepeat {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        for b in buf.iter_mut() {
+            *b = self.byte;
+        }
+        Ok(buf.len())
+    }
+}
+
+// Create repeat reader.
+public fn repeat_byte(byte: Byte) -> ByteRepeat {
+    ByteRepeat { byte: byte }
+}
+
+// =============================================================================
+// Sink Writer
+// =============================================================================
+
+// Sink that discards all data.
+public type Sink is ();
+
+implement Write for Sink {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+// Create sink writer.
+public fn sink() -> Sink {
+    Sink
+}
+
+// =============================================================================
+// Cursor (in-memory)
+// =============================================================================
+
+// In-memory buffer with position.
+public type Cursor<T> is {
+    inner: T,
+    pos: Int,
+};
+
+implement<T> Cursor<T> {
+    // Create cursor at position 0.
+    public fn new(inner: T) -> Cursor<T> {
+        Cursor {
+            inner: inner,
+            pos: 0,
+        }
+    }
+
+    // Get reference to inner data.
+    public fn get_ref(&self) -> &T {
+        &self.inner
+    }
+
+    // Get mutable reference.
+    public fn get_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+
+    // Consume && return inner.
+    public fn into_inner(self) -> T {
+        self.inner
+    }
+
+    // Get current position.
+    public fn position(&self) -> Int {
+        self.pos
+    }
+
+    // Set position.
+    public fn set_position(&mut self, pos: Int) {
+        self.pos = pos;
+    }
+}
+
+implement Read for Cursor<&[Byte]> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let remaining = &self.inner[self.pos..];
+        let n = buf.len().min(remaining.len());
+        buf[..n].copy_from_slice(&remaining[..n]);
+        self.pos = self.pos + n;
+        Ok(n)
+    }
+}
+
+// NOTE: Read for Cursor<List<Byte>> is defined in core/io/buffer.vr (canonical source).
+// Do NOT duplicate it here.
+
+implement Seek for Cursor<&[Byte]> {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        let new_pos = match pos {
+            Start(n) => n,
+            End(n) => self.inner.len() as Int + n,
+            Current(n) => self.pos + n,
+        };
+
+        if new_pos < 0 {
+            return Err(StreamError.new(IoErrorKind.InvalidInput));
+        }
+
+        self.pos = new_pos;
+        Ok(self.pos)
+    }
+}
+
+implement Seek for Cursor<List<Byte>> {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        let new_pos = match pos {
+            Start(n) => n,
+            End(n) => self.inner.len() as Int + n,
+            Current(n) => self.pos + n,
+        };
+
+        if new_pos < 0 {
+            return Err(StreamError.new(IoErrorKind.InvalidInput));
+        }
+
+        self.pos = new_pos;
+        Ok(self.pos)
+    }
+}
+
+implement Write for Cursor<&mut List<Byte>> {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        // Extend if needed
+        while self.inner.len() < self.pos + buf.len() {
+            self.inner.push(0);
+        }
+
+        // Write bytes
+        for (i, b) in buf.iter().enumerate() {
+            self.inner[self.pos + i] = *b;
+        }
+        self.pos = self.pos + buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}

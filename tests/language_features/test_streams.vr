@@ -1,0 +1,171 @@
+// Test: Streams - Stream processing with comprehensions
+// Priority: Advanced
+// Expected output: Stream operations and transformations
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Stream<T> is protocol {
+    fn next(&mut self) -> Maybe<T>;
+    fn collect(&mut self) -> [T];
+};
+
+// Test basic stream comprehension
+fn test_basic_comprehension() {
+    print(f"=== Basic Stream Comprehension ===");
+
+    // Array to stream
+    let nums = [1, 2, 3, 4, 5];
+
+    // Stream comprehension: map
+    let doubled = [x * 2 for x in nums];
+    print(f"Doubled: {doubled}");
+
+    // Stream comprehension: filter
+    let evens = [x for x in nums if x % 2 == 0];
+    print(f"Evens: {evens}");
+
+    // Stream comprehension: filter + map
+    let even_squares = [x * x for x in nums if x % 2 == 0];
+    print(f"Even squares: {even_squares}");
+}
+
+// Test nested comprehensions
+fn test_nested_comprehension() {
+    print(f"=== Nested Comprehensions ===");
+
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+
+    // Flatten matrix
+    let flattened = [x for row in matrix for x in row];
+    print(f"Flattened: {flattened}");
+
+    // Filter and transform nested
+    let filtered = [x * 10 for row in matrix for x in row if x > 5];
+    print(f"Filtered nested: {filtered}");
+}
+
+// Test range-based streams
+fn test_range_streams() {
+    print(f"=== Range Streams ===");
+
+    // Simple range
+    let range1 = 1..6;
+    let collected = [x for x in range1];
+    print(f"Range 1..6: {collected}");
+
+    // Range with transformation
+    let range2 = 1..6;
+    let doubled = [x * 2 for x in range2];
+    print(f"Doubled range: {doubled}");
+}
+
+// Test manual fold/reduce pattern
+fn test_manual_fold() {
+    print(f"=== Manual Fold Pattern ===");
+
+    let nums = [1, 2, 3, 4, 5];
+
+    // Manual sum
+    let mut sum = 0;
+    for x in nums {
+        sum = sum + x;
+    }
+    print(f"Sum: {sum}");
+
+    // Manual product
+    let mut product = 1;
+    for x in nums {
+        product = product * x;
+    }
+    print(f"Product: {product}");
+}
+
+// Test stream filtering
+fn test_stream_filter() {
+    print(f"=== Stream Filtering ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Filter evens
+    let evens = [x for x in nums if x % 2 == 0];
+    print(f"Evens: {evens}");
+
+    // Filter with multiple conditions
+    let filtered = [x for x in nums if x > 3 && x < 8];
+    print(f"Between 3 and 8: {filtered}");
+}
+
+// Test stream mapping
+fn test_stream_map() {
+    print(f"=== Stream Mapping ===");
+
+    let nums = [1, 2, 3, 4, 5];
+
+    // Simple map
+    let doubled = [x * 2 for x in nums];
+    print(f"Doubled: {doubled}");
+
+    // Chained transformations
+    let transformed = [x * 2 + 1 for x in nums];
+    print(f"Transformed: {transformed}");
+}
+
+// Test iteration patterns
+fn test_iteration() {
+    print(f"=== Iteration Patterns ===");
+
+    let nums = [10, 20, 30, 40, 50];
+
+    // Standard iteration
+    print(f"Standard iteration:");
+    for x in nums {
+        print(f"  Value: {x}");
+    }
+
+    // Filtered iteration
+    print(f"Filtered iteration (> 25):");
+    for x in nums {
+        if x > 25 {
+            print(f"  Value: {x}");
+        }
+    }
+}
+
+// Test comprehension concepts
+fn test_comprehension_concepts() {
+    print(f"=== Comprehension Concepts ===");
+    print(f"Stream comprehensions in Verum:");
+    print(f"");
+    print(f"1. Map: [f(x) for x in xs]");
+    print(f"2. Filter: [x for x in xs if p(x)]");
+    print(f"3. FlatMap: [x for row in rows for x in row]");
+    print(f"4. Filter+Map: [f(x) for x in xs if p(x)]");
+    print(f"");
+    print(f"These are lazy and composable!");
+}
+
+fn main() {
+    print(f"Starting stream tests...");
+    print(f"");
+
+    test_basic_comprehension();
+    print(f"");
+    test_nested_comprehension();
+    print(f"");
+    test_range_streams();
+    print(f"");
+    test_manual_fold();
+    print(f"");
+    test_stream_filter();
+    print(f"");
+    test_stream_map();
+    print(f"");
+    test_iteration();
+    print(f"");
+    test_comprehension_concepts();
+    print(f"");
+
+    print(f"All stream tests complete!");
+}

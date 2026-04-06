@@ -1,0 +1,536 @@
+// =============================================================================
+// runtime/thread.vr - Thread Primitives and Stack Trace Capture
+// =============================================================================
+// Layer: 2 (Runtime)
+// Dependencies: core, sys/{linux,darwin,windows}/thread, intrinsics
+// =============================================================================
+//
+// Provides high-level thread management, thread-local storage helpers,
+// and stack trace capture for panic diagnostics.
+//
+// # Architecture
+//
+// Thread primitives delegate to platform-specific implementations:
+// - Linux: clone + futex (via sys/linux/thread)
+// - macOS: pthread (via sys/darwin/thread)
+// - Windows: CreateThread (via sys/windows/thread)
+//
+// Stack traces use frame pointer walking on debug builds and
+// .eh_frame-based unwinding on release builds (via VBC intrinsics).
+//
+// =============================================================================
+
+module runtime.thread;
+
+mount core.*;
+mount core.intrinsics.{size_of, align_of};
+mount core.time.{Duration};
+mount sys.{monotonic_nanos};
+
+// Platform-specific thread imports
+@cfg(target_os = "linux")
+mount sys.linux.thread.{
+    Thread as PlatformThread,
+    spawn as platform_spawn,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.thread.{
+    Thread as PlatformThread,
+    spawn as platform_spawn,
+};
+
+@cfg(target_os = "windows")
+mount sys.windows.thread.{
+    Thread as PlatformThread,
+    thread_spawn as platform_spawn,
+};
+
+// =============================================================================
+// Thread ID
+// =============================================================================
+
+/// Unique identifier for a thread.
+///
+/// Thread IDs are assigned by the runtime and are unique for the lifetime
+/// of the thread. After a thread exits, its ID may be reused.
+public type ThreadId is {
+    id: UInt64,
+};
+
+implement ThreadId {
+    /// Get the thread ID of the current thread.
+    public fn current() -> ThreadId {
+        ThreadId { id: sys.get_thread_id() as UInt64 }
+    }
+}
+
+implement Eq for ThreadId {
+    fn eq(&self, other: &ThreadId) -> Bool {
+        self.id == other.id
+    }
+}
+
+implement Hash for ThreadId {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.id as Int);
+    }
+}
+
+implement Debug for ThreadId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ThreadId({self.id})")
+    }
+}
+
+implement Display for ThreadId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.id}")
+    }
+}
+
+implement Clone for ThreadId {
+    fn clone(&self) -> ThreadId {
+        ThreadId { id: self.id }
+    }
+}
+
+implement Copy for ThreadId {}
+
+// =============================================================================
+// Thread Handle
+// =============================================================================
+
+/// A handle to a spawned thread.
+///
+/// The handle can be used to wait for the thread to finish (join)
+/// or to detach the thread so it runs independently.
+///
+/// # Example
+/// ```verum
+/// let handle = Thread.spawn(fn() {
+///     print("Hello from spawned thread");
+/// });
+///
+/// handle.join().expect("Thread panicked");
+/// ```
+public type JoinHandle<T> is {
+    /// Platform-specific thread handle
+    platform: PlatformThread,
+    /// Result storage (set when thread completes)
+    result: Shared<Maybe<T>>,
+    /// Thread name (for debugging)
+    name: Maybe<Text>,
+};
+
+implement JoinHandle<T> {
+    /// Wait for the thread to finish and return its result.
+    ///
+    /// Returns Err if the thread panicked.
+    public fn join(self) -> Result<T, ThreadError> {
+        // Platform join blocks until thread exits
+        @cfg(target_os = "linux")
+        {
+            sys.linux.thread.join(self.platform)
+                .map_err(|_| ThreadError.JoinFailed)?;
+        }
+
+        @cfg(target_os = "macos")
+        {
+            sys.darwin.thread.join(self.platform)
+                .map_err(|_| ThreadError.JoinFailed)?;
+        }
+
+        @cfg(target_os = "windows")
+        {
+            sys.windows.thread.thread_join(self.platform)
+                .map_err(|_| ThreadError.JoinFailed)?;
+        }
+
+        // Extract result
+        match self.result.take() {
+            Some(value) => Ok(value),
+            None => Err(ThreadError.Panicked),
+        }
+    }
+
+    /// Get the thread's name, if set.
+    public fn name(&self) -> Maybe<&Text> {
+        self.name.as_ref()
+    }
+
+    /// Get the thread's ID.
+    public fn id(&self) -> ThreadId {
+        ThreadId { id: 0 } // Platform thread ID
+    }
+
+    /// Check if the thread has finished.
+    public fn is_finished(&self) -> Bool {
+        self.result.is_some()
+    }
+}
+
+// =============================================================================
+// Thread Builder
+// =============================================================================
+
+/// Configuration for spawning a thread.
+///
+/// # Example
+/// ```verum
+/// let handle = Thread.builder()
+///     .name("worker-1")
+///     .stack_size(2 * 1024 * 1024)  // 2 MB stack
+///     .spawn(fn() {
+///         // thread body
+///     })?;
+/// ```
+public type ThreadBuilder is {
+    name: Maybe<Text>,
+    stack_size: Maybe<Int>,
+};
+
+implement ThreadBuilder {
+    /// Create a new thread builder with default settings.
+    public fn new() -> ThreadBuilder {
+        ThreadBuilder {
+            name: None,
+            stack_size: None,
+        }
+    }
+
+    /// Set the name of the thread.
+    public fn name(self, name: Text) -> ThreadBuilder {
+        ThreadBuilder { name: Some(name), ..self }
+    }
+
+    /// Set the stack size in bytes.
+    ///
+    /// Default is platform-dependent (typically 8 MB on Linux, 512 KB on macOS).
+    public fn stack_size(self, size: Int) -> ThreadBuilder {
+        ThreadBuilder { stack_size: Some(size), ..self }
+    }
+
+    /// Spawn a thread with this configuration.
+    public fn spawn<T: Send>(self, f: fn() -> T) -> Result<JoinHandle<T>, ThreadError> {
+        let result_storage = Shared.new(None);
+        let result_ref = result_storage.clone();
+
+        let wrapper = fn() {
+            let value = f();
+            *result_ref.get_mut() = Some(value);
+        };
+
+        let platform_thread = platform_spawn(wrapper)
+            .map_err(|_| ThreadError.SpawnFailed)?;
+
+        Ok(JoinHandle {
+            platform: platform_thread,
+            result: result_storage,
+            name: self.name,
+        })
+    }
+}
+
+// =============================================================================
+// Thread Namespace
+// =============================================================================
+
+/// Thread operations namespace.
+///
+/// Provides static methods for thread management.
+public type Thread is ();
+
+implement Thread {
+    /// Spawn a new thread running the given function.
+    ///
+    /// # Example
+    /// ```verum
+    /// let handle = Thread.spawn(fn() -> Int {
+    ///     42
+    /// });
+    /// let result = handle.join().unwrap();
+    /// assert_eq(result, 42);
+    /// ```
+    public fn spawn<T: Send>(f: fn() -> T) -> JoinHandle<T> {
+        ThreadBuilder.new()
+            .spawn(f)
+            .expect("Failed to spawn thread")
+    }
+
+    /// Create a thread builder for custom configuration.
+    public fn builder() -> ThreadBuilder {
+        ThreadBuilder.new()
+    }
+
+    /// Get the current thread's ID.
+    public fn current_id() -> ThreadId {
+        ThreadId.current()
+    }
+
+    /// Yield the current thread's time slice.
+    ///
+    /// Signals to the OS scheduler that this thread is willing to
+    /// give up its remaining time slice.
+    public fn yield_now() {
+        @cfg(target_os = "linux")
+        {
+            @syscall(24);  // sched_yield
+        }
+
+        @cfg(target_os = "macos")
+        {
+            sys.darwin.thread.thread_yield();
+        }
+
+        @cfg(target_os = "windows")
+        {
+            sys.windows.thread.thread_yield();
+        }
+    }
+
+    /// Sleep the current thread for the given duration.
+    public fn sleep(duration: Duration) {
+        core.time.Time.sleep(duration);
+    }
+
+    /// Sleep the current thread for the given number of milliseconds.
+    public fn sleep_ms(ms: Int) {
+        core.time.Time.sleep_ms(ms);
+    }
+
+    /// Get the number of available hardware threads (CPUs/cores).
+    public fn available_parallelism() -> Int {
+        sys.num_cpus()
+    }
+
+    /// Park the current thread until it is unparked.
+    ///
+    /// This is a low-level synchronization primitive. Prefer using
+    /// higher-level constructs like channels, mutexes, or condvars.
+    public fn park() {
+        @cfg(target_os = "linux")
+        {
+            sys.linux.syscall.futex_wait(&PARK_FLAG, 0, None);
+        }
+
+        @cfg(target_os = "macos")
+        {
+            sys.darwin.thread.park();
+        }
+    }
+
+    /// Unpark a parked thread.
+    public fn unpark(thread_id: ThreadId) {
+        @cfg(target_os = "linux")
+        {
+            sys.linux.syscall.futex_wake(&PARK_FLAG, 1);
+        }
+
+        @cfg(target_os = "macos")
+        {
+            sys.darwin.thread.unpark(thread_id.id);
+        }
+    }
+}
+
+// Thread-local park flag (used by park/unpark)
+@thread_local
+static mut PARK_FLAG: Int = 0;
+
+// =============================================================================
+// Thread Error
+// =============================================================================
+
+/// Errors that can occur during thread operations.
+public type ThreadError is
+    /// Failed to spawn thread (OS resource limit).
+    | SpawnFailed
+    /// Failed to join thread.
+    | JoinFailed
+    /// Thread panicked during execution.
+    | Panicked
+    /// Thread name was invalid.
+    | InvalidName;
+
+implement Debug for ThreadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SpawnFailed => f.write_str("ThreadError.SpawnFailed"),
+            JoinFailed => f.write_str("ThreadError.JoinFailed"),
+            Panicked => f.write_str("ThreadError.Panicked"),
+            InvalidName => f.write_str("ThreadError.InvalidName"),
+        }
+    }
+}
+
+implement Display for ThreadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SpawnFailed => f.write_str("failed to spawn thread"),
+            JoinFailed => f.write_str("failed to join thread"),
+            Panicked => f.write_str("thread panicked"),
+            InvalidName => f.write_str("invalid thread name"),
+        }
+    }
+}
+
+implement Describable for ThreadError {
+    fn description(&self) -> Text {
+        match self {
+            SpawnFailed => "failed to spawn thread",
+            JoinFailed => "failed to join thread",
+            Panicked => "thread panicked",
+            InvalidName => "invalid thread name",
+        }
+    }
+}
+
+// =============================================================================
+// Stack Trace Capture
+// =============================================================================
+
+/// A captured stack frame.
+public type StackFrame is {
+    /// Instruction pointer (return address)
+    ip: UInt64,
+    /// Symbol name (if available)
+    symbol: Maybe<Text>,
+    /// Source file (if available)
+    file: Maybe<Text>,
+    /// Line number (if available)
+    line: Maybe<Int>,
+    /// Column number (if available)
+    column: Maybe<Int>,
+};
+
+implement StackFrame {
+    /// Create a stack frame from just an instruction pointer.
+    public fn from_ip(ip: UInt64) -> StackFrame {
+        StackFrame {
+            ip: ip,
+            symbol: None,
+            file: None,
+            line: None,
+            column: None,
+        }
+    }
+}
+
+implement Debug for StackFrame {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"  at 0x{self.ip:016x}")?;
+        if let Some(sym) = &self.symbol {
+            f.write_str(f" in {sym}")?;
+        }
+        if let Some(file) = &self.file {
+            f.write_str(f" ({file}")?;
+            if let Some(line) = self.line {
+                f.write_str(f":{line}")?;
+                if let Some(col) = self.column {
+                    f.write_str(f":{col}")?;
+                }
+            }
+            f.write_str(")")?;
+        }
+        Ok(())
+    }
+}
+
+implement Display for StackFrame {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+/// A captured stack trace.
+///
+/// Stack traces are captured during panics or on demand via
+/// `StackTrace.capture()`.
+///
+/// # Example
+/// ```verum
+/// let trace = StackTrace.capture();
+/// for frame in trace.frames() {
+///     print(f"  {frame}");
+/// }
+/// ```
+public type StackTrace is {
+    frames: List<StackFrame>,
+};
+
+implement StackTrace {
+    /// Capture the current stack trace.
+    ///
+    /// Walks the call stack from the current frame upward, collecting
+    /// return addresses. Symbol resolution is deferred until display.
+    ///
+    /// # Performance
+    /// - Frame walking: ~100ns per frame
+    /// - Symbol resolution: ~1us per frame (deferred)
+    public fn capture() -> StackTrace {
+        let mut frames = List.new();
+        let max_frames = 64;
+
+        // Use intrinsic to walk frame pointers
+        let mut frame_ptr = @frame_address(0);
+        let mut count = 0;
+
+        while !frame_ptr.is_null() && count < max_frames {
+            // Return address is at frame_ptr + 8 (on 64-bit)
+            let return_addr = unsafe {
+                *(frame_ptr.offset(8) as *const UInt64)
+            };
+
+            if return_addr == 0 {
+                break;
+            }
+
+            frames.push(StackFrame.from_ip(return_addr));
+
+            // Next frame pointer is at *frame_ptr
+            frame_ptr = unsafe { *(frame_ptr as *const *const Byte) };
+            count = count + 1;
+        }
+
+        StackTrace { frames: frames }
+    }
+
+    /// Create an empty stack trace.
+    public fn empty() -> StackTrace {
+        StackTrace { frames: List.new() }
+    }
+
+    /// Get the frames in this stack trace.
+    public fn frames(&self) -> &List<StackFrame> {
+        &self.frames
+    }
+
+    /// Get the number of frames.
+    public fn len(&self) -> Int {
+        self.frames.len()
+    }
+
+    /// Check if the stack trace is empty.
+    public fn is_empty(&self) -> Bool {
+        self.frames.is_empty()
+    }
+}
+
+implement Debug for StackTrace {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("stack backtrace:\n")?;
+        for i in 0..self.frames.len() {
+            f.write_str(f"  {i}: ")?;
+            self.frames[i].fmt_debug(f)?;
+            f.write_str("\n")?;
+        }
+        Ok(())
+    }
+}
+
+implement Display for StackTrace {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}

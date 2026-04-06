@@ -1,0 +1,103 @@
+[package]
+name = "vtest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "VCS (Verum Compliance Suite) test runner"
+
+[[bin]]
+name = "vtest"
+path = "src/main.rs"
+
+[lib]
+name = "vtest"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies
+verum_common = { workspace = true }
+
+# Verum compiler integration for direct test execution
+verum_compiler = { workspace = true }
+verum_ast = { workspace = true }
+verum_lexer = { workspace = true }
+verum_parser = { workspace = true }
+verum_fast_parser = { workspace = true }
+verum_types = { workspace = true }
+verum_diagnostics = { workspace = true }
+
+# CLI and argument parsing
+clap = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Async runtime (for parallel execution)
+tokio = { workspace = true, features = ["full", "rt-multi-thread", "process", "time", "fs", "io-util"] }
+futures = { workspace = true }
+
+# Regex for directive parsing
+regex = { workspace = true }
+once_cell = { workspace = true }
+
+# Glob pattern matching for file discovery
+glob = { workspace = true }
+walkdir = { workspace = true }
+
+# Terminal output and colors
+colored = { workspace = true }
+indicatif = { workspace = true }
+atty = { workspace = true }
+
+# Configuration file support
+dirs = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Process management
+wait-timeout = { workspace = true }
+
+# Diff output for failures
+similar = { workspace = true }
+
+# Hashing for cache
+blake3 = { workspace = true }
+
+# CPU count detection
+num_cpus = { workspace = true }
+
+# OS-level resource limits (setrlimit for memory caps)
+libc = { workspace = true }
+
+# Parallel iterator support for CPU-bound tasks
+rayon = { workspace = true }
+
+# Logging/tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
+
+# File watching for watch mode
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[features]
+default = []
+# Enable experimental features
+experimental = []
+
+[lints]
+workspace = true

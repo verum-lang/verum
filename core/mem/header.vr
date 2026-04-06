@@ -1,0 +1,550 @@
+// =============================================================================
+// mem/header.vr - Allocation Header for CBGR System
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/capability
+// =============================================================================
+//
+// This module defines the AllocationHeader structure prepended to every
+// heap allocation in the CBGR system.
+//
+// # Memory Layout (32 bytes, cache-line optimized)
+//
+// ```
+// Offset  Size  Field           Description
+// ──────────────────────────────────────────────────────────────────────
+// 0       4     generation      Current generation counter (atomic) — HOT
+// 4       4     epoch_and_caps  Packed: epoch (i16) + capabilities (i16)
+// 8       4     size            Allocation size in bytes (excluding header)
+// 12      4     alignment       Alignment requirement
+// 16      4     type_id         Runtime type identifier
+// 20      4     flags           Allocation state flags
+// 24      4     ref_count       Reference count (atomic)
+// 28      4     reserved        Reserved for future use
+// ──────────────────────────────────────────────────────────────────────
+// Total: 32 bytes (half cache line, 32-byte aligned)
+// ```
+//
+// # Thread Safety
+//
+// The generation, epoch_and_caps, and ref_count fields are atomic and
+// can be safely accessed from multiple threads.
+//
+// # Performance
+//
+// Hot path optimization: generation is at offset 0 for cache-line-aligned
+// first access. Generation + epoch_and_caps form the first 8 bytes,
+// enabling combined 64-bit atomic load for ~15ns validation.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.1
+// =============================================================================
+
+module core.mem.header;
+mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
+
+// Import intrinsics as functions (from submodules directly for reliable resolution)
+mount core.intrinsics.memory.{ptr_offset};
+mount core.intrinsics.atomic.{
+    atomic_load_u32, atomic_store_u32, atomic_fetch_add_u32, atomic_fetch_and_u32,
+    atomic_load_u16, atomic_store_u16, atomic_fetch_add_u16, atomic_fetch_and_u16,
+    atomic_load_u64,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Header size in bytes.
+public const HEADER_SIZE: Int = 32;
+
+/// Header alignment (cache-line half).
+public const HEADER_ALIGN: Int = 32;
+
+/// Initial generation value.
+public const GEN_INITIAL: UInt32 = 1;
+
+/// Maximum generation before wraparound.
+public const GEN_MAX: UInt32 = 0xFFFF_FFFE;
+
+/// Unallocated generation marker.
+public const GEN_UNALLOCATED: UInt32 = 0;
+
+// =============================================================================
+// Allocation Flags
+// =============================================================================
+
+/// Allocation cannot be moved by GC/compaction.
+public const FLAG_PINNED: UInt32 = 1 << 0;
+
+/// Intentionally leaked (permanent allocation, never freed).
+public const FLAG_LEAKED: UInt32 = 1 << 1;
+
+/// Has shared ownership (Shared<T>).
+public const FLAG_SHARED: UInt32 = 1 << 2;
+
+/// Has weak references.
+public const FLAG_WEAK: UInt32 = 1 << 3;
+
+/// Has capability restrictions.
+public const FLAG_CAPABILITY: UInt32 = 1 << 4;
+
+/// Allocation is from arena (bulk dealloc).
+public const FLAG_ARENA: UInt32 = 1 << 5;
+
+/// NUMA-pinned allocation.
+public const FLAG_NUMA_PINNED: UInt32 = 1 << 6;
+
+/// Large allocation (direct mmap).
+public const FLAG_LARGE: UInt32 = 1 << 7;
+
+/// Borrowed reference active.
+public const FLAG_BORROWED: UInt32 = 1 << 8;
+
+/// Allocation flags container.
+public type AllocationFlags is (UInt32);
+
+implement AllocationFlags {
+    /// Create empty flags.
+    public fn none() -> AllocationFlags {
+        AllocationFlags(0)
+    }
+
+    /// Check if pinned.
+    public fn is_pinned(&self) -> Bool {
+        (self.0 & FLAG_PINNED) != 0
+    }
+
+    /// Check if leaked.
+    public fn is_leaked(&self) -> Bool {
+        (self.0 & FLAG_LEAKED) != 0
+    }
+
+    /// Check if shared.
+    public fn is_shared(&self) -> Bool {
+        (self.0 & FLAG_SHARED) != 0
+    }
+
+    /// Check if has weak refs.
+    public fn has_weak(&self) -> Bool {
+        (self.0 & FLAG_WEAK) != 0
+    }
+
+    /// Check if large allocation.
+    public fn is_large(&self) -> Bool {
+        (self.0 & FLAG_LARGE) != 0
+    }
+
+    /// Check if arena allocation.
+    public fn is_arena(&self) -> Bool {
+        (self.0 & FLAG_ARENA) != 0
+    }
+}
+
+// =============================================================================
+// Allocation Header
+// =============================================================================
+
+/// Allocation header prepended to every heap allocation.
+///
+/// This structure is 32 bytes, cache-line optimized for half cache line
+/// alignment on most architectures.
+
+/// Error type for reference validation failures.
+public type ValidationError is
+    | GenerationMismatch { expected: UInt32, actual: UInt32 }
+    | EpochMismatch { expected: UInt16, actual: UInt16 };
+
+implement ValidationError {
+    public fn generation_mismatch(expected: UInt32, actual: UInt32) -> ValidationError {
+        ValidationError.GenerationMismatch { expected: expected, actual: actual }
+    }
+
+    public fn epoch_mismatch(expected: UInt16, actual: UInt16) -> ValidationError {
+        ValidationError.EpochMismatch { expected: expected, actual: actual }
+    }
+}
+
+implement Debug for ValidationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            GenerationMismatch { expected, actual } =>
+                f.write_str(f"GenerationMismatch(expected={expected}, actual={actual})"),
+            EpochMismatch { expected, actual } =>
+                f.write_str(f"EpochMismatch(expected={expected}, actual={actual})"),
+        }
+    }
+}
+
+implement Display for ValidationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            GenerationMismatch { expected, actual } =>
+                f.write_str(f"generation mismatch: expected {expected}, got {actual}"),
+            EpochMismatch { expected, actual } =>
+                f.write_str(f"epoch mismatch: expected {expected}, got {actual}"),
+        }
+    }
+}
+
+@repr(C, align(32))
+public type AllocationHeader is {
+    /// Current generation counter (atomic) — HOT: checked on every deref.
+    /// Starts at GEN_INITIAL (1), increments on deallocation/revocation.
+    generation: UInt32,  // Offset 0, AtomicU32 semantics via intrinsics
+
+    /// Packed epoch (lower 16 bits) + capabilities (upper 16 bits) (atomic).
+    /// Epoch: wraparound protection counter. Capabilities: access control flags.
+    epoch_and_caps: UInt32,  // Offset 4, AtomicU32 semantics
+
+    /// Allocation size in bytes (excluding header).
+    size: UInt32,  // Offset 8
+
+    /// Alignment requirement for the allocation.
+    alignment: UInt32,  // Offset 12
+
+    /// Runtime type identifier (for debugging and profiling).
+    type_id: UInt32,  // Offset 16
+
+    /// Allocation state flags.
+    flags: UInt32,  // Offset 20
+
+    /// Reference count (atomic).
+    ref_count: UInt32,  // Offset 24
+
+    /// Reserved for future use.
+    reserved: UInt32,  // Offset 28
+};
+
+implement AllocationHeader {
+    /// Create a new allocation header.
+    public fn new(
+        size: UInt32,
+        alignment: UInt32,
+        type_id: UInt32,
+        capabilities: UInt16,
+    ) -> AllocationHeader {
+        let epoch_and_caps = (capabilities as UInt32) << 16;
+        AllocationHeader {
+            generation: GEN_INITIAL,
+            epoch_and_caps: epoch_and_caps,
+            size: size,
+            alignment: alignment,
+            type_id: type_id,
+            flags: 0,
+            ref_count: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Create header for a typed allocation.
+    public fn for_type<T>(capabilities: UInt16) -> AllocationHeader {
+        let size = T.size as UInt32;
+        let alignment = T.alignment as UInt32;
+        let type_id = T.id as UInt32;
+        AllocationHeader.new(size, alignment, type_id, capabilities)
+    }
+
+    /// Create header with explicit type_id (uses CAP_OWNED by default).
+    public fn new_with_type(size: UInt32, alignment: UInt32, type_id: UInt32) -> AllocationHeader {
+        AllocationHeader.new(size, alignment, type_id, CAP_OWNED)
+    }
+
+    /// Load generation counter atomically.
+    @inline
+    public fn load_generation(&self) -> UInt32 {
+        atomic_load_u32(&self.generation, "acquire")
+    }
+
+    /// Store generation counter atomically.
+    @inline
+    public fn store_generation(&mut self, gen: UInt32) {
+        atomic_store_u32(&self.generation, gen, "release")
+    }
+
+    /// Increment generation and return old value.
+    /// Handles wraparound by incrementing epoch.
+    @inline
+    public fn increment_generation(&mut self) -> UInt32 {
+        let old_gen = atomic_fetch_add_u32(&self.generation, 1, "acq_rel");
+
+        // Check for wraparound
+        if old_gen >= GEN_MAX - 1 {
+            // Increment epoch in the packed epoch_and_caps field (lower 16 bits)
+            let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+            let old_epoch = (old_packed & 0xFFFF) as UInt16;
+            let caps = (old_packed >> 16) as UInt16;
+            let new_epoch = old_epoch + 1;
+            let new_packed = ((caps as UInt32) << 16) | (new_epoch as UInt32);
+            atomic_store_u32(&self.epoch_and_caps, new_packed, "release");
+            // Reset generation
+            atomic_store_u32(&self.generation, GEN_INITIAL, "release");
+            // Notify epoch manager
+            super.epoch.GLOBAL_EPOCH.on_wraparound();
+        }
+
+        old_gen
+    }
+
+    /// Load epoch counter atomically (lower 16 bits of epoch_and_caps).
+    @inline
+    public fn load_epoch(&self) -> UInt16 {
+        let packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        (packed & 0xFFFF) as UInt16
+    }
+
+    /// Store epoch counter atomically (preserves capabilities in upper 16 bits).
+    @inline
+    public fn store_epoch(&mut self, epoch: UInt16) {
+        let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let caps = old_packed & 0xFFFF_0000;
+        let new_packed = caps | (epoch as UInt32);
+        atomic_store_u32(&self.epoch_and_caps, new_packed, "release")
+    }
+
+    /// Load generation and epoch in optimized sequential access.
+    /// This is the HOT PATH - ~15ns for validation.
+    /// Generation is at offset 0 for optimal cache access.
+    @inline
+    public fn load_generation_epoch_fast(&self) -> (UInt32, UInt16) {
+        // Load generation with Acquire ordering (provides memory fence)
+        let generation = atomic_load_u32(&self.generation, "acquire");
+        // Epoch is lower 16 bits of epoch_and_caps; Relaxed since generation provides fence
+        let packed = atomic_load_u32(&self.epoch_and_caps, "relaxed");
+        let epoch = (packed & 0xFFFF) as UInt16;
+        (generation, epoch)
+    }
+
+    /// Load generation and epoch in a SINGLE 64-bit access (faster).
+    /// Generation (offset 0) + epoch_and_caps (offset 4) are adjacent,
+    /// enabling a combined 64-bit atomic load.
+    @inline
+    public unsafe fn load_generation_epoch_combined(&self) -> (UInt32, UInt16) {
+        // Cast generation field address to UInt64 pointer and load
+        let ptr = &self.generation as &unsafe UInt64;
+        let combined = atomic_load_u64(ptr, "acquire");
+
+        // Extract generation (lower 32 bits) and epoch (bits 32-47)
+        let generation = (combined & 0xFFFF_FFFF) as UInt32;
+        let epoch = ((combined >> 32) & 0xFFFF) as UInt16;
+
+        (generation, epoch)
+    }
+
+    /// Load capabilities atomically (upper 16 bits of epoch_and_caps).
+    @inline
+    public fn load_capabilities(&self) -> UInt16 {
+        let packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        ((packed >> 16) & 0xFFFF) as UInt16
+    }
+
+    /// Store capabilities atomically (preserves epoch in lower 16 bits).
+    @inline
+    public fn store_capabilities(&mut self, caps: UInt16) {
+        let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let epoch = old_packed & 0xFFFF;
+        let new_packed = ((caps as UInt32) << 16) | epoch;
+        atomic_store_u32(&self.epoch_and_caps, new_packed, "release")
+    }
+
+    /// Attenuate (reduce) capabilities using AND mask.
+    /// Once capabilities are removed, they cannot be restored.
+    @inline
+    public fn attenuate_capabilities(&mut self, mask: UInt16) -> UInt16 {
+        // AND the upper 16 bits (caps) while preserving lower 16 bits (epoch)
+        let u32_mask = ((mask as UInt32) << 16) | 0xFFFF;
+        let old_packed = atomic_fetch_and_u32(&self.epoch_and_caps, u32_mask, "acq_rel");
+        ((old_packed >> 16) & 0xFFFF) as UInt16
+    }
+
+    /// Check if a specific capability is set.
+    @inline
+    public fn has_capability(&self, cap: UInt16) -> Bool {
+        (self.load_capabilities() & cap) == cap
+    }
+
+    /// Load reference count atomically.
+    @inline
+    public fn load_ref_count(&self) -> UInt32 {
+        atomic_load_u32(&self.ref_count, "acquire")
+    }
+
+    /// Increment reference count and return old value.
+    @inline
+    public fn increment_ref_count(&mut self) -> UInt32 {
+        atomic_fetch_add_u32(&self.ref_count, 1, "acq_rel")
+    }
+
+    /// Decrement reference count and return new value.
+    /// Caller must handle deallocation when this returns 0.
+    @inline
+    public fn decrement_ref_count(&mut self) -> UInt32 {
+        let old = atomic_fetch_add_u32(&self.ref_count, 0xFFFF_FFFF, "acq_rel");
+        old - 1
+    }
+
+    /// Validate that a reference's generation/epoch match this header.
+    /// Returns Ok(()) if valid, Err with validation error if not.
+    @inline
+    public fn validate_reference(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), ValidationError> {
+        let actual_gen = self.load_generation();
+        let actual_epoch = self.load_epoch();
+        if expected_gen != actual_gen {
+            Result.Err(ValidationError.generation_mismatch(expected_gen, actual_gen))
+        } else if expected_epoch != actual_epoch {
+            Result.Err(ValidationError.epoch_mismatch(expected_epoch, actual_epoch))
+        } else {
+            Result.Ok(())
+        }
+    }
+
+    /// Fast validation using combined atomic load.
+    /// Returns Ok(()) if valid, Err with validation error if not.
+    @inline
+    public unsafe fn validate_reference_fast(&self, expected_gen: UInt32, expected_epoch: UInt16) -> Result<(), ValidationError> {
+        let (actual_gen, actual_epoch) = self.load_generation_epoch_combined();
+        if expected_gen != actual_gen {
+            Result.Err(ValidationError.generation_mismatch(expected_gen, actual_gen))
+        } else if expected_epoch != actual_epoch {
+            Result.Err(ValidationError.epoch_mismatch(expected_epoch, actual_epoch))
+        } else {
+            Result.Ok(())
+        }
+    }
+
+    /// Get pointer to user data (after header).
+    @inline
+    public unsafe fn user_ptr(&self) -> &unsafe Byte {
+        let self_ptr = self as &unsafe Byte;
+        ptr_offset(self_ptr, HEADER_SIZE)
+    }
+
+    /// Get header from user pointer.
+    @inline
+    public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
+        let header_ptr = ptr_offset(ptr, -HEADER_SIZE);
+        header_ptr as &AllocationHeader
+    }
+
+    /// Get mutable header from user pointer.
+    @inline
+    public unsafe fn from_user_ptr_mut(ptr: &unsafe Byte) -> &mut AllocationHeader {
+        let header_ptr = ptr_offset(ptr, -HEADER_SIZE);
+        header_ptr as &mut AllocationHeader
+    }
+
+    /// Check if allocation is pinned.
+    @inline
+    public fn is_pinned(&self) -> Bool {
+        (self.flags & FLAG_PINNED) != 0
+    }
+
+    /// Check if allocation is leaked.
+    @inline
+    public fn is_leaked(&self) -> Bool {
+        (self.flags & FLAG_LEAKED) != 0
+    }
+
+    /// Check if allocation has shared ownership.
+    @inline
+    public fn is_shared(&self) -> Bool {
+        (self.flags & FLAG_SHARED) != 0
+    }
+
+    /// Check if allocation has weak references.
+    @inline
+    public fn has_weak_refs(&self) -> Bool {
+        (self.flags & FLAG_WEAK) != 0
+    }
+
+    /// Mark allocation as pinned.
+    @inline
+    public fn set_pinned(&mut self) {
+        self.flags = self.flags | FLAG_PINNED;
+    }
+
+    /// Mark allocation as leaked.
+    @inline
+    public fn set_leaked(&mut self) {
+        self.flags = self.flags | FLAG_LEAKED;
+    }
+
+    /// Mark allocation as shared.
+    @inline
+    public fn set_shared(&mut self) {
+        self.flags = self.flags | FLAG_SHARED;
+    }
+
+    /// Set weak reference flag.
+    @inline
+    public fn set_has_weak(&mut self) {
+        self.flags = self.flags | FLAG_WEAK;
+    }
+
+    /// Set an arbitrary flag.
+    @inline
+    public fn set_flag(&mut self, flag: UInt32) {
+        self.flags = self.flags | flag;
+    }
+
+    /// Check if an arbitrary flag is set.
+    @inline
+    public fn has_flag(&self, flag: UInt32) -> Bool {
+        (self.flags & flag) != 0
+    }
+
+    /// Clear an arbitrary flag.
+    @inline
+    public fn clear_flag(&mut self, flag: UInt32) {
+        self.flags = self.flags & !flag;
+    }
+
+    /// Get allocation size.
+    @inline
+    public fn get_size(&self) -> UInt32 {
+        self.size
+    }
+
+    /// Get alignment.
+    @inline
+    public fn get_alignment(&self) -> UInt32 {
+        self.alignment
+    }
+
+    /// Get type ID.
+    @inline
+    public fn get_type_id(&self) -> UInt32 {
+        self.type_id
+    }
+
+    /// Get total allocation size (header + data).
+    @inline
+    public fn total_size(&self) -> Int {
+        HEADER_SIZE + self.size as Int
+    }
+}
+
+// =============================================================================
+// Validation Functions
+// =============================================================================
+
+/// Validate that a reference's generation/epoch match the header.
+@inline
+public fn validate_reference(
+    header: &AllocationHeader,
+    expected_gen: UInt32,
+    expected_epoch: UInt16,
+) -> Bool {
+    let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
+    expected_gen == actual_gen && expected_epoch == actual_epoch
+}
+
+/// Fast validation using combined load.
+@inline
+public unsafe fn validate_reference_fast(
+    header: &AllocationHeader,
+    expected_gen: UInt32,
+    expected_epoch: UInt16,
+) -> Bool {
+    let (actual_gen, actual_epoch) = header.load_generation_epoch_combined();
+    expected_gen == actual_gen && expected_epoch == actual_epoch
+}

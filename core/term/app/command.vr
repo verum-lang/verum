@@ -1,0 +1,46 @@
+// =============================================================================
+// command.vr - Command type (async side effects)
+// =============================================================================
+module command;
+
+mount core.time.Duration;
+
+/// Command — a deferred side effect that produces a message.
+public type Command<Msg> is
+    | Noop                              // No effect (renamed from None to avoid collision with Maybe.None)
+    | Perform(fn() -> Msg)              // Sync side effect
+    | Async(async fn() -> Msg)          // Async side effect
+    | Batch(List<Command<Msg>>)         // Parallel execution
+    | Sequence(List<Command<Msg>>)      // Sequential execution
+    | Tick(Duration)                    // Periodic tick
+    | Quit;                            // Quit application
+
+/// Create a no-op command.
+public fn none<Msg>() -> Command<Msg> {
+    Command.Noop
+}
+
+/// Create a sync side-effect command.
+public fn perform<Msg>(f: fn() -> Msg) -> Command<Msg> {
+    Command.Perform(f)
+}
+
+/// Create a batch of commands (run in parallel).
+public fn batch<Msg>(cmds: List<Command<Msg>>) -> Command<Msg> {
+    Command.Batch(cmds)
+}
+
+/// Create a sequence of commands (run in order).
+public fn sequence<Msg>(cmds: List<Command<Msg>>) -> Command<Msg> {
+    Command.Sequence(cmds)
+}
+
+/// Create a periodic tick command.
+public fn tick<Msg>(interval: Duration) -> Command<Msg> {
+    Command.Tick(interval)
+}
+
+/// Create a quit command.
+public fn quit<Msg>() -> Command<Msg> {
+    Command.Quit
+}

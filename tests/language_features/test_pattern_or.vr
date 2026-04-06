@@ -1,0 +1,9 @@
+fn main() {
+    // Test 3: Or patterns
+    let n = 3;
+    match n {
+        1 | 2 | 3 => print(f"small"),
+        _ => print(f"big"),
+    }
+    print(f"Or pattern test complete!");
+}

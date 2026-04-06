@@ -1,0 +1,51 @@
+[package]
+name = "verum-parser-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+logos = "=0.16.0"
+logos-derive = "=0.16.0"
+logos-codegen = "=0.16.0"
+verum_fast_parser = { path = ".." }
+verum_lexer = { path = "../../verum_lexer" }
+verum_common = { path = "../../verum_common" }
+verum_ast = { path = "../../verum_ast" }
+
+# Prevent this from being discovered as a workspace member
+[workspace]
+
+[[bin]]
+name = "fuzz_parse_module"
+path = "fuzz_targets/fuzz_parse_module.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_parse_expr"
+path = "fuzz_targets/fuzz_parse_expr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_parse_type"
+path = "fuzz_targets/fuzz_parse_type.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_parse_pattern"
+path = "fuzz_targets/fuzz_parse_pattern.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_lexer"
+path = "fuzz_targets/fuzz_lexer.rs"
+test = false
+doc = false

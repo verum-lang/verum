@@ -1,0 +1,45 @@
+# Maintainer: Verum Language Team <maintainers@verum-lang.org>
+pkgname=verum
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Practical language with refinement types and gradual verification"
+arch=('x86_64' 'aarch64')
+url="https://verum-lang.org"
+license=('Apache' 'MIT')
+depends=('llvm>=18' 'z3' 'gcc-libs')
+makedepends=('rust>=1.93' 'cargo')
+source=("https://github.com/verum-lang/verum/archive/v${pkgver}.tar.gz")
+sha256sums=('REPLACE_WITH_ACTUAL_SHA256')
+
+build() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Build in release mode
+    cargo build --release --locked --all-features
+}
+
+check() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Run test suite (skip integration tests for packaging)
+    cargo test --release --locked
+}
+
+package() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Install binary
+    install -Dm755 "target/release/verum" "${pkgdir}/usr/bin/verum"
+
+    # Install documentation
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+    install -Dm644 CHANGELOG.md "${pkgdir}/usr/share/doc/${pkgname}/CHANGELOG.md"
+    install -Dm644 LICENSE-APACHE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+    install -Dm644 LICENSE-MIT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
+
+    # Install examples if present
+    if [ -d "examples" ]; then
+        mkdir -p "${pkgdir}/usr/share/${pkgname}"
+        cp -r examples "${pkgdir}/usr/share/${pkgname}/"
+    fi
+}

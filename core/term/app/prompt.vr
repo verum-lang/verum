@@ -1,0 +1,263 @@
+// =============================================================================
+// prompt.vr - High-level interactive prompts
+// =============================================================================
+module prompt;
+
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount super.super.event.{Event, KeyEvent, KeyCode, Modifiers, EventStream};
+mount super.super.render.frame.{Terminal, Frame};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.theme.Theme;
+mount super.super.widget.paragraph.{Paragraph, Line, Span, Wrap};
+mount super.super.widget.block.{Block, Borders, Alignment};
+
+/// Confirmation prompt: "Are you sure? [y/N]"
+public fn confirm(message: Text) -> IoResult<Bool> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    let mut events = EventStream.new(terminal.backend_mut());
+    let mut result = false;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.size();
+            let mut lines = List.new();
+            lines.push(Line.raw(f"{message} [y/N] "));
+            let p = Paragraph.new()
+                .text(lines);
+            p.render(area, frame.buffer);
+        })?;
+
+        match events.read() {
+            Ok(Event.Key(ke)) => match ke.code {
+                KeyCode.Char('y') | KeyCode.Char('Y') => { result = true; break; }
+                KeyCode.Char('n') | KeyCode.Char('N') | KeyCode.Enter | KeyCode.Escape => { result = false; break; }
+                _ => {}
+            },
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    terminal.restore()?;
+    Ok(result)
+}
+
+/// Selection prompt: choose from a list of options.
+/// Returns the index of the selected option, or None if cancelled.
+public fn select(message: Text, options: &List<Text>) -> IoResult<Maybe<Int>> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    let mut events = EventStream.new(terminal.backend_mut());
+    let mut selected: Int = 0;
+    let total = options.len();
+    let mut cancelled = false;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.size();
+            let mut lines = List.new();
+            lines.push(Line.raw(message.clone()));
+            lines.push(Line.raw(""));
+
+            for i in 0..total {
+                let prefix = if i == selected { "▸ " } else { "  " };
+                let style = if i == selected {
+                    Style.new().bold()
+                } else {
+                    Style.DEFAULT
+                };
+                lines.push(Line.styled(f"{prefix}{options[i]}", style));
+            }
+
+            let p = Paragraph.new().text(lines);
+            p.render(area, frame.buffer);
+        })?;
+
+        match events.read() {
+            Ok(Event.Key(ke)) => match ke.code {
+                KeyCode.Up | KeyCode.Char('k') => {
+                    selected = if selected > 0 { selected - 1 } else { total - 1 };
+                }
+                KeyCode.Down | KeyCode.Char('j') => {
+                    selected = if selected < total - 1 { selected + 1 } else { 0 };
+                }
+                KeyCode.Enter => break,
+                KeyCode.Escape | KeyCode.Char('q') => { cancelled = true; break; }
+                _ => {}
+            },
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    terminal.restore()?;
+    if cancelled { Ok(None) } else { Ok(Some(selected)) }
+}
+
+/// Text input prompt.
+public fn input(message: Text) -> IoResult<Text> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    let mut events = EventStream.new(terminal.backend_mut());
+    let mut value = "";
+    let mut cursor = 0;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.size();
+            let mut lines = List.new();
+            lines.push(Line.raw(f"{message}: {value}"));
+            let p = Paragraph.new().text(lines);
+            p.render(area, frame.buffer);
+
+            // Show cursor
+            frame.set_cursor(message.len() + 2 + cursor, 0);
+        })?;
+
+        match events.read() {
+            Ok(Event.Key(ke)) => match ke.code {
+                KeyCode.Enter => break,
+                KeyCode.Escape => { value = ""; break; }
+                KeyCode.Backspace => {
+                    if cursor > 0 {
+                        let before = value.slice(0, cursor - 1);
+                        let after = value.slice(cursor, value.len());
+                        value = before + &after;
+                        cursor = cursor - 1;
+                    }
+                }
+                KeyCode.Delete => {
+                    if cursor < value.len() {
+                        let before = value.slice(0, cursor);
+                        let after = value.slice(cursor + 1, value.len());
+                        value = before + &after;
+                    }
+                }
+                KeyCode.Left => { if cursor > 0 { cursor = cursor - 1; } }
+                KeyCode.Right => { if cursor < value.len() { cursor = cursor + 1; } }
+                KeyCode.Home => { cursor = 0; }
+                KeyCode.End => { cursor = value.len(); }
+                KeyCode.Char(ch) => {
+                    let before = value.slice(0, cursor);
+                    let after = value.slice(cursor, value.len());
+                    value = before + &ch.to_text() + &after;
+                    cursor = cursor + 1;
+                }
+                _ => {}
+            },
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    terminal.restore()?;
+    Ok(value)
+}
+
+/// Multi-select prompt: choose multiple options.
+/// Returns list of selected indices.
+public fn multi_select(message: Text, options: &List<Text>) -> IoResult<List<Int>> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    let mut events = EventStream.new(terminal.backend_mut());
+    let total = options.len();
+    let mut cursor: Int = 0;
+    let mut selected: List<Bool> = List.new();
+    for _ in 0..total { selected.push(false); }
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.size();
+            let mut lines = List.new();
+            lines.push(Line.raw(f"{message} (Space to toggle, Enter to confirm)"));
+            lines.push(Line.raw(""));
+
+            for i in 0..total {
+                let pointer = if i == cursor { "▸" } else { " " };
+                let check = if selected[i] { "✓" } else { " " };
+                let style = if i == cursor { Style.new().bold() } else { Style.DEFAULT };
+                lines.push(Line.styled(f"{pointer} [{check}] {options[i]}", style));
+            }
+
+            let p = Paragraph.new().text(lines);
+            p.render(area, frame.buffer);
+        })?;
+
+        match events.read() {
+            Ok(Event.Key(ke)) => match ke.code {
+                KeyCode.Up | KeyCode.Char('k') => {
+                    cursor = if cursor > 0 { cursor - 1 } else { total - 1 };
+                }
+                KeyCode.Down | KeyCode.Char('j') => {
+                    cursor = if cursor < total - 1 { cursor + 1 } else { 0 };
+                }
+                KeyCode.Space => { selected[cursor] = !selected[cursor]; }
+                KeyCode.Enter => break,
+                KeyCode.Escape => {
+                    terminal.restore()?;
+                    return Ok(List.new());
+                }
+                _ => {}
+            },
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    terminal.restore()?;
+
+    let mut result = List.new();
+    for i in 0..total {
+        if selected[i] { result.push(i); }
+    }
+    Ok(result)
+}
+
+/// Password prompt (hidden input).
+public fn password(message: Text) -> IoResult<Text> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    let mut events = EventStream.new(terminal.backend_mut());
+    let mut value = "";
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.size();
+            let masked = "";
+            for _ in 0..value.len() { masked = masked + "•"; }
+            let mut lines = List.new();
+            lines.push(Line.raw(f"{message}: {masked}"));
+            let p = Paragraph.new().text(lines);
+            p.render(area, frame.buffer);
+        })?;
+
+        match events.read() {
+            Ok(Event.Key(ke)) => match ke.code {
+                KeyCode.Enter => break,
+                KeyCode.Escape => { value = ""; break; }
+                KeyCode.Backspace => {
+                    if value.len() > 0 {
+                        value = value.slice(0, value.len() - 1);
+                    }
+                }
+                KeyCode.Char(ch) => {
+                    value = value + &ch.to_text();
+                }
+                _ => {}
+            },
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    terminal.restore()?;
+    Ok(value)
+}

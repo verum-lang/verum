@@ -1,0 +1,481 @@
+// =============================================================================
+// async/timer.vr - Async Timer and Interval Utilities
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/future, async/poll, time
+// =============================================================================
+//
+// Provides timer-based async primitives:
+//
+// - sleep(duration): Future that completes after a duration
+// - sleep_ms(ms): Convenience for millisecond sleep
+// - sleep_until(deadline): Sleep until an absolute time
+// - Interval: Repeating timer that yields at fixed intervals
+// - Timeout: Wraps a future with a deadline
+// - Delay: Delays execution of a future
+//
+// All timers use monotonic clock for correctness (immune to wall clock changes).
+//
+// =============================================================================
+
+module timer;
+
+mount core.*;
+mount super.poll.Poll;
+mount super.waker.Context;
+mount super.future.Future;
+mount time.{Duration, Instant};
+
+// =============================================================================
+// Sleep Future
+// =============================================================================
+
+/// Future that completes after a specified duration.
+///
+/// Uses monotonic clock for accuracy. The actual sleep may be slightly
+/// longer than requested due to scheduling, but never shorter.
+///
+/// # Example
+///
+/// ```verum
+/// // Sleep for 100 milliseconds
+/// sleep(Duration.from_millis(100)).await;
+///
+/// // Convenience
+/// sleep_ms(100).await;
+/// ```
+public type Sleep is {
+    /// Target deadline (set on first poll)
+    deadline: Maybe<Instant>,
+    /// Duration to sleep
+    duration: Duration,
+};
+
+implement Sleep {
+    /// Create a new sleep future for the given duration.
+    public fn new(duration: Duration) -> Sleep {
+        Sleep {
+            deadline: None,
+            duration: duration,
+        }
+    }
+}
+
+implement Future for Sleep {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        // Set deadline on first poll
+        let deadline = match self.deadline {
+            Some(d) => d,
+            None => {
+                let d = Instant.now() + self.duration;
+                self.deadline = Some(d);
+                d
+            }
+        };
+
+        // Check if deadline has elapsed
+        if Instant.now() >= deadline {
+            Poll.Ready(())
+        } else {
+            // Register waker so executor re-polls us
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+/// Create a future that completes after the given duration.
+public fn sleep(duration: Duration) -> Sleep {
+    Sleep.new(duration)
+}
+
+/// Create a future that completes after the given milliseconds.
+public fn sleep_ms(ms: Int) -> Sleep {
+    Sleep.new(Duration.from_millis(ms))
+}
+
+/// Create a future that completes after the given seconds.
+public fn sleep_secs(secs: Int) -> Sleep {
+    Sleep.new(Duration.from_secs(secs))
+}
+
+// =============================================================================
+// SleepUntil Future
+// =============================================================================
+
+/// Future that completes at an absolute deadline.
+///
+/// Unlike `sleep` which is relative, `sleep_until` takes an absolute
+/// monotonic instant. Useful for scheduling at precise times.
+public type SleepUntil is {
+    deadline: Instant,
+};
+
+implement SleepUntil {
+    /// Create a sleep-until future for the given absolute deadline.
+    public fn new(deadline: Instant) -> SleepUntil {
+        SleepUntil { deadline: deadline }
+    }
+}
+
+implement Future for SleepUntil {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if Instant.now() >= self.deadline {
+            Poll.Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+/// Create a future that completes at the given absolute instant.
+public fn sleep_until(deadline: Instant) -> SleepUntil {
+    SleepUntil.new(deadline)
+}
+
+// =============================================================================
+// Interval
+// =============================================================================
+
+/// A stream that yields at fixed intervals.
+///
+/// After each tick, the interval waits for `period` before yielding again.
+/// The first tick happens after `period` from creation (not immediately).
+///
+/// # Example
+///
+/// ```verum
+/// let mut ticker = Interval.new(Duration.from_millis(100));
+/// loop {
+///     ticker.tick().await;
+///     do_periodic_work();
+/// }
+/// ```
+public type Interval is {
+    /// Period between ticks
+    period: Duration,
+    /// Next deadline
+    next_tick: Maybe<Instant>,
+};
+
+implement Interval {
+    /// Create a new interval with the given period.
+    ///
+    /// The first tick will be `period` from now.
+    public fn new(period: Duration) -> Interval {
+        Interval {
+            period: period,
+            next_tick: None,
+        }
+    }
+
+    /// Create an interval that ticks immediately on first call.
+    public fn immediate(period: Duration) -> Interval {
+        Interval {
+            period: period,
+            next_tick: Some(Instant.now()),
+        }
+    }
+
+    /// Wait for the next tick.
+    ///
+    /// Returns the instant at which the tick occurred.
+    public async fn tick(&mut self) -> Instant {
+        let deadline = match self.next_tick {
+            Some(d) => d,
+            None => {
+                let d = Instant.now() + self.period;
+                self.next_tick = Some(d);
+                d
+            }
+        };
+
+        // Wait until deadline
+        sleep_until(deadline).await;
+
+        // Schedule next tick
+        let tick_time = deadline;
+        self.next_tick = Some(deadline + self.period);
+
+        tick_time
+    }
+
+    /// Reset the interval to start counting from now.
+    public fn reset(&mut self) {
+        self.next_tick = Some(Instant.now() + self.period);
+    }
+
+    /// Get the period of this interval.
+    public fn period(&self) -> Duration {
+        self.period
+    }
+}
+
+// =============================================================================
+// Delay Future
+// =============================================================================
+
+/// Wraps a future and delays its first poll.
+///
+/// The inner future is not polled until after the delay has elapsed.
+///
+/// # Example
+///
+/// ```verum
+/// let delayed = delay(Duration.from_secs(1), async {
+///     expensive_operation().await
+/// });
+/// let result = delayed.await; // waits 1s before starting
+/// ```
+public type Delay<F: Future> is {
+    sleep: Sleep,
+    future: F,
+    sleep_done: Bool,
+};
+
+implement<F: Future> Delay<F> {
+    /// Create a delayed future.
+    public fn new(duration: Duration, future: F) -> Delay<F> {
+        Delay {
+            sleep: Sleep.new(duration),
+            future: future,
+            sleep_done: false,
+        }
+    }
+}
+
+implement<F: Future> Future for Delay<F> {
+    type Output = F.Output;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<F.Output> {
+        // First wait for the delay to complete
+        if !self.sleep_done {
+            match self.sleep.poll(cx) {
+                Poll.Ready(()) => {
+                    self.sleep_done = true;
+                }
+                Poll.Pending => return Poll.Pending,
+            }
+        }
+
+        // Then poll the inner future
+        self.future.poll(cx)
+    }
+}
+
+/// Create a future that starts after a delay.
+public fn delay<F: Future>(duration: Duration, future: F) -> Delay<F> {
+    Delay.new(duration, future)
+}
+
+// =============================================================================
+// Timeout Future
+// =============================================================================
+
+/// Error returned when a timeout expires.
+public type TimeoutError is ();
+
+implement Debug for TimeoutError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TimeoutError")
+    }
+}
+
+implement Display for TimeoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("operation timed out")
+    }
+}
+
+/// Wraps a future with a timeout.
+///
+/// If the inner future does not complete within the timeout,
+/// returns `Err(TimeoutError)`.
+///
+/// # Example
+///
+/// ```verum
+/// match timeout(Duration.from_secs(5), fetch_data()).await {
+///     Ok(data) => process(data),
+///     Err(TimeoutError) => print("timed out!"),
+/// }
+/// ```
+public type Timeout<F: Future> is {
+    future: F,
+    sleep: Sleep,
+    completed: Bool,
+};
+
+implement<F: Future> Timeout<F> {
+    /// Create a new timeout wrapper.
+    public fn new(duration: Duration, future: F) -> Timeout<F> {
+        Timeout {
+            future: future,
+            sleep: Sleep.new(duration),
+            completed: false,
+        }
+    }
+}
+
+implement<F: Future> Future for Timeout<F> {
+    type Output = Result<F.Output, TimeoutError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, TimeoutError>> {
+        if self.completed {
+            return Poll.Ready(Err(TimeoutError));
+        }
+
+        // Try the inner future first
+        match self.future.poll(cx) {
+            Poll.Ready(val) => {
+                self.completed = true;
+                return Poll.Ready(Ok(val));
+            }
+            Poll.Pending => {}
+        }
+
+        // Check if timeout has expired
+        match self.sleep.poll(cx) {
+            Poll.Ready(()) => {
+                self.completed = true;
+                Poll.Ready(Err(TimeoutError))
+            }
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+/// Wrap a future with a timeout duration.
+public fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<F> {
+    Timeout.new(duration, future)
+}
+
+/// Wrap a future with a timeout in milliseconds.
+public fn timeout_ms<F: Future>(ms: Int, future: F) -> Timeout<F> {
+    Timeout.new(Duration.from_millis(ms), future)
+}
+
+// =============================================================================
+// Debounce
+// =============================================================================
+
+/// Debounce state for collapsing rapid events into a single delayed action.
+///
+/// After each trigger, waits for `delay` without another trigger before firing.
+/// Useful for input handling, search-as-you-type, window resize, etc.
+public type Debounce is {
+    delay: Duration,
+    deadline: Maybe<Instant>,
+};
+
+implement Debounce {
+    /// Create a new debounce with the given delay.
+    public fn new(delay: Duration) -> Debounce {
+        Debounce {
+            delay: delay,
+            deadline: None,
+        }
+    }
+
+    /// Trigger the debounce (resets the timer).
+    public fn trigger(&mut self) {
+        self.deadline = Some(Instant.now() + self.delay);
+    }
+
+    /// Check if the debounce has settled (enough time passed since last trigger).
+    ///
+    /// Returns true if no trigger has been called, or if the delay has elapsed
+    /// since the last trigger.
+    public fn is_settled(&self) -> Bool {
+        match self.deadline {
+            None => true,
+            Some(d) => Instant.now() >= d,
+        }
+    }
+
+    /// Wait until the debounce settles.
+    ///
+    /// Returns immediately if no trigger has been called.
+    public async fn settled(&self) {
+        match self.deadline {
+            None => {}
+            Some(d) => sleep_until(d).await,
+        }
+    }
+
+    /// Reset without triggering.
+    public fn reset(&mut self) {
+        self.deadline = None;
+    }
+}
+
+// =============================================================================
+// Throttle
+// =============================================================================
+
+/// Throttle state for rate-limiting operations.
+///
+/// Allows at most one operation per `interval`.
+/// Unlike debounce, the first call goes through immediately.
+public type Throttle is {
+    interval: Duration,
+    last_allowed: Maybe<Instant>,
+};
+
+implement Throttle {
+    /// Create a new throttle with the given minimum interval.
+    public fn new(interval: Duration) -> Throttle {
+        Throttle {
+            interval: interval,
+            last_allowed: None,
+        }
+    }
+
+    /// Check if an operation is currently allowed.
+    ///
+    /// Returns true and records the time if allowed.
+    /// Returns false if the interval has not elapsed since last allowed call.
+    public fn try_acquire(&mut self) -> Bool {
+        let now = Instant.now();
+        match self.last_allowed {
+            None => {
+                self.last_allowed = Some(now);
+                true
+            }
+            Some(last) => {
+                if now >= last + self.interval {
+                    self.last_allowed = Some(now);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Wait until the throttle allows an operation.
+    pub async fn acquire(&mut self) {
+        match self.last_allowed {
+            None => {
+                self.last_allowed = Some(Instant.now());
+            }
+            Some(last) => {
+                let next_allowed = last + self.interval;
+                if Instant.now() < next_allowed {
+                    sleep_until(next_allowed).await;
+                }
+                self.last_allowed = Some(Instant.now());
+            }
+        }
+    }
+
+    /// Reset the throttle state.
+    public fn reset(&mut self) {
+        self.last_allowed = None;
+    }
+}

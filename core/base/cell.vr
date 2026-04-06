@@ -1,0 +1,510 @@
+// =============================================================================
+// cell.vr - Interior mutability primitives
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: none (pure types)
+// =============================================================================
+//
+// Provides interior mutability — allowing mutation through shared references.
+// These are single-threaded primitives.
+//
+// - Cell<T>: Simple value replacement, requires T: Clone
+// - RefCell<T>: Dynamic borrow checking at runtime
+// - OnceCell<T>: Write-once cell for lazy initialization
+// - LazyCell<T>: Lazy computation with deferred initialization
+//
+// For thread-safe variants, use sync/atomic, sync/mutex, or sync/once instead.
+// =============================================================================
+
+// =============================================================================
+// Cell<T> - Single-threaded interior mutability for Copy types
+// =============================================================================
+
+/// A mutable memory location for Copy types.
+///
+/// `Cell<T>` provides interior mutability by moving values in and out.
+/// It requires `T: Clone` and is NOT thread-safe.
+///
+/// # Example
+/// ```verum
+/// let cell = Cell.new(42);
+/// assert_eq(cell.get(), 42);
+/// cell.set(100);
+/// assert_eq(cell.get(), 100);
+/// ```
+
+module core.base.cell;
+public type Cell<T> is { value: T };
+
+implement<T: Clone> Cell<T> {
+    /// Create a new Cell with the given value.
+    public fn new(value: T) -> Cell<T> {
+        Cell { value: value }
+    }
+
+    /// Get a copy of the contained value.
+    public fn get(&self) -> T {
+        self.value.clone()
+    }
+
+    /// Set the contained value.
+    public fn set(&self, value: T) {
+        // In typecheck mode, we model this as replacing the value.
+        // At runtime, this uses interior mutability to bypass &self.
+        @vbc(CELL_SET, self, value);
+    }
+
+    /// Replace the contained value and return the old one.
+    public fn replace(&self, value: T) -> T {
+        let old = self.get();
+        self.set(value);
+        old
+    }
+
+    /// Take the value, leaving Default::default() in its place.
+    public fn take(&self) -> T where T: Default {
+        self.replace(T.default())
+    }
+
+    /// Update the cell's value using a function.
+    public fn update(&self, f: fn(T) -> T) {
+        let old = self.get();
+        self.set(f(old));
+    }
+}
+
+implement<T: Clone + Eq> Eq for Cell<T> {
+    fn eq(&self, other: &Cell<T>) -> Bool {
+        self.get() == other.get()
+    }
+}
+
+implement<T: Clone + Ord> Ord for Cell<T> {
+    fn cmp(&self, other: &Cell<T>) -> Ordering {
+        self.get().cmp(&other.get())
+    }
+}
+
+implement<T: Clone> Clone for Cell<T> {
+    fn clone(&self) -> Cell<T> {
+        Cell.new(self.get())
+    }
+}
+
+implement<T: Clone + Default> Default for Cell<T> {
+    fn default() -> Cell<T> {
+        Cell.new(T.default())
+    }
+}
+
+implement<T: Clone + Debug> Debug for Cell<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Cell(")?;
+        self.get().fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// RefCell<T> - Single-threaded interior mutability with dynamic borrow checking
+// =============================================================================
+
+/// Borrow state for RefCell.
+///
+/// Tracks the number of active borrows:
+/// - 0: no borrows
+/// - positive: number of shared (&T) borrows
+/// - -1: exclusive (&mut T) borrow active
+type BorrowState is { count: Int };
+
+/// A mutable memory location with dynamically checked borrow rules.
+///
+/// `RefCell<T>` enforces Verum's borrowing rules at runtime:
+/// - Multiple shared borrows (&T) are allowed simultaneously
+/// - An exclusive borrow (&mut T) requires no other borrows
+/// - Violating these rules causes a panic at runtime
+///
+/// # Example
+/// ```verum
+/// let cell = RefCell.new(42);
+/// {
+///     let borrow = cell.borrow();
+///     assert_eq(*borrow, 42);
+/// }
+/// {
+///     let mut borrow = cell.borrow_mut();
+///     *borrow = 100;
+/// }
+/// ```
+public type RefCell<T> is {
+    value: T,
+    borrow_state: BorrowState,
+};
+
+/// Error returned when a borrow operation fails.
+public type BorrowError is {
+    message: Text,
+};
+
+/// Error returned when a mutable borrow operation fails.
+public type BorrowMutError is {
+    message: Text,
+};
+
+/// RAII guard for shared borrows from RefCell.
+public type Ref<T> is {
+    value: &T,
+    state: &BorrowState,
+};
+
+/// RAII guard for exclusive borrows from RefCell.
+public type RefMut<T> is {
+    value: &mut T,
+    state: &BorrowState,
+};
+
+implement<T> RefCell<T> {
+    /// Create a new RefCell with the given value.
+    public fn new(value: T) -> RefCell<T> {
+        RefCell {
+            value: value,
+            borrow_state: BorrowState { count: 0 },
+        }
+    }
+
+    /// Immutably borrow the contained value.
+    ///
+    /// Panics if a mutable borrow is currently active.
+    public fn borrow(&self) -> Ref<T> {
+        if self.borrow_state.count < 0 {
+            panic("already mutably borrowed");
+        }
+        // Increment borrow count
+        @vbc(REFCELL_BORROW, self);
+        Ref {
+            value: &self.value,
+            state: &self.borrow_state,
+        }
+    }
+
+    /// Mutably borrow the contained value.
+    ///
+    /// Panics if any borrow (shared or exclusive) is currently active.
+    public fn borrow_mut(&self) -> RefMut<T> {
+        if self.borrow_state.count != 0 {
+            panic("already borrowed");
+        }
+        // Set to exclusive borrow state
+        @vbc(REFCELL_BORROW_MUT, self);
+        RefMut {
+            value: &mut self.value,
+            state: &self.borrow_state,
+        }
+    }
+
+    /// Try to immutably borrow. Returns Err if already mutably borrowed.
+    public fn try_borrow(&self) -> Result<Ref<T>, BorrowError> {
+        if self.borrow_state.count < 0 {
+            Err(BorrowError { message: "already mutably borrowed" })
+        } else {
+            @vbc(REFCELL_BORROW, self);
+            Ok(Ref {
+                value: &self.value,
+                state: &self.borrow_state,
+            })
+        }
+    }
+
+    /// Try to mutably borrow. Returns Err if already borrowed.
+    public fn try_borrow_mut(&self) -> Result<RefMut<T>, BorrowMutError> {
+        if self.borrow_state.count != 0 {
+            Err(BorrowMutError { message: "already borrowed" })
+        } else {
+            @vbc(REFCELL_BORROW_MUT, self);
+            Ok(RefMut {
+                value: &mut self.value,
+                state: &self.borrow_state,
+            })
+        }
+    }
+
+    /// Replace the contained value and return the old one.
+    ///
+    /// Panics if the value is currently borrowed.
+    public fn replace(&self, value: T) -> T where T: Clone {
+        let old = self.borrow().value.clone();
+        @vbc(REFCELL_REPLACE, self, value);
+        old
+    }
+
+    /// Get the current borrow count.
+    ///
+    /// Returns 0 for unborrowed, positive for shared borrows,
+    /// -1 for exclusive borrow.
+    public fn borrow_count(&self) -> Int {
+        self.borrow_state.count
+    }
+}
+
+implement<T: Clone> Clone for RefCell<T> {
+    fn clone(&self) -> RefCell<T> {
+        RefCell.new(self.borrow().value.clone())
+    }
+}
+
+implement<T: Eq> Eq for RefCell<T> {
+    fn eq(&self, other: &RefCell<T>) -> Bool {
+        *self.borrow().value == *other.borrow().value
+    }
+}
+
+implement<T: Debug> Debug for RefCell<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.borrow_state.count < 0 {
+            f.write_str("RefCell(<mutably borrowed>)")
+        } else {
+            f.write_str("RefCell(")?;
+            self.borrow().value.fmt_debug(f)?;
+            f.write_str(")")
+        }
+    }
+}
+
+implement<T: Default> Default for RefCell<T> {
+    fn default() -> RefCell<T> {
+        RefCell.new(T.default())
+    }
+}
+
+// Ref<T> dereferences to &T
+implement<T> Deref for Ref<T> {
+    type Target = T;
+    fn deref(&self) -> &T { self.value }
+}
+
+// RefMut<T> dereferences to &mut T
+implement<T> Deref for RefMut<T> {
+    type Target = T;
+    fn deref(&self) -> &T { self.value }
+}
+
+implement<T> DerefMut for RefMut<T> {
+    fn deref_mut(&mut self) -> &mut T { self.value }
+}
+
+implement Debug for BorrowError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BorrowError(")?;
+        f.write_str(&self.message)?;
+        f.write_str(")")
+    }
+}
+
+implement Display for BorrowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+implement Debug for BorrowMutError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BorrowMutError(")?;
+        f.write_str(&self.message)?;
+        f.write_str(")")
+    }
+}
+
+implement Display for BorrowMutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+// =============================================================================
+// OnceCell<T> - Write-once cell for lazy initialization
+// =============================================================================
+
+/// A cell that can be written to at most once.
+///
+/// `OnceCell<T>` starts empty and can be initialized with a value exactly once.
+/// Subsequent attempts to set the value will fail and return the rejected value.
+/// This is useful for lazy initialization patterns where a value is computed
+/// once and then read many times.
+///
+/// # Example
+/// ```verum
+/// let cell: OnceCell<Int> = OnceCell.new();
+/// assert(cell.get().is_none());
+/// cell.set(42);
+/// assert_eq(cell.get().unwrap(), 42);
+/// ```
+///
+/// For thread-safe lazy initialization, use `sync/once.OnceLock<T>`.
+public type OnceCell<T> is { value: Maybe<T> };
+
+implement<T> OnceCell<T> {
+    /// Create a new empty OnceCell.
+    public fn new() -> OnceCell<T> {
+        OnceCell { value: None }
+    }
+
+    /// Create a new OnceCell with an initial value.
+    public fn new_with(value: T) -> OnceCell<T> {
+        OnceCell { value: Some(value) }
+    }
+
+    /// Returns true if the cell has been initialized.
+    public fn is_initialized(&self) -> Bool {
+        self.value.is_some()
+    }
+
+    /// Get a reference to the contained value, if initialized.
+    ///
+    /// Returns `None` if the cell is empty.
+    public fn get(&self) -> Maybe<T> where T: Clone {
+        self.value.clone()
+    }
+
+    /// Set the value of the cell.
+    ///
+    /// Returns `Ok(())` if the cell was empty and the value was stored.
+    /// Returns `Err(value)` if the cell was already initialized, giving
+    /// back the rejected value.
+    public fn set(&self, value: T) -> Result<(), T> {
+        if self.value.is_some() {
+            Err(value)
+        } else {
+            @vbc(ONCECELL_SET, self, value);
+            Ok(())
+        }
+    }
+
+    /// Get the value, initializing it with the given function if empty.
+    ///
+    /// If the cell is empty, calls `init` and stores the result.
+    /// If already initialized, returns the existing value.
+    /// The init function is guaranteed to be called at most once.
+    public fn get_or_init(&self, init: fn() -> T) -> T where T: Clone {
+        if self.value.is_some() {
+            self.value.clone().unwrap()
+        } else {
+            let val = init();
+            @vbc(ONCECELL_SET, self, val);
+            self.value.clone().unwrap()
+        }
+    }
+
+    /// Take the value out of the cell, leaving it empty.
+    ///
+    /// Returns `Some(value)` if the cell was initialized, `None` otherwise.
+    /// After this call, the cell can be set again.
+    public fn take(&self) -> Maybe<T> where T: Clone {
+        if self.value.is_none() {
+            None
+        } else {
+            let val = self.value.clone();
+            @vbc(ONCECELL_TAKE, self);
+            val
+        }
+    }
+
+    /// Consume the OnceCell and return the contained value.
+    ///
+    /// Returns `Some(value)` if initialized, `None` otherwise.
+    public fn into_inner(self) -> Maybe<T> {
+        self.value
+    }
+}
+
+implement<T: Clone + Eq> Eq for OnceCell<T> {
+    fn eq(&self, other: &OnceCell<T>) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement<T: Clone> Clone for OnceCell<T> {
+    fn clone(&self) -> OnceCell<T> {
+        OnceCell { value: self.value.clone() }
+    }
+}
+
+implement<T> Default for OnceCell<T> {
+    fn default() -> OnceCell<T> {
+        OnceCell.new()
+    }
+}
+
+implement<T: Clone + Debug> Debug for OnceCell<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.value.is_some() {
+            f.write_str("OnceCell(")?;
+            self.value.clone().unwrap().fmt_debug(f)?;
+            f.write_str(")")
+        } else {
+            f.write_str("OnceCell(<empty>)")
+        }
+    }
+}
+
+// =============================================================================
+// LazyCell<T> - Lazy computation with deferred initialization
+// =============================================================================
+
+/// A cell that lazily computes its value on first access.
+///
+/// `LazyCell<T>` wraps a function and only calls it when the value is first
+/// requested via `force()`. The result is cached for subsequent accesses.
+///
+/// # Example
+/// ```verum
+/// let cell: LazyCell<Int> = LazyCell.new(|| expensive_computation());
+/// // Nothing computed yet
+/// let value = cell.force(); // Computes and caches
+/// let same = cell.force();  // Returns cached value
+/// ```
+///
+/// For thread-safe lazy initialization, use `sync/once.OnceLock<T>`.
+public type LazyCell<T> is {
+    value: Maybe<T>,
+    init: Maybe<fn() -> T>,
+};
+
+implement<T> LazyCell<T> {
+    /// Create a new LazyCell with the given initialization function.
+    ///
+    /// The function will not be called until `force()` is invoked.
+    public fn new(init: fn() -> T) -> LazyCell<T> {
+        LazyCell {
+            value: None,
+            init: Some(init),
+        }
+    }
+
+    /// Force evaluation of the lazy value.
+    ///
+    /// If the cell has not been initialized, calls the init function,
+    /// caches the result, and returns it. On subsequent calls, returns
+    /// the cached value without calling the init function again.
+    public fn force(&self) -> T where T: Clone {
+        if self.value.is_some() {
+            self.value.clone().unwrap()
+        } else {
+            let init_fn = self.init.clone().unwrap();
+            let val = init_fn();
+            @vbc(LAZYCELL_FORCE, self, val);
+            self.value.clone().unwrap()
+        }
+    }
+
+    /// Returns true if the cell has been initialized.
+    public fn is_initialized(&self) -> Bool {
+        self.value.is_some()
+    }
+
+    /// Get the value if already initialized, without forcing evaluation.
+    ///
+    /// Returns `None` if the cell hasn't been forced yet.
+    public fn get(&self) -> Maybe<T> where T: Clone {
+        self.value.clone()
+    }
+}

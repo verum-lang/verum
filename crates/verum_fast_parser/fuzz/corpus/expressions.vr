@@ -1,0 +1,46 @@
+fn main() {
+    let x = 42;
+    let y = 3.14;
+    let s = "hello world";
+    let b = true;
+    let n = -1;
+
+    let sum = x + y;
+    let product = x * y;
+    let shifted = x << 2;
+    let masked = x & 0xFF;
+
+    let list = [1, 2, 3, 4, 5];
+    let first = list[0];
+    let len = list.len();
+
+    let tuple = (1, "two", 3.0);
+
+    let result = if x > 0 { "positive" } else { "non-positive" };
+
+    let factorial = match x {
+        0 => 1,
+        1 => 1,
+        n => n * (n - 1),
+    };
+
+    let formatted = f"x = {x}, y = {y}";
+
+    let closure = |a, b| a + b;
+    let applied = closure(1, 2);
+
+    let piped = x |> double |> add_one;
+
+    let range = 0..10;
+    let inclusive = 0..=10;
+
+    let cond = x > 0 and y < 10.0;
+    let alt = x == 0 or y != 0.0;
+
+    let heap_val = Heap(42);
+    let maybe = Some(x);
+    let nothing = None;
+}
+
+fn double(n: Int) -> Int { n * 2 }
+fn add_one(n: Int) -> Int { n + 1 }

@@ -1,0 +1,1801 @@
+// =============================================================================
+// slice.vr - Slice types
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core (protocols, maybe, iterator, memory)
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI memory operations:
+// - Uses core/memory.vr native intrinsics (memcpy, memset, memcmp_bytes)
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// Slices are views into contiguous memory. They do not own their data.
+//
+// - &[T]     - Immutable slice (fat pointer: ptr + len)
+// - &mut [T] - Mutable slice
+//
+// This module provides:
+// - Slice iteration
+// - Slice splitting and joining
+// - Searching and sorting
+// - Binary search
+//
+// =============================================================================
+
+module core.collections.slice;
+mount core.*;
+// Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
+mount core.base.ordering.{Ordering};
+
+// Import intrinsics as functions
+mount core.intrinsics.{
+    slice_len, slice_as_ptr, slice_as_mut_ptr, slice_get_unchecked,
+    slice_subslice, slice_subslice_mut, slice_split_at_mut,
+    slice_from_raw_parts, slice_from_raw_parts_mut,
+};
+
+// =============================================================================
+// Slice Extension Methods
+// =============================================================================
+
+implement<T> [T] {
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Length of the slice.
+    fn len(&self) -> Int {
+        slice_len(self) as Int
+    }
+
+    /// Check if slice is empty.
+    fn is_empty(&self) -> Bool {
+        self.len() == 0
+    }
+
+    /// Get raw pointer to first element.
+    fn as_ptr(&self) -> &unsafe T {
+        slice_as_ptr(self)
+    }
+
+    // =========================================================================
+    // Element Access
+    // =========================================================================
+
+    /// Get element by index.
+    fn get(&self, idx: Int) -> Maybe<&T> {
+        if idx >= 0 && idx < self.len() {
+            Some(&self[idx])
+        } else {
+            None
+        }
+    }
+
+    /// Get element by index without bounds checking.
+    /// # Safety
+    /// Index must be in bounds.
+    unsafe fn get_unchecked(&self, idx: Int) -> &T {
+        slice_get_unchecked(self, idx as USize)
+    }
+
+    /// Get first element.
+    fn first(&self) -> Maybe<&T> {
+        if self.is_empty() { None } else { Some(&self[0]) }
+    }
+
+    /// Get last element.
+    fn last(&self) -> Maybe<&T> {
+        if self.is_empty() { None } else { Some(&self[self.len() - 1]) }
+    }
+
+    // =========================================================================
+    // Slicing
+    // =========================================================================
+
+    /// Get a subslice from start to end.
+    fn slice(&self, start: Int, end: Int) -> &[T] {
+        assert(start >= 0 && start <= end && end <= self.len(),
+               "slice bounds out of range");
+        slice_subslice(self, start as USize, end as USize)
+    }
+
+    /// Get subslice from start to end of slice.
+    fn slice_from(&self, start: Int) -> &[T] {
+        self.slice(start, self.len())
+    }
+
+    /// Get subslice from beginning to end index.
+    fn slice_to(&self, end: Int) -> &[T] {
+        self.slice(0, end)
+    }
+
+    /// Split at index, returning two slices.
+    fn split_at(&self, mid: Int) -> (&[T], &[T]) {
+        assert(mid >= 0 && mid <= self.len(), "split_at out of bounds");
+        (self.slice_to(mid), self.slice_from(mid))
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    /// Iterate over elements.
+    ///
+    /// Returns a double-ended iterator that supports both forward and reverse iteration.
+    fn iter(&self) -> SliceIter<T> {
+        SliceIter.new(self)
+    }
+
+    /// Iterate over elements with indices.
+    fn iter_enumerate(&self) -> SliceEnumerate<T> {
+        SliceEnumerate {
+            slice: self,
+            pos: 0,
+        }
+    }
+
+    /// Iterate over chunks of size n.
+    fn chunks(&self, chunk_size: Int) -> Chunks<T> {
+        assert(chunk_size > 0, "chunk size must be positive");
+        Chunks {
+            slice: self,
+            size: chunk_size,
+            pos: 0,
+        }
+    }
+
+    /// Iterate over exact chunks (panics if !evenly divisible).
+    fn chunks_exact(&self, chunk_size: Int) -> ChunksExact<T> {
+        assert(chunk_size > 0, "chunk size must be positive");
+        ChunksExact {
+            slice: self.slice_to(self.len() - (self.len() % chunk_size)),
+            remainder: self.slice_from(self.len() - (self.len() % chunk_size)),
+            size: chunk_size,
+            pos: 0,
+        }
+    }
+
+    /// Iterate over sliding windows.
+    fn windows(&self, size: Int) -> Windows<T> {
+        assert(size > 0, "window size must be positive");
+        Windows {
+            slice: self,
+            size: size,
+            pos: 0,
+        }
+    }
+
+    // =========================================================================
+    // Searching
+    // =========================================================================
+
+    /// Check if slice contains element.
+    fn contains(&self, value: &T) -> Bool
+    where T: Eq
+    {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if *item == *value {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Find first index of element.
+    fn position(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if *item == *value {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Find last index of element.
+    fn rposition(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        let mut i = self.len();
+        while i > 0 {
+            i = i - 1;
+            let item: &T = &self[i];
+            if *item == *value {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Find first element matching predicate.
+    fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if predicate(item) {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    /// Find position of first element matching predicate.
+    fn find_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if predicate(item) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Check if starts with given slice.
+    fn starts_with(&self, prefix: &[T]) -> Bool
+    where T: Eq
+    {
+        if prefix.len() > self.len() {
+            return false;
+        }
+        for i in range(0, prefix.len()) {
+            let a: &T = &self[i];
+            let b: &T = &prefix[i];
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if ends with given slice.
+    fn ends_with(&self, suffix: &[T]) -> Bool
+    where T: Eq
+    {
+        if suffix.len() > self.len() {
+            return false;
+        }
+        let offset = self.len() - suffix.len();
+        for i in range(0, suffix.len()) {
+            let a: &T = &self[offset + i];
+            let b: &T = &suffix[i];
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    // =========================================================================
+    // Binary Search
+    // =========================================================================
+
+    /// Binary search for element in sorted slice.
+    /// Returns Ok(index) if found, Err(insertion_point) if !found.
+    fn binary_search(&self, target: &T) -> Result<Int, Int>
+    where T: Ord
+    {
+        let mut left = 0;
+        let mut right = self.len();
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let elem: &T = &self[mid];
+            if *elem < *target {
+                left = mid + 1;
+            } else if *elem > *target {
+                right = mid;
+            } else {
+                return Ok(mid);
+            }
+        }
+
+        Err(left)
+    }
+
+    /// Binary search with custom comparator.
+    fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
+        let mut left = 0;
+        let mut right = self.len();
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            match f(&self[mid]) {
+                Ordering.Less => left = mid + 1,
+                Ordering.Greater => right = mid,
+                Ordering.Equal => return Ok(mid),
+            }
+        }
+
+        Err(left)
+    }
+
+    /// Binary search by key.
+    fn binary_search_by_key<K: Ord>(&self, key: &K, f: fn(&T) -> K) -> Result<Int, Int> {
+        self.binary_search_by(|item| {
+            let k: K = f(item);
+            if k < *key { Ordering.Less }
+            else if k > *key { Ordering.Greater }
+            else { Ordering.Equal }
+        })
+    }
+
+    // =========================================================================
+    // Aggregation
+    // =========================================================================
+
+    /// Count elements matching predicate.
+    fn count(&self, predicate: fn(&T) -> Bool) -> Int {
+        let mut n = 0;
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if predicate(item) {
+                n = n + 1;
+            }
+        }
+        n
+    }
+
+    /// Check if all elements match predicate.
+    fn all(&self, predicate: fn(&T) -> Bool) -> Bool {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if !predicate(item) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if any element matches predicate.
+    fn any(&self, predicate: fn(&T) -> Bool) -> Bool {
+        for i in range(0, self.len()) {
+            let item: &T = &self[i];
+            if predicate(item) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get minimum element.
+    fn min(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.is_empty() {
+            return None;
+        }
+        let mut min = &self[0];
+        for i in range(1, self.len()) {
+            let elem: &T = &self[i];
+            if *elem < *min {
+                min = elem;
+            }
+        }
+        Some(min)
+    }
+
+    /// Get maximum element.
+    fn max(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.is_empty() {
+            return None;
+        }
+        let mut max = &self[0];
+        for i in range(1, self.len()) {
+            let elem: &T = &self[i];
+            if *elem > *max {
+                max = elem;
+            }
+        }
+        Some(max)
+    }
+
+    // =========================================================================
+    // Comparison
+    // =========================================================================
+
+    /// Check equality with another slice.
+    fn eq_slice(&self, other: &[T]) -> Bool
+    where T: Eq
+    {
+        if self.len() != other.len() {
+            return false;
+        }
+        for i in range(0, self.len()) {
+            let a: &T = &self[i];
+            let b: &T = &other[i];
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Lexicographic comparison.
+    fn cmp_slice(&self, other: &[T]) -> Ordering
+    where T: Ord
+    {
+        let min_len = self.len().min(other.len());
+        for i in range(0, min_len) {
+            let a: &T = &self[i];
+            let b: &T = &other[i];
+            if *a < *b {
+                return Ordering.Less;
+            } else if *a > *b {
+                return Ordering.Greater;
+            }
+            // Ordering.Equal, continue
+        }
+        // Compare lengths
+        let self_len = self.len();
+        let other_len = other.len();
+        if self_len < other_len { Ordering.Less }
+        else if self_len > other_len { Ordering.Greater }
+        else { Ordering.Equal }
+    }
+
+    // =========================================================================
+    // Sortedness Checks
+    // =========================================================================
+
+    /// Check if slice is sorted in ascending order.
+    fn is_sorted(&self) -> Bool
+    where T: Ord
+    {
+        if self.len() <= 1 {
+            return true;
+        }
+        for i in range(1, self.len()) {
+            if self[i - 1] > self[i] {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if slice is sorted according to a comparator.
+    fn is_sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> Bool {
+        if self.len() <= 1 {
+            return true;
+        }
+        for i in range(1, self.len()) {
+            if compare(&self[i - 1], &self[i]) is Ordering.Greater {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if slice is sorted by a key extraction function.
+    fn is_sorted_by_key<K: Ord>(&self, key: fn(&T) -> K) -> Bool {
+        if self.len() <= 1 {
+            return true;
+        }
+        for i in range(1, self.len()) {
+            let ka: K = key(&self[i - 1]);
+            let kb: K = key(&self[i]);
+            if ka > kb {
+                return false;
+            }
+        }
+        true
+    }
+
+    // =========================================================================
+    // Split First / Last
+    // =========================================================================
+
+    /// Split off the first element, returning it and the rest.
+    /// Returns None if the slice is empty.
+    fn split_first(&self) -> Maybe<(&T, &[T])> {
+        if self.is_empty() {
+            None
+        } else {
+            Some((&self[0], self.slice_from(1)))
+        }
+    }
+
+    /// Split off the last element, returning it and the rest.
+    /// Returns None if the slice is empty.
+    fn split_last(&self) -> Maybe<(&T, &[T])> {
+        if self.is_empty() {
+            None
+        } else {
+            let last_idx = self.len() - 1;
+            Some((&self[last_idx], self.slice_to(last_idx)))
+        }
+    }
+
+    // =========================================================================
+    // Partition Point
+    // =========================================================================
+
+    /// Returns the index of the partition point according to the given predicate.
+    ///
+    /// Assumes that the slice is partitioned: all elements for which the predicate
+    /// returns true come before all elements for which it returns false.
+    ///
+    /// Returns the index of the first element for which the predicate returns false,
+    /// or the length of the slice if the predicate returns true for all elements.
+    fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
+        let mut left = 0;
+        let mut right = self.len();
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            if predicate(&self[mid]) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+
+        left
+    }
+
+    // =========================================================================
+    // Reverse Find
+    // =========================================================================
+
+    /// Find last element matching predicate.
+    fn rfind(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+        let mut i = self.len();
+        while i > 0 {
+            i = i - 1;
+            let item: &T = &self[i];
+            if predicate(item) {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    /// Find position of last element matching predicate.
+    fn rfind_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+        let mut i = self.len();
+        while i > 0 {
+            i = i - 1;
+            let item: &T = &self[i];
+            if predicate(item) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    // =========================================================================
+    // Materialization
+    // =========================================================================
+
+    /// Convert slice to an owned List.
+    fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.with_capacity(self.len());
+        for i in range(0, self.len()) {
+            result.push(self[i].clone());
+        }
+        result
+    }
+}
+
+// =============================================================================
+// Mutable Slice Methods
+// =============================================================================
+
+implement<T> [T] {
+    /// Get mutable reference by index.
+    fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
+        if idx >= 0 && idx < self.len() {
+            Some(&mut self[idx])
+        } else {
+            None
+        }
+    }
+
+    /// Get mutable first element.
+    fn first_mut(&mut self) -> Maybe<&mut T> {
+        if self.is_empty() { None } else { Some(&mut self[0]) }
+    }
+
+    /// Get mutable last element.
+    fn last_mut(&mut self) -> Maybe<&mut T> {
+        let len = self.len();
+        if len == 0 { None } else { Some(&mut self[len - 1]) }
+    }
+
+    /// Mutable subslice.
+    fn slice_mut(&mut self, start: Int, end: Int) -> &mut [T] {
+        assert(start >= 0 && start <= end && end <= self.len(),
+               "slice bounds out of range");
+        slice_subslice_mut(self, start as USize, end as USize)
+    }
+
+    /// Mutable iterator.
+    ///
+    /// Returns a double-ended iterator that supports both forward and reverse iteration.
+    fn iter_mut(&mut self) -> SliceIterMut<T> {
+        SliceIterMut.new(self)
+    }
+
+    /// Split at index returning mutable slices.
+    fn split_at_mut(&mut self, mid: Int) -> (&mut [T], &mut [T]) {
+        assert(mid >= 0 && mid <= self.len(), "split_at_mut out of bounds");
+        slice_split_at_mut(self, mid as USize)
+    }
+
+    /// Swap two elements.
+    fn swap(&mut self, a: Int, b: Int) {
+        assert(a >= 0 && a < self.len() && b >= 0 && b < self.len(),
+               "swap indices out of bounds");
+        if a != b {
+            let tmp = self[a];
+            self[a] = self[b];
+            self[b] = tmp;
+        }
+    }
+
+    /// Reverse slice in place.
+    fn reverse(&mut self) {
+        let len = self.len();
+        for i in range(0, len / 2) {
+            self.swap(i, len - 1 - i);
+        }
+    }
+
+    /// Fill slice with value.
+    fn fill(&mut self, value: T)
+    where T: Clone
+    {
+        for i in range(0, self.len()) {
+            self[i] = value.clone();
+        }
+    }
+
+    /// Fill with default value.
+    fn fill_default(&mut self)
+    where T: Default
+    {
+        for i in range(0, self.len()) {
+            self[i] = T.default();
+        }
+    }
+
+    /// Fill with values generated by a closure.
+    fn fill_with<F: fn() -> T>(&mut self, f: F) {
+        for i in range(0, self.len()) {
+            self[i] = f();
+        }
+    }
+
+    /// Swap contents of two non-overlapping slices of equal length.
+    fn swap_with_slice(&mut self, other: &mut [T]) {
+        assert(self.len() == other.len(), "slice lengths must match");
+        for i in range(0, self.len()) {
+            let tmp = self[i];
+            self[i] = other[i];
+            other[i] = tmp;
+        }
+    }
+
+    /// Copy from another slice.
+    fn copy_from_slice(&mut self, src: &[T])
+    where T: Copy
+    {
+        assert(self.len() == src.len(), "slice lengths must match");
+        for i in range(0, self.len()) {
+            self[i] = src[i];
+        }
+    }
+
+    /// Clone from another slice.
+    fn clone_from_slice(&mut self, src: &[T])
+    where T: Clone
+    {
+        assert(self.len() == src.len(), "slice lengths must match");
+        for i in range(0, self.len()) {
+            self[i] = src[i].clone();
+        }
+    }
+
+    /// Copy within slice (handles overlap).
+    fn copy_within(&mut self, src_start: Int, src_end: Int, dest: Int)
+    where T: Copy
+    {
+        let count = src_end - src_start;
+        assert(src_start >= 0 && src_end <= self.len(), "source out of bounds");
+        assert(dest >= 0 && dest + count <= self.len(), "dest out of bounds");
+
+        if src_start < dest {
+            // Copy backwards
+            for i in range_inclusive(count - 1, 0).rev() {
+                self[dest + i] = self[src_start + i];
+            }
+        } else {
+            // Copy forwards
+            for i in range(0, count) {
+                self[dest + i] = self[src_start + i];
+            }
+        }
+    }
+
+    // =========================================================================
+    // Sorting — Stable (Merge Sort)
+    // =========================================================================
+
+    /// Sort slice in ascending order (stable).
+    ///
+    /// Stability means equal elements maintain their relative order.
+    /// Uses merge sort for O(n log n) guaranteed performance.
+    fn sort(&mut self)
+    where T: Ord
+    {
+        self.sort_by(|a, b| a.cmp(b));
+    }
+
+    /// Sort with custom comparator (stable, merge sort).
+    ///
+    /// Guarantees O(n log n) worst-case and preserves the relative
+    /// order of equal elements.
+    fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        let len = self.len();
+        if len <= 1 {
+            return;
+        }
+
+        // Use insertion sort for small slices
+        if len <= 32 {
+            self.insertion_sort_by(compare);
+            return;
+        }
+
+        // Bottom-up merge sort
+        self.merge_sort_by(compare);
+    }
+
+    /// Sort by key (stable).
+    fn sort_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
+        self.sort_by(|a, b| {
+            let ka: K = key(a);
+            let kb: K = key(b);
+            if ka < kb { Ordering.Less }
+            else if ka > kb { Ordering.Greater }
+            else { Ordering.Equal }
+        });
+    }
+
+    /// Insertion sort for small slices (stable, O(n^2)).
+    fn insertion_sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        for i in range(1, self.len()) {
+            let mut j = i;
+            while j > 0 && compare(&self[j], &self[j - 1]) is Ordering.Less {
+                self.swap(j, j - 1);
+                j = j - 1;
+            }
+        }
+    }
+
+    /// Bottom-up merge sort (stable, O(n log n)).
+    fn merge_sort_by(&mut self, compare: fn(&T, &T) -> Ordering)
+    where T: Clone
+    {
+        let len = self.len();
+
+        // First pass: insertion sort small runs of size 32
+        let run_size = 32;
+        let mut start = 0;
+        while start < len {
+            let end = (start + run_size).min(len);
+            // Insertion sort this run
+            for i in range(start + 1, end) {
+                let mut j = i;
+                while j > start && compare(&self[j], &self[j - 1]) is Ordering.Less {
+                    self.swap(j, j - 1);
+                    j = j - 1;
+                }
+            }
+            start = start + run_size;
+        }
+
+        // Iteratively merge runs of increasing size
+        let mut width = run_size;
+        while width < len {
+            let mut left_start = 0;
+            while left_start < len {
+                let mid = (left_start + width).min(len);
+                let right_end = (left_start + 2 * width).min(len);
+
+                if mid < right_end {
+                    self.merge_by(left_start, mid, right_end, compare);
+                }
+
+                left_start = left_start + 2 * width;
+            }
+            width = width * 2;
+        }
+    }
+
+    /// Merge two adjacent sorted runs [left_start..mid) and [mid..right_end).
+    fn merge_by(&mut self, left_start: Int, mid: Int, right_end: Int, compare: fn(&T, &T) -> Ordering)
+    where T: Clone
+    {
+        // Copy left run to temporary buffer
+        let mut left_buf: List<T> = [];
+        for i in range(left_start, mid) {
+            left_buf.push(self[i].clone());
+        }
+
+        let mut li = 0;        // index into left buffer
+        let mut ri = mid;       // index into right run (in-place)
+        let mut wi = left_start; // write index
+
+        let left_len = mid - left_start;
+
+        while li < left_len && ri < right_end {
+            // Use <= for stability: take from left when equal
+            if !(compare(&self[ri], &left_buf[li]) is Ordering.Less) {
+                self[wi] = left_buf[li].clone();
+                li = li + 1;
+            } else {
+                // self[wi] = self[ri] — but wi might equal ri, so use swap logic
+                if wi != ri {
+                    self[wi] = self[ri].clone();
+                }
+                ri = ri + 1;
+            }
+            wi = wi + 1;
+        }
+
+        // Copy remaining left buffer elements
+        while li < left_len {
+            self[wi] = left_buf[li].clone();
+            li = li + 1;
+            wi = wi + 1;
+        }
+        // Right elements are already in place
+    }
+
+    // =========================================================================
+    // Sorting — Unstable (Quicksort)
+    // =========================================================================
+
+    /// Sort slice in ascending order (unstable).
+    ///
+    /// May be faster than stable sort but does not preserve relative order
+    /// of equal elements. Uses quicksort.
+    fn sort_unstable(&mut self)
+    where T: Ord
+    {
+        self.sort_unstable_by(|a, b| a.cmp(b));
+    }
+
+    /// Sort with custom comparator (unstable, quicksort).
+    fn sort_unstable_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        if self.len() <= 1 {
+            return;
+        }
+
+        if self.len() <= 16 {
+            self.insertion_sort_by(compare);
+            return;
+        }
+
+        self.quicksort_by(0, self.len() - 1, compare);
+    }
+
+    /// Sort by key (unstable).
+    fn sort_unstable_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
+        self.sort_unstable_by(|a, b| {
+            let ka: K = key(a);
+            let kb: K = key(b);
+            if ka < kb { Ordering.Less }
+            else if ka > kb { Ordering.Greater }
+            else { Ordering.Equal }
+        });
+    }
+
+    /// Quicksort implementation.
+    fn quicksort_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) {
+        if low < high {
+            let pivot = self.qs_partition_by(low, high, compare);
+            if pivot > 0 {
+                self.quicksort_by(low, pivot - 1, compare);
+            }
+            self.quicksort_by(pivot + 1, high, compare);
+        }
+    }
+
+    /// Partition for quicksort.
+    fn qs_partition_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) -> Int {
+        let pivot_idx = low + (high - low) / 2;
+        self.swap(pivot_idx, high);
+
+        let mut i = low;
+        for j in range(low, high) {
+            if compare(&self[j], &self[high]) is Ordering.Less {
+                self.swap(i, j);
+                i = i + 1;
+            }
+        }
+        self.swap(i, high);
+        i
+    }
+
+    // =========================================================================
+    // Selection (Quickselect)
+    // =========================================================================
+
+    /// Rearranges the slice so that the element at `index` is in its sorted position.
+    ///
+    /// All elements before `index` will be <= element at `index`.
+    /// All elements after `index` will be >= element at `index`.
+    /// Uses quickselect algorithm, O(n) average.
+    fn select_nth_unstable(&mut self, index: Int)
+    where T: Ord
+    {
+        self.select_nth_unstable_by(index, |a, b| a.cmp(b));
+    }
+
+    /// Quickselect with custom comparator.
+    fn select_nth_unstable_by(&mut self, index: Int, compare: fn(&T, &T) -> Ordering) {
+        assert(index >= 0 && index < self.len(), "select_nth_unstable: index out of bounds");
+        self.quickselect_by(0, self.len() - 1, index, compare);
+    }
+
+    /// Quickselect implementation.
+    fn quickselect_by(&mut self, mut low: Int, mut high: Int, index: Int, compare: fn(&T, &T) -> Ordering) {
+        while low < high {
+            let pivot = self.qs_partition_by(low, high, compare);
+            if pivot == index {
+                return;
+            } else if pivot < index {
+                low = pivot + 1;
+            } else {
+                high = pivot - 1;
+            }
+        }
+    }
+
+    // =========================================================================
+    // Dedup (remove consecutive duplicates in-place)
+    // =========================================================================
+
+    /// Remove consecutive duplicate elements in-place.
+    ///
+    /// Returns the new logical length of the deduplicated prefix.
+    /// Elements beyond the returned length are unspecified.
+    fn dedup(&mut self) -> Int
+    where T: Eq
+    {
+        self.dedup_by(|a, b| *a == *b)
+    }
+
+    /// Remove consecutive elements that are equal according to the predicate.
+    ///
+    /// Returns the new logical length of the deduplicated prefix.
+    fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) -> Int {
+        let len = self.len();
+        if len <= 1 {
+            return len;
+        }
+
+        let mut write = 1;
+        for read in range(1, len) {
+            if !same(&self[read], &self[write - 1]) {
+                if write != read {
+                    self.swap(write, read);
+                }
+                write = write + 1;
+            }
+        }
+        write
+    }
+
+    /// Rotate left by n positions.
+    fn rotate_left(&mut self, n: Int) {
+        if self.is_empty() {
+            return;
+        }
+        let n = n % self.len();
+        if n == 0 {
+            return;
+        }
+
+        // Reverse first n, reverse rest, reverse all
+        self.slice_mut(0, n).reverse();
+        self.slice_mut(n, self.len()).reverse();
+        self.reverse();
+    }
+
+    /// Rotate right by n positions.
+    fn rotate_right(&mut self, n: Int) {
+        if self.is_empty() {
+            return;
+        }
+        let n = n % self.len();
+        self.rotate_left(self.len() - n);
+    }
+
+    // =========================================================================
+    // Split by Predicate
+    // =========================================================================
+
+    /// Split slice by predicate, yielding subslices between matching elements.
+    ///
+    /// The matching elements are not included in the yielded subslices.
+    /// Adjacent matches yield empty slices between them.
+    fn split<P: fn(&T) -> Bool>(&self, predicate: P) -> Split<T, P> {
+        Split {
+            slice: self,
+            predicate: predicate,
+            pos: 0,
+            finished: false,
+        }
+    }
+
+    /// Split slice by predicate, including the matching element at the end of each subslice.
+    ///
+    /// The last subslice will contain any remaining elements even if they don't end with a match.
+    fn split_inclusive<P: fn(&T) -> Bool>(&self, predicate: P) -> SplitInclusive<T, P> {
+        SplitInclusive {
+            slice: self,
+            predicate: predicate,
+            pos: 0,
+            finished: false,
+        }
+    }
+
+    /// Split slice at most `n` times by predicate.
+    ///
+    /// At most `n` subslices are returned. The last subslice contains
+    /// the remainder of the slice after `n-1` splits.
+    fn splitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> SplitN<T, P> {
+        SplitN {
+            slice: self,
+            predicate: predicate,
+            pos: 0,
+            remaining: n,
+            finished: false,
+        }
+    }
+
+    /// Split slice by predicate in reverse order.
+    ///
+    /// Like `split`, but yields subslices from the end.
+    fn rsplit<P: fn(&T) -> Bool>(&self, predicate: P) -> RSplit<T, P> {
+        RSplit {
+            slice: self,
+            predicate: predicate,
+            end: self.len(),
+            finished: false,
+        }
+    }
+
+    /// Split slice at most `n` times by predicate, from the end.
+    ///
+    /// Like `splitn`, but splits from the right.
+    fn rsplitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> RSplitN<T, P> {
+        RSplitN {
+            slice: self,
+            predicate: predicate,
+            end: self.len(),
+            remaining: n,
+            finished: false,
+        }
+    }
+}
+
+// =============================================================================
+// Slice Iterators
+// =============================================================================
+
+/// Iterator over slice elements.
+///
+/// Supports double-ended iteration via `next()` and `next_back()`.
+/// Spec: docs/audit1.md Section 13.2 (Slice reverse iter)
+public type SliceIter<T> is {
+    slice: &[T],
+    /// Index of next element for forward iteration
+    front: Int,
+    /// Index one past the last element for reverse iteration (exclusive end)
+    back: Int,
+};
+
+implement<T> SliceIter<T> {
+    /// Create a new slice iterator.
+    fn new(slice: &[T]) -> SliceIter<T> {
+        SliceIter {
+            slice: slice,
+            front: 0,
+            back: slice.len(),
+        }
+    }
+}
+
+implement<T> Iterator for SliceIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        if self.front >= self.back {
+            return None;
+        }
+        let item = &self.slice[self.front];
+        self.front = self.front + 1;
+        Some(item)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.back - self.front;
+        (remaining, Some(remaining))
+    }
+
+    fn count(&mut self) -> Int {
+        let remaining = self.back - self.front;
+        self.front = self.back;
+        remaining
+    }
+
+    fn nth(&mut self, n: Int) -> Maybe<&T> {
+        self.front = self.front + n;
+        self.next()
+    }
+}
+
+implement<T> DoubleEndedIterator for SliceIter<T> {
+    fn next_back(&mut self) -> Maybe<&T> {
+        if self.front >= self.back {
+            return None;
+        }
+        self.back = self.back - 1;
+        Some(&self.slice[self.back])
+    }
+
+    fn nth_back(&mut self, n: Int) -> Maybe<&T> {
+        if n >= self.back - self.front {
+            self.front = self.back;
+            return None;
+        }
+        self.back = self.back - n;
+        self.next_back()
+    }
+}
+
+implement<T> ExactSizeIterator for SliceIter<T> {}
+
+implement<T> IntoIterator for SliceIter<T> {
+    type Item = &T;
+    type IntoIter = SliceIter<T>;
+
+    fn into_iter(self) -> SliceIter<T> {
+        self
+    }
+}
+
+/// Enumerate iterator for slices.
+public type SliceEnumerate<T> is {
+    slice: &[T],
+    pos: Int,
+};
+
+implement<T> Iterator for SliceEnumerate<T> {
+    type Item = (Int, &T);
+
+    fn next(&mut self) -> Maybe<(Int, &T)> {
+        if self.pos >= self.slice.len() {
+            return None;
+        }
+        let idx = self.pos;
+        let item = &self.slice[self.pos];
+        self.pos = self.pos + 1;
+        Some((idx, item))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.slice.len() - self.pos;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> IntoIterator for SliceEnumerate<T> {
+    type Item = (Int, &T);
+    type IntoIter = SliceEnumerate<T>;
+
+    fn into_iter(self) -> SliceEnumerate<T> {
+        self
+    }
+}
+
+/// Mutable slice iterator.
+///
+/// Supports double-ended iteration via `next()` and `next_back()`.
+public type SliceIterMut<T> is {
+    slice: &mut [T],
+    /// Index of next element for forward iteration
+    front: Int,
+    /// Index one past the last element for reverse iteration (exclusive end)
+    back: Int,
+};
+
+implement<T> SliceIterMut<T> {
+    /// Create a new mutable slice iterator.
+    fn new(slice: &mut [T]) -> SliceIterMut<T> {
+        let len = slice.len();
+        SliceIterMut {
+            slice: slice,
+            front: 0,
+            back: len,
+        }
+    }
+}
+
+implement<T> Iterator for SliceIterMut<T> {
+    type Item = &mut T;
+
+    fn next(&mut self) -> Maybe<&mut T> {
+        if self.front >= self.back {
+            return None;
+        }
+        let item = &mut self.slice[self.front];
+        self.front = self.front + 1;
+        Some(item)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.back - self.front;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for SliceIterMut<T> {
+    fn next_back(&mut self) -> Maybe<&mut T> {
+        if self.front >= self.back {
+            return None;
+        }
+        self.back = self.back - 1;
+        Some(&mut self.slice[self.back])
+    }
+}
+
+implement<T> ExactSizeIterator for SliceIterMut<T> {}
+
+implement<T> IntoIterator for SliceIterMut<T> {
+    type Item = &mut T;
+    type IntoIter = SliceIterMut<T>;
+
+    fn into_iter(self) -> SliceIterMut<T> {
+        self
+    }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<T> FusedIterator for SliceIter<T> {}
+implement<T> FusedIterator for SliceIterMut<T> {}
+
+/// Chunks iterator.
+public type Chunks<T> is {
+    slice: &[T],
+    size: Int,
+    pos: Int,
+};
+
+implement<T> Iterator for Chunks<T> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.pos >= self.slice.len() {
+            return None;
+        }
+        let end = (self.pos + self.size).min(self.slice.len());
+        let chunk = self.slice.slice(self.pos, end);
+        self.pos = end;
+        Some(chunk)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.slice.len() - self.pos;
+        let count = (remaining + self.size - 1) / self.size;
+        (count, Some(count))
+    }
+}
+
+implement<T> IntoIterator for Chunks<T> {
+    type Item = &[T];
+    type IntoIter = Chunks<T>;
+
+    fn into_iter(self) -> Chunks<T> {
+        self
+    }
+}
+
+/// Exact chunks iterator.
+public type ChunksExact<T> is {
+    slice: &[T],
+    remainder: &[T],
+    size: Int,
+    pos: Int,
+};
+
+implement<T> Iterator for ChunksExact<T> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.pos >= self.slice.len() {
+            return None;
+        }
+        let chunk = self.slice.slice(self.pos, self.pos + self.size);
+        self.pos = self.pos + self.size;
+        Some(chunk)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = (self.slice.len() - self.pos) / self.size;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> ChunksExact<T> {
+    /// Get the remainder (elements that don't fit in a complete chunk).
+    fn remainder(&self) -> &[T] {
+        self.remainder
+    }
+}
+
+implement<T> IntoIterator for ChunksExact<T> {
+    type Item = &[T];
+    type IntoIter = ChunksExact<T>;
+
+    fn into_iter(self) -> ChunksExact<T> {
+        self
+    }
+}
+
+/// Windows iterator.
+public type Windows<T> is {
+    slice: &[T],
+    size: Int,
+    pos: Int,
+};
+
+implement<T> Iterator for Windows<T> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.pos + self.size > self.slice.len() {
+            return None;
+        }
+        let window = self.slice.slice(self.pos, self.pos + self.size);
+        self.pos = self.pos + 1;
+        Some(window)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.slice.len() < self.size {
+            return (0, Some(0));
+        }
+        let count = self.slice.len() - self.size + 1 - self.pos;
+        (count.max(0), Some(count.max(0)))
+    }
+}
+
+implement<T> IntoIterator for Windows<T> {
+    type Item = &[T];
+    type IntoIter = Windows<T>;
+
+    fn into_iter(self) -> Windows<T> {
+        self
+    }
+}
+
+// =============================================================================
+// Split Iterators
+// =============================================================================
+
+/// Iterator that splits a slice by a predicate.
+///
+/// Created by the `split()` method on slices.
+public type Split<T, P> is {
+    slice: &[T],
+    predicate: P,
+    pos: Int,
+    finished: Bool,
+};
+
+implement<T, P: fn(&T) -> Bool> Iterator for Split<T, P> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.finished {
+            return None;
+        }
+
+        let start = self.pos;
+        let len = self.slice.len();
+
+        // Search for next match
+        let mut i = start;
+        while i < len {
+            let item: &T = &self.slice[i];
+            if (self.predicate)(item) {
+                let result = self.slice.slice(start, i);
+                self.pos = i + 1;
+                return Some(result);
+            }
+            i = i + 1;
+        }
+
+        // No more matches — yield remainder
+        self.finished = true;
+        Some(self.slice.slice(start, len))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.finished {
+            (0, Some(0))
+        } else {
+            (1, Some(self.slice.len() - self.pos + 1))
+        }
+    }
+}
+
+implement<T, P: fn(&T) -> Bool> IntoIterator for Split<T, P> {
+    type Item = &[T];
+    type IntoIter = Split<T, P>;
+
+    fn into_iter(self) -> Split<T, P> {
+        self
+    }
+}
+
+/// Iterator that splits a slice by a predicate, including the matching element.
+///
+/// Created by the `split_inclusive()` method on slices.
+public type SplitInclusive<T, P> is {
+    slice: &[T],
+    predicate: P,
+    pos: Int,
+    finished: Bool,
+};
+
+implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.finished {
+            return None;
+        }
+
+        let start = self.pos;
+        let len = self.slice.len();
+
+        if start >= len {
+            self.finished = true;
+            return None;
+        }
+
+        // Search for next match
+        let mut i = start;
+        while i < len {
+            let item: &T = &self.slice[i];
+            if (self.predicate)(item) {
+                let result = self.slice.slice(start, i + 1);
+                self.pos = i + 1;
+                return Some(result);
+            }
+            i = i + 1;
+        }
+
+        // No more matches — yield remainder
+        self.finished = true;
+        Some(self.slice.slice(start, len))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.finished {
+            (0, Some(0))
+        } else {
+            (1, Some(self.slice.len() - self.pos + 1))
+        }
+    }
+}
+
+implement<T, P: fn(&T) -> Bool> IntoIterator for SplitInclusive<T, P> {
+    type Item = &[T];
+    type IntoIter = SplitInclusive<T, P>;
+
+    fn into_iter(self) -> SplitInclusive<T, P> {
+        self
+    }
+}
+
+/// Iterator that splits a slice at most N times by a predicate.
+///
+/// Created by the `splitn()` method on slices.
+public type SplitN<T, P> is {
+    slice: &[T],
+    predicate: P,
+    pos: Int,
+    remaining: Int,
+    finished: Bool,
+};
+
+implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.finished || self.remaining == 0 {
+            return None;
+        }
+
+        let start = self.pos;
+        let len = self.slice.len();
+
+        // Last split — return remainder
+        if self.remaining == 1 {
+            self.remaining = 0;
+            self.finished = true;
+            return Some(self.slice.slice(start, len));
+        }
+
+        // Search for next match
+        let mut i = start;
+        while i < len {
+            let item: &T = &self.slice[i];
+            if (self.predicate)(item) {
+                let result = self.slice.slice(start, i);
+                self.pos = i + 1;
+                self.remaining = self.remaining - 1;
+                return Some(result);
+            }
+            i = i + 1;
+        }
+
+        // No more matches — yield remainder
+        self.finished = true;
+        self.remaining = 0;
+        Some(self.slice.slice(start, len))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.finished || self.remaining == 0 {
+            (0, Some(0))
+        } else {
+            (1, Some(self.remaining))
+        }
+    }
+}
+
+implement<T, P: fn(&T) -> Bool> IntoIterator for SplitN<T, P> {
+    type Item = &[T];
+    type IntoIter = SplitN<T, P>;
+
+    fn into_iter(self) -> SplitN<T, P> {
+        self
+    }
+}
+
+/// Iterator that splits a slice by a predicate, from the end.
+///
+/// Created by the `rsplit()` method on slices.
+public type RSplit<T, P> is {
+    slice: &[T],
+    predicate: P,
+    end: Int,
+    finished: Bool,
+};
+
+implement<T, P: fn(&T) -> Bool> Iterator for RSplit<T, P> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.finished {
+            return None;
+        }
+
+        let end = self.end;
+
+        // Search backwards for match
+        let mut i = end;
+        while i > 0 {
+            i = i - 1;
+            let item: &T = &self.slice[i];
+            if (self.predicate)(item) {
+                let result = self.slice.slice(i + 1, end);
+                self.end = i;
+                return Some(result);
+            }
+        }
+
+        // No more matches — yield remainder (from beginning to current end)
+        self.finished = true;
+        Some(self.slice.slice(0, end))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.finished {
+            (0, Some(0))
+        } else {
+            (1, Some(self.end + 1))
+        }
+    }
+}
+
+implement<T, P: fn(&T) -> Bool> IntoIterator for RSplit<T, P> {
+    type Item = &[T];
+    type IntoIter = RSplit<T, P>;
+
+    fn into_iter(self) -> RSplit<T, P> {
+        self
+    }
+}
+
+/// Iterator that splits a slice at most N times by a predicate, from the end.
+///
+/// Created by the `rsplitn()` method on slices.
+public type RSplitN<T, P> is {
+    slice: &[T],
+    predicate: P,
+    end: Int,
+    remaining: Int,
+    finished: Bool,
+};
+
+implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
+    type Item = &[T];
+
+    fn next(&mut self) -> Maybe<&[T]> {
+        if self.finished || self.remaining == 0 {
+            return None;
+        }
+
+        let end = self.end;
+
+        // Last split — return remainder from beginning
+        if self.remaining == 1 {
+            self.remaining = 0;
+            self.finished = true;
+            return Some(self.slice.slice(0, end));
+        }
+
+        // Search backwards for match
+        let mut i = end;
+        while i > 0 {
+            i = i - 1;
+            let item: &T = &self.slice[i];
+            if (self.predicate)(item) {
+                let result = self.slice.slice(i + 1, end);
+                self.end = i;
+                self.remaining = self.remaining - 1;
+                return Some(result);
+            }
+        }
+
+        // No more matches — yield remainder
+        self.finished = true;
+        self.remaining = 0;
+        Some(self.slice.slice(0, end))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        if self.finished || self.remaining == 0 {
+            (0, Some(0))
+        } else {
+            (1, Some(self.remaining))
+        }
+    }
+}
+
+implement<T, P: fn(&T) -> Bool> IntoIterator for RSplitN<T, P> {
+    type Item = &[T];
+    type IntoIter = RSplitN<T, P>;
+
+    fn into_iter(self) -> RSplitN<T, P> {
+        self
+    }
+}
+
+// =============================================================================
+// ExactSizeIterator for slice-specific iterators
+// =============================================================================
+
+implement<T> ExactSizeIterator for Chunks<T> {
+    fn len(&self) -> Int {
+        let remaining = self.slice.len() - self.pos;
+        (remaining + self.size - 1) / self.size
+    }
+}
+
+implement<T> ExactSizeIterator for ChunksExact<T> {
+    fn len(&self) -> Int {
+        (self.slice.len() - self.pos) / self.size
+    }
+}
+
+implement<T> ExactSizeIterator for Windows<T> {
+    fn len(&self) -> Int {
+        if self.slice.len() < self.size {
+            0
+        } else {
+            (self.slice.len() - self.size + 1 - self.pos).max(0)
+        }
+    }
+}
+
+// =============================================================================
+// FusedIterator for slice-specific iterators
+// =============================================================================
+
+implement<T> FusedIterator for Chunks<T> {}
+implement<T> FusedIterator for ChunksExact<T> {}
+implement<T> FusedIterator for Windows<T> {}
+implement<T, P: fn(&T) -> Bool> FusedIterator for Split<T, P> {}
+implement<T, P: fn(&T) -> Bool> FusedIterator for SplitInclusive<T, P> {}
+implement<T, P: fn(&T) -> Bool> FusedIterator for SplitN<T, P> {}
+implement<T, P: fn(&T) -> Bool> FusedIterator for RSplit<T, P> {}
+implement<T, P: fn(&T) -> Bool> FusedIterator for RSplitN<T, P> {}
+
+// =============================================================================
+// Byte Slice Specialization
+// =============================================================================
+
+implement [Byte] {
+    /// Compare byte slices using memcmp.
+    fn eq_bytes(&self, other: &[Byte]) -> Bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        if self.len() == 0 {
+            return true;
+        }
+        unsafe {
+            memcmp_bytes(self.as_ptr(), other.as_ptr(), self.len()) == 0
+        }
+    }
+
+    /// Fill with byte value.
+    fn fill_byte(&mut self, value: Byte) {
+        for i in range(0, self.len()) {
+            self[i] = value;
+        }
+    }
+
+    /// Zero out bytes.
+    fn zero(&mut self) {
+        self.fill_byte(0);
+    }
+
+    /// Copy from byte slice.
+    fn copy_from_bytes(&mut self, src: &[Byte]) {
+        assert(self.len() == src.len(), "slice lengths must match");
+        for i in range(0, self.len()) {
+            self[i] = src[i];
+        }
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Create slice from raw parts.
+/// # Safety
+/// ptr must be valid for len elements.
+public unsafe fn make_slice<T>(ptr: &unsafe T, len: Int) -> &[T] {
+    slice_from_raw_parts(ptr as *const T, len as USize)
+}
+
+/// Create mutable slice from raw parts.
+/// # Safety
+/// ptr must be valid for len elements.
+public unsafe fn make_slice_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
+    slice_from_raw_parts_mut(ptr as *mut T, len as USize)
+}

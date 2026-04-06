@@ -1,0 +1,600 @@
+module sys.init;
+
+// =============================================================================
+// sys/init.vr - V-LLSI Runtime Initialization Entry Point
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common, sys/{platform}/tls, mem/allocator
+// =============================================================================
+//
+// This module provides the runtime initialization sequence for Verum programs.
+// It sets up TLS, the context system, and the CBGR allocator before calling
+// the user's main function.
+//
+// # Initialization Sequence
+//
+// ```
+// _start (platform-specific) → verum_init() → user_main()
+//                                  │
+//                                  ├── 1. Initialize TLS
+//                                  ├── 2. Initialize context system
+//                                  ├── 3. Initialize CBGR allocator
+//                                  ├── 4. Initialize panic handler
+//                                  └── 5. Call user_main
+// ```
+//
+// # Platform-Specific Entry Points
+//
+// - Linux x86_64: _start → verum_init (direct syscall to set TLS)
+// - macOS: _main → verum_init (via dyld initialization)
+// - Windows: mainCRTStartup → verum_init (via TLS callbacks)
+// - Embedded: Reset_Handler → verum_init (no TLS needed)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 9 (Bootstrap Kernel)
+// =============================================================================
+
+mount super.common.{OSError, init_runtime, cleanup_runtime, is_runtime_initialized, init_process_args};
+mount core.intrinsics.{spin_hint};
+
+@cfg(target_os = "linux")
+mount core.intrinsics.lowlevel.kernel.{linux_x86_64_start};
+
+// Linux-specific: auxiliary vector initialization (no libc)
+@cfg(target_os = "linux")
+mount super.linux.auxv.init_auxv;
+
+// =============================================================================
+// Initialization State
+// =============================================================================
+
+/// Initialization status flags (atomic).
+static mut INIT_STATE: InitState = InitState {
+    tls_initialized: false,
+    context_initialized: false,
+    allocator_initialized: false,
+    panic_handler_initialized: false,
+    fully_initialized: false,
+};
+
+/// Runtime initialization state.
+type InitState is {
+    /// TLS (thread-local storage) initialized.
+    tls_initialized: Bool,
+    /// Context system initialized.
+    context_initialized: Bool,
+    /// CBGR allocator initialized.
+    allocator_initialized: Bool,
+    /// Panic handler initialized.
+    panic_handler_initialized: Bool,
+    /// All initialization complete.
+    fully_initialized: Bool,
+};
+
+/// Initialization error types.
+public type InitError is
+    | TlsFailed { reason: Text }
+    | ContextFailed { reason: Text }
+    | AllocatorFailed { reason: Text }
+    | PanicHandlerFailed { reason: Text }
+    | AlreadyInitialized
+    | NotInitialized
+    ;
+
+implement InitError {
+    /// Get error message.
+    public fn message(&self) -> Text {
+        match self {
+            InitError.TlsFailed { reason } => f"TLS initialization failed: {reason}",
+            InitError.ContextFailed { reason } => f"Context initialization failed: {reason}",
+            InitError.AllocatorFailed { reason } => f"Allocator initialization failed: {reason}",
+            InitError.PanicHandlerFailed { reason } => f"Panic handler initialization failed: {reason}",
+            InitError.AlreadyInitialized => "Runtime already initialized",
+            InitError.NotInitialized => "Runtime not initialized",
+        }
+    }
+}
+
+// =============================================================================
+// Main Initialization Entry Point
+// =============================================================================
+
+/// Initialize the V-LLSI runtime.
+///
+/// This is the main entry point called by platform-specific startup code.
+/// It initializes all runtime subsystems in the correct order.
+///
+/// # Returns
+///
+/// * `Ok(())` - Runtime initialized successfully
+/// * `Err(InitError)` - Initialization failed
+///
+/// # Example
+///
+/// ```verum
+/// // Called automatically by _start
+/// fn _start() {
+///     match verum_init() {
+///         Ok(()) => {
+///             let exit_code = user_main();
+///             exit(exit_code);
+///         }
+///         Err(e) => {
+///             // Emergency write to stderr
+///             write_stderr(e.message());
+///             exit(1);
+///         }
+///     }
+/// }
+/// ```
+public fn verum_init() -> Result<(), InitError> {
+    unsafe {
+        if INIT_STATE.fully_initialized {
+            return Err(InitError.AlreadyInitialized);
+        }
+    }
+
+    // Step 1: Initialize TLS
+    init_tls()?;
+
+    // Step 2: Initialize context system
+    init_context_system()?;
+
+    // Step 3: Initialize CBGR allocator
+    init_allocator()?;
+
+    // Step 4: Initialize panic handler
+    init_panic_handler()?;
+
+    // Mark as fully initialized
+    unsafe {
+        INIT_STATE.fully_initialized = true;
+    }
+
+    Ok(())
+}
+
+/// Shutdown the V-LLSI runtime.
+///
+/// Called automatically at program exit or on thread termination.
+/// Performs cleanup in reverse initialization order.
+public fn verum_shutdown() {
+    unsafe {
+        if !INIT_STATE.fully_initialized {
+            return;
+        }
+
+        // Reverse order cleanup
+        shutdown_panic_handler();
+        shutdown_allocator();
+        shutdown_context_system();
+        shutdown_tls();
+
+        INIT_STATE.fully_initialized = false;
+    }
+}
+
+/// Check if runtime is fully initialized.
+@inline
+public fn is_initialized() -> Bool {
+    unsafe { INIT_STATE.fully_initialized }
+}
+
+// =============================================================================
+// Step 1: TLS Initialization
+// =============================================================================
+
+fn init_tls() -> Result<(), InitError> {
+    unsafe {
+        if INIT_STATE.tls_initialized {
+            return Ok(());
+        }
+    }
+
+    match init_runtime() {
+        Ok(()) => {
+            unsafe { INIT_STATE.tls_initialized = true; }
+            Ok(())
+        }
+        Err(e) => {
+            Err(InitError.TlsFailed { reason: e.message })
+        }
+    }
+}
+
+fn shutdown_tls() {
+    unsafe {
+        if INIT_STATE.tls_initialized {
+            cleanup_runtime();
+            INIT_STATE.tls_initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// Step 2: Context System Initialization
+// =============================================================================
+
+fn init_context_system() -> Result<(), InitError> {
+    unsafe {
+        if INIT_STATE.context_initialized {
+            return Ok(());
+        }
+    }
+
+    // Context system is part of TLS, just verify it's accessible
+    if !is_runtime_initialized() {
+        return Err(InitError.ContextFailed { reason: "TLS not initialized" });
+    }
+
+    unsafe { INIT_STATE.context_initialized = true; }
+    Ok(())
+}
+
+fn shutdown_context_system() {
+    unsafe {
+        // Context slots are freed with TLS
+        INIT_STATE.context_initialized = false;
+    }
+}
+
+// =============================================================================
+// Step 3: CBGR Allocator Initialization
+// =============================================================================
+
+fn init_allocator() -> Result<(), InitError> {
+    unsafe {
+        if INIT_STATE.allocator_initialized {
+            return Ok(());
+        }
+    }
+
+    // Initialize the global epoch manager
+    // (already done via static initialization)
+
+    // Initialize thread-local heap using the new mimalloc-style allocator
+    // This requires TLS to be set up first
+    @cfg(not(runtime = "embedded"))
+    {
+        // Initialize the new industrial-grade heap with:
+        // - 73 size classes (mimalloc-style)
+        // - 32 MiB segments with lazy commit
+        // - Lock-free fast path allocation
+        // - Cross-thread deallocation support
+        // Initialize heap - if it fails, report error
+        let heap_result = core.mem.heap.init_thread_heap();
+        if heap_result.is_ok() {
+            unsafe { INIT_STATE.allocator_initialized = true; }
+        } else {
+            return Err(InitError.AllocatorFailed { reason: "Heap init failed" });
+        }
+    }
+
+    @cfg(runtime = "embedded")
+    {
+        // Embedded uses static allocator, no runtime init needed
+        unsafe { INIT_STATE.allocator_initialized = true; }
+    }
+
+    Ok(())
+}
+
+fn shutdown_allocator() {
+    unsafe {
+        if INIT_STATE.allocator_initialized {
+            // Shutdown the thread-local heap (abandons segments for reclamation)
+            @cfg(not(runtime = "embedded"))
+            {
+                core.mem.heap.shutdown_thread_heap();
+                // Force reclamation of any pending hazard pointer retirements
+                core.mem.hazard.force_reclaim_all();
+            }
+            INIT_STATE.allocator_initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// Step 4: Panic Handler Initialization
+// =============================================================================
+
+/// Default panic handler that writes to stderr and aborts.
+fn default_panic_handler(info: &PanicInfo) {
+    // Write panic message to stderr
+    let msg = f"panic: {info.message}\n";
+
+    @cfg(target_os = "linux")
+    {
+        let bytes = msg.as_bytes();
+        super.linux.syscall.write(2, bytes.as_ptr(), bytes.len());
+        super.linux.syscall.exit_group(1);
+    }
+
+    @cfg(target_os = "macos")
+    {
+        let bytes = msg.as_bytes();
+        super.darwin.write(2, bytes.as_ptr(), bytes.len());
+        super.darwin.exit(1);
+    }
+
+    @cfg(target_os = "windows")
+    {
+        // Write to stderr handle
+        super.windows.write_stderr(&msg);
+        super.windows.ExitProcess(1);
+    }
+
+    @cfg(runtime = "embedded")
+    {
+        // Embedded: infinite loop (watchdog will reset)
+        loop { spin_hint(); }
+    }
+}
+
+/// Current panic handler.
+static mut PANIC_HANDLER: fn(&PanicInfo) = default_panic_handler;
+
+/// Panic information passed to handler.
+public type PanicInfo is {
+    /// Panic message.
+    public message: Text,
+    /// Source file where panic occurred.
+    public file: Text,
+    /// Line number in source file.
+    public line: Int,
+    /// Column number in source file.
+    public column: Int,
+};
+
+fn init_panic_handler() -> Result<(), InitError> {
+    unsafe {
+        if INIT_STATE.panic_handler_initialized {
+            return Ok(());
+        }
+        PANIC_HANDLER = default_panic_handler;
+        INIT_STATE.panic_handler_initialized = true;
+    }
+    Ok(())
+}
+
+fn shutdown_panic_handler() {
+    unsafe {
+        INIT_STATE.panic_handler_initialized = false;
+    }
+}
+
+/// Set a custom panic handler.
+///
+/// # Arguments
+///
+/// * `handler` - Function to call on panic
+///
+/// # Safety
+///
+/// The handler must not panic itself (double-panic is undefined behavior).
+public unsafe fn set_panic_handler(handler: fn(&PanicInfo)) {
+    PANIC_HANDLER = handler;
+}
+
+/// Trigger a panic with the given message.
+///
+/// This is called by the panic() built-in function.
+@cold
+@no_inline
+public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> ! {
+    let info = PanicInfo {
+        message: message,
+        file: file,
+        line: line,
+        column: column,
+    };
+
+    unsafe {
+        (PANIC_HANDLER)(&info);
+    }
+
+    // If handler returns (it shouldn't), abort
+    @cfg(target_os = "linux")
+    { super.linux.syscall.exit_group(134); }  // SIGABRT
+
+    @cfg(target_os = "macos")
+    { super.darwin.exit(134); }
+
+    @cfg(target_os = "windows")
+    { super.windows.ExitProcess(134); }
+
+    @cfg(runtime = "embedded")
+    { loop { spin_hint(); } }
+
+    // Unreachable marker for type checker
+    unreachable()
+}
+
+// =============================================================================
+// Thread Initialization (for spawned threads)
+// =============================================================================
+
+/// Initialize runtime for a new thread.
+///
+/// Called by the thread spawn implementation before running thread function.
+public fn init_thread() -> Result<(), InitError> {
+    // Step 1: TLS is set up by clone() with CLONE_SETTLS on Linux
+    // or pthread_create on macOS/Windows
+
+    // Step 2: Initialize thread-local context slots
+    init_thread_context()?;
+
+    // Step 3: Initialize thread-local allocator heap
+    init_thread_allocator()?;
+
+    Ok(())
+}
+
+/// Clean up runtime for exiting thread.
+///
+/// Called by the thread implementation before thread exits.
+public fn cleanup_thread() {
+    cleanup_thread_allocator();
+    cleanup_thread_context();
+    cleanup_runtime();
+}
+
+fn init_thread_context() -> Result<(), InitError> {
+    // Context slots are already set up via TLS
+    // Just verify they're accessible
+    if !is_runtime_initialized() {
+        return Err(InitError.ContextFailed { reason: "TLS not set up for thread" });
+    }
+    Ok(())
+}
+
+fn cleanup_thread_context() {
+    // Context slots are freed with TLS
+}
+
+fn init_thread_allocator() -> Result<(), InitError> {
+    // Thread-local heap is initialized lazily on first allocation
+    Ok(())
+}
+
+fn cleanup_thread_allocator() {
+    // Shutdown thread-local heap (abandons segments for other threads to reclaim)
+    @cfg(not(runtime = "embedded"))
+    {
+        core.mem.heap.shutdown_thread_heap();
+        // Clean up thread-local hazard pointers
+        core.mem.hazard.cleanup_thread_hazards();
+    }
+}
+
+// =============================================================================
+// Platform-Specific Entry Points
+// =============================================================================
+
+@cfg(target_os = "linux")
+module linux_entry {
+    // External user main function
+    extern {
+        fn verum_main(argc: Int, argv: &&Byte) -> Int;
+    }
+
+    /// Linux x86_64 entry point.
+    ///
+    /// Called by _start before stack is fully set up.
+    /// Initializes TLS first (required for @thread_local).
+    @naked
+    @no_mangle
+    public fn _start() {
+        // Linux x86_64 entry point assembly:
+        // 1. Zero frame pointer for backtraces
+        // 2. Get argc from [rsp], argv from [rsp+8]
+        // 3. Align stack to 16 bytes
+        // 4. Call verum_entry(argc, argv)
+        // 5. Exit with return value via exit_group syscall
+        linux_x86_64_start();
+    }
+
+    /// Verum entry point called from _start.
+    @no_mangle
+    public fn verum_entry(argc: Int, argv: &&Byte) -> Int {
+        // Initialize auxiliary vector access (must be first - no libc)
+        init_auxv(argv);
+
+        // Store process arguments for env module
+        init_process_args(argc, argv);
+
+        // Initialize runtime
+        match super.verum_init() {
+            Ok(()) => {}
+            Err(_) => {
+                // Emergency exit on init failure
+                sys.linux.syscall.exit_group(1);
+                unreachable()
+            }
+        }
+
+        // Call user main (must be defined elsewhere)
+        let exit_code = verum_main(argc, argv);
+
+        // Shutdown runtime
+        super.verum_shutdown();
+
+        exit_code
+    }
+}
+
+@cfg(target_os = "macos")
+module darwin_entry {
+    // External user main function
+    extern {
+        fn verum_main(argc: Int, argv: &&Byte) -> Int;
+    }
+
+    /// macOS entry point via dyld.
+    @no_mangle
+    public fn main(argc: Int, argv: &&Byte) -> Int {
+        // Store process arguments for env module
+        init_process_args(argc, argv);
+
+        // Initialize runtime
+        match super.verum_init() {
+            Ok(()) => {}
+            Err(_) => {
+                sys.darwin.libsystem.exit(1);
+                unreachable()
+            }
+        }
+
+        // Call user main
+        let exit_code = verum_main(argc, argv);
+
+        // Shutdown runtime
+        super.verum_shutdown();
+
+        exit_code
+    }
+}
+
+@cfg(target_os = "windows")
+module windows_entry {
+    // External user main function (Windows uses command line string)
+    extern {
+        fn verum_main(cmdline: &Byte) -> Int;
+    }
+
+    /// Windows entry point.
+    @no_mangle
+    public fn mainCRTStartup() {
+        // Initialize runtime
+        match super.verum_init() {
+            Ok(()) => {}
+            Err(_) => {
+                sys.windows.ExitProcess(1);
+            }
+        }
+
+        // Get command line and call user main
+        let cmdline = sys.windows.GetCommandLineA();
+        let exit_code = verum_main(cmdline);
+
+        // Shutdown runtime
+        super.verum_shutdown();
+
+        sys.windows.ExitProcess(exit_code as UInt32);
+    }
+}
+
+@cfg(runtime = "embedded")
+module embedded_entry {
+    /// Embedded entry point (called from reset handler).
+    @no_mangle
+    public fn verum_embedded_init() {
+        // Minimal initialization for embedded
+        match super.verum_init() {
+            Ok(()) => {}
+            Err(_) => {
+                // Hang on error (watchdog will reset)
+                loop { spin_hint(); }
+            }
+        }
+    }
+}

@@ -1,0 +1,481 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, refinements, complex
+// @timeout: 20000
+// @expected-proof-time: <150ms
+
+/// Description: Tests SMT stability for complex refinement type proofs
+/// Regression Detection: Complex refinements with multiple constraints and
+/// dependencies should complete within 150ms. Proofs exceeding 300ms or
+/// experiencing non-deterministic timeouts indicate SMT regression.
+
+// ============================================================================
+// Multi-Constraint Refinements
+// ============================================================================
+
+type BoundedInt is Int{>= -1000 && <= 1000};
+type SmallPositive is Int{> 0 && < 100};
+type EvenPositive is Int{> 0 && it % 2 == 0};
+type OddNonNeg is Int{>= 0 && it % 2 == 1};
+type PrimeCandidate is Int{>= 2 && <= 1000};
+
+/// Multi-constraint bounds check
+@verify(proof)
+fn bounded_int_check(x: BoundedInt) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x >= -1000 && x <= 1000;
+    "
+    x >= -1000 && x <= 1000
+}
+
+/// Small positive check
+@verify(proof)
+fn small_positive_check(x: SmallPositive) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x > 0 && x < 100;
+    "
+    x > 0 && x < 100
+}
+
+/// Even positive verification
+@verify(proof)
+fn even_positive_verify(x: EvenPositive) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x > 0;
+        ensures x % 2 == 0;
+    "
+    x > 0 && x % 2 == 0
+}
+
+/// Construct even positive from positive
+@verify(proof)
+fn make_even_positive(x: SmallPositive) -> EvenPositive {
+    contract#"
+        ensures result > 0;
+        ensures result % 2 == 0;
+    "
+    if x % 2 == 0 { x } else { x + 1 }
+}
+
+// ============================================================================
+// Dependent Refinements
+// ============================================================================
+
+type Index<N: meta Int> is Int{>= 0 && < N};
+type ValidDivisor<D: meta Int{!= 0}> is Int{== D};
+
+/// Index is within bounds
+@verify(proof)
+fn index_in_bounds<N: meta Int{> 0}>(idx: Index<N>) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures idx >= 0;
+        ensures idx < N;
+    "
+    idx >= 0 && idx < N
+}
+
+/// Index successor (if within bounds)
+@verify(proof)
+fn index_succ<N: meta Int{> 1}>(idx: Index<N>) -> Maybe<Index<N>> {
+    contract#"
+        ensures match result {
+            Some(i) => i == idx + 1 && i < N,
+            None => idx + 1 >= N
+        };
+    "
+    if idx + 1 < N {
+        Some(idx + 1)
+    } else {
+        None
+    }
+}
+
+/// Index predecessor (if within bounds)
+@verify(proof)
+fn index_pred<N: meta Int{> 0}>(idx: Index<N>) -> Maybe<Index<N>> {
+    contract#"
+        ensures match result {
+            Some(i) => i == idx - 1 && i >= 0,
+            None => idx == 0
+        };
+    "
+    if idx > 0 {
+        Some(idx - 1)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement Intersection and Union
+// ============================================================================
+
+type PositiveEven is Int{> 0 && it % 2 == 0};    // Intersection
+type NonNegativeOrSmall is Int{>= 0 || < 10};    // Union
+
+/// Intersection refinement
+@verify(proof)
+fn intersection_check(x: PositiveEven) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures x > 0;
+        ensures x % 2 == 0;
+    "
+    x > 0 && x % 2 == 0
+}
+
+/// Construct intersection type
+@verify(proof)
+fn construct_positive_even(x: Int) -> Maybe<PositiveEven> {
+    contract#"
+        ensures match result {
+            Some(pe) => pe > 0 && pe % 2 == 0,
+            None => !(x > 0 && x % 2 == 0)
+        };
+    "
+    if x > 0 && x % 2 == 0 {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Refinement Propagation Across Functions
+// ============================================================================
+
+type NonEmpty<T> is List<T>{len() > 0};
+type Bounded<T> is List<T>{len() <= 100};
+type ValidList<T> is List<T>{len() > 0 && len() <= 100};
+
+/// Non-empty head extraction
+@verify(proof)
+fn safe_head<T>(list: NonEmpty<T>) -> &T {
+    contract#"
+        requires list.len() > 0;
+    "
+    &list[0]
+}
+
+/// Non-empty tail extraction
+@verify(proof)
+fn safe_tail<T>(list: NonEmpty<T>) -> List<T> {
+    contract#"
+        requires list.len() > 0;
+        ensures result.len() == list.len() - 1;
+    "
+    list.slice(1, list.len())
+}
+
+/// Bounded list push (may fail if at capacity)
+@verify(proof)
+fn bounded_push<T>(list: Bounded<T>, item: T) -> Result<Bounded<T>, Text> {
+    contract#"
+        ensures match result {
+            Ok(new_list) => new_list.len() == list.len() + 1 && new_list.len() <= 100,
+            Err(_) => list.len() >= 100
+        };
+    "
+    if list.len() < 100 {
+        Ok(list.push(item))
+    } else {
+        Err("List at capacity")
+    }
+}
+
+// ============================================================================
+// Nested Refinement Types
+// ============================================================================
+
+type PositiveList is List<Int{> 0}>;
+type SortedPositiveList is PositiveList{forall i, j. i < j implies it[i] <= it[j]};
+
+/// All elements in positive list are positive
+@verify(proof)
+fn all_positive(list: &PositiveList) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    for x in list {
+        if *x <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Filter to positive list
+@verify(proof)
+fn filter_positive(list: List<Int>) -> PositiveList {
+    contract#"
+        ensures forall i. 0 <= i < result.len() implies result[i] > 0;
+    "
+    let mut result: PositiveList = list![];
+    for x in list {
+        if x > 0 {
+            result = result.push(x);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Arithmetic with Refinements
+// ============================================================================
+
+type NonNegFloat is Float{>= 0.0};
+type UnitInterval is Float{>= 0.0 && <= 1.0};
+
+/// Safe square root
+@verify(proof)
+fn safe_sqrt(x: NonNegFloat) -> NonNegFloat {
+    contract#"
+        requires x >= 0.0;
+        ensures result >= 0.0;
+    "
+    x.sqrt()
+}
+
+/// Normalize to unit interval
+@verify(proof)
+fn normalize_to_unit(x: Float, min: Float, max: Float) -> UnitInterval {
+    contract#"
+        requires min < max;
+        ensures result >= 0.0 && result <= 1.0;
+    "
+    let clamped = if x < min { min } else if x > max { max } else { x };
+    (clamped - min) / (max - min)
+}
+
+/// Linear interpolation
+@verify(proof)
+fn lerp(a: Float, b: Float, t: UnitInterval) -> Float {
+    contract#"
+        requires t >= 0.0 && t <= 1.0;
+        ensures (a <= b) implies (result >= a && result <= b);
+        ensures (b <= a) implies (result >= b && result <= a);
+    "
+    a + t * (b - a)
+}
+
+// ============================================================================
+// Conditional Refinement Preservation
+// ============================================================================
+
+/// Both branches preserve refinement
+@verify(proof)
+fn conditional_preserves(x: BoundedInt, y: BoundedInt, cond: Bool) -> BoundedInt {
+    contract#"
+        ensures result >= -1000 && result <= 1000;
+    "
+    if cond { x } else { y }
+}
+
+/// Match preserves refinement
+@verify(proof)
+fn match_preserves(x: SmallPositive) -> SmallPositive {
+    contract#"
+        ensures result > 0 && result < 100;
+    "
+    match x {
+        n if n < 50 => n,
+        n => n - 1  // Still > 0 and < 100 since n >= 50 and n < 100
+    }
+}
+
+/// Loop preserves refinement
+@verify(proof)
+fn loop_preserves(mut x: SmallPositive, iterations: Int{>= 0 && <= 10}) -> SmallPositive {
+    contract#"
+        requires iterations >= 0 && iterations <= 10;
+        ensures result > 0 && result < 100;
+    "
+    for _ in 0..iterations {
+        // Increment but clamp to stay in range
+        x = if x < 99 { x + 1 } else { x };
+    }
+    x
+}
+
+// ============================================================================
+// Recursive Refinement Verification
+// ============================================================================
+
+/// Factorial with refinement
+@verify(proof)
+fn factorial(n: Int{>= 0 && <= 12}) -> Int{> 0} {
+    contract#"
+        requires n >= 0 && n <= 12;
+        ensures result > 0;
+    "
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+/// Fibonacci with refinement
+@verify(proof)
+fn fibonacci(n: Int{>= 0 && <= 30}) -> Int{>= 0} {
+    contract#"
+        requires n >= 0 && n <= 30;
+        ensures result >= 0;
+    "
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+/// GCD with refinement
+@verify(proof)
+fn gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures result <= a && result <= b;
+    "
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+// ============================================================================
+// Witness-Based Refinement Verification
+// ============================================================================
+
+/// Find minimum (witness for exists)
+@verify(proof)
+fn find_min(list: NonEmpty<Int>) -> (Int, Int{>= 0}) {
+    contract#"
+        requires list.len() > 0;
+        ensures result.1 >= 0 && result.1 < list.len();
+        ensures result.0 == list[result.1];
+        ensures forall i. 0 <= i < list.len() implies result.0 <= list[i];
+    "
+    let mut min_val = list[0];
+    let mut min_idx = 0;
+    for i in 1..list.len() {
+        if list[i] < min_val {
+            min_val = list[i];
+            min_idx = i;
+        }
+    }
+    (min_val, min_idx)
+}
+
+/// Find maximum (witness for exists)
+@verify(proof)
+fn find_max(list: NonEmpty<Int>) -> (Int, Int{>= 0}) {
+    contract#"
+        requires list.len() > 0;
+        ensures result.1 >= 0 && result.1 < list.len();
+        ensures result.0 == list[result.1];
+        ensures forall i. 0 <= i < list.len() implies result.0 >= list[i];
+    "
+    let mut max_val = list[0];
+    let mut max_idx = 0;
+    for i in 1..list.len() {
+        if list[i] > max_val {
+            max_val = list[i];
+            max_idx = i;
+        }
+    }
+    (max_val, max_idx)
+}
+
+// ============================================================================
+// Complex Flow with Refinements
+// ============================================================================
+
+type SafeIndex is Int{>= 0 && < 1000};
+
+/// Binary search with refinement
+@verify(proof)
+fn binary_search_idx(sorted: &List<Int>, target: Int) -> Maybe<SafeIndex> {
+    contract#"
+        requires sorted.len() <= 1000;
+        requires forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j];
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < sorted.len() && sorted[idx] == target,
+            None => forall i. 0 <= i < sorted.len() implies sorted[i] != target
+        };
+    "
+    if sorted.is_empty() {
+        return None;
+    }
+
+    let mut low: SafeIndex = 0;
+    let mut high = sorted.len() - 1;
+
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        if sorted[mid] == target {
+            return Some(mid);
+        } else if sorted[mid] < target {
+            low = mid + 1;
+        } else {
+            if mid == 0 { break; }
+            high = mid - 1;
+        }
+    }
+    None
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Multi-constraint refinements
+    assert(bounded_int_check(500));
+    assert(small_positive_check(50));
+    assert(even_positive_verify(42));
+    assert(make_even_positive(5) % 2 == 0);
+
+    // Dependent refinements
+    let idx: Index<10> = 5;
+    assert(index_in_bounds.<10>(idx));
+    assert(index_succ.<10>(idx) == Some(6));
+    assert(index_pred.<10>(idx) == Some(4));
+
+    // Intersection refinement
+    assert(intersection_check(42));
+    assert(construct_positive_even(44) == Some(44));
+    assert(construct_positive_even(43) == None);
+
+    // Nested refinements
+    let pos_list: PositiveList = list![1, 2, 3, 4, 5];
+    assert(all_positive(&pos_list));
+    assert(filter_positive(list![-1, 2, -3, 4]).len() == 2);
+
+    // Arithmetic refinements
+    assert(safe_sqrt(16.0) == 4.0);
+    assert(normalize_to_unit(75.0, 0.0, 100.0) == 0.75);
+    assert(lerp(0.0, 10.0, 0.5) == 5.0);
+
+    // Conditional preservation
+    assert(conditional_preserves(100, -100, true) == 100);
+    assert(match_preserves(75) > 0);
+
+    // Recursive refinement
+    assert(factorial(5) == 120);
+    assert(fibonacci(10) == 55);
+    assert(gcd(48, 18) == 6);
+
+    // Witness-based
+    let (min_val, min_idx) = find_min(list![3, 1, 4, 1, 5, 9, 2, 6]);
+    assert(min_val == 1);
+    assert(min_idx == 1 || min_idx == 3);
+
+    println("All complex refinement tests verified successfully!");
+}

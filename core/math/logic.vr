@@ -1,0 +1,163 @@
+// =============================================================================
+// logic.vr - Formal Logic and Proof Theory
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// Defines propositions, proof terms (Curry-Howard correspondence),
+// logical connectives, quantifiers, decidability, and fundamental
+// axioms and inference rules of classical and constructive logic.
+// =============================================================================
+
+module core.math.logic;
+
+// =============================================================================
+// 1. Propositions and Proof Terms
+// =============================================================================
+
+/// A proposition: a statement that can be true or false.
+/// Under Curry-Howard, propositions correspond to types.
+public type Prop is ();
+
+/// A proof term witnessing the truth of a proposition P.
+/// Under Curry-Howard, proofs correspond to programs.
+public type Proof<P> is {
+    /// An opaque witness value.
+    witness: Int,
+};
+
+// =============================================================================
+// 2. Logical Connectives
+// =============================================================================
+
+/// Conjunction: P and Q. A proof requires proofs of both P and Q.
+public type And<P, Q> is {
+    /// Proof of the left conjunct.
+    left: P,
+    /// Proof of the right conjunct.
+    right: Q,
+};
+
+/// Disjunction: P or Q. A proof requires a proof of either P or Q.
+public type Or<P, Q> is
+    Left(P) | Right(Q);
+
+/// Negation: not P. Defined as P implies absurdity.
+public type Not<P> is {
+    /// A function turning a proof of P into a contradiction.
+    refute: fn(P) -> Void,
+};
+
+/// Implication: P implies Q. A function from proofs of P to proofs of Q.
+public type Implies<P, Q> is {
+    /// The implication function.
+    derive: fn(P) -> Q,
+};
+
+/// Biconditional: P if and only if Q.
+public type Iff<P, Q> is {
+    /// Forward direction: P implies Q.
+    forward: Implies<P, Q>,
+    /// Backward direction: Q implies P.
+    backward: Implies<Q, P>,
+};
+
+// =============================================================================
+// 3. Quantifiers
+// =============================================================================
+
+/// Universal quantification: for all x of type T, predicate holds.
+/// Under Curry-Howard, this is a dependent function type.
+public type Forall<T> is {
+    /// A function producing a proof for any x.
+    witness: fn(&T) -> Bool,
+};
+
+/// Existential quantification: there exists x of type T satisfying predicate.
+/// Under Curry-Howard, this is a dependent pair (sigma type).
+public type Exists<T> is {
+    /// The witness value.
+    witness: T,
+    /// Evidence that the witness satisfies the predicate.
+    evidence: Int,
+};
+
+// =============================================================================
+// 4. Decidability
+// =============================================================================
+
+/// A decidable proposition: either P or not P is constructively provable.
+public type Decidable<P> is protocol {
+    /// Decide whether P holds, returning a constructive verdict.
+    fn decide(&self) -> Bool;
+};
+
+/// A type with decidable equality.
+public type DecidableEq is protocol {
+    /// Decide whether two values are equal.
+    fn eq_dec(&self, other: &Self) -> Bool;
+};
+
+// =============================================================================
+// 5. Classical Logic Axioms
+// =============================================================================
+
+/// Law of excluded middle: for any proposition P, either P or not P.
+/// This is an axiom in classical logic, not provable constructively.
+axiom law_of_excluded_middle(p: Int) -> Bool;
+
+/// Double negation elimination: not(not(P)) implies P.
+/// Equivalent to LEM in most settings.
+axiom double_negation_elimination(p: Int) -> Bool;
+
+/// Proof irrelevance: any two proofs of the same proposition are equal.
+/// This holds in classical logic and some constructive systems.
+axiom proof_irrelevance(p: Int, proof1: Int, proof2: Int) -> Bool;
+
+/// Peirce's law: ((P -> Q) -> P) -> P.
+/// Equivalent to LEM in propositional logic.
+axiom peirces_law(p: Int, q: Int) -> Bool;
+
+// =============================================================================
+// 6. Inference Rules (as axiom declarations)
+// =============================================================================
+
+/// Modus ponens: from P and (P -> Q), derive Q.
+axiom modus_ponens(p: Int, q: Int) -> Bool;
+
+/// Modus tollens: from not(Q) and (P -> Q), derive not(P).
+axiom modus_tollens(p: Int, q: Int) -> Bool;
+
+/// Contrapositive: (P -> Q) if and only if (not Q -> not P).
+axiom contrapositive(p: Int, q: Int) -> Bool;
+
+/// Hypothetical syllogism: from (P -> Q) and (Q -> R), derive (P -> R).
+axiom hypothetical_syllogism(p: Int, q: Int, r: Int) -> Bool;
+
+/// Disjunctive syllogism: from (P or Q) and not(P), derive Q.
+axiom disjunctive_syllogism(p: Int, q: Int) -> Bool;
+
+/// Constructive dilemma: from (P -> Q), (R -> S), and (P or R),
+/// derive (Q or S).
+axiom constructive_dilemma(p: Int, q: Int, r: Int, s: Int) -> Bool;
+
+// =============================================================================
+// 7. Constructive Logic Markers
+// =============================================================================
+
+/// A constructive proof: one that does not rely on LEM or DNE.
+/// Used to tag proofs that are valid in intuitionistic logic.
+public type Constructive<P> is {
+    /// The constructive witness.
+    witness: P,
+};
+
+/// A classical proof: may rely on LEM, DNE, or proof by contradiction.
+public type Classical<P> is {
+    /// The classical witness.
+    witness: P,
+};
+
+/// Marker distinguishing constructive vs classical reasoning.
+public type LogicMode is
+    ConstructiveMode | ClassicalMode;

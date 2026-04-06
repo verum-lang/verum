@@ -1,0 +1,109 @@
+// =============================================================================
+// core/intrinsics/runtime/sync.vr - Synchronization Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Operating system threading
+//
+// Efficient blocking synchronization using OS primitives.
+//
+// Implementation:
+// - Linux: futex syscall
+// - macOS: __ulock_wait/__ulock_wake
+// - Windows: WaitOnAddress/WakeByAddressSingle
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.sync;
+
+// =============================================================================
+// SECTION 1: Futex Operations
+// =============================================================================
+
+/// Wait on a memory address until value changes.
+///
+/// Blocks until:
+/// - The value at `addr` differs from `expected`
+/// - The timeout expires (if timeout_ns > 0)
+/// - Another thread calls futex_wake
+///
+/// Returns: 0 on success, -1 on timeout
+/// Requires: Operating system
+@intrinsic("futex_wait")
+@vbc_direct_lowering
+public fn futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) -> Int32;
+
+/// Wake threads waiting on a memory address.
+///
+/// Wakes up to `count` threads.
+/// Returns: Number of threads woken
+/// Requires: Operating system
+@intrinsic("futex_wake")
+@vbc_direct_lowering
+public fn futex_wake(addr: *const UInt32, count: UInt32) -> Int32;
+
+/// Wake exactly one thread waiting on address.
+@intrinsic("futex_wake_one")
+@inline(always)
+@vbc_direct_lowering
+public fn futex_wake_one(addr: *const UInt32) -> Int32;
+
+/// Wake all threads waiting on address.
+@intrinsic("futex_wake_all")
+@vbc_direct_lowering
+public fn futex_wake_all(addr: *const UInt32) -> Int32;
+
+// =============================================================================
+// SECTION 2: Spinlock Operations
+// =============================================================================
+
+/// Try to acquire spinlock without blocking.
+///
+/// Returns: true if lock acquired, false if already held
+@intrinsic("spinlock_try_lock")
+@inline(always)
+@vbc_direct_lowering
+public fn spinlock_try_lock(lock: *mut UInt32) -> Bool;
+
+/// Acquire spinlock, spinning until available.
+///
+/// Uses spin_hint() for power efficiency.
+@intrinsic("spinlock_lock")
+@vbc_direct_lowering
+public fn spinlock_lock(lock: *mut UInt32);
+
+/// Release spinlock.
+@intrinsic("spinlock_unlock")
+@inline(always)
+@vbc_direct_lowering
+public fn spinlock_unlock(lock: *mut UInt32);
+
+/// Check if spinlock is held (non-blocking).
+@intrinsic("spinlock_is_locked")
+@inline(always)
+@vbc_direct_lowering
+public fn spinlock_is_locked(lock: *const UInt32) -> Bool;
+
+// =============================================================================
+// SECTION 3: CPU Hints and Fences
+// =============================================================================
+
+/// Hint to the CPU that we are in a spin loop (power-efficient pause).
+@intrinsic("spin_hint")
+@inline(always)
+public fn spin_hint();
+
+/// Alias for spin_hint (Rust-style name)
+@intrinsic("spin_hint")
+@inline(always)
+public fn spin_loop_hint();
+
+/// Full memory fence with specified ordering.
+@intrinsic("memory_fence")
+@inline(always)
+public fn memory_fence(order: Int = 5);
+
+/// Compiler-only fence (prevents reordering, no hardware barrier).
+@intrinsic("compiler_fence")
+@inline(always)
+public fn compiler_fence(order: Int = 5);

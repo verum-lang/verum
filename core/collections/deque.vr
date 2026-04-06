@@ -1,0 +1,1955 @@
+// =============================================================================
+// deque.vr - Double-ended queue (ring buffer)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI memory operations:
+// - Uses core/memory.vr native allocator (CBGR-backed)
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// Deque<T> is a double-ended queue implemented as a growable ring buffer.
+// Both front and back operations are O(1) amortized.
+//
+// Performance characteristics:
+// - push_front/push_back: O(1) amortized
+// - pop_front/pop_back: O(1)
+// - get by index: O(1)
+// - insert/remove in middle: O(n)
+//
+// Memory layout:
+// - Ring buffer with head and tail indices
+// - Capacity is always power of two for efficient modulo
+//
+// =============================================================================
+
+module core.collections.deque;
+mount core.*;
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Deque<T>
+// =============================================================================
+
+// Double-ended queue using ring buffer.
+public type Deque<T> is {
+    data: &unsafe T,
+    head: Int,          // Index of first element
+    len: Int,           // Number of elements
+    cap: Int,           // Capacity (always power of 2)
+};
+
+implement<T> Deque<T> {
+    // Create empty deque.
+    public fn new() -> Deque<T> {
+        Deque {
+            data: null_ptr(),
+            head: 0,
+            len: 0,
+            cap: 0,
+        }
+    }
+
+    // Create with pre-allocated capacity.
+    public fn with_capacity(capacity: Int) -> Deque<T> {
+        if capacity == 0 {
+            return Deque.new();
+        }
+
+        // Round up to power of 2
+        let cap = capacity.next_power_of_two();
+
+        let data = unsafe {
+            alloc(cap * T.size, T.alignment)
+        } as &unsafe T;
+
+        if data.is_null() {
+            panic("Out of memory");
+        }
+
+        Deque {
+            data: data,
+            head: 0,
+            len: 0,
+            cap: cap,
+        }
+    }
+
+    // Number of elements.
+    public fn len(&self) -> Int {
+        self.len
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    // Current capacity.
+    public fn capacity(&self) -> Int {
+        self.cap
+    }
+
+    // Wrap index around buffer.
+    fn wrap_index(&self, idx: Int) -> Int {
+        if self.cap == 0 {
+            0
+        } else {
+            idx & (self.cap - 1)  // Works because cap is power of 2
+        }
+    }
+
+    // Physical index for logical index.
+    fn physical_index(&self, idx: Int) -> Int {
+        self.wrap_index(self.head + idx)
+    }
+
+    // Push element to back.
+    public fn push_back(&mut self, value: T) {
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        let tail = self.physical_index(self.len);
+        unsafe {
+            ptr_write(self.data.offset(tail), value);
+        }
+        self.len = self.len + 1;
+    }
+
+    // Push element to front.
+    public fn push_front(&mut self, value: T) {
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        // Move head backwards
+        self.head = self.wrap_index(self.head - 1 + self.cap);
+        unsafe {
+            ptr_write(self.data.offset(self.head), value);
+        }
+        self.len = self.len + 1;
+    }
+
+    // Pop element from back.
+    public fn pop_back(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            return None;
+        }
+
+        self.len = self.len - 1;
+        let tail = self.physical_index(self.len);
+        Some(unsafe { ptr_read(self.data.offset(tail)) })
+    }
+
+    // Pop element from front.
+    public fn pop_front(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let value = unsafe { ptr_read(self.data.offset(self.head)) };
+        self.head = self.wrap_index(self.head + 1);
+        self.len = self.len - 1;
+        Some(value)
+    }
+
+    // Get front element by value copy.
+    // Returns Maybe<T> (value copy) for AOT compatibility.
+    public fn front(&self) -> Maybe<T> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(unsafe { *self.data.offset(self.head) })
+        }
+    }
+
+    // Get mutable reference to front element.
+    public fn front_mut(&mut self) -> Maybe<&mut T> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(unsafe { &mut *self.data.offset(self.head) })
+        }
+    }
+
+    // Get back element by value copy.
+    // Returns Maybe<T> (value copy) for AOT compatibility.
+    public fn back(&self) -> Maybe<T> {
+        if self.len == 0 {
+            None
+        } else {
+            let tail = self.physical_index(self.len - 1);
+            Some(unsafe { *self.data.offset(tail) })
+        }
+    }
+
+    // Get mutable reference to back element.
+    public fn back_mut(&mut self) -> Maybe<&mut T> {
+        if self.len == 0 {
+            None
+        } else {
+            let tail = self.physical_index(self.len - 1);
+            Some(unsafe { &mut *self.data.offset(tail) })
+        }
+    }
+
+    // Get element by logical index (value copy).
+    // Returns Maybe<T> (value copy) for AOT compatibility.
+    public fn get(&self, idx: Int) -> Maybe<T> {
+        if idx < 0 || idx >= self.len {
+            None
+        } else {
+            let phys = self.physical_index(idx);
+            Some(unsafe { *self.data.offset(phys) })
+        }
+    }
+
+    // Get mutable element by logical index.
+    public fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
+        if idx < 0 || idx >= self.len {
+            None
+        } else {
+            let phys = self.physical_index(idx);
+            Some(unsafe { &mut *self.data.offset(phys) })
+        }
+    }
+
+    // Index operator (panics on out of bounds).
+    public fn index(&self, idx: Int) -> &T {
+        self.get(idx).expect("Deque index out of bounds")
+    }
+
+    // Clear all elements.
+    public fn clear(&mut self) {
+        while self.pop_front().is_some() {}
+        self.head = 0;
+    }
+
+    // Reserve capacity for additional elements.
+    public fn reserve(&mut self, additional: Int) {
+        let required = self.len + additional;
+        if required > self.cap {
+            let new_cap = required.next_power_of_two();
+            self.reallocate(new_cap);
+        }
+    }
+
+    // Shrink capacity to fit current length.
+    public fn shrink_to_fit(&mut self) {
+        if self.len > 0 {
+            let new_cap = self.len.next_power_of_two();
+            if new_cap < self.cap {
+                self.reallocate(new_cap);
+            }
+        } else if self.cap > 0 {
+            self.drop_buffer();
+        }
+    }
+
+    /// Shrink capacity to at least `min_capacity`.
+    ///
+    /// The capacity will remain at least as large as both the current length
+    /// and the supplied value. Capacity is always rounded up to a power of two
+    /// since Deque requires power-of-two capacity for ring buffer indexing.
+    ///
+    /// Does nothing if the current capacity is already less than or equal to
+    /// `min_capacity`.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut deque = Deque.with_capacity(100);
+    /// deque.push_back(1);
+    /// deque.push_back(2);
+    /// deque.shrink_to(10);
+    /// assert(deque.capacity() >= 10);
+    /// assert(deque.capacity() < 100);
+    /// ```
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        let target = if min_capacity < self.len { self.len } else { min_capacity };
+        if target == 0 && self.cap > 0 {
+            if self.len == 0 {
+                self.drop_buffer();
+            }
+        } else {
+            let new_cap = target.next_power_of_two();
+            if new_cap < self.cap {
+                self.reallocate(new_cap);
+            }
+        }
+    }
+
+    // Make deque contiguous (optimize for iteration).
+    public fn make_contiguous(&mut self) -> &mut [T] {
+        if self.head != 0 && self.len > 0 {
+            // Need to rotate to make head = 0
+            self.rotate_left(self.head);
+            self.head = 0;
+        }
+        unsafe {
+            slice_from_raw_parts_mut(self.data, self.len)
+        }
+    }
+
+    // Rotate elements left by n positions.
+    public fn rotate_left(&mut self, n: Int) {
+        if self.len <= 1 || n == 0 {
+            return;
+        }
+        let n = n % self.len;
+        self.head = self.wrap_index(self.head + n);
+    }
+
+    // Rotate elements right by n positions.
+    public fn rotate_right(&mut self, n: Int) {
+        if self.len <= 1 || n == 0 {
+            return;
+        }
+        let n = n % self.len;
+        self.head = self.wrap_index(self.head - n + self.cap);
+    }
+
+    // Swap two elements by logical index.
+    public fn swap(&mut self, i: Int, j: Int) {
+        assert(i >= 0 && i < self.len, "Index i out of bounds");
+        assert(j >= 0 && j < self.len, "Index j out of bounds");
+
+        if i == j {
+            return;
+        }
+
+        let phys_i = self.physical_index(i);
+        let phys_j = self.physical_index(j);
+
+        unsafe {
+            let tmp = ptr_read(self.data.offset(phys_i));
+            ptr_write(self.data.offset(phys_i), ptr_read(self.data.offset(phys_j)));
+            ptr_write(self.data.offset(phys_j), tmp);
+        }
+    }
+
+    // Check if deque contains value.
+    public fn contains(&self, value: &T) -> Bool
+    where T: Eq
+    {
+        for i in range(0, self.len) {
+            if self.get(i).unwrap() == value {
+                return true;
+            }
+        }
+        false
+    }
+
+    // Binary search in a sorted deque. Returns Ok(index) or Err(insertion_point).
+    public fn binary_search(&self, value: &T) -> Result<Int, Int>
+    where T: Ord
+    {
+        let mut low = 0;
+        let mut high = self.len;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let item = self.get(mid).unwrap();
+            match item.cmp(value) {
+                Ordering.Less => { low = mid + 1; },
+                Ordering.Greater => { high = mid; },
+                Ordering.Equal => { return Ok(mid); },
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary search with custom comparator.
+    ///
+    /// The comparator receives each element and should return:
+    /// - Less if the element is less than the target
+    /// - Greater if the element is greater than the target
+    /// - Equal if the element matches the target
+    public fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
+        let mut low = 0;
+        let mut high = self.len;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let item = self.get(mid).unwrap();
+            match f(item) {
+                Ordering.Less => { low = mid + 1; },
+                Ordering.Greater => { high = mid; },
+                Ordering.Equal => { return Ok(mid); },
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary search by key.
+    public fn binary_search_by_key<K: Ord>(&self, key: &K, f: fn(&T) -> K) -> Result<Int, Int> {
+        self.binary_search_by(|item| {
+            let k: K = f(item);
+            if k < *key { Ordering.Less }
+            else if k > *key { Ordering.Greater }
+            else { Ordering.Equal }
+        })
+    }
+
+    // =========================================================================
+    // Search by Predicate
+    // =========================================================================
+
+    /// Find first element matching predicate.
+    public fn find<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<&T> {
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if predicate(item) {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    /// Find position of first element matching predicate.
+    public fn find_position<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<Int> {
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if predicate(item) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Check if any element satisfies the predicate.
+    public fn any<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if predicate(item) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if all elements satisfy the predicate.
+    public fn all<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if !predicate(item) {
+                return false;
+            }
+        }
+        true
+    }
+
+    // =========================================================================
+    // Aggregation
+    // =========================================================================
+
+    /// Get minimum element.
+    /// Named min_element to avoid conflict with Ord.min(self, other).
+    public fn min_element(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.is_empty() {
+            return None;
+        }
+        let mut min_val = self.get(0).unwrap();
+        for i in range(1, self.len) {
+            let item = self.get(i).unwrap();
+            if item < min_val {
+                min_val = item;
+            }
+        }
+        Some(min_val)
+    }
+
+    /// Get maximum element.
+    /// Named max_element to avoid conflict with Ord.max(self, other).
+    public fn max_element(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.is_empty() {
+            return None;
+        }
+        let mut max_val = self.get(0).unwrap();
+        for i in range(1, self.len) {
+            let item = self.get(i).unwrap();
+            if item > max_val {
+                max_val = item;
+            }
+        }
+        Some(max_val)
+    }
+
+    // =========================================================================
+    // Conversion
+    // =========================================================================
+
+    /// Convert deque to an owned List.
+    public fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.with_capacity(self.len);
+        for i in range(0, self.len) {
+            result.push(self.get(i).unwrap().clone());
+        }
+        result
+    }
+
+    /// Convert to list by consuming the deque.
+    public fn into_list(self) -> List<T> {
+        let mut result: List<T> = List.with_capacity(self.len);
+        let mut d = self;
+        while let Some(val) = d.pop_front() {
+            result.push(val);
+        }
+        result
+    }
+
+    /// Create a deque from a List.
+    public fn from_list(list: &List<T>) -> Deque<T>
+    where T: Clone
+    {
+        let mut d = Deque.with_capacity(list.len());
+        for i in range(0, list.len()) {
+            d.push_back(list[i].clone());
+        }
+        d
+    }
+
+    // Get as pair of slices (may wrap around buffer).
+    public fn as_slices(&self) -> (&[T], &[T]) {
+        if self.len == 0 {
+            return (unsafe { slice_from_raw_parts(self.data, 0) },
+                    unsafe { slice_from_raw_parts(self.data, 0) });
+        }
+
+        let tail = self.wrap_index(self.head + self.len);
+
+        if self.head < tail {
+            // Contiguous
+            (unsafe { slice_from_raw_parts(self.data.offset(self.head), self.len) },
+             unsafe { slice_from_raw_parts(self.data, 0) })
+        } else {
+            // Wraps around
+            let first_len = self.cap - self.head;
+            let second_len = tail;
+            (unsafe { slice_from_raw_parts(self.data.offset(self.head), first_len) },
+             unsafe { slice_from_raw_parts(self.data, second_len) })
+        }
+    }
+
+    // Iterator over elements.
+    public fn iter(&self) -> DequeIter<T> {
+        DequeIter {
+            deque: self,
+            idx: 0,
+            back: self.len,
+        }
+    }
+
+    // Mutable iterator.
+    public fn iter_mut(&mut self) -> DequeIterMut<T> {
+        let n = self.len;
+        DequeIterMut {
+            deque: self,
+            idx: 0,
+            back: n,
+        }
+    }
+
+    // Retain only elements satisfying predicate.
+    public fn retain<F: fn(&T) -> Bool>(&mut self, f: F) {
+        let mut i = 0;
+        let mut kept = 0;
+        while i < self.len {
+            let phys = self.physical_index(i);
+            let item: &T = unsafe { &*self.data.offset(phys) };
+            if f(item) {
+                if kept != i {
+                    // Move element to kept position
+                    let src_phys = self.physical_index(i);
+                    let dst_phys = self.physical_index(kept);
+                    unsafe {
+                        let val = ptr_read(self.data.offset(src_phys));
+                        ptr_write(self.data.offset(dst_phys), val);
+                    }
+                }
+                kept = kept + 1;
+            }
+            i = i + 1;
+        }
+        self.len = kept;
+    }
+
+    // Retain only elements satisfying predicate, allowing mutation of each element.
+    public fn retain_mut<F: fn(&mut T) -> Bool>(&mut self, f: F) {
+        let mut i = 0;
+        let mut kept = 0;
+        while i < self.len {
+            let phys = self.physical_index(i);
+            let item: &mut T = unsafe { &mut *self.data.offset(phys) };
+            if f(item) {
+                if kept != i {
+                    // Move element to kept position
+                    let src_phys = self.physical_index(i);
+                    let dst_phys = self.physical_index(kept);
+                    unsafe {
+                        let val = ptr_read(self.data.offset(src_phys));
+                        ptr_write(self.data.offset(dst_phys), val);
+                    }
+                }
+                kept = kept + 1;
+            }
+            i = i + 1;
+        }
+        self.len = kept;
+    }
+
+    /// Returns elements in the index range [from, to) as a new List.
+    public fn range(&self, from: Int, to: Int) -> List<T> where T: Clone {
+        let mut result: List<T> = [];
+        let actual_from = if from < 0 { 0 } else { from };
+        let actual_to = if to > self.len { self.len } else { to };
+        let mut i = actual_from;
+        while i < actual_to {
+            let phys = self.physical_index(i);
+            let item: &T = unsafe { &*self.data.offset(phys) };
+            result.push(item.clone());
+            i = i + 1;
+        }
+        result
+    }
+
+    /// Truncate deque to given length, dropping excess elements from the back.
+    public fn truncate(&mut self, new_len: Int) {
+        if new_len >= self.len {
+            return;
+        }
+        while self.len > new_len {
+            self.pop_back();
+        }
+    }
+
+    // Insert element at position. Panics if index > len.
+    public fn insert(&mut self, idx: Int, value: T) {
+        assert(idx >= 0 && idx <= self.len, "Deque insert index out of bounds");
+
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        if idx == self.len {
+            // Insert at back
+            self.push_back(value);
+            return;
+        }
+
+        if idx == 0 {
+            // Insert at front
+            self.push_front(value);
+            return;
+        }
+
+        // Shift elements to make room
+        // Shift right from back: move [idx..len] to [idx+1..len+1]
+        let mut i = self.len;
+        while i > idx {
+            let src_phys = self.physical_index(i - 1);
+            let dst_phys = self.physical_index(i);
+            unsafe {
+                let val = ptr_read(self.data.offset(src_phys));
+                ptr_write(self.data.offset(dst_phys), val);
+            }
+            i = i - 1;
+        }
+
+        let phys = self.physical_index(idx);
+        unsafe {
+            ptr_write(self.data.offset(phys), value);
+        }
+        self.len = self.len + 1;
+    }
+
+    // Remove element at position. Returns removed element.
+    public fn remove(&mut self, idx: Int) -> Maybe<T> {
+        if idx < 0 || idx >= self.len {
+            return None;
+        }
+
+        let phys = self.physical_index(idx);
+        let value = unsafe { ptr_read(self.data.offset(phys)) };
+
+        // Shift elements left: move [idx+1..len] to [idx..len-1]
+        let mut i = idx;
+        while i < self.len - 1 {
+            let src_phys = self.physical_index(i + 1);
+            let dst_phys = self.physical_index(i);
+            unsafe {
+                let val = ptr_read(self.data.offset(src_phys));
+                ptr_write(self.data.offset(dst_phys), val);
+            }
+            i = i + 1;
+        }
+
+        self.len = self.len - 1;
+        Some(value)
+    }
+
+    /// Creates a draining iterator that removes and yields all elements.
+    /// The deque will be empty after this call.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut deque = Deque.new();
+    /// deque.push_back(1);
+    /// deque.push_back(2);
+    /// let drained: List<Int> = deque.drain().collect();
+    /// assert(deque.is_empty());
+    /// ```
+    public fn drain(&mut self) -> DequeDrain<T> {
+        let len = self.len;
+        DequeDrain { deque: self, remaining: len }
+    }
+
+    /// Splits the deque into two at the given index.
+    /// Returns a new deque containing elements from `at..len`.
+    /// `self` retains elements from `0..at`.
+    ///
+    /// Panics if `at > len`.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut deque = Deque.new();
+    /// deque.push_back(1);
+    /// deque.push_back(2);
+    /// deque.push_back(3);
+    /// let right = deque.split_off(1);
+    /// // deque = [1], right = [2, 3]
+    /// ```
+    public fn split_off(&mut self, at: Int) -> Deque<T>
+    where T: Clone
+    {
+        assert(at >= 0 && at <= self.len, "Deque split_off index out of bounds");
+
+        let mut other = Deque.with_capacity(self.len - at);
+        let mut i = at;
+        while i < self.len {
+            match self.get(i) {
+                Some(v) => other.push_back(v.clone()),
+                None => break,
+            }
+            i = i + 1;
+        }
+        self.truncate(at);
+        other
+    }
+
+    /// Moves all the elements of `other` into `self`, leaving `other` empty.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut a = Deque.new();
+    /// a.push_back(1);
+    /// let mut b = Deque.new();
+    /// b.push_back(2);
+    /// a.append(&mut b);
+    /// assert_eq(a.len(), 2);
+    /// assert(b.is_empty());
+    /// ```
+    public fn append(&mut self, other: &mut Deque<T>) {
+        self.reserve(other.len);
+        while let Some(v) = other.pop_front() {
+            self.push_back(v);
+        }
+    }
+
+    /// Resizes the deque to `new_len` elements.
+    ///
+    /// If `new_len` is greater than the current length, the deque is extended
+    /// with clones of `value`. If less, the deque is truncated.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut deque = Deque.new();
+    /// deque.resize(5, 0);
+    /// assert_eq(deque.len(), 5);
+    /// ```
+    public fn resize(&mut self, new_len: Int, value: T)
+    where T: Clone
+    {
+        if new_len <= self.len {
+            self.truncate(new_len);
+        } else {
+            self.reserve(new_len - self.len);
+            while self.len < new_len {
+                self.push_back(value.clone());
+            }
+        }
+    }
+
+    /// Resizes the deque to `new_len` elements using a generator function.
+    ///
+    /// If `new_len` is greater than the current length, the deque is extended
+    /// with values returned by `f()`. If less, the deque is truncated.
+    public fn resize_with<F: fn() -> T>(&mut self, new_len: Int, f: F) {
+        if new_len <= self.len {
+            self.truncate(new_len);
+        } else {
+            self.reserve(new_len - self.len);
+            while self.len < new_len {
+                self.push_back(f());
+            }
+        }
+    }
+
+    // Replace element at index and return the old value.
+    public fn set(&mut self, idx: Int, value: T) -> Maybe<T> {
+        if idx < 0 || idx >= self.len {
+            None
+        } else {
+            let phys = self.physical_index(idx);
+            let old = unsafe { ptr_read(self.data.offset(phys)) };
+            unsafe { ptr_write(self.data.offset(phys), value); }
+            Some(old)
+        }
+    }
+
+    // Reverse the order of elements in-place.
+    public fn reverse(&mut self) {
+        if self.len <= 1 {
+            return;
+        }
+        let mut lo = 0;
+        let mut hi = self.len - 1;
+        while lo < hi {
+            self.swap(lo, hi);
+            lo = lo + 1;
+            hi = hi - 1;
+        }
+    }
+
+    // =========================================================================
+    // Sorting
+    // =========================================================================
+
+    /// Sort the deque in ascending order (stable).
+    ///
+    /// Makes the deque contiguous first, then delegates to slice sort.
+    public fn sort(&mut self)
+    where T: Ord
+    {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort();
+    }
+
+    /// Sort with a custom comparator (stable).
+    public fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort_by(compare);
+    }
+
+    /// Sort by key extraction (stable).
+    public fn sort_by_key<K: Ord>(&mut self, key_fn: fn(&T) -> K) {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort_by_key(key_fn);
+    }
+
+    /// Sort the deque in ascending order (unstable, may reorder equal elements).
+    ///
+    /// May be faster than stable sort. Uses quicksort via slice sort_unstable.
+    public fn sort_unstable(&mut self)
+    where T: Ord
+    {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort_unstable();
+    }
+
+    /// Unstable sort with a custom comparator.
+    public fn sort_unstable_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort_unstable_by(compare);
+    }
+
+    /// Unstable sort by key extraction.
+    public fn sort_unstable_by_key<K: Ord>(&mut self, key_fn: fn(&T) -> K) {
+        if self.len <= 1 {
+            return;
+        }
+        let slice = self.make_contiguous();
+        slice.sort_unstable_by_key(key_fn);
+    }
+
+    /// Check if the deque is sorted in ascending order.
+    public fn is_sorted(&self) -> Bool
+    where T: Ord
+    {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a = self.get(i).unwrap();
+            let b = self.get(i + 1).unwrap();
+            if a > b {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if deque is sorted according to a comparator.
+    public fn is_sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> Bool {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a = self.get(i).unwrap();
+            let b = self.get(i + 1).unwrap();
+            if compare(a, b) is Ordering.Greater {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if deque is sorted by a key extraction function.
+    public fn is_sorted_by_key<K: Ord>(&self, key: fn(&T) -> K) -> Bool {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a = self.get(i).unwrap();
+            let b = self.get(i + 1).unwrap();
+            let ka: K = key(a);
+            let kb: K = key(b);
+            if ka > kb {
+                return false;
+            }
+        }
+        true
+    }
+
+    // Swap-remove at index, filling hole from front. O(1).
+    public fn swap_remove_front(&mut self, idx: Int) -> Maybe<T> {
+        if idx < 0 || idx >= self.len {
+            return None;
+        }
+        if idx == 0 {
+            self.pop_front()
+        } else {
+            self.swap(0, idx);
+            self.pop_front()
+        }
+    }
+
+    // Swap-remove at index, filling hole from back. O(1).
+    public fn swap_remove_back(&mut self, idx: Int) -> Maybe<T> {
+        if idx < 0 || idx >= self.len {
+            return None;
+        }
+        if idx == self.len - 1 {
+            self.pop_back()
+        } else {
+            self.swap(idx, self.len - 1);
+            self.pop_back()
+        }
+    }
+
+    // =========================================================================
+    // Filtering & Deduplication
+    // =========================================================================
+    // Windowing
+    // =========================================================================
+
+    /// Return sliding windows of the given size as a list of lists.
+    public fn windows(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "window size must be positive");
+        let mut result: List<List<T>> = [];
+        if size <= self.len {
+            let mut i = 0;
+            let limit = self.len - size + 1;
+            while i < limit {
+                let mut window: List<T> = List.with_capacity(size);
+                let mut j = 0;
+                while j < size {
+                    let item = self.get(i + j).unwrap();
+                    window.push(item.clone());
+                    j = j + 1;
+                }
+                result.push(window);
+                i = i + 1;
+            }
+        }
+        result
+    }
+
+    /// Return fixed-size chunks as a list of lists.
+    public fn chunks(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = [];
+        let mut i = 0;
+        while i < self.len {
+            let chunk_end = if i + size > self.len { self.len } else { i + size };
+            let mut chunk: List<T> = List.with_capacity(chunk_end - i);
+            let mut j = i;
+            while j < chunk_end {
+                let item = self.get(j).unwrap();
+                chunk.push(item.clone());
+                j = j + 1;
+            }
+            result.push(chunk);
+            i = i + size;
+        }
+        result
+    }
+
+    /// Return exact-size chunks, discarding any remainder.
+    public fn chunks_exact(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = [];
+        let mut i = 0;
+        while i + size <= self.len {
+            let mut chunk: List<T> = List.with_capacity(size);
+            let mut j = 0;
+            while j < size {
+                let item = self.get(i + j).unwrap();
+                chunk.push(item.clone());
+                j = j + 1;
+            }
+            result.push(chunk);
+            i = i + size;
+        }
+        result
+    }
+
+    /// Return elements that don't fit into exact-size chunks.
+    public fn chunks_exact_remainder(&self, size: Int) -> List<T>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let full_chunks = self.len / size;
+        let start = full_chunks * size;
+        let mut result: List<T> = [];
+        let mut i = start;
+        while i < self.len {
+            let item = self.get(i).unwrap();
+            result.push(item.clone());
+            i = i + 1;
+        }
+        result
+    }
+
+    // =========================================================================
+    // Functional Utilities
+    // =========================================================================
+
+    /// Return a new Deque containing only elements matching the predicate.
+    public fn filter<F: fn(&T) -> Bool>(&self, f: F) -> Deque<T>
+    where T: Clone
+    {
+        let mut result = Deque.new();
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if f(item) {
+                result.push_back(item.clone());
+            }
+        }
+        result
+    }
+
+    /// Return a new Deque with each element transformed by the function.
+    public fn map<U, F: fn(&T) -> U>(&self, f: F) -> Deque<U> {
+        let mut result: Deque<U> = Deque.with_capacity(self.len);
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            result.push_back(f(item));
+        }
+        result
+    }
+
+    /// Partition elements into two deques based on a predicate.
+    /// Returns (matching, non_matching).
+    public fn partition<F: fn(&T) -> Bool>(&self, f: F) -> (Deque<T>, Deque<T>)
+    where T: Clone
+    {
+        let mut yes = Deque.new();
+        let mut no = Deque.new();
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if f(item) {
+                yes.push_back(item.clone());
+            } else {
+                no.push_back(item.clone());
+            }
+        }
+        (yes, no)
+    }
+
+    /// Count elements matching a predicate.
+    public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
+        let mut count = 0;
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            if f(item) {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    /// Filter and transform in one pass. Keeps elements for which the function returns Some.
+    public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Deque<U> {
+        let mut result: Deque<U> = Deque.new();
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            match f(item) {
+                Some(v) => result.push_back(v),
+                None => {}
+            }
+        }
+        result
+    }
+
+    /// Apply a function to each element, accumulating a result from left to right.
+    public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
+        let mut acc = init;
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            acc = f(acc, item);
+        }
+        acc
+    }
+
+    /// Apply a function to each element for its side effects.
+    public fn for_each<F: fn(&T)>(&self, f: F) {
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            f(item);
+        }
+    }
+
+    /// Reduce the deque to a single value by applying a function to pairs of elements.
+    /// Returns None if the deque is empty.
+    public fn reduce<F: fn(T, &T) -> T>(&self, f: F) -> Maybe<T>
+    where T: Clone
+    {
+        if self.len == 0 {
+            return None;
+        }
+        let mut acc: T = self.get(0).unwrap().clone();
+        for i in range(1, self.len) {
+            let item = self.get(i).unwrap();
+            acc = f(acc, item);
+        }
+        Some(acc)
+    }
+
+    /// Return a new Deque with each element transformed by the function,
+    /// then flattened from inner Lists.
+    public fn flat_map<U, F: fn(&T) -> List<U>>(&self, f: F) -> Deque<U> {
+        let mut result: Deque<U> = Deque.new();
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            let inner = f(item);
+            for j in range(0, inner.len()) {
+                result.push_back(inner[j].clone());
+            }
+        }
+        result
+    }
+
+    /// Check if the deque starts with the given prefix.
+    public fn starts_with(&self, prefix: &Deque<T>) -> Bool
+    where T: Eq
+    {
+        if prefix.len > self.len {
+            return false;
+        }
+        for i in range(0, prefix.len) {
+            if self.get(i).unwrap() != prefix.get(i).unwrap() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if the deque ends with the given suffix.
+    public fn ends_with(&self, suffix: &Deque<T>) -> Bool
+    where T: Eq
+    {
+        if suffix.len > self.len {
+            return false;
+        }
+        let offset = self.len - suffix.len;
+        for i in range(0, suffix.len) {
+            if self.get(offset + i).unwrap() != suffix.get(i).unwrap() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Find the index of the first element equal to value.
+    public fn position(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        for i in range(0, self.len) {
+            if self.get(i).unwrap() == value {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Find the index of the last element equal to value.
+    public fn rposition(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        let mut i = self.len - 1;
+        while i >= 0 {
+            if self.get(i).unwrap() == value {
+                return Some(i);
+            }
+            i = i - 1;
+        }
+        None
+    }
+
+    /// Return a new Deque with a separator inserted between each element.
+    public fn intersperse(&self, separator: T) -> Deque<T>
+    where T: Clone
+    {
+        if self.len <= 1 {
+            return self.clone();
+        }
+        let mut result = Deque.with_capacity(self.len * 2 - 1);
+        for i in range(0, self.len) {
+            if i > 0 {
+                result.push_back(separator.clone());
+            }
+            result.push_back(self.get(i).unwrap().clone());
+        }
+        result
+    }
+
+    /// Return a new Deque with a separator generated by the function inserted between each element.
+    public fn intersperse_with<F: fn() -> T>(&self, separator: F) -> Deque<T>
+    where T: Clone
+    {
+        if self.len <= 1 {
+            return self.clone();
+        }
+        let mut result = Deque.with_capacity(self.len * 2 - 1);
+        for i in range(0, self.len) {
+            if i > 0 {
+                result.push_back(separator());
+            }
+            result.push_back(self.get(i).unwrap().clone());
+        }
+        result
+    }
+
+    // =========================================================================
+    // Extraction
+    // =========================================================================
+
+    /// Remove all elements matching the predicate and return them as a List.
+    /// Preserves the relative order of non-matching elements.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut d = Deque.from_list(&[1, 2, 3, 4, 5]);
+    /// let evens = d.extract_if(|x| *x % 2 == 0);
+    /// // d = [1, 3, 5], evens = [2, 4]
+    /// ```
+    public fn extract_if<F: fn(&T) -> Bool>(&mut self, pred: F) -> List<T> {
+        let mut extracted: List<T> = [];
+        let mut i = 0;
+        let mut kept = 0;
+        while i < self.len {
+            let phys = self.physical_index(i);
+            let item: &T = unsafe { &*self.data.offset(phys) };
+            if pred(item) {
+                // Extract the element
+                let val = unsafe { ptr_read(self.data.offset(phys)) };
+                extracted.push(val);
+            } else {
+                if kept != i {
+                    let src_phys = self.physical_index(i);
+                    let dst_phys = self.physical_index(kept);
+                    unsafe {
+                        let val = ptr_read(self.data.offset(src_phys));
+                        ptr_write(self.data.offset(dst_phys), val);
+                    }
+                }
+                kept = kept + 1;
+            }
+            i = i + 1;
+        }
+        self.len = kept;
+        extracted
+    }
+
+    /// Remove consecutive duplicate elements, keeping the first of each run.
+    /// Returns the number of elements removed.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut d = Deque.from_list(&[1, 1, 2, 3, 3, 3, 2]);
+    /// let removed = d.dedup();
+    /// // d = [1, 2, 3, 2], removed = 3
+    /// ```
+    public fn dedup(&mut self) -> Int
+    where T: Eq
+    {
+        if self.len <= 1 {
+            return 0;
+        }
+        let original_len = self.len;
+        let mut write = 1;
+        let mut read = 1;
+        while read < self.len {
+            let read_phys = self.physical_index(read);
+            let write_prev_phys = self.physical_index(write - 1);
+            let read_item: &T = unsafe { &*self.data.offset(read_phys) };
+            let prev_item: &T = unsafe { &*self.data.offset(write_prev_phys) };
+            if *read_item != *prev_item {
+                if write != read {
+                    let src_phys = self.physical_index(read);
+                    let dst_phys = self.physical_index(write);
+                    unsafe {
+                        let val = ptr_read(self.data.offset(src_phys));
+                        ptr_write(self.data.offset(dst_phys), val);
+                    }
+                }
+                write = write + 1;
+            }
+            read = read + 1;
+        }
+        self.len = write;
+        original_len - write
+    }
+
+    /// Remove consecutive duplicate elements using a custom equality function.
+    /// Returns the number of elements removed.
+    ///
+    /// The predicate receives two consecutive elements and should return true
+    /// if they are considered equal (and the second should be removed).
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut d = Deque.from_list(&[1, -1, 2, -2, 3]);
+    /// fn same_abs(a: &Int, b: &Int) -> Bool { abs(*a) == abs(*b) }
+    /// d.dedup_by(same_abs); // d = [1, 2, 3]
+    /// ```
+    public fn dedup_by<F: fn(&T, &T) -> Bool>(&mut self, same: F) -> Int {
+        if self.len <= 1 {
+            return 0;
+        }
+        let original_len = self.len;
+        let mut write = 1;
+        let mut read = 1;
+        while read < self.len {
+            let read_phys = self.physical_index(read);
+            let write_prev_phys = self.physical_index(write - 1);
+            let read_item: &T = unsafe { &*self.data.offset(read_phys) };
+            let prev_item: &T = unsafe { &*self.data.offset(write_prev_phys) };
+            if !same(prev_item, read_item) {
+                if write != read {
+                    let src_phys = self.physical_index(read);
+                    let dst_phys = self.physical_index(write);
+                    unsafe {
+                        let val = ptr_read(self.data.offset(src_phys));
+                        ptr_write(self.data.offset(dst_phys), val);
+                    }
+                }
+                write = write + 1;
+            }
+            read = read + 1;
+        }
+        self.len = write;
+        original_len - write
+    }
+
+    /// Remove consecutive duplicate elements by key, keeping the first of each run.
+    /// Returns the number of elements removed.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut d = Deque.from_list(&[10, 11, 20, 21, 30]);
+    /// fn tens(x: &Int) -> Int { *x / 10 }
+    /// d.dedup_by_key(tens); // d = [10, 20, 30]
+    /// ```
+    public fn dedup_by_key<K: Eq, F: fn(&T) -> K>(&mut self, key: F) -> Int {
+        self.dedup_by(|a, b| key(a) == key(b))
+    }
+
+    // Internal: grow buffer.
+    fn grow(&mut self) {
+        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        self.reallocate(new_cap);
+    }
+
+    // Internal: reallocate to new capacity.
+    fn reallocate(&mut self, new_cap: Int) {
+        let new_data = unsafe {
+            alloc(new_cap * T.size, T.alignment)
+        } as &unsafe T;
+
+        if new_data.is_null() {
+            panic("Out of memory");
+        }
+
+        // Copy elements to new buffer (making contiguous)
+        if self.len > 0 {
+            let tail = self.wrap_index(self.head + self.len);
+
+            if self.head < tail {
+                // Contiguous - single copy
+                unsafe {
+                    memmove(
+                        new_data as &unsafe Byte,
+                        self.data.offset(self.head) as &unsafe Byte,
+                        self.len * T.size
+                    );
+                }
+            } else {
+                // Wraps around - two copies
+                let first_len = self.cap - self.head;
+                let second_len = tail;
+
+                unsafe {
+                    memmove(
+                        new_data as &unsafe Byte,
+                        self.data.offset(self.head) as &unsafe Byte,
+                        first_len * T.size
+                    );
+                    memmove(
+                        new_data.offset(first_len) as &unsafe Byte,
+                        self.data as &unsafe Byte,
+                        second_len * T.size
+                    );
+                }
+            }
+        }
+
+        // Free old buffer
+        if self.cap > 0 {
+            unsafe {
+                dealloc(
+                    self.data as &unsafe Byte,
+                    self.cap * T.size,
+                    T.alignment
+                );
+            }
+        }
+
+        self.data = new_data;
+        self.head = 0;
+        self.cap = new_cap;
+    }
+
+    // Internal: free buffer without copying.
+    fn drop_buffer(&mut self) {
+        if self.cap > 0 {
+            unsafe {
+                dealloc(
+                    self.data as &unsafe Byte,
+                    self.cap * T.size,
+                    T.alignment
+                );
+            }
+            self.data = null_ptr();
+            self.cap = 0;
+        }
+        self.head = 0;
+        self.len = 0;
+    }
+}
+
+// =============================================================================
+// Drop
+// =============================================================================
+
+implement<T> Drop for Deque<T> {
+    fn drop(&mut self) {
+        // Drop all elements
+        self.clear();
+        // Free buffer
+        if self.cap > 0 {
+            unsafe {
+                dealloc(
+                    self.data as &unsafe Byte,
+                    self.cap * T.size,
+                    T.alignment
+                );
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Clone
+// =============================================================================
+
+implement<T: Clone> Clone for Deque<T> {
+    fn clone(&self) -> Deque<T> {
+        let mut new_deque = Deque.with_capacity(self.len);
+        for i in range(0, self.len) {
+            new_deque.push_back(self.get(i).unwrap().clone());
+        }
+        new_deque
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+// Iterator over deque elements.
+public type DequeIter<T> is {
+    deque: &Deque<T>,
+    idx: Int,
+    back: Int,
+};
+
+implement<T> Iterator for DequeIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        if self.idx >= self.back {
+            None
+        } else {
+            let item = self.deque.get(self.idx);
+            self.idx = self.idx + 1;
+            item
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.back - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for DequeIter<T> {
+    fn next_back(&mut self) -> Maybe<&T> {
+        if self.idx >= self.back {
+            None
+        } else {
+            self.back = self.back - 1;
+            self.deque.get(self.back)
+        }
+    }
+
+    fn nth_back(&mut self, n: Int) -> Maybe<&T> {
+        if n >= self.back - self.idx {
+            self.idx = self.back;
+            None
+        } else {
+            self.back = self.back - n;
+            self.next_back()
+        }
+    }
+
+    fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
+        let remaining = self.back - self.idx;
+        if n <= remaining {
+            self.back = self.back - n;
+            Ok(())
+        } else {
+            self.back = self.idx;
+            Err(n - remaining)
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for DequeIter<T> {
+    fn len(&self) -> Int {
+        self.back - self.idx
+    }
+}
+
+// Mutable iterator.
+public type DequeIterMut<T> is {
+    deque: &mut Deque<T>,
+    idx: Int,
+    back: Int,
+};
+
+implement<T> Iterator for DequeIterMut<T> {
+    type Item = &mut T;
+
+    fn next(&mut self) -> Maybe<&mut T> {
+        if self.idx >= self.back {
+            None
+        } else {
+            let item = self.deque.get_mut(self.idx);
+            self.idx = self.idx + 1;
+            item
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.back - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for DequeIterMut<T> {
+    fn next_back(&mut self) -> Maybe<&mut T> {
+        if self.idx >= self.back {
+            None
+        } else {
+            self.back = self.back - 1;
+            self.deque.get_mut(self.back)
+        }
+    }
+
+    fn nth_back(&mut self, n: Int) -> Maybe<&mut T> {
+        if n >= self.back - self.idx {
+            self.idx = self.back;
+            None
+        } else {
+            self.back = self.back - n;
+            self.next_back()
+        }
+    }
+
+    fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
+        let remaining = self.back - self.idx;
+        if n <= remaining {
+            self.back = self.back - n;
+            Ok(())
+        } else {
+            self.back = self.idx;
+            Err(n - remaining)
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for DequeIterMut<T> {
+    fn len(&self) -> Int {
+        self.back - self.idx
+    }
+}
+
+// IntoIterator for DequeIterMut so it can be used in for loops.
+implement<T> IntoIterator for DequeIterMut<T> {
+    type Item = &mut T;
+    type IntoIter = DequeIterMut<T>;
+
+    fn into_iter(self) -> DequeIterMut<T> { self }
+}
+
+// Into iterator.
+public type DequeIntoIter<T> is {
+    deque: Deque<T>,
+};
+
+implement<T> Iterator for DequeIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.deque.pop_front()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.deque.len, Some(self.deque.len))
+    }
+}
+
+implement<T> DoubleEndedIterator for DequeIntoIter<T> {
+    fn next_back(&mut self) -> Maybe<T> {
+        self.deque.pop_back()
+    }
+}
+
+implement<T> ExactSizeIterator for DequeIntoIter<T> {
+    fn len(&self) -> Int {
+        self.deque.len
+    }
+}
+
+// =============================================================================
+// Drain Iterator
+// =============================================================================
+
+/// Draining iterator that removes and yields all elements from the deque.
+public type DequeDrain<T> is {
+    deque: &mut Deque<T>,
+    remaining: Int,
+};
+
+implement<T> Iterator for DequeDrain<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining = self.remaining - 1;
+        self.deque.pop_front()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for DequeDrain<T> {
+    fn next_back(&mut self) -> Maybe<T> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining = self.remaining - 1;
+        self.deque.pop_back()
+    }
+}
+
+implement<T> ExactSizeIterator for DequeDrain<T> {
+    fn len(&self) -> Int {
+        self.remaining
+    }
+}
+
+implement<T> IntoIterator for DequeDrain<T> {
+    type Item = T;
+    type IntoIter = DequeDrain<T>;
+
+    fn into_iter(self) -> DequeDrain<T> {
+        self
+    }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<T> FusedIterator for DequeIter<T> {}
+implement<T> FusedIterator for DequeIterMut<T> {}
+implement<T> FusedIterator for DequeIntoIter<T> {}
+implement<T> FusedIterator for DequeDrain<T> {}
+
+// =============================================================================
+// Protocol Implementations
+// =============================================================================
+
+implement<T> IntoIterator for Deque<T> {
+    type Item = T;
+    type Iter = DequeIntoIter<T>;
+
+    fn into_iter(self) -> DequeIntoIter<T> {
+        DequeIntoIter { deque: self }
+    }
+}
+
+implement<T> Default for Deque<T> {
+    fn default() -> Deque<T> {
+        Deque.new()
+    }
+}
+
+implement<T: Ord> Ord for Deque<T> {
+    fn cmp(&self, other: &Deque<T>) -> Ordering {
+        let min_len = if self.len < other.len { self.len } else { other.len };
+        for i in range(0, min_len) {
+            let a = self.get(i).unwrap();
+            let b = other.get(i).unwrap();
+            let c = a.cmp(b);
+            match c {
+                Ordering.Equal => {}
+                _ => { return c; }
+            }
+        }
+        if self.len < other.len {
+            Ordering.Less
+        } else if self.len > other.len {
+            Ordering.Greater
+        } else {
+            Ordering.Equal
+        }
+    }
+}
+
+implement<T: Hash> Hash for Deque<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.len);
+        for i in range(0, self.len) {
+            let item = self.get(i).unwrap();
+            item.hash(hasher);
+        }
+    }
+}
+
+implement<T: Eq> Eq for Deque<T> {
+    fn eq(&self, other: &Deque<T>) -> Bool {
+        if self.len != other.len {
+            return false;
+        }
+        for i in range(0, self.len) {
+            if self.get(i).unwrap() != other.get(i).unwrap() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+implement<T: Debug> Debug for Deque<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Deque[")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt_debug(f)?;
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+implement<T: Display> Display for Deque<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("[")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let item: &T = v;
+                    item.fmt(f)?;
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+implement<T> FromIterator<T> for Deque<T> {
+    fn from_iter<I: Iterator<Item>>(iter: I) -> Deque<T> {
+        let mut deque = Deque.new();
+        for v in iter {
+            deque.push_back(v);
+        }
+        deque
+    }
+}
+
+implement<T> Extend<T> for Deque<T> {
+    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+        for v in iter {
+            self.push_back(v);
+        }
+    }
+}
+
+implement<T> Index<Int> for Deque<T> {
+    type Output = T;
+
+    fn index(&self, idx: Int) -> &T {
+        assert(idx >= 0 && idx < self.len, "Deque index out of bounds");
+        let phys = self.physical_index(idx);
+        unsafe { &*self.data.offset(phys) }
+    }
+}
+
+implement<T> IndexMut<Int> for Deque<T> {
+    fn index_mut(&mut self, idx: Int) -> &mut T {
+        assert(idx >= 0 && idx < self.len, "Deque index out of bounds");
+        let phys = self.physical_index(idx);
+        unsafe { &mut *self.data.offset(phys) }
+    }
+}
+
+// =============================================================================
+// From conversions
+// =============================================================================
+
+implement<T> From<List<T>> for Deque<T> {
+    fn from(list: List<T>) -> Deque<T> {
+        let mut deque = Deque.with_capacity(list.len());
+        for item in list {
+            deque.push_back(item);
+        }
+        deque
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+// Create deque from values.
+public fn deque<T>(values: &[T]) -> Deque<T>
+where T: Clone
+{
+    let mut d = Deque.with_capacity(values.len());
+    // Direct index access to avoid associated type issues
+    for i in range(0, values.len()) {
+        let v: &T = &values[i];
+        d.push_back(v.clone());
+    }
+    d
+}
+
+// =============================================================================
+// Helper: Next power of 2
+// =============================================================================
+
+implement Int {
+    fn next_power_of_two(&self) -> Int {
+        if *self <= 0 {
+            return 1;
+        }
+        let mut n = *self - 1;
+        n = n | (n >> 1);
+        n = n | (n >> 2);
+        n = n | (n >> 4);
+        n = n | (n >> 8);
+        n = n | (n >> 16);
+        n = n | (n >> 32);
+        n + 1
+    }
+}
