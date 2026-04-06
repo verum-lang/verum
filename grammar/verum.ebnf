@@ -381,6 +381,7 @@ item            = function_def
                 | context_protocol_def
                 | context_type_protocol_def
                 | context_group_def
+                | layer_def
                 | const_def
                 | static_def
                 | mount_stmt
@@ -408,7 +409,14 @@ std_attribute   = 'std' , [ '(' , context_group_identifier , ')' ] ;
 specialize_attribute = 'specialize' ;
 derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
 verify_attribute = 'verify' , '(' , ( 'runtime' | 'static' | 'formal' ) , ')' ;
+injectable_attribute = 'injectable' , '(' , injection_scope , ')' ;
+injection_scope = 'Scope' , '.' , ( 'Singleton' | 'Request' | 'Transient' ) ;
+inject_attribute = 'inject' ;
 context_group_identifier = identifier ;
+
+(* Inject expression: resolve a dependency from the DI container *)
+(* Example: let db = inject DatabaseService; *)
+inject_expr     = 'inject' , type_path ;
 
 (* 2.2 Cogs and Modules *)
 mount_stmt       = 'mount' , mount_tree , [ 'as' , identifier ] , ';' ;
@@ -438,7 +446,21 @@ type_definition_body = type_expr , [ type_refinement ] , ';'
                      | '(' , type_list , ')' , ';'
                      | '{' , field_list , '}' , [ type_refinement ] , ';'
                      | variant_list , ';'
-                     | protocol_def , ';' ;
+                     | protocol_def , ';'
+                     | inductive_def , ';'
+                     | coinductive_def , ';' ;
+
+(* Inductive type definition - defined by constructors (well-founded recursion)      *)
+(* Syntax: type Nat is inductive { | Zero | Succ(Nat) };                             *)
+(* Constructors use the same variant syntax as sum types but with explicit inductive  *)
+(* semantics enabling structural induction and termination checking.                  *)
+inductive_def    = 'inductive' , '{' , variant_list , '}' ;
+
+(* Coinductive type definition - defined by destructors/observations                 *)
+(* Syntax: type Stream<A> is coinductive { fn head(&self) -> A; ... };               *)
+(* Destructors are observation functions (protocol methods). Coinductive types allow  *)
+(* infinite structures with productivity checking via cofix.                          *)
+coinductive_def  = 'coinductive' , '{' , protocol_items , '}' ;
 
 (* Dependent type bindings (Sigma types) - supports single or multiple bindings     *)
 (* Spec: type theory dependent pairs (Σ-types)                                      *)
@@ -912,6 +934,27 @@ context_type_protocol_def = visibility , 'context' , 'type' , identifier , [ gen
 (*              Use `context Name { }` for pure contexts (Injectable).    *)
 (*              Use `context protocol Name { }` for dual-kind protocols.  *)
 
+(* 2.6.2 Context Layers - Composable Context Bundles *)
+(* Layers group provide statements with dependency resolution.                     *)
+(* Composition via '+' enables modular application assembly.                       *)
+(*                                                                                 *)
+(* Example:                                                                        *)
+(*   layer DatabaseLayer {                                                         *)
+(*       provide ConnectionPool = ConnectionPool.new(Config.get_url());            *)
+(*       provide QueryExecutor = QueryExecutor.new(ConnectionPool);                *)
+(*   }                                                                             *)
+(*   layer AppLayer = DatabaseLayer + LoggingLayer;                                *)
+(*   fn main() { provide AppLayer; run_server(); }                                 *)
+(*                                                                                 *)
+(* Layers are compile-time constructs: the compiler resolves dependencies          *)
+(* between layers, verifies all requires are satisfied, and generates              *)
+(* optimal initialization order (topological sort).                                *)
+layer_def       = visibility , 'layer' , identifier , layer_body ;
+layer_body      = '{' , { layer_item } , '}'
+                | '=' , layer_expr , ';' ;
+layer_item      = provide_stmt ;
+layer_expr      = identifier , { '+' , identifier } ;
+
 (* Context group definition supports full context requirements including negation, *)
 (* type args, and transforms.                                                      *)
 (* Example: using Pure = [!IO, !State<_>, !Random];                                *)
@@ -985,6 +1028,7 @@ type_expr       = simple_type , [ type_refinement ] ;
 simple_type     = primitive_type
                 | never_type
                 | unknown_type
+                | universe_type
                 | path_type
                 | tuple_type
                 | record_type
@@ -1045,6 +1089,22 @@ never_type      = '!' ;
 (* This enables safe FFI, deserialization, and rapid prototyping.               *)
 (* Spec: docs/improvements.md Section 13.2 - Unknown Type                       *)
 unknown_type    = 'unknown' ;
+
+(* Universe type: Type, Type(0), Type(1), Type(u)                               *)
+(* Universe hierarchy: Type(0) : Type(1) : Type(2) : ... prevents paradoxes     *)
+(* Type is sugar for Type(0). Universe polymorphism via level parameters.        *)
+(* Cumulative: Type(n) <: Type(n+1), so all Type(0) values also live in Type(1) *)
+(*                                                                               *)
+(* Examples:                                                                     *)
+(*   type Container<T: Type(1)> is { value: T };                                 *)
+(*   fn identity<u: Level, T: Type(u)>(x: T) -> T { x }                        *)
+(*   type Pair<A, B> is { fst: A, snd: B };  // inferred: Type(max(u,v))        *)
+universe_type   = 'Type' , [ '(' , universe_level , ')' ] ;
+universe_level  = integer_lit | identifier ;
+
+(* Level parameter in generic params: u: Level                                   *)
+(* Declares a universe level variable for universe-polymorphic types/functions   *)
+level_param     = identifier , ':' , 'Level' ;
 
 path_type       = path ;
 tuple_type      = '(' , type_expr , { ',' , type_expr } , ')' ;
@@ -1214,7 +1274,7 @@ postfix_op      = '.' , identifier , [ type_args ] , [ call_args ]
                 | '?.' , identifier , [ type_args ] , [ call_args ]
                 | '.' , integer_lit
                 | '.' , 'await'
-                | '[' , expression , ']'
+                | '[' , expression , { ',' , expression } , ']'
                 | [ type_args ] , call_args
                 | '?'
                 | 'as' , type_expr ;
@@ -1227,7 +1287,9 @@ postfix_op      = '.' , identifier , [ type_args ] , [ call_args ]
 (* When type_args is omitted, type inference determines the types.              *)
 
 call_args       = '(' , arg_list , ')' ;
-arg_list        = [ expression , { ',' , expression } , [ ',' ] ] ;
+arg_list        = [ call_arg , { ',' , call_arg } , [ ',' ] ] ;
+call_arg        = named_arg | expression ;
+named_arg       = identifier , ':' , expression ;
 
 (* argument_list - alias for arg_list for consistency *)
 argument_list   = arg_list ;
@@ -1661,7 +1723,8 @@ let_else_stmt   = 'let' , pattern , '=' , expression , 'else' , block_expr ;
 (* Supports optional alias for multiple instances of same context type *)
 (* Spec: docs/detailed/16-context-system.md Section 2.11.2 - Aliased Contexts *)
 (* context_path is defined in Section 2.4 *)
-provide_stmt    = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
+provide_stmt    = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr )
+                | 'provide' , identifier , ';' ;  (* Layer shorthand: provide AppLayer; *)
 
 (* Defer and errdefer statements *)
 (* defer: Always executes at scope exit (success or error) *)
@@ -1705,7 +1768,7 @@ guarded_pattern = and_pattern , [ guard ] ;
 (* Example: Even() & Positive() - matches positive even numbers                 *)
 and_pattern     = primary_pattern , { '&' , primary_pattern } ;
 
-primary_pattern = simple_pattern | active_pattern ;
+primary_pattern = simple_pattern | active_pattern | view_pattern ;
 
 simple_pattern  = literal_pattern
                 | type_test_pattern
@@ -1720,6 +1783,17 @@ simple_pattern  = literal_pattern
                 | variant_pattern
                 | reference_pattern
                 | range_pattern ;
+
+(* View pattern: match through a transformation function                        *)
+(* The view function is applied to the scrutinee and the result is matched      *)
+(* against the inner pattern.                                                   *)
+(*                                                                              *)
+(* Examples:                                                                    *)
+(*   parity -> Even(k)         - apply parity(), match against Even(k)         *)
+(*   json.parse -> Ok(data)    - apply json.parse(), match against Ok(data)    *)
+(*   f -> g -> pat             - nested: apply f, then g, match pat            *)
+(*                                                                              *)
+view_pattern    = ( identifier | qualified_path ) , '->' , primary_pattern ;
 
 (* Type test pattern: binding is Type                                          *)
 (* Tests runtime type and binds narrowed value. Essential for unknown type.    *)
@@ -2116,7 +2190,8 @@ quantifier_binding =
 (* 2.19.12 AST Alignment Keywords *)
 ast_alignment_keyword =
     'ref' | 'move' | 'as' | 'in' | 'Self' | 'private'
-    | 'checked' | 'view' | 'extern' | 'cofix' | 'dyn' | 'biased' ;
+    | 'checked' | 'view' | 'extern' | 'cofix' | 'dyn' | 'biased'
+    | 'inductive' | 'coinductive' ;
 
 (* ============================================================================ *)
 (* 2.20 BUILT-IN FUNCTIONS AND MACRO SYNTAX STANDARDIZATION                      *)

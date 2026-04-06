@@ -1,0 +1,8 @@
+// Test defer statements
+// This test verifies that defer statements execute in reverse order at scope exit
+
+fn main() {
+    println("start")
+    defer println("cleanup")
+    println("middle")
+}

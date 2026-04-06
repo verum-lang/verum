@@ -1,0 +1,742 @@
+// Verum Registry - Request/Response Logging Middleware
+//
+// Structured logging middleware for HTTP requests and responses with
+// performance tracking, error logging, and audit trails.
+//
+// Features:
+// - Request/response lifecycle logging
+// - Performance metrics tracking
+// - Structured log context
+// - Correlation ID tracking
+// - Sensitive data redaction
+
+mount core.collections.{Map, List};
+mount core.base.{Result, Maybe, Text, Int, Float, Bool};
+mount core.time.{unix_timestamp, Instant};
+mount core.crypto.{random_bytes};
+
+// Import context protocols
+mount super.super.contexts.{Logger, Metrics};
+mount super.super.domain.errors.{RegistryError};
+
+// ============================================================================
+// Types - Request/Response Logging
+// ============================================================================
+
+/// Logging configuration
+pub type LogConfig is {
+    /// Log request bodies (may contain sensitive data)
+    log_request_body: Bool,
+
+    /// Log response bodies
+    log_response_body: Bool,
+
+    /// Maximum body size to log (bytes)
+    max_body_size: Int where |n| n > 0,
+
+    /// Log headers
+    log_headers: Bool,
+
+    /// Headers to redact (sensitive data)
+    redacted_headers: List<Text>,
+
+    /// Log query parameters
+    log_query_params: Bool,
+
+    /// Enable performance tracking
+    track_performance: Bool,
+
+    /// Enable audit logging
+    audit_logging: Bool,
+};
+
+/// Request metadata for logging
+pub type RequestMetadata is {
+    /// Unique request ID for correlation
+    request_id: Text where |id| id.len() > 0,
+
+    /// HTTP method (GET, POST, etc)
+    method: Text,
+
+    /// Request path
+    path: Text,
+
+    /// Query string
+    query: Text,
+
+    /// Client IP address
+    client_ip: Text,
+
+    /// User agent string
+    user_agent: Text,
+
+    /// Request timestamp (microseconds)
+    timestamp: Int where |t| t > 0,
+
+    /// Authenticated user ID
+    user_id: Maybe<Text>,
+
+    /// Request headers
+    headers: Map<Text, Text>,
+
+    /// Request body size (bytes)
+    body_size: Int where |n| n >= 0,
+};
+
+/// Response metadata for logging
+pub type ResponseMetadata is {
+    /// HTTP status code
+    status_code: Int where |c| c >= 100 && c < 600,
+
+    /// Response body size (bytes)
+    body_size: Int where |n| n >= 0,
+
+    /// Response headers
+    headers: Map<Text, Text>,
+
+    /// Response timestamp (microseconds)
+    timestamp: Int where |t| t > 0,
+
+    /// Processing duration (microseconds)
+    duration_us: Int where |d| d >= 0,
+
+    /// Error message if request failed
+    error: Maybe<Text>,
+};
+
+/// Complete request/response log entry
+pub type RequestLog is {
+    /// Request metadata
+    request: RequestMetadata,
+
+    /// Response metadata
+    response: ResponseMetadata,
+
+    /// Additional context fields
+    context: Map<Text, Text>,
+
+    /// Performance metrics
+    metrics: PerformanceMetrics,
+};
+
+/// Performance tracking metrics
+pub type PerformanceMetrics is {
+    /// Total request duration (microseconds)
+    total_duration_us: Int where |d| d >= 0,
+
+    /// Time spent in middleware (microseconds)
+    middleware_duration_us: Int where |d| d >= 0,
+
+    /// Time spent in handler (microseconds)
+    handler_duration_us: Int where |d| d >= 0,
+
+    /// Time spent in database (microseconds)
+    database_duration_us: Int where |d| d >= 0,
+
+    /// Number of database queries
+    database_queries: Int where |n| n >= 0,
+
+    /// Memory allocated (bytes)
+    memory_allocated: Int where |n| n >= 0,
+};
+
+/// Log level for request logging
+pub type RequestLogLevel is
+    | Debug      // Verbose logging for development
+    | Info       // Standard request logging
+    | Warn       // Slow or problematic requests
+    | Error;     // Failed requests
+
+// ============================================================================
+// Request Logger Protocol
+// ============================================================================
+
+/// Context protocol for request logging
+pub context protocol RequestLogger {
+    /// Log incoming request
+    async fn log_request(
+        self,
+        metadata: RequestMetadata,
+        config: LogConfig
+    ) -> Result<(), RegistryError>;
+
+    /// Log outgoing response
+    async fn log_response(
+        self,
+        request: RequestMetadata,
+        response: ResponseMetadata,
+        config: LogConfig
+    ) -> Result<(), RegistryError>;
+
+    /// Log complete request/response cycle
+    async fn log_request_response(
+        self,
+        log: RequestLog,
+        config: LogConfig
+    ) -> Result<(), RegistryError>;
+
+    /// Create request correlation context
+    fn create_request_context(
+        self,
+        request_id: Text,
+        user_id: Maybe<Text>
+    ) -> Map<Text, Text>;
+}
+
+// ============================================================================
+// Middleware Functions
+// ============================================================================
+
+/// Create request logger with configuration
+///
+/// Example:
+/// ```
+/// let config = LogConfig {
+///     log_request_body: false,
+///     log_response_body: false,
+///     max_body_size: 1024,
+///     log_headers: true,
+///     redacted_headers: List.from(["Authorization", "Cookie"]),
+///     log_query_params: true,
+///     track_performance: true,
+///     audit_logging: true,
+/// };
+/// let logger = create_request_logger(config);
+/// ```
+pub fn create_request_logger(config: LogConfig) -> LogConfig {
+    config
+}
+
+/// Log incoming HTTP request
+///
+/// Logs request details including method, path, headers, and metadata.
+pub async fn log_request(
+    metadata: RequestMetadata,
+    config: LogConfig
+) -> Result<(), RegistryError>
+    using [Logger, Metrics]
+{
+    // Build log context
+    let mut context = Map.new();
+    context.insert("request_id", metadata.request_id);
+    context.insert("method", metadata.method);
+    context.insert("path", metadata.path);
+    context.insert("client_ip", metadata.client_ip);
+
+    // Add user ID if authenticated
+    match metadata.user_id {
+        Maybe.Some(user_id) => {
+            context.insert("user_id", user_id);
+        },
+        Maybe.None => {},
+    };
+
+    // Log headers if enabled
+    if config.log_headers {
+        let redacted_headers = redact_sensitive_headers(
+            &metadata.headers,
+            &config.redacted_headers
+        );
+        context.insert("headers", format_headers(&redacted_headers));
+    }
+
+    // Log query params if enabled
+    if config.log_query_params && metadata.query.len() > 0 {
+        context.insert("query", metadata.query);
+    }
+
+    // Log with structured context
+    Logger.with_fields(context).info(
+        f"Incoming request: {metadata.method} {metadata.path}"
+    );
+
+    // Track metrics
+    if config.track_performance {
+        Metrics.increment_counter("http.requests.total").await;
+        Metrics.increment_counter(f"http.requests.{metadata.method}").await;
+    }
+
+    Result.Ok(())
+}
+
+/// Log outgoing HTTP response
+///
+/// Logs response details including status, headers, duration, and errors.
+pub async fn log_response(
+    request: RequestMetadata,
+    response: ResponseMetadata,
+    config: LogConfig
+) -> Result<(), RegistryError>
+    using [Logger, Metrics]
+{
+    // Build log context
+    let mut context = Map.new();
+    context.insert("request_id", request.request_id);
+    context.insert("method", request.method);
+    context.insert("path", request.path);
+    context.insert("status_code", response.status_code.to_string());
+    context.insert("duration_ms", (response.duration_us / 1000).to_string());
+
+    // Add user ID if authenticated
+    match request.user_id {
+        Maybe.Some(user_id) => {
+            context.insert("user_id", user_id);
+        },
+        Maybe.None => {},
+    };
+
+    // Determine log level based on status and duration
+    let log_level = determine_log_level(&response);
+
+    // Log error details if present
+    match response.error {
+        Maybe.Some(error_msg) => {
+            context.insert("error", error_msg);
+            Logger.with_fields(context).error(
+                f"Request failed: {request.method} {request.path} - {response.status_code}"
+            );
+        },
+        Maybe.None => {
+            match log_level {
+                RequestLogLevel.Error => {
+                    Logger.with_fields(context).error(
+                        f"Request error: {request.method} {request.path} - {response.status_code}"
+                    );
+                },
+                RequestLogLevel.Warn => {
+                    Logger.with_fields(context).warn(
+                        f"Request slow: {request.method} {request.path} - {response.duration_us}us"
+                    );
+                },
+                RequestLogLevel.Info => {
+                    Logger.with_fields(context).info(
+                        f"Request completed: {request.method} {request.path} - {response.status_code}"
+                    );
+                },
+                RequestLogLevel.Debug => {
+                    Logger.with_fields(context).debug(
+                        f"Request debug: {request.method} {request.path}"
+                    );
+                },
+            }
+        },
+    };
+
+    // Track metrics
+    if config.track_performance {
+        Metrics.record_histogram(
+            "http.request.duration",
+            response.duration_us.to_float() / 1000.0  // Convert to ms
+        ).await;
+
+        Metrics.increment_counter(
+            f"http.response.status.{response.status_code}"
+        ).await;
+
+        // Track error rate
+        if response.status_code >= 500 {
+            Metrics.increment_counter("http.errors.5xx").await;
+        } else if response.status_code >= 400 {
+            Metrics.increment_counter("http.errors.4xx").await;
+        }
+    }
+
+    Result.Ok(())
+}
+
+/// Log complete request/response cycle with performance metrics
+pub async fn log_request_response(
+    log: RequestLog,
+    config: LogConfig
+) -> Result<(), RegistryError>
+    using [Logger, Metrics]
+{
+    // Build comprehensive log context
+    let mut context = Map.new();
+    context.insert("request_id", log.request.request_id);
+    context.insert("method", log.request.method);
+    context.insert("path", log.request.path);
+    context.insert("status_code", log.response.status_code.to_string());
+    context.insert("duration_ms", (log.metrics.total_duration_us / 1000).to_string());
+
+    // Add performance breakdown
+    if config.track_performance {
+        context.insert(
+            "middleware_ms",
+            (log.metrics.middleware_duration_us / 1000).to_string()
+        );
+        context.insert(
+            "handler_ms",
+            (log.metrics.handler_duration_us / 1000).to_string()
+        );
+        context.insert(
+            "database_ms",
+            (log.metrics.database_duration_us / 1000).to_string()
+        );
+        context.insert("db_queries", log.metrics.database_queries.to_string());
+    }
+
+    // Add user context
+    match log.request.user_id {
+        Maybe.Some(user_id) => {
+            context.insert("user_id", user_id);
+        },
+        Maybe.None => {},
+    };
+
+    // Merge additional context
+    for key in log.context.keys() {
+        for value in log.context.get(&key) {
+            context.insert(key, value);
+        }
+    }
+
+    // Audit logging for sensitive operations
+    if config.audit_logging && is_audit_worthy(&log.request) {
+        Logger.with_fields(context).info(
+            f"AUDIT: {log.request.method} {log.request.path} by user {log.request.user_id.unwrap_or('anonymous')}"
+        );
+    }
+
+    // Log with appropriate level
+    let log_level = determine_log_level(&log.response);
+    match log_level {
+        RequestLogLevel.Error => {
+            Logger.with_fields(context).error("Request/Response cycle completed with errors");
+        },
+        RequestLogLevel.Warn => {
+            Logger.with_fields(context).warn("Request/Response cycle completed with warnings");
+        },
+        RequestLogLevel.Info => {
+            Logger.with_fields(context).info("Request/Response cycle completed");
+        },
+        RequestLogLevel.Debug => {
+            Logger.with_fields(context).debug("Request/Response cycle completed");
+        },
+    }
+
+    // Track comprehensive metrics
+    if config.track_performance {
+        track_performance_metrics(&log.metrics).await;
+    }
+
+    Result.Ok(())
+}
+
+/// Create request correlation context for distributed tracing
+pub fn create_request_context(
+    request_id: Text,
+    user_id: Maybe<Text>
+) -> Map<Text, Text> {
+    let mut context = Map.new();
+
+    context.insert("request_id", request_id);
+    context.insert("timestamp", unix_timestamp().to_string());
+
+    match user_id {
+        Maybe.Some(id) => {
+            context.insert("user_id", id);
+        },
+        Maybe.None => {
+            context.insert("user_id", "anonymous");
+        },
+    };
+
+    context
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Redact sensitive headers for logging
+fn redact_sensitive_headers(
+    headers: &Map<Text, Text>,
+    redacted_list: &List<Text>
+) -> Map<Text, Text> {
+    let mut result = Map.new();
+
+    for key in headers.keys() {
+        let value = headers.get(&key).unwrap_or("");
+
+        if redacted_list.contains(key) {
+            result.insert(key, "[REDACTED]");
+        } else {
+            result.insert(key, value);
+        }
+    }
+
+    result
+}
+
+/// Format headers for logging
+fn format_headers(headers: &Map<Text, Text>) -> Text {
+    let mut parts = List.new();
+
+    for key in headers.keys() {
+        let value = headers.get(&key).unwrap_or("");
+        parts.push(f"{key}: {value}");
+    }
+
+    parts.join(", ")
+}
+
+/// Determine log level based on response characteristics
+fn determine_log_level(response: &ResponseMetadata) -> RequestLogLevel {
+    // Error status codes
+    if response.status_code >= 500 {
+        return RequestLogLevel.Error;
+    }
+
+    // Client errors (except 401, 404 which are common)
+    if response.status_code >= 400 && response.status_code != 401 && response.status_code != 404 {
+        return RequestLogLevel.Warn;
+    }
+
+    // Slow requests (>1 second)
+    if response.duration_us > 1000000 {
+        return RequestLogLevel.Warn;
+    }
+
+    // Normal requests
+    RequestLogLevel.Info
+}
+
+/// Check if request should be audit logged
+fn is_audit_worthy(request: &RequestMetadata) -> Bool {
+    // Audit write operations
+    if request.method == "POST" || request.method == "PUT" || request.method == "DELETE" {
+        return true;
+    }
+
+    // Audit admin endpoints
+    if request.path.starts_with("/admin") {
+        return true;
+    }
+
+    // Audit auth operations
+    if request.path.contains("/login") || request.path.contains("/token") {
+        return true;
+    }
+
+    false
+}
+
+/// Track performance metrics in metrics system
+async fn track_performance_metrics(metrics: &PerformanceMetrics) -> ()
+    using [Metrics]
+{
+    // Track duration histogram
+    Metrics.record_histogram(
+        "request.duration.total",
+        metrics.total_duration_us.to_float() / 1000.0
+    ).await;
+
+    Metrics.record_histogram(
+        "request.duration.middleware",
+        metrics.middleware_duration_us.to_float() / 1000.0
+    ).await;
+
+    Metrics.record_histogram(
+        "request.duration.handler",
+        metrics.handler_duration_us.to_float() / 1000.0
+    ).await;
+
+    Metrics.record_histogram(
+        "request.duration.database",
+        metrics.database_duration_us.to_float() / 1000.0
+    ).await;
+
+    // Track database queries
+    Metrics.record_histogram(
+        "request.database.queries",
+        metrics.database_queries.to_float()
+    ).await;
+
+    // Track memory usage
+    Metrics.record_histogram(
+        "request.memory.allocated",
+        metrics.memory_allocated.to_float() / 1024.0 / 1024.0  // Convert to MB
+    ).await;
+}
+
+/// Generate unique request ID using UUID v4 format
+///
+/// Generates a cryptographically random UUID in the standard format:
+/// xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+///
+/// Where:
+/// - x is any hexadecimal digit
+/// - 4 indicates UUID version 4 (random)
+/// - y is one of 8, 9, a, or b (variant bits)
+///
+/// Example output: "550e8400-e29b-41d4-a716-446655440000"
+pub fn generate_request_id() -> Text {
+    // Generate 16 random bytes for UUID v4
+    let random = random_bytes(16);
+
+    // Convert bytes to hex characters
+    let hex_chars = "0123456789abcdef";
+
+    // Build UUID string with proper formatting
+    let mut uuid = Text.new();
+
+    for i in 0..16 {
+        let byte = random.get(i).unwrap_or(0);
+
+        // Apply UUID v4 version and variant bits
+        let adjusted_byte = if i == 6 {
+            // Version 4: Set high nibble to 0100 (4)
+            (byte & 0x0f) | 0x40
+        } else if i == 8 {
+            // Variant: Set high bits to 10xx (8, 9, a, or b)
+            (byte & 0x3f) | 0x80
+        } else {
+            byte
+        };
+
+        // Convert byte to two hex characters
+        let high_nibble = (adjusted_byte >> 4) & 0x0f;
+        let low_nibble = adjusted_byte & 0x0f;
+
+        uuid = uuid.append(hex_chars.char_at(high_nibble));
+        uuid = uuid.append(hex_chars.char_at(low_nibble));
+
+        // Add hyphens at standard positions: 8-4-4-4-12
+        if i == 3 || i == 5 || i == 7 || i == 9 {
+            uuid = uuid.append("-");
+        }
+    }
+
+    uuid
+}
+
+/// Generate a short request ID suitable for logging
+///
+/// Returns a 12-character base62 encoded ID combining timestamp and random bytes.
+/// Format: TTTTTTRRRRRRR (6 chars timestamp + 6 chars random)
+///
+/// Example output: "1hZ4k9mN3pQ7"
+pub fn generate_short_request_id() -> Text {
+    let base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    // Get current timestamp in milliseconds
+    let timestamp = unix_timestamp() * 1000 + Instant.now().millis() % 1000;
+
+    // Generate 4 random bytes
+    let random = random_bytes(4);
+
+    let mut id = Text.new();
+
+    // Encode timestamp (6 characters)
+    let mut ts = timestamp;
+    for _ in 0..6 {
+        let idx = (ts % 62).to_int();
+        id = base62_chars.char_at(idx).append(id);  // Prepend for correct order
+        ts = ts / 62;
+    }
+
+    // Encode random bytes (6 characters)
+    let mut rand_val = 0;
+    for i in 0..4 {
+        rand_val = (rand_val << 8) | random.get(i).unwrap_or(0);
+    }
+
+    for _ in 0..6 {
+        let idx = (rand_val % 62).to_int();
+        id = id.append(base62_chars.char_at(idx));
+        rand_val = rand_val / 62;
+    }
+
+    id
+}
+
+/// Generate a prefixed request ID
+///
+/// Combines a prefix with a short random ID for easy identification
+/// of request sources in distributed systems.
+///
+/// # Parameters
+/// - prefix: A short identifier for the service/component (e.g., "api", "web", "cli")
+///
+/// # Example
+/// ```
+/// let id = generate_prefixed_request_id("api");
+/// // Returns something like: "api-1hZ4k9mN3pQ7"
+/// ```
+pub fn generate_prefixed_request_id(prefix: Text) -> Text {
+    let short_id = generate_short_request_id();
+    f"{prefix}-{short_id}"
+}
+
+/// Validate a request ID format
+///
+/// Checks if a string looks like a valid request ID (UUID or short format)
+pub fn is_valid_request_id(id: Text) -> Bool {
+    let len = id.len();
+
+    // UUID format: 36 characters (8-4-4-4-12)
+    if len == 36 {
+        // Check for hyphens at correct positions
+        return id.char_at(8) == "-" &&
+               id.char_at(13) == "-" &&
+               id.char_at(18) == "-" &&
+               id.char_at(23) == "-";
+    }
+
+    // Short format: 12 characters base62
+    if len == 12 {
+        return id.chars().all(|c| c.is_alphanumeric());
+    }
+
+    // Prefixed format: prefix-12chars
+    if len > 13 && id.contains("-") {
+        let parts = id.split("-");
+        if parts.len() == 2 {
+            let suffix = parts.get(1).unwrap_or("");
+            return suffix.len() == 12 && suffix.chars().all(|c| c.is_alphanumeric());
+        }
+    }
+
+    false
+}
+
+/// Calculate duration between timestamps
+pub fn calculate_duration(start: Int, end: Int) -> Int {
+    if end >= start {
+        end - start
+    } else {
+        0
+    }
+}
+
+/// Format duration for human-readable output
+pub fn format_duration(duration_us: Int) -> Text {
+    let ms = duration_us / 1000;
+
+    if ms < 1000 {
+        f"{ms}ms"
+    } else {
+        let secs = ms / 1000;
+        f"{secs}s"
+    }
+}
+
+/// Create performance metrics from timings
+pub fn create_performance_metrics(
+    total_duration: Int,
+    middleware_duration: Int,
+    handler_duration: Int,
+    database_duration: Int,
+    database_queries: Int,
+    memory_allocated: Int
+) -> PerformanceMetrics {
+    PerformanceMetrics {
+        total_duration_us: total_duration,
+        middleware_duration_us: middleware_duration,
+        handler_duration_us: handler_duration,
+        database_duration_us: database_duration,
+        database_queries,
+        memory_allocated,
+    }
+}

@@ -1,0 +1,62 @@
+// Loops and Control Flow Test
+
+fn sum_to(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn count_down(n: Int) -> Int {
+    let mut current = n;
+    while current > 0 {
+        current = current - 1;
+    }
+    current
+}
+
+fn find_first_divisor(n: Int) -> Int {
+    let mut i = 2;
+    while i < n {
+        if n % i == 0 {
+            return i;
+        }
+        i = i + 1;
+    }
+    n
+}
+
+fn main() {
+    print("=== Loops Test ===");
+
+    // While loop sum
+    print(f"sum_to(10) = {sum_to(10)}");
+    print(f"sum_to(100) = {sum_to(100)}");
+
+    // Factorial
+    print(f"factorial(5) = {factorial(5)}");
+    print(f"factorial(10) = {factorial(10)}");
+
+    // Count down
+    print(f"count_down(5) = {count_down(5)}");
+
+    // Early return from loop
+    print(f"find_first_divisor(12) = {find_first_divisor(12)}");
+    print(f"find_first_divisor(17) = {find_first_divisor(17)}");
+    print(f"find_first_divisor(100) = {find_first_divisor(100)}");
+
+    print("=== Done ===");
+}

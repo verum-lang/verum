@@ -1,0 +1,36 @@
+// Test simple recursion (mutual recursion requires forward declarations)
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+fn power(base: Int, exp: Int) -> Int {
+    if exp <= 0 {
+        1
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+fn main() {
+    let _ = print("Testing recursion...");
+
+    // Test fibonacci
+    let _ = print(f"fib(0) = {fibonacci(0)}");
+    let _ = print(f"fib(1) = {fibonacci(1)}");
+    let _ = print(f"fib(5) = {fibonacci(5)}");
+    let _ = print(f"fib(10) = {fibonacci(10)}");
+
+    // Test power
+    let _ = print(f"2^0 = {power(2, 0)}");
+    let _ = print(f"2^3 = {power(2, 3)}");
+    let _ = print(f"3^4 = {power(3, 4)}");
+
+    let _ = print("Done!");
+}

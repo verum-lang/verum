@@ -1,0 +1,26 @@
+// Test basic list comprehensions: [x * 2 for x in list]
+
+fn main() -> Int {
+    // Test 1: Simple transformation
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = [x * 2 for x in numbers];
+
+    // Should produce [2, 4, 6, 8, 10]
+    let sum = doubled[0] + doubled[1] + doubled[2] + doubled[3] + doubled[4];
+    // sum should be 30
+
+    // Test 2: Identity comprehension
+    let identity = [x for x in numbers];
+    // Should be same as original
+
+    // Test 3: String transformation
+    let words = ["hello", "world"];
+    let upper = [s.to_upper() for s in words];
+
+    // Test 4: Empty list
+    let empty: [Int] = [];
+    let empty_result = [x * 2 for x in empty];
+    // Should be empty
+
+    0
+}

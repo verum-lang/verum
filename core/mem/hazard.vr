@@ -1,0 +1,522 @@
+// =============================================================================
+// mem/hazard.vr - Hazard Pointer System for CBGR Race Protection
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// =============================================================================
+//
+// This module implements a lock-free hazard pointer system that prevents the
+// race condition between CBGR validation and dereference.
+//
+// # Problem Statement
+//
+// Without hazard pointers, this race condition exists:
+//
+// ```
+// Thread 1                    Thread 2
+// --------                    --------
+// validate() - OK
+//                             deallocate(ptr)
+// deref(ptr) - UAF!
+// ```
+//
+// # Solution
+//
+// Hazard pointers prevent deallocation while references are in use:
+//
+// ```
+// Thread 1                    Thread 2
+// --------                    --------
+// acquire_hazard(ptr)
+// validate() - OK
+//                             deallocate(ptr) - DEFERRED
+// deref(ptr) - OK
+// release_hazard(ptr)
+//                             retire_reclaim(ptr) - OK
+// ```
+//
+// # Performance
+//
+// - Acquire hazard: ~5-10ns (thread-local fast path)
+// - Release hazard: ~3-5ns (thread-local operation)
+// - Retirement scan: ~100-500ns (amortized, batched)
+//
+// # Implementation
+//
+// Each thread has a fixed-size array of hazard pointer slots. When a thread
+// needs to protect a pointer:
+// 1. Store the pointer in an available slot (atomic store with Release)
+// 2. Perform validation and access
+// 3. Clear the slot (atomic store with Release)
+//
+// Deallocation checks all threads' hazard arrays before reclaiming memory.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.4
+// =============================================================================
+
+// Import intrinsics as functions
+
+module core.mem.hazard;
+mount core.intrinsics.{
+    atomic_load_ptr, atomic_store_ptr, atomic_cmpxchg_ptr,
+    atomic_fetch_add_int, atomic_load_int,
+};
+mount core.intrinsics.atomic.ORDERING_RELAXED;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum number of hazard pointers per thread.
+/// Limits nesting depth of validated accesses.
+public const HAZARD_POINTERS_PER_THREAD: Int = 8;
+
+/// Threshold for triggering reclamation scan.
+/// Higher values amortize scan cost but use more memory.
+public const RETIRED_THRESHOLD: Int = 64;
+
+/// Maximum number of threads supported.
+/// Limits total memory used for hazard pointer arrays.
+public const MAX_THREADS: Int = 256;
+
+// =============================================================================
+// Hazard Domain
+// =============================================================================
+
+/// Global hazard pointer domain.
+///
+/// This structure manages all thread records and coordinates reclamation.
+public type HazardDomain is {
+    /// Head of the thread record linked list (atomic).
+    head: &unsafe ThreadRecord,
+
+    /// Number of registered threads (atomic).
+    thread_count: Int,
+
+    /// Global epoch for coordination (atomic).
+    epoch: Int,
+};
+
+/// Thread record in the global linked list.
+///
+/// Each thread that uses hazard pointers gets one of these.
+@repr(C, align(64))  // Cache-line aligned to avoid false sharing
+public type ThreadRecord is {
+    /// Hazard pointer slots for this thread (atomic).
+    hazards: [&unsafe Byte; 8],  // HAZARD_POINTERS_PER_THREAD
+
+    /// Next thread record in linked list (atomic).
+    next: &unsafe ThreadRecord,
+
+    /// Active flag (for cleanup, atomic).
+    active: Bool,
+
+    /// Thread ID for debugging.
+    tid: UInt32,
+
+    /// Padding to fill cache line.
+    _padding: [UInt32; 9],
+};
+
+/// Thread-local hazard record manager.
+///
+/// This structure tracks thread-local state including slot usage and
+/// retired nodes waiting for reclamation.
+public type ThreadHazardRecord is {
+    /// Pointer to this thread's record in global list.
+    record: Maybe<&mut ThreadRecord>,
+
+    /// Next available hazard slot index.
+    next_slot: Int,
+
+    /// Retired nodes waiting for reclamation.
+    retired: List<RetiredNode>,
+};
+
+/// Retired node waiting for reclamation.
+type RetiredNode is {
+    /// Pointer to the retired allocation.
+    ptr: &unsafe Byte,
+
+    /// Size of the allocation (for deallocation).
+    size: Int,
+
+    /// Epoch when retired (for debugging).
+    epoch: Int,
+};
+
+// =============================================================================
+// Global State
+// =============================================================================
+
+/// Global hazard domain instance.
+public static mut GLOBAL_HAZARD_DOMAIN: HazardDomain = HazardDomain {
+    head: 0 as &unsafe ThreadRecord,
+    thread_count: 0,
+    epoch: 0,
+};
+
+/// Thread-local hazard record.
+/// Each thread gets its own manager for O(1) local operations.
+@thread_local
+static mut THREAD_HAZARD_RECORD: ThreadHazardRecord = ThreadHazardRecord {
+    record: None,
+    next_slot: 0,
+    retired: List.new(),
+};
+
+// =============================================================================
+// Hazard Domain Implementation
+// =============================================================================
+
+implement HazardDomain {
+    /// Register a new thread with the hazard domain.
+    ///
+    /// Allocates a ThreadRecord and adds it to the global list.
+    /// Called lazily on first hazard acquisition.
+    fn register_thread(&mut self) -> &mut ThreadRecord {
+        // Allocate new thread record
+        let record_ptr = unsafe {
+            let size = ThreadRecord.size;
+            let ptr = sys.common.os_alloc(size, 64)?;
+            ptr as &mut ThreadRecord
+        };
+
+        // Initialize record
+        let record = record_ptr;
+        for i in 0..HAZARD_POINTERS_PER_THREAD {
+            record.hazards[i] = 0 as &unsafe Byte;
+        }
+        record.next = 0 as &unsafe ThreadRecord;
+        record.active = true;
+        record.tid = sys.common.get_thread_id() as UInt32;
+
+        // Add to linked list (lock-free prepend)
+        loop {
+            let head = atomic_load_ptr(&self.head, "acquire");
+            atomic_store_ptr(&record.next, head, "relaxed");
+
+            let result = atomic_cmpxchg_ptr(
+                &self.head,
+                head,
+                record_ptr as &unsafe ThreadRecord,
+                "release",
+                "acquire"
+            );
+
+            if result.success {
+                break;
+            }
+        }
+
+        atomic_fetch_add_int(&self.thread_count, 1, "relaxed");
+
+        record
+    }
+
+    /// Scan all hazard pointers to find protected addresses.
+    ///
+    /// Returns a sorted list of all currently protected pointers.
+    /// Used during reclamation to determine which retired nodes are safe.
+    fn scan_hazards(&self) -> List<&unsafe Byte> {
+        let capacity = atomic_load_int(&self.thread_count, "relaxed")
+            * HAZARD_POINTERS_PER_THREAD;
+        let mut protected = List.with_capacity(capacity);
+
+        // Walk the thread record list
+        let mut current = atomic_load_ptr(&self.head, "acquire");
+
+        while current as Int != 0 {
+            let record = unsafe { &*current };
+
+            // Scan all hazard slots in this thread's record
+            for i in 0..HAZARD_POINTERS_PER_THREAD {
+                let hp = atomic_load_ptr(&record.hazards[i], "acquire");
+                if hp as Int != 0 {
+                    protected.push(hp);
+                }
+            }
+
+            current = atomic_load_ptr(&record.next, "acquire");
+        }
+
+        // Sort for binary search during reclamation
+        protected.sort();
+        protected.dedup();
+        protected
+    }
+
+    /// Advance global epoch.
+    public fn advance_epoch(&mut self) -> Int {
+        atomic_fetch_add_int(&self.epoch, 1, "acq_rel")
+    }
+
+    /// Get current global epoch.
+    public fn current_epoch(&self) -> Int {
+        atomic_load_int(&self.epoch, "acquire")
+    }
+}
+
+// =============================================================================
+// Thread Hazard Record Implementation
+// =============================================================================
+
+implement ThreadHazardRecord {
+    /// Get or create the thread record.
+    fn get_record(&mut self) -> &mut ThreadRecord {
+        match self.record {
+            Some(record) => record,
+            None => {
+                let record = unsafe { GLOBAL_HAZARD_DOMAIN.register_thread() };
+                self.record = Some(record);
+                record
+            }
+        }
+    }
+
+    /// Acquire a hazard pointer for an address.
+    ///
+    /// Returns a guard that automatically releases when dropped.
+    fn acquire(&mut self, ptr: &unsafe Byte) -> HazardGuard {
+        let record = self.get_record();
+
+        // Find available slot
+        let slot = self.next_slot;
+        @debug_assert(
+            slot < HAZARD_POINTERS_PER_THREAD,
+            "Hazard pointer slots exhausted (nested validation too deep)"
+        );
+
+        // Store pointer with Release ordering (makes it visible to scanners)
+        atomic_store_ptr(&record.hazards[slot], ptr, "release");
+
+        self.next_slot += 1;
+
+        HazardGuard {
+            slot: slot,
+            ptr: ptr,
+        }
+    }
+
+    /// Release a hazard pointer.
+    fn release(&mut self, slot: Int) {
+        match self.record {
+            Some(record) => {
+                // Clear the slot
+                atomic_store_ptr(
+                    &record.hazards[slot],
+                    0 as &unsafe Byte,
+                    "release"
+                );
+
+                // Allow slot reuse (LIFO for cache locality)
+                if slot + 1 == self.next_slot {
+                    self.next_slot = slot;
+                }
+            }
+            None => {}  // No record = nothing to release
+        }
+    }
+
+    /// Retire a pointer for later reclamation.
+    ///
+    /// The pointer is not immediately freed. Instead, it's added to a
+    /// retirement list and will be reclaimed when no hazard pointers
+    /// reference it.
+    fn retire(&mut self, ptr: &unsafe Byte, size: Int) {
+        let epoch = unsafe { GLOBAL_HAZARD_DOMAIN.current_epoch() };
+
+        self.retired.push(RetiredNode {
+            ptr: ptr,
+            size: size,
+            epoch: epoch,
+        });
+
+        // Trigger reclamation if threshold exceeded
+        if self.retired.len() >= RETIRED_THRESHOLD {
+            self.reclaim();
+        }
+    }
+
+    /// Attempt to reclaim retired nodes.
+    ///
+    /// Scans all hazard pointers and frees any retired nodes that are
+    /// not currently protected.
+    fn reclaim(&mut self) {
+        // Scan all hazard pointers
+        let protected = unsafe { GLOBAL_HAZARD_DOMAIN.scan_hazards() };
+
+        // Partition retired nodes into reclaimable and still-protected
+        let mut still_retired = List.with_capacity(self.retired.len());
+
+        for node in self.retired.drain() {
+            // Binary search in sorted protected list
+            if !protected.binary_search(&node.ptr).is_found() {
+                // Not protected, safe to reclaim
+                unsafe {
+                    sys.common.os_free(node.ptr, node.size);
+                }
+            } else {
+                // Still protected, keep in retired list
+                still_retired.push(node);
+            }
+        }
+
+        self.retired = still_retired;
+    }
+}
+
+// =============================================================================
+// Hazard Guard (RAII)
+// =============================================================================
+
+/// RAII guard for a hazard pointer.
+///
+/// Automatically releases the hazard pointer when dropped.
+/// This ensures hazard pointers are properly released even on early returns
+/// or panics.
+public type HazardGuard is {
+    /// Slot index in the thread's hazard array.
+    slot: Int,
+
+    /// Protected pointer (for debugging).
+    ptr: &unsafe Byte,
+};
+
+implement HazardGuard {
+    /// Get the protected pointer.
+    @inline
+    public fn ptr(&self) -> &unsafe Byte {
+        self.ptr
+    }
+
+    /// Check if this guard is protecting the given pointer.
+    @inline
+    public fn is_protecting(&self, ptr: &unsafe Byte) -> Bool {
+        self.ptr as Int == ptr as Int
+    }
+}
+
+implement Drop for HazardGuard {
+    fn drop(&mut self) {
+        unsafe {
+            THREAD_HAZARD_RECORD.release(self.slot);
+        }
+    }
+}
+
+/// HazardGuard can be sent between threads (the protection is per-slot,
+/// not per-thread).
+unsafe implement Send for HazardGuard {}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Acquire a hazard pointer for the given address.
+///
+/// This protects the address from deallocation until the returned guard
+/// is dropped. Use this before CBGR validation to prevent race conditions.
+///
+/// # Performance
+///
+/// ~5-10ns (thread-local operation, no synchronization on fast path)
+///
+/// # Example
+///
+/// ```verum
+/// let guard = acquire_hazard(ptr);
+/// // ptr is now protected from deallocation
+/// validate(ptr)?;
+/// let value = unsafe { *ptr };
+/// // guard dropped here, ptr no longer protected
+/// ```
+@inline
+public fn acquire_hazard(ptr: &unsafe Byte) -> HazardGuard {
+    unsafe { THREAD_HAZARD_RECORD.acquire(ptr) }
+}
+
+/// Retire a pointer for later reclamation.
+///
+/// The pointer will be freed once no hazard pointers reference it.
+/// This is called by the allocator during deallocation.
+///
+/// # Safety
+///
+/// Caller must ensure:
+/// - `ptr` was allocated by the CBGR allocator
+/// - `size` matches the original allocation size
+@inline
+public unsafe fn retire_hazard(ptr: &unsafe Byte, size: Int) {
+    THREAD_HAZARD_RECORD.retire(ptr, size);
+}
+
+/// Force reclamation of all retired nodes.
+///
+/// This is useful for cleanup or when memory pressure is high.
+/// Normally, reclamation happens automatically when the retirement
+/// threshold is reached.
+public fn force_reclaim_all() {
+    unsafe { THREAD_HAZARD_RECORD.reclaim() }
+}
+
+/// Get statistics about the hazard pointer system.
+public fn hazard_stats() -> HazardStats {
+    let protected = unsafe { GLOBAL_HAZARD_DOMAIN.scan_hazards() };
+    let retired_count = unsafe { THREAD_HAZARD_RECORD.retired.len() };
+
+    HazardStats {
+        protected_count: protected.len(),
+        retired_count: retired_count,
+        thread_count: unsafe {
+            atomic_load_int(&GLOBAL_HAZARD_DOMAIN.thread_count, ORDERING_RELAXED)
+        },
+    }
+}
+
+/// Statistics for the hazard pointer system.
+public type HazardStats is {
+    /// Current number of protected pointers across all threads.
+    public protected_count: Int,
+
+    /// Current number of retired nodes waiting for reclamation.
+    public retired_count: Int,
+
+    /// Number of registered threads.
+    public thread_count: Int,
+};
+
+implement HazardStats {
+    /// Check if reclamation is needed.
+    public fn needs_reclaim(&self) -> Bool {
+        self.retired_count >= RETIRED_THRESHOLD
+    }
+
+    /// Estimate memory held by retired nodes (assuming average allocation size).
+    public fn estimated_retired_bytes(&self, avg_size: Int) -> Int {
+        self.retired_count * avg_size
+    }
+}
+
+// =============================================================================
+// Thread Cleanup
+// =============================================================================
+
+/// Clean up hazard pointers for the current thread.
+///
+/// Called automatically when a thread exits. Marks the thread record
+/// as inactive and reclaims any remaining retired nodes.
+public fn cleanup_thread_hazards() {
+    unsafe {
+        // Mark thread record as inactive
+        match THREAD_HAZARD_RECORD.record {
+            Some(record) => {
+                record.active = false;
+            }
+            None => {}
+        }
+
+        // Reclaim any remaining retired nodes
+        THREAD_HAZARD_RECORD.reclaim();
+    }
+}

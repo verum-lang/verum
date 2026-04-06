@@ -1,0 +1,21 @@
+#!/bin/bash
+# Wrapper script for running Verum programs in AOT mode (Tier 3)
+# Used by vtest for VCS testing
+#
+# Tier 3: AOT optimized - maximum performance (90-100% native)
+# Compiles to native binary then executes
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERUM_CLI="${VERUM_CLI:-$SCRIPT_DIR/../../target/release/verum}"
+
+if [ ! -x "$VERUM_CLI" ]; then
+    VERUM_CLI="$SCRIPT_DIR/../../target/debug/verum"
+fi
+
+if [ ! -x "$VERUM_CLI" ]; then
+    echo "Error: verum CLI not found. Run 'cargo build --release -p verum_cli'" >&2
+    exit 1
+fi
+
+# Run with AOT/optimized tier (Tier 3)
+exec "$VERUM_CLI" run --aot "$@"

@@ -1,0 +1,7 @@
+// Test lambda refinements
+
+type Age is Int where |x| x >= 0 && x <= 150;
+
+fn main() {
+    print("Lambda refinement test");
+}

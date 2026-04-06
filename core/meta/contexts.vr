@@ -1,0 +1,3317 @@
+// =============================================================================
+// contexts.vr - Meta-Specific Contexts (Capabilities)
+// =============================================================================
+// Version: 0.1.0
+// Spec: docs/architecture/meta-audit.md#2.3
+// =============================================================================
+//
+// # Meta Contexts
+//
+// Meta contexts provide capability-based access to compiler services during
+// compile-time execution. Unlike runtime contexts which require explicit
+// `provide`, meta contexts are automatically provided by the compiler.
+//
+// ## Design Principles
+//
+// 1. **Isomorphism** - Same syntax as runtime contexts (`using [Ctx]`)
+// 2. **Implicit Purity** - All meta functions are pure by definition
+// 3. **Compiler Intrinsics** - Contexts are compiler-provided, not user-defined
+// 4. **Defense-in-Depth** - Type system + linter + sandbox protection
+//
+// ## Context Hierarchy
+//
+// ```
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                         META CONTEXT HIERARCHY                               │
+// ├─────────────────────────────────────────────────────────────────────────────┤
+// │                                                                             │
+// │  Level 0: Pure Computation (no context required)                            │
+// │  ├── Arithmetic, string operations, collections                             │
+// │  └── Basic control flow, pattern matching                                   │
+// │                                                                             │
+// │  Level 1: Type Introspection                                                │
+// │  ├── Type Properties: T.size, T.alignment, T.stride, T.bits, T.name, T.id  │
+// │  ├── TypeInfo: fields_of, variants_of, generics_of, protocols_of           │
+// │  └── Protocols: implemented_protocols, associated_types                     │
+// │                                                                             │
+// │  Level 2: AST Manipulation                                                  │
+// │  ├── AstAccess: parse_expr, parse_type, parse_item                         │
+// │  └── TokenStream: emit, splice, iterate                                     │
+// │                                                                             │
+// │  Level 3: Build Resources                                                   │
+// │  ├── BuildAssets: load, load_text, exists, list_dir                        │
+// │  └── CompileDiag: emit_warning, emit_error, emit_note                      │
+// │                                                                             │
+// │  Level 4: Meta Runtime                                                      │
+// │  ├── MetaRuntime: limits, configuration, target info                       │
+// │  ├── MacroState: caching, memoization, dependency tracking                 │
+// │  └── StageInfo: N-level staged metaprogramming support                     │
+// │                                                                             │
+// └─────────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// ## Usage
+//
+// ```verum
+// // Level 0: No context needed
+// meta fn square(x: Int) -> Int {
+//     x * x
+// }
+//
+// // Level 1: Type introspection
+// meta fn field_count<T>() -> Int using TypeInfo {
+//     TypeInfo.fields_of<T>().len()
+// }
+//
+// // Level 2: AST manipulation
+// meta fn transform(input: TokenStream) -> TokenStream using AstAccess {
+//     let expr = AstAccess.parse_expr(input)?;
+//     AstAccess.emit(transform_expr(expr))
+// }
+//
+// // Level 3: Build resources
+// meta fn load_config() -> Config using BuildAssets {
+//     let text = BuildAssets.load_text("config.toml")?;
+//     Config.parse(text)?
+// }
+//
+// // Multiple contexts
+// meta fn derive<T>() -> TokenStream using MetaCore {
+//     // MetaCore = [TypeInfo, AstAccess, CompileDiag]
+//     ...
+// }
+// ```
+//
+// =============================================================================
+
+module meta.contexts;
+
+mount core.{Result, Text, List, Maybe, Byte, Map};
+mount meta.span.{Span, SourceLocation};
+mount meta.token.{TokenStream};
+mount meta.reflection.{
+    FieldInfo, VariantInfo, TypeKind, ProtocolInfo, GenericParam, FunctionInfo,
+    TraitBound, LifetimeParam, OwnershipInfo, FieldOffset, MethodResolution,
+};
+mount meta.attribute.{Attribute};
+mount meta.{MetaError, MetaResult};
+
+// =============================================================================
+// BuildAssets Context
+// =============================================================================
+
+/// Build-time asset loading context
+///
+/// Provides access to files in the project during compilation. Assets are
+/// resolved relative to the project root or specified asset directories.
+///
+/// ## Security
+///
+/// - Path traversal is prevented (no `..` allowed)
+/// - Only project-local paths are accessible
+/// - Network access is forbidden
+/// - File writes are forbidden (read-only)
+///
+/// ## Caching
+///
+/// Assets are cached per-compilation. Multiple loads of the same path
+/// return cached content without disk I/O.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn load_schema() -> Schema using BuildAssets {
+///     let content = BuildAssets.load_text("schemas/user.json")?;
+///     Schema.from_json(content)?
+/// }
+///
+/// meta fn include_sql() -> TokenStream using BuildAssets {
+///     let queries = BuildAssets.list_dir("sql/")?;
+///     let mut tokens = TokenStream.empty();
+///
+///     for path in queries {
+///         if path.ends_with(".sql") {
+///             let sql = BuildAssets.load_text(path)?;
+///             tokens = tokens.append(quote {
+///                 const ${path_to_ident(path)}: &Text = $sql;
+///             });
+///         }
+///     }
+///
+///     tokens
+/// }
+/// ```
+@compiler_provided
+public context BuildAssets {
+    /// Load binary asset from path
+    ///
+    /// # Arguments
+    /// - `path`: Relative path from project root or asset directory
+    ///
+    /// # Returns
+    /// - `Ok(List<Byte>)`: File contents as raw bytes
+    /// - `Err(AssetNotFound)`: Path does not exist
+    /// - `Err(AssetReadError)`: I/O error reading file
+    ///
+    /// # Security
+    /// - Path must not contain `..` (path traversal)
+    /// - Path must be within project boundaries
+    fn load(path: Text) -> MetaResult<List<Byte>>;
+
+    /// Load text asset from path
+    ///
+    /// Equivalent to `load(path).and_then(|b| Text.from_utf8(b))`.
+    ///
+    /// # Arguments
+    /// - `path`: Relative path from project root
+    ///
+    /// # Returns
+    /// - `Ok(Text)`: File contents as UTF-8 text
+    /// - `Err(AssetNotFound)`: Path does not exist
+    /// - `Err(AssetReadError)`: I/O error or invalid UTF-8
+    fn load_text(path: Text) -> MetaResult<Text>;
+
+    /// Check if asset exists
+    ///
+    /// # Arguments
+    /// - `path`: Relative path from project root
+    ///
+    /// # Returns
+    /// `true` if path exists and is readable
+    fn exists(path: Text) -> Bool;
+
+    /// List directory contents
+    ///
+    /// # Arguments
+    /// - `path`: Relative path to directory
+    ///
+    /// # Returns
+    /// - `Ok(List<Text>)`: List of file/directory names in the directory
+    /// - `Err(AssetNotFound)`: Directory does not exist
+    /// - `Err(AssetReadError)`: Not a directory or permission denied
+    fn list_dir(path: Text) -> MetaResult<List<Text>>;
+
+    /// Get asset metadata
+    ///
+    /// # Arguments
+    /// - `path`: Relative path to asset
+    ///
+    /// # Returns
+    /// Asset metadata including size and modification time
+    fn metadata(path: Text) -> MetaResult<AssetMetadata>;
+
+    /// Get project root directory
+    ///
+    /// Returns the absolute path to the project root (where Verum.toml is located).
+    fn project_root() -> Text;
+
+    /// Get configured asset directories
+    ///
+    /// Returns list of directories configured in `[build.assets]` in Verum.toml.
+    fn asset_dirs() -> List<Text>;
+}
+
+/// Asset metadata
+public type AssetMetadata is {
+    /// File size in bytes
+    size: UInt64,
+
+    /// Modification timestamp (Unix epoch nanoseconds)
+    modified_ns: UInt64,
+
+    /// Whether this is a directory
+    is_directory: Bool,
+
+    /// Whether this is a regular file
+    is_file: Bool,
+
+    /// Whether this is a symbolic link
+    is_symlink: Bool,
+};
+
+// =============================================================================
+// TypeInfo Context
+// =============================================================================
+
+/// Type introspection context
+///
+/// Provides compile-time reflection over types, enabling generic derive
+/// macros, serialization, and other meta-programming patterns.
+///
+/// ## Capabilities
+///
+/// - Field enumeration for struct types
+/// - Variant enumeration for enum types
+/// - Type naming and identity
+/// - Size and alignment information
+/// - Generic parameter inspection
+/// - Protocol implementation queries
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_clone<T>() -> TokenStream using TypeInfo {
+///     let name = TypeInfo.name_of<T>();
+///     let kind = TypeInfo.kind_of<T>();
+///
+///     match kind {
+///         TypeKind.Struct => {
+///             let fields = TypeInfo.fields_of<T>();
+///             quote {
+///                 implement Clone for $name {
+///                     fn clone(&self) -> Self {
+///                         Self {
+///                             $[for f in fields {
+///                                 ${f.name}: self.${f.name}.clone(),
+///                             }]
+///                         }
+///                     }
+///                 }
+///             }
+///         }
+///         TypeKind.Enum => {
+///             let variants = TypeInfo.variants_of<T>();
+///             quote {
+///                 implement Clone for $name {
+///                     fn clone(&self) -> Self {
+///                         match self {
+///                             $[for v in variants {
+///                                 ${v.pattern} => ${v.clone_expr},
+///                             }]
+///                         }
+///                     }
+///                 }
+///             }
+///         }
+///         _ => {
+///             CompileDiag.emit_error(
+///                 f"Cannot derive Clone for {kind}",
+///                 Span.call_site()
+///             );
+///             TokenStream.empty()
+///         }
+///     }
+/// }
+/// ```
+@compiler_provided
+public context TypeInfo {
+    /// Get type name
+    ///
+    /// Returns the fully qualified name of the type.
+    ///
+    /// # Example
+    /// `TypeInfo.name_of<std.collections.List<Int>>()` → `"std.collections.List<Int>"`
+    fn name_of<T>() -> Text;
+
+    /// Get type's simple (unqualified) name
+    ///
+    /// # Example
+    /// `TypeInfo.simple_name_of<std.collections.List<Int>>()` → `"List"`
+    fn simple_name_of<T>() -> Text;
+
+    /// Get type's module path
+    ///
+    /// # Example
+    /// `TypeInfo.module_of<std.collections.List<Int>>()` → `"std.collections"`
+    fn module_of<T>() -> Text;
+
+    /// Get type kind classification
+    fn kind_of<T>() -> TypeKind;
+
+    /// Get fields of a struct type
+    ///
+    /// # Returns
+    /// - List of FieldInfo for struct types
+    /// - Empty list for non-struct types
+    fn fields_of<T>() -> List<FieldInfo>;
+
+    /// Get variants of an enum type
+    ///
+    /// # Returns
+    /// - List of VariantInfo for enum types
+    /// - Empty list for non-enum types
+    fn variants_of<T>() -> List<VariantInfo>;
+
+    /// Get size in bytes. Prefer: `T.size` type property
+    @deprecated("Use T.size type property instead")
+    fn size_of<T>() -> Int;
+
+    /// Get alignment in bytes. Prefer: `T.alignment` type property
+    @deprecated("Use T.alignment type property instead")
+    fn align_of<T>() -> Int;
+
+    /// Get generic type parameters
+    fn generics_of<T>() -> List<GenericParam>;
+
+    /// Get implemented protocols
+    fn protocols_of<T>() -> List<ProtocolInfo>;
+
+    /// Check if type implements protocol
+    fn implements<T, P>() -> Bool;
+
+    /// Get associated types for a protocol implementation
+    fn associated_types_of<T, P>() -> List<(Text, TypeKind)>;
+
+    /// Get type's attributes
+    fn attributes_of<T>() -> List<Attribute>;
+
+    /// Check if type has specific attribute
+    fn has_attribute<T>(name: Text) -> Bool;
+
+    /// Get attribute value
+    fn get_attribute<T>(name: Text) -> Maybe<Attribute>;
+
+    /// Get type's documentation comments
+    fn doc_of<T>() -> Maybe<Text>;
+
+    /// Check if type is Copy
+    fn is_copy<T>() -> Bool;
+
+    /// Check if type is Send
+    fn is_send<T>() -> Bool;
+
+    /// Check if type is Sync
+    fn is_sync<T>() -> Bool;
+
+    /// Check if type is Sized
+    fn is_sized<T>() -> Bool;
+
+    /// Get type ID (unique identifier for this type)
+    fn type_id<T>() -> UInt64;
+
+    // =========================================================================
+    // Function/Method Introspection (NEW)
+    // =========================================================================
+
+    /// Get all functions/methods of a type
+    ///
+    /// Returns both inherent methods and protocol implementations.
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn list_methods<T>() using TypeInfo {
+    ///     for func in TypeInfo.functions_of<T>() {
+    ///         println(f"{func.visibility.keyword()?.unwrap_or(\"\")} {func.signature()}");
+    ///     }
+    /// }
+    /// ```
+    fn functions_of<T>() -> List<FunctionInfo>;
+
+    /// Get specific method by name
+    ///
+    /// # Arguments
+    /// - `name`: Method name to find
+    ///
+    /// # Returns
+    /// Method info with resolution details, or None if not found
+    fn method_of<T>(name: Text) -> Maybe<MethodResolution>;
+
+    /// Get all static functions of a type (no self parameter)
+    fn static_functions_of<T>() -> List<FunctionInfo>;
+
+    /// Get all instance methods of a type (has self parameter)
+    fn instance_methods_of<T>() -> List<FunctionInfo>;
+
+    // =========================================================================
+    // Bounds and Constraints (NEW)
+    // =========================================================================
+
+    /// Get protocol bounds on type parameters
+    ///
+    /// For a type like `List<T: Clone + Send>`, returns bounds for T.
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn check_bounds<T>() -> Bool using TypeInfo {
+    ///     let bounds = TypeInfo.bounds_of<T>();
+    ///     bounds.iter().any(|b| b.protocol_name == "Clone")
+    /// }
+    /// ```
+    fn bounds_of<T>() -> List<TraitBound>;
+
+    /// Get lifetime parameters of a type
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn has_lifetimes<T>() -> Bool using TypeInfo {
+    ///     !TypeInfo.lifetime_params_of<T>().is_empty()
+    /// }
+    /// ```
+    fn lifetime_params_of<T>() -> List<LifetimeParam>;
+
+    /// Get where clause constraints
+    ///
+    /// Returns additional constraints from where clauses.
+    fn where_clause_of<T>() -> List<TraitBound>;
+
+    // =========================================================================
+    // Memory Layout (NEW)
+    // =========================================================================
+
+    /// Get field offset information
+    ///
+    /// # Arguments
+    /// - `field_name`: Name of the field
+    ///
+    /// # Returns
+    /// Field offset info with size, alignment, and padding
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn derive_binary_serialize<T>() -> TokenStream using TypeInfo {
+    ///     let mut offset = 0;
+    ///     for field in TypeInfo.fields_of<T>() {
+    ///         let layout = TypeInfo.field_offset<T>(field.name)?;
+    ///         // Generate serialization code using offset
+    ///     }
+    /// }
+    /// ```
+    fn field_offset<T>(field_name: Text) -> Maybe<FieldOffset>;
+
+    /// Get complete memory layout of a type
+    ///
+    /// Returns list of all field offsets in memory order.
+    fn memory_layout_of<T>() -> List<FieldOffset>;
+
+    /// Get stride (size with alignment padding for arrays)
+    fn stride_of<T>() -> Int;
+
+    // =========================================================================
+    // Ownership Information (NEW)
+    // =========================================================================
+
+    /// Get ownership semantics information
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn can_auto_clone<T>() -> Bool using TypeInfo {
+    ///     let ownership = TypeInfo.ownership_of<T>();
+    ///     ownership.is_copy || ownership.is_clone
+    /// }
+    /// ```
+    fn ownership_of<T>() -> OwnershipInfo;
+
+    /// Check if type needs drop
+    fn needs_drop<T>() -> Bool;
+
+    // =========================================================================
+    // Type Relationships (NEW)
+    // =========================================================================
+
+    /// Get super types (types this type extends/inherits from)
+    fn super_types_of<T>() -> List<Text>;
+
+    /// Get inner type for wrapper types (Heap<T>, List<T>, etc.)
+    fn inner_type_of<T>() -> Maybe<Text>;
+
+    /// Get element type for collections/arrays
+    fn element_type_of<T>() -> Maybe<Text>;
+
+    /// Get key and value types for map-like types
+    fn key_value_types_of<T>() -> Maybe<(Text, Text)>;
+}
+
+// =============================================================================
+// AstAccess Context
+// =============================================================================
+
+/// AST access and manipulation context
+///
+/// Provides parsing and emission of Verum syntax elements during
+/// meta function execution. Enables advanced code generation patterns.
+///
+/// ## Capabilities
+///
+/// - Parse token streams into AST nodes
+/// - Emit AST nodes back to token streams
+/// - Validate syntax correctness
+/// - Access current macro invocation site
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn transform_literals(input: TokenStream) -> TokenStream using AstAccess {
+///     let expr = AstAccess.parse_expr(input)?;
+///
+///     let transformed = transform_expr(expr, |e| {
+///         match e {
+///             Expr.Literal(Literal.Int(n)) => Expr.Literal(Literal.Int(n * 2)),
+///             other => other,
+///         }
+///     });
+///
+///     AstAccess.emit(transformed)
+/// }
+/// ```
+@compiler_provided
+public context AstAccess {
+    /// Parse token stream as expression
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to parse
+    ///
+    /// # Returns
+    /// - `Ok(Expr)`: Parsed expression AST
+    /// - `Err(ParseError)`: Syntax error in tokens
+    fn parse_expr(tokens: TokenStream) -> MetaResult<Expr>;
+
+    /// Parse token stream as type
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to parse
+    ///
+    /// # Returns
+    /// - `Ok(Type)`: Parsed type AST
+    /// - `Err(ParseError)`: Syntax error in tokens
+    fn parse_type(tokens: TokenStream) -> MetaResult<Type>;
+
+    /// Parse token stream as item (function, type, etc.)
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to parse
+    ///
+    /// # Returns
+    /// - `Ok(Item)`: Parsed item AST
+    /// - `Err(ParseError)`: Syntax error in tokens
+    fn parse_item(tokens: TokenStream) -> MetaResult<Item>;
+
+    /// Parse token stream as pattern
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to parse
+    ///
+    /// # Returns
+    /// - `Ok(Pattern)`: Parsed pattern AST
+    /// - `Err(ParseError)`: Syntax error in tokens
+    fn parse_pattern(tokens: TokenStream) -> MetaResult<Pattern>;
+
+    /// Parse token stream as statement
+    fn parse_statement(tokens: TokenStream) -> MetaResult<Statement>;
+
+    /// Parse token stream as block
+    fn parse_block(tokens: TokenStream) -> MetaResult<Block>;
+
+    /// Emit AST node as token stream
+    ///
+    /// Converts any AST node back to its token representation.
+    fn emit<T: ToTokens>(node: T) -> TokenStream;
+
+    /// Validate token stream syntax without full parsing
+    ///
+    /// Performs quick syntax validation without constructing full AST.
+    fn validate(tokens: TokenStream) -> MetaResult<()>;
+
+    /// Get span of current macro invocation
+    fn call_site() -> Span;
+
+    /// Get span of macro definition
+    fn def_site() -> Span;
+
+    /// Create span mixing call and def site
+    fn mixed_site() -> Span;
+
+    /// Get the input token stream to the current macro
+    fn input() -> TokenStream;
+
+    /// Get attribute arguments if invoked as attribute macro
+    fn attr_args() -> Maybe<TokenStream>;
+
+    // =========================================================================
+    // AST Visitor Pattern (NEW)
+    // =========================================================================
+
+    /// Visit and transform expression tree
+    ///
+    /// Traverses expression AST depth-first, applying visitor to each node.
+    /// Returns transformed expression.
+    ///
+    /// # Arguments
+    /// - `expr`: Expression to transform
+    /// - `visitor`: Function called for each expression node
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn double_literals(input: TokenStream) -> TokenStream using AstAccess {
+    ///     let expr = AstAccess.parse_expr(input)?;
+    ///     let transformed = AstAccess.visit_expr(expr, |e| {
+    ///         match e {
+    ///             Expr.Literal(Literal.Int(n)) => Expr.Literal(Literal.Int(n * 2)),
+    ///             other => other,
+    ///         }
+    ///     });
+    ///     AstAccess.emit(transformed)
+    /// }
+    /// ```
+    fn visit_expr(expr: Expr, visitor: fn(Expr) -> Expr) -> Expr;
+
+    /// Visit and transform type tree
+    fn visit_type(ty: Type, visitor: fn(Type) -> Type) -> Type;
+
+    /// Visit and transform pattern tree
+    fn visit_pattern(pat: Pattern, visitor: fn(Pattern) -> Pattern) -> Pattern;
+
+    /// Visit and transform statement tree
+    fn visit_statement(stmt: Statement, visitor: fn(Statement) -> Statement) -> Statement;
+
+    /// Visit and transform item tree
+    fn visit_item(item: Item, visitor: fn(Item) -> Item) -> Item;
+
+    /// Visit all expressions in item (comprehensive traversal)
+    ///
+    /// Visits every expression in an item including function bodies,
+    /// default values, etc.
+    fn visit_all_exprs(item: Item, visitor: fn(Expr) -> Expr) -> Item;
+
+    // =========================================================================
+    // Error Recovery Parsing (NEW)
+    // =========================================================================
+
+    /// Parse expression with error recovery
+    ///
+    /// Unlike `parse_expr`, this attempts to continue parsing after errors,
+    /// returning partial results along with diagnostics.
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to parse
+    ///
+    /// # Returns
+    /// Parse result with possible partial expression and error list
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn lenient_transform(input: TokenStream) -> TokenStream using AstAccess {
+    ///     let result = AstAccess.parse_expr_recovery(input);
+    ///
+    ///     if !result.errors.is_empty() {
+    ///         for err in result.errors {
+    ///             CompileDiag.emit_warning(err.message, err.span);
+    ///         }
+    ///     }
+    ///
+    ///     if let Some(expr) = result.expr {
+    ///         AstAccess.emit(transform(expr))
+    ///     } else {
+    ///         input // Return unchanged on total failure
+    ///     }
+    /// }
+    /// ```
+    fn parse_expr_recovery(tokens: TokenStream) -> ParseResult<Expr>;
+
+    /// Parse type with error recovery
+    fn parse_type_recovery(tokens: TokenStream) -> ParseResult<Type>;
+
+    /// Parse item with error recovery
+    fn parse_item_recovery(tokens: TokenStream) -> ParseResult<Item>;
+
+    /// Parse multiple items with error recovery
+    ///
+    /// Parses a sequence of items, recovering from errors to parse
+    /// as many items as possible.
+    fn parse_items_recovery(tokens: TokenStream) -> ParseResult<List<Item>>;
+
+    // =========================================================================
+    // Pretty Printing (NEW)
+    // =========================================================================
+
+    /// Pretty print tokens with formatting
+    ///
+    /// # Arguments
+    /// - `tokens`: Token stream to format
+    ///
+    /// # Returns
+    /// Formatted source code string
+    fn pretty_print(tokens: TokenStream) -> Text;
+
+    /// Pretty print tokens with custom options
+    fn pretty_print_with(tokens: TokenStream, options: FormatOptions) -> Text;
+
+    /// Pretty print expression
+    fn pretty_print_expr(expr: Expr) -> Text;
+
+    /// Pretty print type
+    fn pretty_print_type(ty: Type) -> Text;
+
+    // =========================================================================
+    // Token Manipulation (NEW)
+    // =========================================================================
+
+    /// Get source text of a span
+    ///
+    /// Returns the original source code for a span.
+    fn span_source(span: Span) -> Text;
+
+    /// Join spans (from first.start to last.end)
+    fn span_join(first: Span, last: Span) -> Span;
+
+    /// Check if two spans overlap
+    fn spans_overlap(a: Span, b: Span) -> Bool;
+}
+
+// =============================================================================
+// CompileDiag Context
+// =============================================================================
+
+/// Compile-time diagnostics context
+///
+/// Allows meta functions to emit warnings, errors, and notes during compilation.
+/// Essential for providing helpful feedback when derive macros encounter issues.
+///
+/// ## Severity Levels
+///
+/// - **Error**: Compilation will fail
+/// - **Warning**: Compilation continues but issue is reported
+/// - **Note**: Additional context for other diagnostics
+/// - **Help**: Suggested fix for an issue
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_serialize<T>() -> TokenStream using [TypeInfo, CompileDiag] {
+///     let fields = TypeInfo.fields_of<T>();
+///
+///     for field in fields {
+///         if field.name.starts_with("_") {
+///             CompileDiag.emit_warning(
+///                 f"Field '{field.name}' starts with underscore, will be serialized as-is",
+///                 field.span
+///             );
+///         }
+///
+///         if !field.is_public && !TypeInfo.has_attribute<T>("serialize_private") {
+///             CompileDiag.emit_error(
+///                 f"Field '{field.name}' is private and cannot be serialized",
+///                 field.span
+///             );
+///             CompileDiag.emit_help(
+///                 "Add @serialize_private attribute to include private fields",
+///                 Span.call_site()
+///             );
+///         }
+///     }
+///
+///     generate_serialize_impl<T>()
+/// }
+/// ```
+@compiler_provided
+public context CompileDiag {
+    /// Emit compilation error
+    ///
+    /// This will cause compilation to fail after meta function completes.
+    ///
+    /// # Arguments
+    /// - `message`: Error description
+    /// - `span`: Location in source code
+    fn emit_error(message: Text, span: Span);
+
+    /// Emit compilation warning
+    ///
+    /// Compilation continues but warning is reported.
+    ///
+    /// # Arguments
+    /// - `message`: Warning description
+    /// - `span`: Location in source code
+    fn emit_warning(message: Text, span: Span);
+
+    /// Emit informational note
+    ///
+    /// Provides additional context for other diagnostics.
+    ///
+    /// # Arguments
+    /// - `message`: Note content
+    /// - `span`: Location in source code
+    fn emit_note(message: Text, span: Span);
+
+    /// Emit help suggestion
+    ///
+    /// Suggests a fix for an issue.
+    ///
+    /// # Arguments
+    /// - `message`: Suggestion content
+    /// - `span`: Location in source code
+    fn emit_help(message: Text, span: Span);
+
+    /// Emit error with code
+    ///
+    /// # Arguments
+    /// - `code`: Error code (e.g., "E0001")
+    /// - `message`: Error description
+    /// - `span`: Location in source code
+    fn emit_error_with_code(code: Text, message: Text, span: Span);
+
+    /// Emit warning with code
+    fn emit_warning_with_code(code: Text, message: Text, span: Span);
+
+    /// Create structured diagnostic builder
+    fn diagnostic() -> DiagnosticBuilder;
+
+    /// Check if any errors have been emitted
+    fn has_errors() -> Bool;
+
+    /// Get count of emitted errors
+    fn error_count() -> Int;
+
+    /// Get count of emitted warnings
+    fn warning_count() -> Int;
+}
+
+/// Structured diagnostic builder
+///
+/// Allows building complex diagnostics with multiple spans and labels.
+///
+/// ## Example
+///
+/// ```verum
+/// CompileDiag.diagnostic()
+///     .error("mismatched types")
+///     .code("E0308")
+///     .primary_span(found_span, f"found `{found_type}`")
+///     .secondary_span(expected_span, f"expected `{expected_type}`")
+///     .help("consider using `.into()` to convert")
+///     .emit();
+/// ```
+public type DiagnosticBuilder is {
+    severity: DiagnosticSeverity,
+    code: Maybe<Text>,
+    message: Maybe<Text>,
+    spans: List<SpanLabel>,
+    suggestions: List<Suggestion>,
+};
+
+implement DiagnosticBuilder {
+    /// Set severity to error
+    public fn error(mut self, message: Text) -> Self {
+        self.severity = DiagnosticSeverity.Error;
+        self.message = Some(message);
+        self
+    }
+
+    /// Set severity to warning
+    public fn warning(mut self, message: Text) -> Self {
+        self.severity = DiagnosticSeverity.Warning;
+        self.message = Some(message);
+        self
+    }
+
+    /// Set diagnostic code
+    public fn code(mut self, code: Text) -> Self {
+        self.code = Some(code);
+        self
+    }
+
+    /// Add primary span with label
+    public fn primary_span(mut self, span: Span, label: Text) -> Self {
+        self.spans.push(SpanLabel {
+            span,
+            label,
+            is_primary: true,
+        });
+        self
+    }
+
+    /// Add secondary span with label
+    public fn secondary_span(mut self, span: Span, label: Text) -> Self {
+        self.spans.push(SpanLabel {
+            span,
+            label,
+            is_primary: false,
+        });
+        self
+    }
+
+    /// Add note
+    public fn note(mut self, message: Text) -> Self {
+        self.suggestions.push(Suggestion {
+            kind: SuggestionKind.Note,
+            message,
+            span: None,
+            replacement: None,
+        });
+        self
+    }
+
+    /// Add help suggestion
+    public fn help(mut self, message: Text) -> Self {
+        self.suggestions.push(Suggestion {
+            kind: SuggestionKind.Help,
+            message,
+            span: None,
+            replacement: None,
+        });
+        self
+    }
+
+    /// Add suggestion with replacement code
+    public fn suggest(mut self, message: Text, span: Span, replacement: Text) -> Self {
+        self.suggestions.push(Suggestion {
+            kind: SuggestionKind.Fix,
+            message,
+            span: Some(span),
+            replacement: Some(replacement),
+        });
+        self
+    }
+
+    /// Emit the diagnostic
+    @compiler_intrinsic
+    public fn emit(self);
+}
+
+/// Diagnostic severity level
+@repr(UInt8)
+public type DiagnosticSeverity is
+    | Error
+    | Warning
+    | Note
+    | Help;
+
+/// Span with label for diagnostics
+public type SpanLabel is {
+    span: Span,
+    label: Text,
+    is_primary: Bool,
+};
+
+/// Diagnostic suggestion
+public type Suggestion is {
+    kind: SuggestionKind,
+    message: Text,
+    span: Maybe<Span>,
+    replacement: Maybe<Text>,
+};
+
+/// Suggestion kind
+@repr(UInt8)
+public type SuggestionKind is
+    | Note
+    | Help
+    | Fix;
+
+// =============================================================================
+// MetaRuntime Context
+// =============================================================================
+
+/// Meta runtime configuration context
+///
+/// Provides access to crate/module information, runtime configuration,
+/// resource limits, and configuration access during meta function execution.
+///
+/// Note: Target platform and build configuration (debug/release, opt level)
+/// have been moved to `ProjectInfo` context to avoid duplication.
+///
+/// ## Capabilities
+///
+/// - Query crate/module information
+/// - Access Verum.toml configuration
+/// - Check resource limits (recursion, iterations, memory)
+/// - Get runtime configuration
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn crate_info() -> TokenStream using MetaRuntime {
+///     let name = MetaRuntime.crate_name();
+///     let version = MetaRuntime.crate_version();
+///
+///     quote {
+///         const CRATE_NAME: &Text = ${name};
+///         const CRATE_VERSION: (Int, Int, Int) = ${version};
+///     }
+/// }
+///
+/// meta fn check_limits() -> TokenStream using [MetaRuntime, CompileDiag] {
+///     if MetaRuntime.recursion_limit() < 128 {
+///         CompileDiag.emit_warning(
+///             "Recursion limit is low, complex macros may fail",
+///             Span.call_site()
+///         );
+///     }
+///     // ...
+/// }
+/// ```
+@compiler_provided
+public context MetaRuntime {
+    // =========================================================================
+    // Crate/Module Information
+    // =========================================================================
+
+    /// Get current crate name
+    fn crate_name() -> Text;
+
+    /// Get current module path
+    fn module_path() -> Text;
+
+    /// Get crate version
+    fn crate_version() -> (Int, Int, Int);
+
+    // =========================================================================
+    // Runtime Configuration
+    // =========================================================================
+
+    /// Get runtime configuration
+    ///
+    /// Returns: "full", "single_thread", "no_async", "no_heap", "embedded"
+    fn runtime_config() -> Text;
+
+    /// Get Verum compiler version
+    fn compiler_version() -> (Int, Int, Int);
+
+    // =========================================================================
+    // Resource Limits
+    // =========================================================================
+
+    /// Get recursion limit for meta functions
+    fn recursion_limit() -> Int;
+
+    /// Get iteration limit for loops
+    fn iteration_limit() -> Int;
+
+    /// Get memory limit in bytes
+    fn memory_limit() -> Int;
+
+    /// Get timeout limit in milliseconds
+    fn timeout_ms() -> Int;
+
+    // =========================================================================
+    // Configuration Access
+    // =========================================================================
+
+    /// Get configuration value from Verum.toml
+    ///
+    /// # Arguments
+    /// - `key`: Dot-separated path (e.g., "build.runtime", "package.name")
+    ///
+    /// # Returns
+    /// Configuration value as text, or None if not present
+    fn config_get(key: Text) -> Maybe<Text>;
+
+    /// Get configuration value as integer
+    fn config_get_int(key: Text) -> Maybe<Int>;
+
+    /// Get configuration value as boolean
+    fn config_get_bool(key: Text) -> Maybe<Bool>;
+
+    /// Get configuration array
+    fn config_get_array(key: Text) -> Maybe<List<Text>>;
+
+    // =========================================================================
+    // Environment
+    // =========================================================================
+
+    /// Get environment variable (from build environment)
+    ///
+    /// Note: This is the build-time environment, not runtime.
+    fn env(key: Text) -> Maybe<Text>;
+
+    /// Check if running in CI environment
+    fn is_ci() -> Bool;
+}
+
+// =============================================================================
+// MacroState Context (NEW)
+// =============================================================================
+
+/// Build-time state and caching context
+///
+/// Provides memoization and caching capabilities for meta functions,
+/// critical for incremental compilation performance.
+///
+/// ## Design Philosophy
+///
+/// Meta functions should be pure, but computing the same derivation
+/// multiple times is wasteful. MacroState provides controlled caching
+/// that preserves determinism while enabling optimization.
+///
+/// ## Capabilities
+///
+/// - Per-compilation caching with automatic invalidation
+/// - Memoization for expensive computations
+/// - Invocation tracking for debugging
+/// - Dependency tracking for incremental compilation
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn expensive_analyze<T>() -> Analysis using [TypeInfo, MacroState] {
+///     // Check if we've already computed this
+///     let cache_key = f"analyze:{TypeInfo.type_id<T>()}";
+///
+///     if let Some(cached) = MacroState.cache_get<Analysis>(cache_key) {
+///         return cached;
+///     }
+///
+///     // Expensive computation
+///     let result = do_expensive_analysis<T>();
+///
+///     // Cache for future invocations
+///     MacroState.cache_set(cache_key, result.clone());
+///
+///     result
+/// }
+///
+/// // Or use memoization helper
+/// meta fn memoized_analyze<T>() -> Analysis using [TypeInfo, MacroState] {
+///     MacroState.memo(
+///         f"analyze:{TypeInfo.type_id<T>()}",
+///         || do_expensive_analysis<T>()
+///     )
+/// }
+/// ```
+@compiler_provided
+public context MacroState {
+    // =========================================================================
+    // Caching
+    // =========================================================================
+
+    /// Get cached value by key
+    ///
+    /// # Arguments
+    /// - `key`: Unique cache key (should include type info for generic caches)
+    ///
+    /// # Returns
+    /// Cached value if present and still valid, None otherwise
+    fn cache_get<T>(key: Text) -> Maybe<T>;
+
+    /// Set cached value
+    ///
+    /// # Arguments
+    /// - `key`: Unique cache key
+    /// - `value`: Value to cache (must be serializable by compiler)
+    ///
+    /// # Notes
+    /// - Cache is scoped to current compilation
+    /// - Automatically invalidated on source changes
+    fn cache_set<T>(key: Text, value: T);
+
+    /// Check if cache contains key
+    fn cache_has(key: Text) -> Bool;
+
+    /// Remove cached value
+    fn cache_remove(key: Text);
+
+    /// Clear all cached values
+    fn cache_clear();
+
+    // =========================================================================
+    // Memoization
+    // =========================================================================
+
+    /// Memoize computation with key
+    ///
+    /// If key exists in cache, returns cached value.
+    /// Otherwise, calls compute, caches result, and returns it.
+    ///
+    /// # Arguments
+    /// - `key`: Unique memoization key
+    /// - `compute`: Function to compute value if not cached
+    ///
+    /// # Example
+    /// ```verum
+    /// let result = MacroState.memo("key", || expensive_computation());
+    /// ```
+    fn memo<T>(key: Text, compute: fn() -> T) -> T;
+
+    /// Memoize computation with typed key
+    ///
+    /// Uses type information for automatic key generation.
+    ///
+    /// # Example
+    /// ```verum
+    /// let fields = MacroState.memo_typed<MyType, List<FieldInfo>>(
+    ///     "fields",
+    ///     || TypeInfo.fields_of<MyType>()
+    /// );
+    /// ```
+    fn memo_typed<K, V>(suffix: Text, compute: fn() -> V) -> V;
+
+    // =========================================================================
+    // Invocation Tracking
+    // =========================================================================
+
+    /// Get number of times current macro has been invoked
+    ///
+    /// Useful for generating unique identifiers.
+    fn invocation_count() -> Int;
+
+    /// Get unique invocation ID for current call
+    ///
+    /// Returns a unique identifier that can be used to generate
+    /// unique names across invocations.
+    fn invocation_id() -> UInt64;
+
+    /// Get macro name being executed
+    fn current_macro_name() -> Text;
+
+    /// Get call depth (for recursive macros)
+    fn call_depth() -> Int;
+
+    // =========================================================================
+    // Dependency Tracking
+    // =========================================================================
+
+    /// Register a dependency on a file
+    ///
+    /// Tells the compiler that this macro's output depends on the given file,
+    /// triggering recompilation when the file changes.
+    ///
+    /// # Arguments
+    /// - `path`: Relative path to dependency file
+    fn depend_on_file(path: Text);
+
+    /// Register a dependency on a type
+    ///
+    /// Triggers recompilation when the type definition changes.
+    fn depend_on_type<T>();
+
+    /// Register a dependency on environment variable
+    ///
+    /// Triggers recompilation when the env var changes.
+    fn depend_on_env(var: Text);
+
+    // =========================================================================
+    // State Inspection (Debug)
+    // =========================================================================
+
+    /// Get all cache keys (debug only)
+    fn cache_keys() -> List<Text>;
+
+    /// Get cache statistics
+    fn cache_stats() -> CacheStats;
+}
+
+/// Cache statistics for debugging
+public type CacheStats is {
+    /// Number of entries in cache
+    entry_count: Int,
+
+    /// Number of cache hits
+    hits: Int,
+
+    /// Number of cache misses
+    misses: Int,
+
+    /// Approximate memory usage in bytes
+    memory_bytes: Int,
+};
+
+// =============================================================================
+// CodeSearch Context (Advanced Code Analysis)
+// =============================================================================
+
+/// Code search context for advanced codebase analysis during compilation
+///
+/// Enables meta functions to search for code patterns, find usages,
+/// and analyze codebase structure. Essential for writing intelligent
+/// code generators and refactoring macros.
+///
+/// ## Use Cases
+///
+/// - Find all implementations of a protocol
+/// - Search for functions matching a pattern
+/// - Find usages of a type or function
+/// - Analyze module dependencies
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn find_handlers() -> TokenStream using CodeSearch {
+///     // Find all functions with @handler attribute
+///     let handlers = CodeSearch.find_functions_with_attr("handler");
+///
+///     // Generate registry code
+///     quote {
+///         fn register_handlers(router: &mut Router) {
+///             $[for h in handlers {
+///                 router.add("/${h.attr_value("path")}", ${h.name});
+///             }]
+///         }
+///     }
+/// }
+/// ```
+@compiler_provided
+public context CodeSearch {
+    // =========================================================================
+    // Function Search
+    // =========================================================================
+
+    /// Find all functions with a specific attribute
+    ///
+    /// # Arguments
+    /// - `attr_name`: Attribute name without the `@` prefix
+    ///
+    /// # Returns
+    /// List of function information for matching functions
+    fn find_functions_with_attr(attr_name: Text) -> List<FunctionSearchResult>;
+
+    /// Find functions matching a name pattern
+    ///
+    /// Supports glob patterns: `*` matches any sequence, `?` matches single char.
+    ///
+    /// # Arguments
+    /// - `pattern`: Glob pattern to match function names
+    fn find_functions_by_pattern(pattern: Text) -> List<FunctionSearchResult>;
+
+    /// Find all functions in a module
+    ///
+    /// # Arguments
+    /// - `module_path`: Fully qualified module path
+    fn find_functions_in_module(module_path: Text) -> List<FunctionSearchResult>;
+
+    /// Find functions with a specific return type
+    fn find_functions_by_return_type(type_name: Text) -> List<FunctionSearchResult>;
+
+    // =========================================================================
+    // Type Search
+    // =========================================================================
+
+    /// Find all types implementing a protocol
+    ///
+    /// # Arguments
+    /// - `protocol_name`: Fully qualified protocol name
+    fn find_types_implementing(protocol_name: Text) -> List<TypeSearchResult>;
+
+    /// Find all types with a specific attribute
+    fn find_types_with_attr(attr_name: Text) -> List<TypeSearchResult>;
+
+    /// Find types matching a name pattern
+    fn find_types_by_pattern(pattern: Text) -> List<TypeSearchResult>;
+
+    /// Find types in a module
+    fn find_types_in_module(module_path: Text) -> List<TypeSearchResult>;
+
+    // =========================================================================
+    // Usage Analysis
+    // =========================================================================
+
+    /// Find all usages of a function
+    ///
+    /// # Arguments
+    /// - `function_path`: Fully qualified function path
+    fn find_function_usages(function_path: Text) -> List<UsageInfo>;
+
+    /// Find all usages of a type
+    fn find_type_usages(type_path: Text) -> List<UsageInfo>;
+
+    /// Find all usages of a constant
+    fn find_const_usages(const_path: Text) -> List<UsageInfo>;
+
+    // =========================================================================
+    // Pattern Matching
+    // =========================================================================
+
+    /// Search for code matching a pattern expression
+    ///
+    /// Uses a simplified pattern language for matching AST structures.
+    /// Patterns use `_` for wildcards and `$name` for captures.
+    ///
+    /// # Example
+    /// ```verum
+    /// // Find all Result::unwrap() calls
+    /// let unwraps = CodeSearch.find_pattern("_.unwrap()");
+    ///
+    /// // Find all if-let-some patterns
+    /// let if_lets = CodeSearch.find_pattern("if let Some($x) = $expr { $body }");
+    /// ```
+    fn find_pattern(pattern: Text) -> List<PatternMatch>;
+
+    /// Search for text in string literals
+    fn find_string_literal(text: Text) -> List<UsageInfo>;
+
+    // =========================================================================
+    // Module Analysis
+    // =========================================================================
+
+    /// Get all modules in the project
+    fn all_modules() -> List<Text>;
+
+    /// Get public items in a module
+    fn module_public_items(module_path: Text) -> List<ItemInfo>;
+
+    /// Get module dependencies (imports)
+    fn module_dependencies(module_path: Text) -> List<Text>;
+
+    /// Get modules that depend on a module
+    fn module_dependents(module_path: Text) -> List<Text>;
+}
+
+/// Result of a function search
+public type FunctionSearchResult is {
+    /// Fully qualified function name
+    name: Text,
+
+    /// Module containing the function
+    module: Text,
+
+    /// Function visibility
+    is_public: Bool,
+
+    /// Source location
+    span: Span,
+
+    /// Attributes on the function
+    attributes: List<Attribute>,
+
+    /// Function signature as text
+    signature: Text,
+};
+
+/// Result of a type search
+public type TypeSearchResult is {
+    /// Fully qualified type name
+    name: Text,
+
+    /// Module containing the type
+    module: Text,
+
+    /// Type visibility
+    is_public: Bool,
+
+    /// Source location
+    span: Span,
+
+    /// Attributes on the type
+    attributes: List<Attribute>,
+
+    /// Type kind (struct, enum, protocol, etc.)
+    kind: TypeKind,
+};
+
+/// Information about a code usage
+public type UsageInfo is {
+    /// Location of the usage
+    span: Span,
+
+    /// Module containing the usage
+    module: Text,
+
+    /// Function containing the usage (if any)
+    containing_function: Maybe<Text>,
+
+    /// Context of the usage (call, type annotation, etc.)
+    context: UsageContext,
+};
+
+/// Context in which a symbol is used
+public type UsageContext is
+    | Call          // Function/method call
+    | TypeAnnotation // Type position
+    | FieldAccess   // Field access
+    | InPattern     // In a pattern
+    | Import        // Import statement
+    | Other(Text);
+
+/// Result of pattern matching search
+public type PatternMatch is {
+    /// Location of the match
+    span: Span,
+
+    /// Captured variables
+    captures: Map<Text, TokenStream>,
+
+    /// Module containing the match
+    module: Text,
+};
+
+/// Information about an item (function, type, const, etc.)
+public type ItemInfo is {
+    /// Item name
+    name: Text,
+
+    /// Item kind
+    kind: ItemKind,
+
+    /// Source location
+    span: Span,
+
+    /// Documentation
+    doc: Maybe<Text>,
+};
+
+/// Kind of item
+public type ItemKind is
+    | Function
+    | TypeDef
+    | Const
+    | Static
+    | Module
+    | Protocol
+    | Implement;
+
+// =============================================================================
+// ProjectInfo Context (Project Metadata)
+// =============================================================================
+
+/// Project information context for accessing project-wide metadata
+///
+/// Provides access to project configuration, dependencies, and
+/// build information during compilation. Essential for generating
+/// code that adapts to project settings.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn version_string() -> TokenStream using ProjectInfo {
+///     let name = ProjectInfo.package_name();
+///     let version = ProjectInfo.package_version();
+///
+///     quote {
+///         const VERSION: &Text = ${f"{name} v{version}"};
+///     }
+/// }
+/// ```
+@compiler_provided
+public context ProjectInfo {
+    // =========================================================================
+    // Package Information
+    // =========================================================================
+
+    /// Get package name from Verum.toml
+    fn package_name() -> Text;
+
+    /// Get package version
+    fn package_version() -> Text;
+
+    /// Get package authors
+    fn package_authors() -> List<Text>;
+
+    /// Get package description
+    fn package_description() -> Maybe<Text>;
+
+    /// Get package license
+    fn package_license() -> Maybe<Text>;
+
+    /// Get package repository URL
+    fn package_repository() -> Maybe<Text>;
+
+    // =========================================================================
+    // Dependencies
+    // =========================================================================
+
+    /// Get all dependencies
+    fn dependencies() -> List<DependencyInfo>;
+
+    /// Get dev dependencies
+    fn dev_dependencies() -> List<DependencyInfo>;
+
+    /// Check if a dependency is present
+    fn has_dependency(name: Text) -> Bool;
+
+    /// Get dependency version
+    fn dependency_version(name: Text) -> Maybe<Text>;
+
+    // =========================================================================
+    // Features
+    // =========================================================================
+
+    /// Get all enabled features
+    fn enabled_features() -> List<Text>;
+
+    /// Check if a feature is enabled
+    fn is_feature_enabled(feature: Text) -> Bool;
+
+    /// Get default features
+    fn default_features() -> List<Text>;
+
+    // =========================================================================
+    // Build Configuration
+    // =========================================================================
+
+    /// Get target platform triple
+    fn target_triple() -> Text;
+
+    /// Get target OS
+    fn target_os() -> Text;
+
+    /// Get target architecture
+    fn target_arch() -> Text;
+
+    /// Check if debug build
+    fn is_debug() -> Bool;
+
+    /// Check if release build
+    fn is_release() -> Bool;
+
+    /// Get optimization level (0-3)
+    fn opt_level() -> UInt32;
+
+    /// Get target pointer width in bits
+    ///
+    /// Returns: 32 or 64
+    fn target_pointer_width() -> Int;
+
+    /// Get target endianness
+    ///
+    /// Returns: "little" or "big"
+    fn target_endian() -> Text;
+
+    /// Check if target has specific feature
+    ///
+    /// # Example
+    /// `ProjectInfo.target_has_feature("sse4.2")` → `true` on x86_64
+    fn target_has_feature(feature: Text) -> Bool;
+
+    // =========================================================================
+    // Paths
+    // =========================================================================
+
+    /// Get project root directory
+    fn project_root() -> Text;
+
+    /// Get source directory
+    fn source_dir() -> Text;
+
+    /// Get output directory
+    fn output_dir() -> Text;
+
+    /// Get manifest file path (Verum.toml)
+    fn manifest_path() -> Text;
+}
+
+/// Dependency information
+public type DependencyInfo is {
+    /// Dependency name
+    name: Text,
+
+    /// Version requirement
+    version: Text,
+
+    /// Whether it's optional
+    is_optional: Bool,
+
+    /// Enabled features
+    features: List<Text>,
+};
+
+// =============================================================================
+// SourceMap Context (Source Location Mapping)
+// =============================================================================
+
+/// Source mapping context for generated code
+///
+/// Enables precise source mapping between generated code and
+/// the original meta code that generated it. Essential for
+/// debugging, error reporting, and IDE integration.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn generate_struct() -> TokenStream using SourceMap {
+///     // Create a source mapping scope
+///     SourceMap.enter_generated("UserStruct");
+///
+///     let result = quote {
+///         type User is {
+///             name: Text,
+///             age: Int,
+///         };
+///     };
+///
+///     // Map spans back to generator
+///     SourceMap.map_span_to_generator(result.span());
+///
+///     SourceMap.exit_generated();
+///     result
+/// }
+/// ```
+@compiler_provided
+public context SourceMap {
+    // =========================================================================
+    // Generation Scope
+    // =========================================================================
+
+    /// Enter a named generation scope
+    ///
+    /// All code generated within this scope will be associated
+    /// with the given name for debugging purposes.
+    fn enter_generated(name: Text);
+
+    /// Exit the current generation scope
+    fn exit_generated();
+
+    /// Get current scope name (if any)
+    fn current_scope() -> Maybe<Text>;
+
+    /// Get full scope path (nested scopes joined by "::")
+    fn scope_path() -> Text;
+
+    // =========================================================================
+    // Span Mapping
+    // =========================================================================
+
+    /// Map a generated span back to its generator
+    ///
+    /// Creates a mapping from the generated code span to the
+    /// current location in the meta function.
+    fn map_span_to_generator(generated_span: Span);
+
+    /// Map a generated span to a specific source span
+    fn map_span_to_source(generated_span: Span, source_span: Span);
+
+    /// Get the source span for a generated span
+    fn get_source_span(generated_span: Span) -> Maybe<Span>;
+
+    /// Create a synthetic span with a descriptive message
+    fn synthetic_span(message: Text) -> Span;
+
+    // =========================================================================
+    // Line Mapping
+    // =========================================================================
+
+    /// Add a line mapping comment
+    ///
+    /// Useful for generating source maps compatible with debuggers.
+    fn add_line_directive(source_file: Text, source_line: UInt32);
+
+    /// Get mappings for a generated file
+    fn get_mappings() -> List<SpanMapping>;
+}
+
+/// Mapping between generated and source spans
+public type SpanMapping is {
+    /// Span in generated code
+    generated: Span,
+
+    /// Span in source (meta function)
+    source: Span,
+
+    /// Name of generator scope
+    scope: Text,
+};
+
+// =============================================================================
+// Schema Context (Generated Code Validation)
+// =============================================================================
+
+/// Schema validation context for verifying generated code structure
+///
+/// Allows meta functions to validate that generated code matches
+/// expected patterns and constraints. Essential for creating
+/// robust code generators that catch errors at compile time.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn generate_api_handler() -> TokenStream using [Schema, CompileDiag] {
+///     let result = generate_handler_code();
+///
+///     // Validate the generated code structure
+///     let schema = Schema.function_schema()
+///         .with_attr("handler")
+///         .with_return_type("Result<Response, Error>")
+///         .with_param("request", "Request");
+///
+///     match Schema.validate(result, schema) {
+///         Ok(()) => result,
+///         Err(errors) => {
+///             for err in errors {
+///                 CompileDiag.emit_error(err.message, err.span);
+///             }
+///             TokenStream.empty()
+///         }
+///     }
+/// }
+/// ```
+@compiler_provided
+public context Schema {
+    // =========================================================================
+    // Schema Builders
+    // =========================================================================
+
+    /// Create a function schema builder
+    fn function_schema() -> FunctionSchemaBuilder;
+
+    /// Create a type schema builder
+    fn type_schema() -> TypeSchemaBuilder;
+
+    /// Create an expression schema builder
+    fn expr_schema() -> ExprSchemaBuilder;
+
+    /// Create a module schema builder
+    fn module_schema() -> ModuleSchemaBuilder;
+
+    // =========================================================================
+    // Validation
+    // =========================================================================
+
+    /// Validate TokenStream against a schema
+    fn validate(code: TokenStream, schema: CodeSchema) -> Result<(), List<SchemaError>>;
+
+    /// Validate and transform (apply fixes for minor issues)
+    fn validate_and_fix(code: TokenStream, schema: CodeSchema) -> Result<TokenStream, List<SchemaError>>;
+
+    // =========================================================================
+    // Quick Validation
+    // =========================================================================
+
+    /// Check if code is a valid function definition
+    fn is_function(code: TokenStream) -> Bool;
+
+    /// Check if code is a valid type definition
+    fn is_type(code: TokenStream) -> Bool;
+
+    /// Check if code is a valid expression
+    fn is_expression(code: TokenStream) -> Bool;
+
+    /// Check if code is a valid statement
+    fn is_statement(code: TokenStream) -> Bool;
+
+    /// Check if code is a valid item
+    fn is_item(code: TokenStream) -> Bool;
+}
+
+/// Function schema builder
+public type FunctionSchemaBuilder is {
+    _inner: (),
+};
+
+implement FunctionSchemaBuilder {
+    /// Require a specific attribute
+    fn with_attr(self, name: Text) -> FunctionSchemaBuilder;
+
+    /// Require a specific return type
+    fn with_return_type(self, type_name: Text) -> FunctionSchemaBuilder;
+
+    /// Require a specific parameter
+    fn with_param(self, name: Text, type_name: Text) -> FunctionSchemaBuilder;
+
+    /// Require public visibility
+    fn require_public(self) -> FunctionSchemaBuilder;
+
+    /// Require async modifier
+    fn require_async(self) -> FunctionSchemaBuilder;
+
+    /// Require meta modifier with optional stage
+    fn require_meta(self, stage_level: Maybe<UInt32>) -> FunctionSchemaBuilder;
+
+    /// Build the schema
+    fn build(self) -> CodeSchema;
+}
+
+/// Type schema builder
+public type TypeSchemaBuilder is {
+    _inner: (),
+};
+
+implement TypeSchemaBuilder {
+    /// Require a specific attribute
+    fn with_attr(self, name: Text) -> TypeSchemaBuilder;
+
+    /// Require specific fields
+    fn with_field(self, name: Text, type_name: Text) -> TypeSchemaBuilder;
+
+    /// Require it to be a struct
+    fn is_struct(self) -> TypeSchemaBuilder;
+
+    /// Require it to be an enum
+    fn is_enum(self) -> TypeSchemaBuilder;
+
+    /// Build the schema
+    fn build(self) -> CodeSchema;
+}
+
+/// Expression schema builder
+public type ExprSchemaBuilder is {
+    _inner: (),
+};
+
+/// Module schema builder
+public type ModuleSchemaBuilder is {
+    _inner: (),
+};
+
+/// Schema for validating code
+public type CodeSchema is {
+    _inner: (),
+};
+
+/// Schema validation error
+public type SchemaError is {
+    /// Error message
+    message: Text,
+
+    /// Location of error
+    span: Span,
+
+    /// Severity
+    severity: SchemaErrorSeverity,
+
+    /// Suggested fix
+    suggestion: Maybe<Text>,
+};
+
+/// Schema error severity
+public type SchemaErrorSeverity is
+    | Error
+    | Warning
+    | Info;
+
+// =============================================================================
+// DepGraph Context (Dependency Analysis)
+// =============================================================================
+
+/// Dependency graph context for analyzing and manipulating dependencies
+///
+/// Provides access to the compilation dependency graph for advanced
+/// code generation that needs to understand or modify build order.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn check_circular_deps() using [DepGraph, CompileDiag] {
+///     let cycles = DepGraph.find_cycles();
+///
+///     for cycle in cycles {
+///         CompileDiag.emit_warning(
+///             f"Circular dependency detected: {cycle.join(" -> ")}",
+///             Span.call_site()
+///         );
+///     }
+/// }
+/// ```
+@compiler_provided
+public context DepGraph {
+    // =========================================================================
+    // Dependency Queries
+    // =========================================================================
+
+    /// Get direct dependencies of a module
+    fn dependencies_of(mod_name: Text) -> List<Text>;
+
+    /// Get transitive dependencies of a module
+    fn transitive_dependencies(mod_name: Text) -> List<Text>;
+
+    /// Get modules that depend on a module
+    fn dependents_of(mod_name: Text) -> List<Text>;
+
+    /// Get transitive dependents
+    fn transitive_dependents(mod_name: Text) -> List<Text>;
+
+    // =========================================================================
+    // Cycle Detection
+    // =========================================================================
+
+    /// Find all cycles in the dependency graph
+    fn find_cycles() -> List<List<Text>>;
+
+    /// Check if two modules are in a cycle together
+    fn in_cycle_with(module_a: Text, module_b: Text) -> Bool;
+
+    // =========================================================================
+    // Ordering
+    // =========================================================================
+
+    /// Get topological order of all modules
+    fn topological_order() -> List<Text>;
+
+    /// Get modules in compilation order (respecting dependencies)
+    fn compilation_order() -> List<Text>;
+
+    /// Get depth of a module in the dependency graph
+    fn depth(mod_name: Text) -> UInt32;
+
+    // =========================================================================
+    // Analysis
+    // =========================================================================
+
+    /// Get strongly connected components
+    fn strongly_connected_components() -> List<List<Text>>;
+
+    /// Get leaf modules (no dependencies)
+    fn leaf_modules() -> List<Text>;
+
+    /// Get root modules (nothing depends on them)
+    fn root_modules() -> List<Text>;
+}
+
+// =============================================================================
+// MetaBench Context (Compile-Time Benchmarking)
+// =============================================================================
+
+/// Benchmarking context for measuring compile-time performance
+///
+/// Allows meta functions to measure and report their own performance.
+/// Useful for optimizing complex meta code and identifying bottlenecks.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn complex_generation() -> TokenStream using MetaBench {
+///     let bench = MetaBench.start("type_analysis");
+///
+///     let result = expensive_type_analysis();
+///
+///     let elapsed = bench.stop();
+///     MetaBench.report("type_analysis", elapsed);
+///
+///     result
+/// }
+/// ```
+@compiler_provided
+public context MetaBench {
+    // =========================================================================
+    // Timing
+    // =========================================================================
+
+    /// Start a new benchmark timer
+    fn start(name: Text) -> BenchTimer;
+
+    /// Get current timestamp in nanoseconds
+    fn now_ns() -> UInt64;
+
+    // =========================================================================
+    // Reporting
+    // =========================================================================
+
+    /// Report a benchmark result
+    ///
+    /// Results are collected and can be displayed with `--bench-meta` flag.
+    fn report(name: Text, duration_ns: UInt64);
+
+    /// Report with additional context
+    fn report_with_context(name: Text, duration_ns: UInt64, context: Text);
+
+    // =========================================================================
+    // Memory Tracking
+    // =========================================================================
+
+    /// Get current memory usage in bytes
+    fn memory_usage() -> UInt64;
+
+    /// Get peak memory usage since start
+    fn peak_memory() -> UInt64;
+
+    /// Report memory usage
+    fn report_memory(name: Text, bytes: UInt64);
+
+    // =========================================================================
+    // Counters
+    // =========================================================================
+
+    /// Increment a named counter
+    fn count(name: Text);
+
+    /// Increment counter by specific amount
+    fn count_by(name: Text, amount: UInt64);
+
+    /// Get current counter value
+    fn get_count(name: Text) -> UInt64;
+
+    // =========================================================================
+    // Summary
+    // =========================================================================
+
+    /// Get all benchmark results
+    fn all_results() -> List<BenchResult>;
+
+    /// Get summary statistics for a benchmark
+    fn stats(name: Text) -> Maybe<BenchStats>;
+}
+
+/// Benchmark timer handle
+public type BenchTimer is {
+    name: Text,
+    start_ns: UInt64,
+};
+
+implement BenchTimer {
+    /// Stop the timer and return elapsed nanoseconds
+    fn stop(self) -> UInt64;
+
+    /// Get elapsed time without stopping
+    fn elapsed(self) -> UInt64;
+}
+
+/// Benchmark result
+public type BenchResult is {
+    /// Benchmark name
+    name: Text,
+
+    /// Duration in nanoseconds
+    duration_ns: UInt64,
+
+    /// Optional context
+    context: Maybe<Text>,
+
+    /// Memory used (if tracked)
+    memory_bytes: Maybe<UInt64>,
+};
+
+/// Benchmark statistics
+public type BenchStats is {
+    /// Number of samples
+    count: UInt64,
+
+    /// Total time in nanoseconds
+    total_ns: UInt64,
+
+    /// Average time in nanoseconds
+    avg_ns: UInt64,
+
+    /// Minimum time
+    min_ns: UInt64,
+
+    /// Maximum time
+    max_ns: UInt64,
+};
+
+// =============================================================================
+// Stage Tracing Types (N-Level Staged Metaprogramming Support)
+// =============================================================================
+
+/// Record of a stage in the generation chain
+///
+/// Used by `StageInfo.generation_chain()` to provide a trace of how
+/// code was generated through multiple stages.
+///
+/// ## Example
+///
+/// ```verum
+/// meta(2) fn debug_generation() using StageInfo {
+///     let chain = StageInfo.generation_chain();
+///     for record in chain {
+///         CompileDiag.emit_note(
+///             f"Stage {record.stage}: {record.generator_name} at {record.timestamp_ns}ns",
+///             record.source_span
+///         );
+///     }
+/// }
+/// ```
+public type StageRecord is {
+    /// The stage level at which this record was created
+    stage_level: UInt32,
+
+    /// Source location where generation occurred
+    source_span: Span,
+
+    /// Name of the generating function
+    generator_name: Text,
+
+    /// Timestamp in nanoseconds when this stage was executed
+    timestamp_ns: UInt64,
+};
+
+/// Trace marker for debugging staged compilation
+///
+/// Created by `StageInfo.trace_marker()` for debugging and profiling
+/// multi-stage compilation. Markers are collected by the compiler and
+/// can be displayed in compilation output with `--trace-stages` flag.
+///
+/// ## Example
+///
+/// ```verum
+/// meta(2) fn complex_generation() using StageInfo {
+///     let marker = StageInfo.trace_marker("start_generation");
+///
+///     // ... complex meta code ...
+///
+///     let end_marker = StageInfo.trace_marker("end_generation");
+///
+///     // Markers help trace compilation flow in debug output
+/// }
+/// ```
+public type TraceMarker is {
+    /// Unique identifier for this marker
+    id: UInt64,
+
+    /// User-provided label for identification
+    label: Text,
+
+    /// Stage at which the marker was created
+    stage_level: UInt32,
+
+    /// Timestamp in nanoseconds
+    timestamp_ns: UInt64,
+};
+
+// =============================================================================
+// StageInfo Context (N-Level Staged Metaprogramming)
+// =============================================================================
+
+/// Stage information context for N-level staged metaprogramming
+///
+/// Provides compile-time access to stage level information during multi-stage
+/// compilation. Essential for writing stage-polymorphic meta code that adapts
+/// its behavior based on the current compilation stage.
+///
+/// ## Staged Metaprogramming Overview
+///
+/// N-level staged metaprogramming allows functions to execute at different
+/// compilation stages:
+///
+/// - **Stage 0**: Runtime code (normal execution)
+/// - **Stage 1**: `meta fn` - First-level compile-time execution
+/// - **Stage 2**: `meta(2) fn` - Second-level (generates Stage 1 code)
+/// - **Stage N**: `meta(N) fn` - N-th level (generates Stage N-1 code)
+///
+/// ## Stage Coherence Rule
+///
+/// A function at Stage N can only **directly** generate code for Stage N-1.
+/// Each `quote { ... }` lowers the stage by exactly 1.
+///
+/// ```
+/// Stage 3 → quote { } → Stage 2 → quote { } → Stage 1 → quote { } → Stage 0
+/// ```
+///
+/// ## Capabilities
+///
+/// - Query current execution stage
+/// - Check maximum configured stage
+/// - Validate stage transitions
+/// - Access stage-specific configuration
+/// - Generate stage-aware code
+///
+/// ## Example
+///
+/// ```verum
+/// // Stage 2 function that generates stage 1 code
+/// meta(2) fn make_meta_function<T>() -> TokenStream using StageInfo {
+///     let current = StageInfo.current_stage();
+///     assert(current == 2, "Expected stage 2");
+///
+///     let target_stage = current - 1;  // Stage 1
+///
+///     quote {
+///         // This is stage 1 code
+///         meta fn generated_meta<T>() -> TokenStream using StageInfo {
+///             let s = StageInfo.current_stage();
+///             assert(s == 1, "Expected stage 1");
+///
+///             quote {
+///                 // This is stage 0 (runtime) code
+///                 println("Hello from runtime!");
+///             }
+///         }
+///     }
+/// }
+///
+/// // Stage-polymorphic function using StageInfo
+/// meta fn stage_aware() -> TokenStream using [StageInfo, CompileDiag] {
+///     let stage = StageInfo.current_stage();
+///
+///     if stage == StageInfo.max_stage() {
+///         CompileDiag.emit_note(
+///             f"Executing at maximum stage {stage}",
+///             Span.call_site()
+///         );
+///     }
+///
+///     quote { /* generated code */ }
+/// }
+/// ```
+///
+/// ## Stage Validation
+///
+/// The compiler validates stage constraints at compile time:
+///
+/// - **E1001**: Invalid stage level (negative or exceeds max)
+/// - **E1002**: Invalid cross-stage call (calling lower stage from higher)
+/// - **E1003**: Quote stage mismatch (quote doesn't lower stage correctly)
+/// - **E1004**: Stage escape error (returning runtime value from meta)
+/// - **E1005**: Invalid stage dependency (circular stage dependencies)
+///
+@compiler_provided
+public context StageInfo {
+    // =========================================================================
+    // Stage Query
+    // =========================================================================
+
+    /// Get the current compilation stage level
+    ///
+    /// Returns the stage at which the current function is executing:
+    /// - 0: Runtime
+    /// - 1: First-level meta (standard `meta fn`)
+    /// - N: N-th level meta (`meta(N) fn`)
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn check_stage() using StageInfo {
+    ///     let stage = StageInfo.current_stage();
+    ///     assert(stage >= 1, "Meta function must be at stage >= 1");
+    /// }
+    /// ```
+    fn current_stage() -> UInt32;
+
+    /// Get the maximum configured stage level
+    ///
+    /// Returns the maximum stage level allowed by the current compilation
+    /// configuration. Default is typically 3, but can be configured in
+    /// Verum.toml via `[meta].max_stage`.
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn check_max() using StageInfo {
+    ///     let max = StageInfo.max_stage();
+    ///     if max < 3 {
+    ///         CompileDiag.emit_warning(
+    ///             "Stage 3 disabled, some features unavailable",
+    ///             Span.call_site()
+    ///         );
+    ///     }
+    /// }
+    /// ```
+    fn max_stage() -> UInt32;
+
+    /// Check if currently at runtime stage (stage 0)
+    ///
+    /// Convenience function equivalent to `current_stage() == 0`.
+    /// Note: This will always return false inside a meta function.
+    fn is_runtime() -> Bool;
+
+    /// Check if currently at compile-time (stage >= 1)
+    ///
+    /// Convenience function equivalent to `current_stage() >= 1`.
+    fn is_compile_time() -> Bool;
+
+    /// Check if at the maximum allowed stage
+    fn is_max_stage() -> Bool;
+
+    // =========================================================================
+    // Stage Validation
+    // =========================================================================
+
+    /// Validate that a stage level is valid
+    ///
+    /// Returns true if the stage level is within [0, max_stage()].
+    ///
+    /// # Arguments
+    /// - `stage`: Stage level to validate
+    fn is_valid_stage(stage_level: UInt32) -> Bool;
+
+    /// Check if a stage transition is valid
+    ///
+    /// A stage transition from `from_stage` to `to_stage` is valid when:
+    /// - `to_stage == from_stage - 1` (quote lowers by exactly 1)
+    /// - Both stages are within valid range
+    ///
+    /// # Arguments
+    /// - `from_stage`: Source stage
+    /// - `to_stage`: Target stage
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn validate_transition() using StageInfo {
+    ///     // Valid: stage 2 → stage 1 via quote
+    ///     assert(StageInfo.is_valid_transition(2, 1));
+    ///
+    ///     // Invalid: stage 2 → stage 0 (skips stage 1)
+    ///     assert(!StageInfo.is_valid_transition(2, 0));
+    /// }
+    /// ```
+    fn is_valid_transition(from_stage_level: UInt32, to_stage_level: UInt32) -> Bool;
+
+    /// Get the target stage for a quote expression
+    ///
+    /// Returns `current_stage() - 1`, or 0 if already at stage 0.
+    /// This is the stage level of code inside a `quote { }` block.
+    fn quote_target_stage() -> UInt32;
+
+    // =========================================================================
+    // Stage-Aware Generation
+    // =========================================================================
+
+    /// Generate a unique identifier scoped to the current stage
+    ///
+    /// Creates a unique identifier that won't conflict with identifiers
+    /// at other stages. Useful for hygiene in multi-stage code generation.
+    ///
+    /// # Arguments
+    /// - `base`: Base name for the identifier
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn make_temp_var() -> TokenStream using StageInfo {
+    ///     let temp = StageInfo.stage_unique_ident("temp");
+    ///     quote {
+    ///         let $temp = compute_value();
+    ///         use_value($temp);
+    ///     }
+    /// }
+    /// ```
+    fn stage_unique_ident(base: Text) -> Text;
+
+    /// Get the number of quote levels between current stage and runtime
+    ///
+    /// Returns `current_stage()`. Useful for generating nested quotes.
+    fn quote_depth() -> UInt32;
+
+    // =========================================================================
+    // Function Stage Information
+    // =========================================================================
+
+    /// Get the declared stage of a function by name
+    ///
+    /// Returns the stage level at which the named function is declared,
+    /// or None if the function is not found.
+    ///
+    /// # Arguments
+    /// - `function_path`: Fully qualified function path
+    ///
+    /// # Example
+    /// ```verum
+    /// meta fn check_callee() using StageInfo {
+    ///     match StageInfo.function_stage("my_module.helper") {
+    ///         Some(stage) => {
+    ///             if stage > StageInfo.current_stage() {
+    ///                 // Cannot call higher-stage function
+    ///                 CompileDiag.emit_error(
+    ///                     "Cannot call higher-stage function from lower stage",
+    ///                     Span.call_site()
+    ///                 );
+    ///             }
+    ///         }
+    ///         None => {
+    ///             // Function not found
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    fn function_stage(function_path: Text) -> Maybe<UInt32>;
+
+    /// Get all functions at a specific stage
+    ///
+    /// Returns list of function paths declared at the given stage.
+    /// Useful for introspection and code generation.
+    ///
+    /// # Arguments
+    /// - `stage`: Stage level to query
+    fn functions_at_stage(stage_level: UInt32) -> List<Text>;
+
+    // =========================================================================
+    // Configuration
+    // =========================================================================
+
+    /// Check if staged compilation is enabled
+    ///
+    /// Returns true if the compiler is configured to support N-level
+    /// staged metaprogramming (stage levels > 1).
+    fn is_staged_enabled() -> Bool;
+
+    /// Get stage-specific configuration value
+    ///
+    /// Retrieves configuration specific to the current stage from Verum.toml.
+    /// Configuration is under `[meta.stage.N]` sections.
+    ///
+    /// # Arguments
+    /// - `key`: Configuration key
+    ///
+    /// # Example
+    /// ```toml
+    /// # Verum.toml
+    /// [meta.stage.2]
+    /// timeout_ms = 5000
+    /// memory_limit = 104857600
+    /// ```
+    ///
+    /// ```verum
+    /// meta(2) fn check_config() using StageInfo {
+    ///     let timeout = StageInfo.stage_config("timeout_ms");
+    /// }
+    /// ```
+    fn stage_config(key: Text) -> Maybe<Text>;
+
+    /// Get stage-specific iteration limit
+    ///
+    /// Returns the maximum number of loop iterations allowed at the
+    /// current stage. Higher stages typically have stricter limits.
+    fn stage_iteration_limit() -> UInt64;
+
+    /// Get stage-specific recursion limit
+    ///
+    /// Returns the maximum recursion depth allowed at the current stage.
+    fn stage_recursion_limit() -> UInt64;
+
+    /// Get stage-specific memory limit in bytes
+    fn stage_memory_limit() -> UInt64;
+
+    /// Get stage-specific timeout in milliseconds
+    fn stage_timeout_ms() -> UInt64;
+
+    // =========================================================================
+    // Stage Transition Validation
+    // =========================================================================
+
+    /// Check if current stage can generate code for target stage
+    ///
+    /// Returns true if `target_stage < current_stage()` and both stages are valid.
+    /// This enforces the Stage Coherence Rule: code can only generate code
+    /// for lower stages.
+    ///
+    /// # Arguments
+    /// - `target_stage`: The stage to generate code for
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn safe_generate() -> TokenStream using StageInfo {
+    ///     // Can generate stage 1 code
+    ///     assert(StageInfo.can_generate(1));
+    ///
+    ///     // Cannot generate same stage or higher
+    ///     assert(!StageInfo.can_generate(2));
+    ///     assert(!StageInfo.can_generate(3));
+    /// }
+    /// ```
+    fn can_generate(target_stage_level: UInt32) -> Bool;
+
+    // =========================================================================
+    // Stage Tracing and Debugging
+    // =========================================================================
+
+    /// Get the generation chain leading to current execution
+    ///
+    /// Returns a list of `StageRecord` entries describing the chain of
+    /// meta function calls and quote expansions that led to the current
+    /// execution context. Useful for debugging complex multi-stage code.
+    ///
+    /// The list is ordered from outermost (highest stage) to innermost
+    /// (current stage).
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn trace_origin() -> TokenStream using [StageInfo, CompileDiag] {
+    ///     let chain = StageInfo.generation_chain();
+    ///
+    ///     if chain.len() > 0 {
+    ///         let origin = chain[0];
+    ///         CompileDiag.emit_note(
+    ///             f"Originally generated by {origin.generator_name} at stage {origin.stage}",
+    ///             origin.source_span
+    ///         );
+    ///     }
+    ///
+    ///     quote { /* ... */ }
+    /// }
+    /// ```
+    fn generation_chain() -> List<StageRecord>;
+
+    /// Create a trace marker for debugging staged compilation
+    ///
+    /// Trace markers are collected by the compiler and can be displayed
+    /// with the `--trace-stages` CLI flag. Useful for profiling and
+    /// debugging complex multi-stage meta programs.
+    ///
+    /// # Arguments
+    /// - `label`: Human-readable label for the marker
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn complex_operation() -> TokenStream using StageInfo {
+    ///     let start = StageInfo.trace_marker("complex_op_start");
+    ///
+    ///     // Complex meta computation
+    ///     let result = expensive_meta_computation();
+    ///
+    ///     let end = StageInfo.trace_marker("complex_op_end");
+    ///
+    ///     // With --trace-stages, you'll see:
+    ///     // [Stage 2] complex_op_start at 1234567890ns
+    ///     // [Stage 2] complex_op_end at 1234890123ns
+    ///
+    ///     result
+    /// }
+    /// ```
+    fn trace_marker(label: Text) -> TraceMarker;
+
+    /// Get trace markers created in current stage
+    ///
+    /// Returns all trace markers that have been created during the
+    /// current stage execution. Useful for performance analysis.
+    fn stage_trace_markers() -> List<TraceMarker>;
+
+    // =========================================================================
+    // Code Origin Tracking
+    // =========================================================================
+
+    /// Get the origin span for generated code
+    ///
+    /// When executing inside generated code, returns the span of the
+    /// quote expression that generated this code. Returns None if
+    /// at the top-level of a meta function (not inside generated code).
+    fn generation_origin() -> Maybe<Span>;
+
+    /// Get the name of the function that generated current code
+    ///
+    /// Returns the fully qualified name of the meta function that
+    /// generated the code we're currently executing in. Returns None
+    /// if at the top-level.
+    fn generation_source_function() -> Maybe<Text>;
+}
+
+// =============================================================================
+// Hygiene Context (Unified Facade)
+// =============================================================================
+
+/// Unified hygiene context for macro identifier management
+///
+/// Provides all hygiene-related capabilities in a single cohesive API,
+/// consolidating functionality from AstAccess, MacroState, and StageInfo.
+///
+/// This context acts as a facade over the scattered hygiene capabilities,
+/// making it easier to write correct hygienic macros without needing to
+/// request multiple contexts.
+///
+/// ## Capabilities
+///
+/// - Unique identifier generation (`gensym`, `stage_unique_ident`)
+/// - Span management (`call_site`, `def_site`, `mixed_site`)
+/// - Invocation tracking (`invocation_id`)
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn hygienic_macro() -> TokenStream using Hygiene {
+///     // Generate unique identifiers that won't conflict
+///     let temp1 = Hygiene.gensym("temp");
+///     let temp2 = Hygiene.gensym("temp");
+///     assert(temp1 != temp2);  // Always unique
+///
+///     // Get appropriate spans for error messages
+///     let user_span = Hygiene.call_site();
+///
+///     quote {
+///         let $temp1 = compute_first();
+///         let $temp2 = compute_second();
+///         combine($temp1, $temp2)
+///     }
+/// }
+///
+/// meta(2) fn staged_hygienic() -> TokenStream using Hygiene {
+///     // Stage-aware unique identifier for multi-stage code
+///     let stage_temp = Hygiene.stage_unique_ident("val");
+///
+///     quote {
+///         meta fn inner() -> TokenStream using Hygiene {
+///             // This won't conflict with outer stage's identifiers
+///             let inner_temp = Hygiene.stage_unique_ident("val");
+///             quote { let $inner_temp = 42; }
+///         }
+///     }
+/// }
+/// ```
+///
+/// ## Delegation
+///
+/// This context delegates to underlying implementations:
+/// - `gensym`, `call_site`, `def_site`, `mixed_site` → AstAccess
+/// - `invocation_id` → MacroState
+/// - `stage_unique_ident` → StageInfo
+@compiler_provided
+public context Hygiene {
+    /// Generate a unique identifier scoped to current macro invocation
+    ///
+    /// Creates identifiers guaranteed not to conflict with user code or
+    /// other macro expansions. Each call returns a distinct identifier
+    /// even with the same base name.
+    ///
+    /// # Arguments
+    /// - `base`: Base name for the identifier (for readability)
+    ///
+    /// # Returns
+    /// A unique Ident that incorporates the base name and a unique suffix
+    ///
+    /// # Example
+    /// ```verum
+    /// let id1 = Hygiene.gensym("temp");  // e.g., __temp_12345
+    /// let id2 = Hygiene.gensym("temp");  // e.g., __temp_12346
+    /// assert(id1 != id2);
+    /// ```
+    fn gensym(base: Text) -> Ident;
+
+    /// Get span at macro call site (caller's hygiene context)
+    ///
+    /// Returns a span pointing to where the macro was invoked.
+    /// Use this for error messages that should point to user code.
+    ///
+    /// # Example
+    /// ```verum
+    /// let span = Hygiene.call_site();
+    /// CompileDiag.emit_error("Invalid usage", span);  // Points to user's code
+    /// ```
+    fn call_site() -> Span;
+
+    /// Get span at macro definition site (macro's hygiene context)
+    ///
+    /// Returns a span pointing to where the macro was defined.
+    /// Identifiers with this span resolve in the macro's namespace.
+    ///
+    /// # Example
+    /// ```verum
+    /// let span = Hygiene.def_site();
+    /// // Identifiers can reference items from macro's module
+    /// ```
+    fn def_site() -> Span;
+
+    /// Get mixed span: visibility from call_site, resolution from def_site
+    ///
+    /// Creates a span that combines properties of both call and def site.
+    /// The identifier is visible at the call site but resolves names
+    /// using the macro definition's scope.
+    ///
+    /// This is useful for creating identifiers that users can see and use
+    /// but that reference internal macro implementation details.
+    fn mixed_site() -> Span;
+
+    /// Get unique identifier for current macro invocation
+    ///
+    /// Returns an ID that uniquely identifies this specific macro invocation.
+    /// Useful for generating names that are unique per expansion rather
+    /// than per-call to gensym.
+    ///
+    /// # Example
+    /// ```verum
+    /// let id = Hygiene.invocation_id();
+    /// let struct_name = f"__Generated_{id}";
+    /// ```
+    fn invocation_id() -> InvocationId;
+
+    /// Generate stage-aware unique identifier for multi-stage metaprogramming
+    ///
+    /// Creates identifiers that won't conflict with identifiers at other
+    /// stages. Essential for N-level staged compilation where identifiers
+    /// must remain distinct across multiple quote/unquote boundaries.
+    ///
+    /// # Arguments
+    /// - `base`: Base name for the identifier
+    ///
+    /// # Returns
+    /// A unique identifier incorporating stage information
+    ///
+    /// # Example
+    /// ```verum
+    /// meta(2) fn make_nested() -> TokenStream using Hygiene {
+    ///     let outer = Hygiene.stage_unique_ident("var");  // Stage 2 unique
+    ///
+    ///     quote {
+    ///         meta fn inner() -> TokenStream using Hygiene {
+    ///             let inner = Hygiene.stage_unique_ident("var");  // Stage 1 unique
+    ///             // outer and inner are guaranteed distinct
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    fn stage_unique_ident(base: Text) -> Ident;
+}
+
+/// Invocation ID for tracking macro expansions
+///
+/// Opaque identifier that uniquely identifies a specific macro invocation.
+/// Can be converted to text for use in generated names.
+public type InvocationId is {
+    /// Internal unique value
+    value: UInt64,
+};
+
+implement InvocationId {
+    /// Convert to text representation
+    fn to_text(&self) -> Text {
+        f"{self.value}"
+    }
+}
+
+// =============================================================================
+// Context Groups
+// =============================================================================
+
+/// Core meta capabilities group
+///
+/// Includes the most commonly used meta contexts:
+/// - TypeInfo: Type introspection
+/// - AstAccess: AST manipulation
+/// - CompileDiag: Diagnostics
+/// - Hygiene: Unified hygiene support
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_default<T>() -> TokenStream using MetaCore {
+///     let fields = TypeInfo.fields_of<T>();
+///
+///     for field in fields {
+///         if !TypeInfo.implements<{field.ty}, Default>() {
+///             CompileDiag.emit_error(
+///                 f"Field '{field.name}' type does not implement Default",
+///                 field.span
+///             );
+///         }
+///     }
+///
+///     let name = TypeInfo.name_of<T>();
+///     quote {
+///         implement Default for $name {
+///             fn default() -> Self {
+///                 Self {
+///                     $[for f in fields {
+///                         ${f.name}: Default.default(),
+///                     }]
+///                 }
+///             }
+///         }
+///     }
+/// }
+/// ```
+public using MetaCore = [TypeInfo, AstAccess, CompileDiag, Hygiene];
+
+/// Full meta capabilities group
+///
+/// Includes all available meta contexts:
+/// - BuildAssets: File loading
+/// - TypeInfo: Type introspection
+/// - AstAccess: AST manipulation
+/// - CompileDiag: Diagnostics
+/// - MetaRuntime: Crate/module information
+/// - MacroState: Caching and memoization
+/// - StageInfo: N-level staged metaprogramming
+/// - CodeSearch: Codebase search and analysis
+/// - ProjectInfo: Project and target metadata
+/// - SourceMap: Source location mapping
+/// - Schema: Code validation
+/// - DepGraph: Dependency analysis
+/// - MetaBench: Compile-time benchmarking
+/// - Hygiene: Unified hygiene support
+///
+/// Use sparingly - prefer requesting only needed contexts.
+public using MetaFull = [
+    BuildAssets, TypeInfo, AstAccess, CompileDiag, MetaRuntime, MacroState,
+    StageInfo, CodeSearch, ProjectInfo, SourceMap, Schema, DepGraph, MetaBench, Hygiene
+];
+
+/// Type introspection only group
+///
+/// Minimal context for pure type inspection without side effects.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn count_fields<T>() -> Int using MetaTypes {
+///     TypeInfo.fields_of<T>().len()
+/// }
+/// ```
+public using MetaTypes = [TypeInfo];
+
+/// Safe context group (no I/O, no external state)
+///
+/// For pure meta functions that only transform code.
+/// Does not include BuildAssets (file I/O).
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_eq<T>() -> TokenStream using MetaSafe {
+///     // Can use TypeInfo, AstAccess, CompileDiag
+///     // Cannot use BuildAssets
+/// }
+/// ```
+public using MetaSafe = [TypeInfo, AstAccess, CompileDiag];
+
+/// No I/O context group
+///
+/// All contexts except BuildAssets. Use when you need
+/// most capabilities but not file system access.
+public using MetaNoIO = [TypeInfo, AstAccess, CompileDiag, MetaRuntime, MacroState, StageInfo, ProjectInfo, Hygiene];
+
+/// Derive macro standard context
+///
+/// Commonly needed contexts for derive macros.
+/// Includes TypeInfo for reflection, AstAccess for code generation,
+/// CompileDiag for error reporting, MacroState for caching, and Hygiene
+/// for proper identifier management.
+///
+/// ## Example
+///
+/// ```verum
+/// @derive_macro
+/// meta fn derive(input: TokenStream) -> TokenStream using MetaDerive {
+///     // Full derive capabilities with proper hygiene
+/// }
+/// ```
+public using MetaDerive = [TypeInfo, AstAccess, CompileDiag, MacroState, Hygiene];
+
+/// Attribute macro standard context
+///
+/// Commonly needed contexts for attribute macros.
+/// Includes all derive capabilities plus BuildAssets for
+/// loading configuration files, and Hygiene for proper identifier management.
+public using MetaAttr = [BuildAssets, TypeInfo, AstAccess, CompileDiag, MacroState, Hygiene];
+
+/// N-level staged metaprogramming context
+///
+/// Specialized context group for multi-stage meta functions (meta(N) fn).
+/// Includes stage-aware capabilities for generating lower-stage code.
+///
+/// ## Capabilities
+///
+/// - StageInfo: Stage level queries and validation
+/// - TypeInfo: Type introspection (works across stages)
+/// - AstAccess: AST manipulation for code generation
+/// - CompileDiag: Stage-aware error reporting
+/// - MacroState: Stage-scoped caching
+/// - Hygiene: Stage-aware identifier management
+///
+/// ## Example
+///
+/// ```verum
+/// // Stage 3 function that generates stage 2 code
+/// meta(3) fn make_stage2_generator<T>() -> TokenStream using MetaStaged {
+///     let stage = StageInfo.current_stage();
+///     assert(stage == 3);
+///
+///     // Generate a stage 2 meta function
+///     quote {
+///         meta(2) fn generated_stage2() -> TokenStream using MetaStaged {
+///             let s = StageInfo.current_stage();
+///             assert(s == 2);
+///
+///             // Generate a stage 1 meta function
+///             quote {
+///                 meta fn generated_stage1() -> TokenStream {
+///                     quote { /* runtime code */ }
+///                 }
+///             }
+///         }
+///     }
+/// }
+/// ```
+///
+/// ## Stage Coherence
+///
+/// The StageInfo context enables validation of the stage coherence rule:
+/// each quote lowers the stage by exactly 1. Using MetaStaged ensures
+/// proper stage tracking throughout nested code generation.
+public using MetaStaged = [StageInfo, TypeInfo, AstAccess, CompileDiag, MacroState, Hygiene];
+
+/// Code analysis context group
+///
+/// Contexts for analyzing and searching the codebase during compilation.
+/// Useful for generating code based on existing code patterns.
+///
+/// ## Capabilities
+///
+/// - CodeSearch: Find functions, types, and usages
+/// - TypeInfo: Type introspection
+/// - AstAccess: AST manipulation
+/// - CompileDiag: Error reporting
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn find_all_handlers() -> TokenStream using MetaAnalysis {
+///     let handlers = CodeSearch.find_functions_with_attr("handler");
+///     // Generate registration code
+/// }
+/// ```
+public using MetaAnalysis = [CodeSearch, TypeInfo, AstAccess, CompileDiag];
+
+/// Project-aware context group
+///
+/// Contexts for meta functions that need project-level information.
+/// Includes project metadata, dependencies, and build configuration.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn conditional_feature() -> TokenStream using MetaProject {
+///     if ProjectInfo.is_feature_enabled("async") {
+///         quote { /* async code */ }
+///     } else {
+///         quote { /* sync code */ }
+///     }
+/// }
+/// ```
+public using MetaProject = [ProjectInfo, TypeInfo, AstAccess, CompileDiag];
+
+/// Code generation with source mapping
+///
+/// Contexts for generating code with proper source location tracking.
+/// Essential for good error messages and IDE integration.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn tracked_generation() -> TokenStream using MetaSourced {
+///     SourceMap.enter_generated("my_macro");
+///     let result = quote { /* generated code */ };
+///     SourceMap.map_span_to_generator(result.span());
+///     SourceMap.exit_generated();
+///     result
+/// }
+/// ```
+public using MetaSourced = [SourceMap, TypeInfo, AstAccess, CompileDiag];
+
+/// Validated code generation
+///
+/// Contexts for generating and validating code structure.
+/// Ensures generated code matches expected patterns.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn validated_api() -> TokenStream using MetaValidated {
+///     let code = generate_api_code();
+///     let schema = Schema.function_schema()
+///         .with_return_type("Result<Response, Error>")
+///         .build();
+///     Schema.validate(code, schema)?;
+///     code
+/// }
+/// ```
+public using MetaValidated = [Schema, TypeInfo, AstAccess, CompileDiag];
+
+/// Dependency-aware meta context
+///
+/// Contexts for meta functions that analyze or manipulate dependencies.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn check_deps() using MetaDeps {
+///     let cycles = DepGraph.find_cycles();
+///     for cycle in cycles {
+///         CompileDiag.emit_warning(
+///             f"Circular dependency: {cycle}",
+///             Span.call_site()
+///         );
+///     }
+/// }
+/// ```
+public using MetaDeps = [DepGraph, ProjectInfo, CompileDiag];
+
+/// Performance-instrumented meta context
+///
+/// Contexts for profiling and benchmarking meta functions.
+/// Useful for optimizing complex code generators.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn instrumented_generation() -> TokenStream using MetaProfiled {
+///     let timer = MetaBench.start("code_gen");
+///     let result = expensive_generation();
+///     MetaBench.report("code_gen", timer.stop());
+///     result
+/// }
+/// ```
+public using MetaProfiled = [MetaBench, TypeInfo, AstAccess, CompileDiag];
+
+/// Complete meta tooling context
+///
+/// All analysis, validation, and performance contexts.
+/// Use for complex meta programs that need full tooling support.
+///
+/// ## Warning
+///
+/// This is the most comprehensive context group. Only use when you
+/// genuinely need all these capabilities. Prefer more specific groups.
+public using MetaTooling = [
+    CodeSearch, ProjectInfo, SourceMap, Schema, DepGraph, MetaBench,
+    TypeInfo, AstAccess, CompileDiag, MacroState
+];
+
+// =============================================================================
+// AST Types (Forward Declarations)
+// =============================================================================
+// These are compiler-internal types exposed to meta functions
+
+/// Expression AST node
+@compiler_type
+public type Expr is ();
+
+/// Type AST node
+@compiler_type
+public type Type is ();
+
+/// Item AST node (function, type, module, etc.)
+@compiler_type
+public type Item is ();
+
+/// Pattern AST node
+@compiler_type
+public type Pattern is ();
+
+/// Statement AST node
+@compiler_type
+public type Statement is ();
+
+/// Block AST node (sequence of statements)
+@compiler_type
+public type Block is ();
+
+// =============================================================================
+// Parse Result Types
+// =============================================================================
+
+/// Result of recovery parsing
+///
+/// Contains partial result along with any errors encountered.
+public type ParseResult<T> is {
+    /// Parsed value (None if parsing completely failed)
+    value: Maybe<T>,
+
+    /// List of parse errors encountered
+    errors: List<ParseError>,
+
+    /// Recovered tokens that couldn't be parsed
+    remaining: TokenStream,
+
+    /// Whether parsing completed successfully
+    success: Bool,
+};
+
+implement<T> ParseResult<T> {
+    /// Check if parsing had no errors
+    public fn is_ok(&self) -> Bool {
+        self.success && self.errors.is_empty()
+    }
+
+    /// Check if parsing had errors
+    public fn has_errors(&self) -> Bool {
+        !self.errors.is_empty()
+    }
+
+    /// Get value if successful
+    public fn ok(self) -> Maybe<T> {
+        if self.success { self.value } else { None }
+    }
+
+    /// Convert to Result, collecting errors
+    public fn to_result(self) -> MetaResult<T> {
+        match self.value {
+            Some(v) if self.success => Ok(v),
+            _ => Err(MetaError.ParseFailed(self.errors)),
+        }
+    }
+}
+
+/// Parse error information
+public type ParseError is {
+    /// Error message
+    message: Text,
+
+    /// Error code
+    code: Maybe<Text>,
+
+    /// Location of error
+    span: Span,
+
+    /// Expected tokens/constructs
+    expected: List<Text>,
+
+    /// Found token/construct
+    found: Maybe<Text>,
+};
+
+implement ParseError {
+    /// Format error for display
+    public fn format(&self) -> Text {
+        let mut msg = self.message.clone();
+        if !self.expected.is_empty() {
+            msg = f"{msg}\nExpected: {self.expected.join(\", \")}";
+        }
+        if let Some(found) = &self.found {
+            msg = f"{msg}\nFound: {found}";
+        }
+        msg
+    }
+}
+
+// =============================================================================
+// Formatting Options
+// =============================================================================
+
+/// Options for pretty printing
+public type FormatOptions is {
+    /// Indentation width (spaces)
+    indent_width: Int,
+
+    /// Maximum line width
+    max_width: Int,
+
+    /// Use tabs instead of spaces
+    use_tabs: Bool,
+
+    /// Add trailing commas
+    trailing_commas: Bool,
+
+    /// Preserve blank lines
+    preserve_blank_lines: Bool,
+
+    /// Single vs multi-line brace style
+    brace_style: BraceStyle,
+};
+
+implement FormatOptions {
+    /// Default formatting options
+    public fn default() -> Self {
+        Self {
+            indent_width: 4,
+            max_width: 100,
+            use_tabs: false,
+            trailing_commas: true,
+            preserve_blank_lines: true,
+            brace_style: BraceStyle.SameLine,
+        }
+    }
+
+    /// Compact formatting (minimal whitespace)
+    public fn compact() -> Self {
+        Self {
+            indent_width: 0,
+            max_width: 1000,
+            use_tabs: false,
+            trailing_commas: false,
+            preserve_blank_lines: false,
+            brace_style: BraceStyle.SameLine,
+        }
+    }
+}
+
+/// Brace style for formatting
+@repr(UInt8)
+public type BraceStyle is
+    /// Opening brace on same line: `fn foo() {`
+    | SameLine
+    /// Opening brace on new line: `fn foo()\n{`
+    | NextLine
+    /// Based on content length
+    | Adaptive;
+
+// =============================================================================
+// ToTokens Protocol
+// =============================================================================
+
+/// Protocol for types that can be converted to token streams
+///
+/// This is a compile-time-only protocol. All methods are marked `meta fn`
+/// to indicate they execute during compilation, not at runtime.
+public type ToTokens is protocol {
+    /// Convert to token stream (compile-time only)
+    meta fn to_tokens(&self) -> TokenStream using AstAccess;
+};
+
+// Implement ToTokens for AST nodes
+implement ToTokens for Expr {
+    meta fn to_tokens(&self) -> TokenStream using AstAccess {
+        AstAccess.emit(*self)
+    }
+}
+
+implement ToTokens for Type {
+    meta fn to_tokens(&self) -> TokenStream using AstAccess {
+        AstAccess.emit(*self)
+    }
+}
+
+implement ToTokens for Item {
+    meta fn to_tokens(&self) -> TokenStream using AstAccess {
+        AstAccess.emit(*self)
+    }
+}
+
+implement ToTokens for Pattern {
+    meta fn to_tokens(&self) -> TokenStream using AstAccess {
+        AstAccess.emit(*self)
+    }
+}
+
+implement ToTokens for TokenStream {
+    meta fn to_tokens(&self) -> TokenStream using AstAccess {
+        *self
+    }
+}

@@ -1,0 +1,22 @@
+// Test 2: Declarative refinements with where clause
+// Syntax: Type where predicate
+
+fn test_where_simple() -> Int where it > 0 {
+    42
+}
+
+fn test_where_range() -> Int where it >= 0 && it <= 100 {
+    50
+}
+
+fn test_where_complex() -> Int where it > 10 && it < 20 && it % 2 == 0 {
+    12
+}
+
+fn main() {
+    let simple = test_where_simple();
+    let range = test_where_range();
+    let complex = test_where_complex();
+
+    simple + range + complex
+}

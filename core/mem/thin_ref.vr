@@ -1,0 +1,581 @@
+// =============================================================================
+// mem/thin_ref.vr - ThinRef<T> (16 bytes) for Sized Types
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/header, mem/capability, mem/hazard, mem/epoch
+// =============================================================================
+//
+// ThinRef<T> is the primary reference type for sized types in the CBGR system.
+// It provides memory safety through generation-based validation with ~15ns
+// overhead per dereference.
+//
+// # Memory Layout (16 bytes total)
+//
+// ```
+// Offset  Size  Field           Description
+// ──────────────────────────────────────────────────────────────────────
+// 0       8     ptr             Pointer to data (non-null)
+// 8       4     generation      Expected generation counter
+// 12      4     epoch_and_caps  Packed: epoch (16-bit) + capabilities (16-bit)
+// ──────────────────────────────────────────────────────────────────────
+// Total: 16 bytes (fits in two registers)
+// ```
+//
+// # Packing Strategy
+//
+// epoch_and_caps layout:
+// - Bits 0-15:  epoch (16 bits, for wraparound protection)
+// - Bits 16-31: capabilities (16 bits, access control)
+//
+// # Validation Tiers
+//
+// - Tier 0 (Interpreter): Full validation with hazard pointers (~15ns)
+// - Tier 1 (Baseline JIT): Standard validation (~10ns)
+// - Tier 2 (Optimizing JIT): Selective validation (~5ns)
+// - Tier 3 (AOT): Minimal validation (~3ns, compiler-proven paths)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.2
+// =============================================================================
+
+module core.mem.thin_ref;
+mount super.header.{AllocationHeader, HEADER_SIZE, GEN_UNALLOCATED};
+mount super.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE,
+    has_capability, validate_read, validate_write,
+};
+mount super.hazard.{HazardGuard, acquire_hazard};
+mount super.epoch.{GLOBAL_EPOCH};
+mount super.{UseAfterFreeError, RevocationError, ExecutionTier, get_execution_tier};
+
+// =============================================================================
+// ThinRef Structure
+// =============================================================================
+
+/// ThinRef - 16-byte generational reference for sized types.
+///
+/// This is the core reference type in Verum's CBGR (Counter-Based Generation
+/// Reference) system. Every dereference is validated against the allocation's
+/// current generation, preventing use-after-free bugs at runtime.
+///
+/// # Example
+///
+/// ```verum
+/// let x = Heap.new(42);
+/// let thin: ThinRef<Int> = x.as_thin_ref();
+///
+/// // Safe access with automatic validation
+/// let value = thin.try_deref()?;
+///
+/// // After deallocation, validation fails
+/// drop(x);
+/// assert(thin.try_deref().is_err());
+/// ```
+@repr(C, size(16), align(8))
+public type ThinRef<T> is {
+    /// Pointer to data (non-null when valid).
+    ptr: &unsafe T,
+
+    /// Expected generation counter from allocation time.
+    generation: UInt32,
+
+    /// Packed epoch (bits 0-15) and capabilities (bits 16-31).
+    epoch_and_caps: UInt32,
+};
+
+implement<T> ThinRef<T> {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    /// Create a new ThinRef from raw components.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - `ptr` is non-null and properly aligned for T
+    /// - `ptr` points to memory with a valid AllocationHeader at offset -32
+    /// - `generation` and `epoch` match the header values
+    @inline
+    public unsafe fn new(
+        ptr: &unsafe T,
+        generation: UInt32,
+        epoch: UInt16,
+        capabilities: UInt16,
+    ) -> ThinRef<T> {
+        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
+
+        ThinRef {
+            ptr: ptr,
+            generation: generation,
+            epoch_and_caps: epoch_and_caps,
+        }
+    }
+
+    /// Create a null ThinRef (for initialization/edge cases).
+    ///
+    /// # Safety
+    ///
+    /// This creates an invalid ThinRef that will fail validation.
+    @inline
+    public unsafe fn null() -> ThinRef<T> {
+        ThinRef {
+            ptr: 0 as &unsafe T,
+            generation: GEN_UNALLOCATED,
+            epoch_and_caps: 0,
+        }
+    }
+
+    /// Create from allocation header.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure `header` is valid and `ptr` is the user data
+    /// pointer corresponding to that header.
+    @inline
+    public unsafe fn from_header(
+        ptr: &unsafe T,
+        header: &AllocationHeader,
+        capabilities: UInt16,
+    ) -> ThinRef<T> {
+        let (generation, epoch) = header.load_generation_epoch_fast();
+        ThinRef.new(ptr, generation, epoch, capabilities)
+    }
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    /// Check if this is a null reference.
+    @inline
+    public fn is_null(&self) -> Bool {
+        self.generation == GEN_UNALLOCATED || self.ptr as Int == 0
+    }
+
+    /// Get raw pointer (unsafe, bypasses validation).
+    @inline
+    public fn as_ptr(&self) -> &unsafe T {
+        self.ptr
+    }
+
+    /// Get generation counter.
+    @inline
+    public fn generation(&self) -> UInt32 {
+        self.generation
+    }
+
+    /// Get epoch counter (unpacked from epoch_and_caps).
+    @inline
+    public fn epoch(&self) -> UInt16 {
+        (self.epoch_and_caps & 0xFFFF) as UInt16
+    }
+
+    /// Get capabilities (unpacked from epoch_and_caps).
+    @inline
+    public fn capabilities(&self) -> UInt16 {
+        (self.epoch_and_caps >> 16) as UInt16
+    }
+
+    /// Check if reference has a specific capability.
+    @inline
+    public fn has_capability(&self, cap: UInt16) -> Bool {
+        has_capability(self.capabilities(), cap)
+    }
+
+    /// Check if reference has read capability.
+    @inline
+    public fn can_read(&self) -> Bool {
+        self.has_capability(CAP_READ)
+    }
+
+    /// Check if reference has write capability.
+    @inline
+    public fn can_write(&self) -> Bool {
+        validate_write(self.capabilities())
+    }
+
+    /// Check if reference can be revoked.
+    @inline
+    public fn can_revoke(&self) -> Bool {
+        self.has_capability(CAP_REVOKE)
+    }
+
+    // =========================================================================
+    // Validation
+    // =========================================================================
+
+    /// Validate generation and epoch (core CBGR check).
+    ///
+    /// This is the fundamental safety check that prevents use-after-free.
+    /// Returns Ok(()) if the reference is valid, or an error describing
+    /// the validation failure.
+    ///
+    /// # Performance
+    ///
+    /// ~15ns for full validation with header access.
+    @inline
+    public fn validate(&self) -> Result<(), UseAfterFreeError> {
+        if self.is_null() {
+            return Err(UseAfterFreeError.null_pointer(T.name));
+        }
+
+        // Access header to get current generation/epoch
+        unsafe {
+            let header = AllocationHeader.from_user_ptr(self.ptr as &unsafe Byte);
+            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
+
+            if self.generation == actual_gen && self.epoch() == actual_epoch {
+                return Ok(());
+            }
+
+            Err(UseAfterFreeError.new(
+                self.generation,
+                actual_gen,
+                self.epoch(),
+                actual_epoch,
+                T.name,
+            ))
+        }
+    }
+
+    /// Fast validation using combined 64-bit load.
+    ///
+    /// # Safety
+    ///
+    /// Requires header to be properly aligned for 64-bit access.
+    @inline
+    public unsafe fn validate_fast(&self) -> Result<(), UseAfterFreeError> {
+        if self.is_null() {
+            return Err(UseAfterFreeError.null_pointer(T.name));
+        }
+
+        let header = AllocationHeader.from_user_ptr(self.ptr as &unsafe Byte);
+        let (actual_gen, actual_epoch) = header.load_generation_epoch_combined();
+
+        if self.generation == actual_gen && self.epoch() == actual_epoch {
+            return Ok(());
+        }
+
+        Err(UseAfterFreeError.new(
+            self.generation,
+            actual_gen,
+            self.epoch(),
+            actual_epoch,
+            T.name,
+        ))
+    }
+
+    /// Check if reference is valid (does not panic).
+    @inline
+    public fn is_valid(&self) -> Bool {
+        self.validate().is_ok()
+    }
+
+    /// Tier-aware validation based on current execution tier.
+    @inline
+    fn validate_for_tier(&self) -> Result<(), UseAfterFreeError> {
+        match get_execution_tier() {
+            Interpreter => self.validate_tier0(),
+            BaselineJit => self.validate_tier1(),
+            OptimizingJit => self.validate_tier2(),
+            Aot => self.validate_tier3(),
+        }
+    }
+
+    /// Tier 0: Full validation (Interpreter) - ~15ns
+    /// Complete CBGR check with all safety guarantees.
+    @inline
+    fn validate_tier0(&self) -> Result<(), UseAfterFreeError> {
+        self.validate()
+    }
+
+    /// Tier 1: Standard validation (Baseline JIT) - ~10ns
+    /// Uses optimized load path.
+    @inline
+    fn validate_tier1(&self) -> Result<(), UseAfterFreeError> {
+        unsafe { self.validate_fast() }
+    }
+
+    /// Tier 2: Selective validation (Optimizing JIT) - ~5ns
+    /// Validates only on first access per basic block (requires JIT support).
+    @inline
+    fn validate_tier2(&self) -> Result<(), UseAfterFreeError> {
+        // In stdlib, fall back to tier 1 behavior
+        // JIT compiler will elide redundant checks
+        unsafe { self.validate_fast() }
+    }
+
+    /// Tier 3: Minimal validation (AOT) - ~3ns
+    /// Only null check for compiler-proven paths.
+    @inline
+    fn validate_tier3(&self) -> Result<(), UseAfterFreeError> {
+        if self.is_null() {
+            Err(UseAfterFreeError.null_pointer(T.name))
+        } else {
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Dereference Operations
+    // =========================================================================
+
+    /// Dereference with generation check.
+    ///
+    /// This is the primary safe access method. It:
+    /// 1. Acquires a hazard pointer to prevent deallocation
+    /// 2. Validates generation and epoch
+    /// 3. Checks read capability
+    /// 4. Returns reference to data
+    ///
+    /// # Performance
+    ///
+    /// ~15-20ns total (hazard + validation + capability check)
+    @inline
+    public fn try_deref(&self) -> Result<&T, UseAfterFreeError> {
+        // Acquire hazard pointer BEFORE validation (prevents race)
+        let _guard = acquire_hazard(self.ptr as &unsafe Byte);
+
+        // Validate generation/epoch
+        self.validate_for_tier()?;
+
+        // Check read capability
+        if !self.can_read() {
+            return Err(UseAfterFreeError.capability_violation(
+                "read",
+                T.name,
+            ));
+        }
+
+        // Safe to dereference
+        unsafe { Ok(&*self.ptr) }
+    }
+
+    /// Dereference mutably with generation check.
+    ///
+    /// Same as try_deref but also validates write and mutable capabilities.
+    @inline
+    public fn try_deref_mut(&mut self) -> Result<&mut T, UseAfterFreeError> {
+        // Acquire hazard pointer
+        let _guard = acquire_hazard(self.ptr as &unsafe Byte);
+
+        // Validate generation/epoch
+        self.validate_for_tier()?;
+
+        // Check write capability
+        if !self.has_capability(CAP_WRITE) {
+            return Err(UseAfterFreeError.capability_violation(
+                "write",
+                T.name,
+            ));
+        }
+
+        // Check mutable capability
+        if !self.has_capability(CAP_MUTABLE) {
+            return Err(UseAfterFreeError.capability_violation(
+                "mutable",
+                T.name,
+            ));
+        }
+
+        // Safe to dereference mutably
+        unsafe { Ok(&mut *self.ptr) }
+    }
+
+    /// Dereference without checking (unsafe).
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - Reference is valid (correct generation/epoch)
+    /// - No concurrent deallocation
+    @inline
+    public unsafe fn deref_unchecked(&self) -> &T {
+        @debug_assert(self.is_valid(), "deref_unchecked on invalid ThinRef");
+        &*self.ptr
+    }
+
+    /// Dereference mutably without checking (unsafe).
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - Reference is valid (correct generation/epoch)
+    /// - Exclusive access (no aliasing)
+    /// - No concurrent deallocation
+    @inline
+    public unsafe fn deref_mut_unchecked(&mut self) -> &mut T {
+        @debug_assert(self.is_valid(), "deref_mut_unchecked on invalid ThinRef");
+        &mut *self.ptr
+    }
+
+    // =========================================================================
+    // Reference Operations
+    // =========================================================================
+
+    /// Clone this reference (shares generation).
+    ///
+    /// The cloned reference points to the same data and will be invalidated
+    /// when the original allocation is deallocated.
+    @inline
+    public fn clone_ref(&self) -> ThinRef<T> {
+        ThinRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: self.epoch_and_caps,
+        }
+    }
+
+    /// Create a read-only view of this reference.
+    ///
+    /// Removes write and mutable capabilities.
+    @inline
+    public fn as_readonly(&self) -> ThinRef<T> {
+        let new_caps = self.capabilities() & !(CAP_WRITE | CAP_MUTABLE);
+        ThinRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+        }
+    }
+
+    /// Attenuate capabilities (can only remove, never add).
+    @inline
+    public fn attenuate(&self, mask: UInt16) -> ThinRef<T> {
+        let new_caps = self.capabilities() & mask;
+        ThinRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+        }
+    }
+
+    // =========================================================================
+    // Revocation
+    // =========================================================================
+
+    /// Explicitly revoke this reference.
+    ///
+    /// Increments the generation counter in the allocation header, which
+    /// invalidates this reference and ALL copies that share the same
+    /// generation value.
+    ///
+    /// # Requirements
+    ///
+    /// - Reference must have CAP_REVOKE capability
+    /// - Reference must be valid (not already revoked)
+    public fn revoke(&self) -> Result<(), RevocationError> {
+        if self.is_null() {
+            return Err(RevocationError.null_pointer(T.name));
+        }
+
+        if !self.can_revoke() {
+            return Err(RevocationError.capability_violation(T.name));
+        }
+
+        unsafe {
+            let header = AllocationHeader.from_user_ptr_mut(self.ptr as &unsafe Byte);
+
+            // Verify current state matches expected
+            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
+
+            if self.generation != actual_gen || self.epoch() != actual_epoch {
+                return Err(RevocationError.already_revoked(T.name));
+            }
+
+            // Increment generation atomically
+            let old_gen = header.increment_generation();
+
+            if old_gen != actual_gen {
+                return Err(RevocationError.internal_error(
+                    T.name,
+                    "generation changed during revocation",
+                ));
+            }
+
+            // Notify epoch manager
+            let new_gen = header.load_generation();
+            let new_epoch = header.load_epoch();
+            GLOBAL_EPOCH.on_revocation(
+                self.ptr as &unsafe Byte,
+                actual_gen,
+                new_gen,
+                new_epoch,
+            );
+
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Header Access
+    // =========================================================================
+
+    /// Get pointer to allocation header.
+    ///
+    /// # Safety
+    ///
+    /// Reference must be non-null and have valid header at offset -32.
+    @inline
+    public unsafe fn header(&self) -> &AllocationHeader {
+        AllocationHeader.from_user_ptr(self.ptr as &unsafe Byte)
+    }
+
+    /// Get mutable header reference.
+    ///
+    /// # Safety
+    ///
+    /// Reference must be non-null and caller must have exclusive access.
+    @inline
+    public unsafe fn header_mut(&self) -> &mut AllocationHeader {
+        AllocationHeader.from_user_ptr_mut(self.ptr as &unsafe Byte)
+    }
+}
+
+// =============================================================================
+// Trait Implementations
+// =============================================================================
+
+/// ThinRef is Copy (16 bytes, no drop semantics).
+implement<T> Copy for ThinRef<T> {}
+
+/// ThinRef is Clone.
+implement<T> Clone for ThinRef<T> {
+    fn clone(&self) -> ThinRef<T> {
+        *self
+    }
+}
+
+/// ThinRef is Send if T is Send.
+unsafe implement<T: Send> Send for ThinRef<T> {}
+
+/// ThinRef is Sync if T is Sync.
+unsafe implement<T: Sync> Sync for ThinRef<T> {}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Create a ThinRef from a heap allocation.
+///
+/// # Safety
+///
+/// Caller must ensure `ptr` is a valid heap allocation with CBGR header.
+@inline
+public unsafe fn thin_ref_from_heap<T>(ptr: &unsafe T, capabilities: UInt16) -> ThinRef<T> {
+    let header = AllocationHeader.from_user_ptr(ptr as &unsafe Byte);
+    ThinRef.from_header(ptr, header, capabilities)
+}
+
+/// Validate a ThinRef and return the inner reference.
+///
+/// Convenience function for common validate-then-deref pattern.
+@inline
+public fn deref_thin<T>(thin: &ThinRef<T>) -> Result<&T, UseAfterFreeError> {
+    thin.try_deref()
+}
+
+/// Validate a ThinRef and return a mutable inner reference.
+@inline
+public fn deref_thin_mut<T>(thin: &mut ThinRef<T>) -> Result<&mut T, UseAfterFreeError> {
+    thin.try_deref_mut()
+}

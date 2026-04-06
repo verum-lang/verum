@@ -1,0 +1,34 @@
+// Test the new . path separator syntax for variant construction
+// This tests that Color.Red, Maybe.Some, etc. work correctly
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+fn describe_color(c: Color) {
+    match c {
+        Color.Red => print(f"This is red"),
+        Color.Green => print(f"This is green"),
+        Color.Blue => print(f"This is blue"),
+    }
+}
+
+fn main() {
+    print(f"Testing dot path syntax...");
+
+    // Test simple enum construction with dot syntax
+    let red = Color.Red;
+    let green = Color.Green;
+    let blue = Color.Blue;
+
+    print(f"Created colors successfully!");
+
+    // Test pattern matching with dot syntax
+    describe_color(red);
+    describe_color(green);
+    describe_color(blue);
+
+
+    print(f"Dot path syntax works!");
+}

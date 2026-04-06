@@ -1,0 +1,7 @@
+[package]
+name = "control_flow"
+version = "0.1.0"
+description = "If/else, match expressions, loops, and ranges"
+
+[language]
+profile = "application"

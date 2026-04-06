@@ -1,0 +1,60 @@
+// Test: OP-001 through OP-010 - All operators
+// Priority: Critical/High
+// Expected output: Various operator results
+
+fn double(x: Int) -> Int { x * 2 }
+fn add_one(x: Int) -> Int { x + 1 }
+
+fn might_fail() -> Result<Int, Text> {
+    Result.Ok(42)
+}
+
+fn main() {
+    // Pipeline operator |>
+    let result = 5 |> double |> add_one;
+    print(f"Pipeline: {result}");
+
+    // Null coalescing ??
+    let x: Maybe<Int> = Maybe.None;
+    let y = x ?? 42;
+    print(f"Null coalesce: {y}");
+
+    // Try operator ?
+    let value = match might_fail() {
+        Result.Ok(v) => v,
+        Result.Err(_) => 0,
+    };
+    print(f"Try result: {value}");
+
+    // Type cast
+    let num: Int = 42;
+    let flt = num as Float;
+    print(f"Cast: {flt}");
+
+    // Comparison operators
+    let a = 5;
+    let b = 10;
+    print(f"{a < b} {a > b} {a <= b} {a >= b} {a == b} {a != b}");
+
+    // Bitwise operators
+    let m = 12;  // 0b1100
+    let n = 10;  // 0b1010
+    print(f"{m & n} {m | n} {m ^ n} {m << 2} {m >> 1}");
+
+    // Unary operators
+    let v = 5;
+    let flag = true;
+    print(f"{-v} {!flag}");
+
+    // Power operator
+    let power = 2 ** 10;
+    print(f"Power: {power}");
+
+    // Compound assignment
+    let mut z = 10;
+    z += 5;
+    z -= 2;
+    z *= 3;
+    z /= 2;
+    print(f"Compound: {z}");
+}

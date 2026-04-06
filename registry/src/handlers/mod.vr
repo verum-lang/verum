@@ -1,0 +1,112 @@
+// Verum Registry - HTTP Handlers Module
+//
+// Exports all HTTP request handlers for the registry API
+
+module packages;
+module search;
+module users;
+module health;
+module owners;
+module webhooks;
+module admin;
+module sumdb;
+module oidc;
+
+// Re-export commonly used types
+pub import .packages.{
+    PackageRequest,
+    PackageResponse,
+    PublishRequest,
+    PublishResponse,
+    YankRequest,
+    get_package,
+    publish_package,
+    yank_package,
+    list_packages,
+};
+
+pub import .search.{
+    SearchRequest,
+    SearchResponse,
+    search_packages,
+};
+
+pub import .users.{
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
+    TokenResponse,
+    login_user,
+    register_user,
+    verify_token,
+};
+
+pub import .health.{
+    HealthResponse,
+    health_check,
+};
+
+// Ownership management handlers
+pub import .owners.{
+    OwnerDto,
+    AddOwnerRequestDto,
+    RemoveOwnerRequestDto,
+    TransferOwnershipRequestDto,
+    OwnershipResponseDto,
+    list_owners,
+    add_owner,
+    remove_owner,
+    transfer_ownership,
+};
+
+// Webhook management handlers
+pub import .webhooks.{
+    WebhookEventDto,
+    WebhookDto,
+    CreateWebhookRequestDto,
+    UpdateWebhookRequestDto,
+    WebhookTestResponseDto,
+    WebhookResponseDto,
+    create_webhook,
+    list_webhooks,
+    update_webhook,
+    delete_webhook,
+    test_webhook,
+};
+
+// Admin handlers
+pub import .admin.{
+    AdminUserDto,
+    AdminPackageDto,
+    SuspendUserRequestDto,
+    BlockPackageRequestDto,
+    UnblockPackageRequestDto,
+    AdminResponseDto,
+    AdminUserListResponseDto,
+    AdminPackageListResponseDto,
+    RegistryStatsDto,
+    list_all_users,
+    suspend_user,
+    unsuspend_user,
+    list_all_packages,
+    block_package,
+    unblock_package,
+    get_registry_stats,
+};
+
+// Sumdb (transparent checksum database) handlers
+pub import .sumdb.{
+    handle_lookup,
+    handle_latest,
+    handle_tile,
+    handle_proof,
+    handle_verify,
+};
+
+// OIDC trusted publishing handlers
+pub import .oidc.{
+    OidcExchangeRequest,
+    OidcExchangeResponse,
+    handle_oidc_exchange,
+};

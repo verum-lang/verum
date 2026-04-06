@@ -1,0 +1,35 @@
+// Storage protocol for package files
+mount core.base.{Result, Text, Int, Float, Bool};
+mount core.collections.List;
+
+pub type StorageError is
+    | NotFound(Text)
+    | AccessDenied(Text)
+    | QuotaExceeded
+    | UploadFailed(Text)
+    | DownloadFailed(Text)
+    | InvalidPath(Text);
+
+pub type StorageMetadata is {
+    size: Int,
+    checksum: Text,
+    content_type: Text,
+    created_at: Text,
+    modified_at: Text,
+};
+
+pub context protocol Storage {
+    async fn store(self, path: Text, data: List<Int>) -> Result<StorageMetadata, StorageError>;
+    async fn retrieve(self, path: Text) -> Result<List<Int>, StorageError>;
+    async fn delete(self, path: Text) -> Result<(), StorageError>;
+    async fn exists(self, path: Text) -> Result<Bool, StorageError>;
+    async fn metadata(self, path: Text) -> Result<StorageMetadata, StorageError>;
+    async fn list(self, prefix: Text) -> Result<List<Text>, StorageError>;
+    async fn get_url(self, path: Text) -> Result<Text, StorageError>;
+
+    // Health check methods
+    async fn ping(self) -> Result<(), StorageError>;
+    async fn is_ready(self) -> Result<Bool, StorageError>;
+    async fn check_available(self) -> Result<(), StorageError>;
+    async fn available_space_gb(self) -> Result<Float, StorageError>;
+}

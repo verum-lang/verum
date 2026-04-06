@@ -1,0 +1,11 @@
+// Test Generic Associated Types (GAT)
+
+type Container is protocol {
+    type Element<T>;
+
+    fn get<T>(&self, index: Int) -> Maybe<Self.Element<T>>;
+};
+
+fn main() {
+    print("GAT protocol parsed successfully");
+}

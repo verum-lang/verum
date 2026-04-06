@@ -1,0 +1,135 @@
+// Filesystem Storage Provider
+//
+// Implements the Storage context protocol using the local filesystem.
+// In production, this would be swapped for an S3-compatible provider;
+// the context protocol interface remains identical.
+
+mount core.base.{Result, Text, Int, Float, Bool, Maybe};
+mount core.collections.List;
+mount core.io.fs.{read_file, write_file, delete_file, file_exists, file_metadata, list_directory};
+mount core.time.unix_timestamp;
+
+mount crate.contexts.storage.{Storage, StorageError, StorageMetadata};
+
+// ============================================================================
+// FilesystemStorageProvider
+// ============================================================================
+
+pub type FilesystemStorageProvider is {
+    base_path: Text,
+};
+
+implement FilesystemStorageProvider {
+    pub fn new(base_path: Text) -> FilesystemStorageProvider {
+        FilesystemStorageProvider { base_path: base_path }
+    }
+
+    /// Create required storage directories if they do not exist.
+    pub async fn ensure_directories(self) -> Result<(), Text> {
+        @ffi_mkdir_p(self.base_path);
+        Result.Ok(())
+    }
+
+    /// Build the full filesystem path for a storage key.
+    fn full_path(self, path: Text) -> Text {
+        f"{self.base_path}/{path}"
+    }
+
+    /// Compute a SHA-256 checksum for a byte buffer.
+    fn compute_checksum(data: &List<Int>) -> Text {
+        @sha256_hex(data)
+    }
+}
+
+implement Storage for FilesystemStorageProvider {
+    async fn store(self, path: Text, data: List<Int>) -> Result<StorageMetadata, StorageError> {
+        let full = self.full_path(path);
+        match write_file(full, data.clone()) {
+            Result.Ok(()) => {
+                let now = unix_timestamp().to_string();
+                let checksum = FilesystemStorageProvider.compute_checksum(&data);
+                Result.Ok(StorageMetadata {
+                    size: data.len(),
+                    checksum: checksum,
+                    content_type: "application/octet-stream",
+                    created_at: now.clone(),
+                    modified_at: now,
+                })
+            },
+            Result.Err(msg) => Result.Err(StorageError.UploadFailed(msg)),
+        }
+    }
+
+    async fn retrieve(self, path: Text) -> Result<List<Int>, StorageError> {
+        let full = self.full_path(path);
+        match read_file(full) {
+            Result.Ok(data) => Result.Ok(data),
+            Result.Err(_) => Result.Err(StorageError.NotFound(path)),
+        }
+    }
+
+    async fn delete(self, path: Text) -> Result<(), StorageError> {
+        let full = self.full_path(path);
+        match delete_file(full) {
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(_) => Result.Err(StorageError.NotFound(path)),
+        }
+    }
+
+    async fn exists(self, path: Text) -> Result<Bool, StorageError> {
+        let full = self.full_path(path);
+        Result.Ok(file_exists(full))
+    }
+
+    async fn metadata(self, path: Text) -> Result<StorageMetadata, StorageError> {
+        let full = self.full_path(path);
+        match file_metadata(full) {
+            Result.Ok(meta) => Result.Ok(StorageMetadata {
+                size: meta.size,
+                checksum: "",
+                content_type: "application/octet-stream",
+                created_at: meta.created_at,
+                modified_at: meta.modified_at,
+            }),
+            Result.Err(_) => Result.Err(StorageError.NotFound(path)),
+        }
+    }
+
+    async fn list(self, prefix: Text) -> Result<List<Text>, StorageError> {
+        let full = self.full_path(prefix);
+        match list_directory(full) {
+            Result.Ok(entries) => Result.Ok(entries),
+            Result.Err(_) => Result.Ok(List.new()),
+        }
+    }
+
+    async fn get_url(self, path: Text) -> Result<Text, StorageError> {
+        let full = self.full_path(path);
+        if file_exists(full) {
+            Result.Ok(f"file://{self.base_path}/{path}")
+        } else {
+            Result.Err(StorageError.NotFound(path))
+        }
+    }
+
+    async fn ping(self) -> Result<(), StorageError> {
+        Result.Ok(())
+    }
+
+    async fn is_ready(self) -> Result<Bool, StorageError> {
+        Result.Ok(file_exists(self.base_path))
+    }
+
+    async fn check_available(self) -> Result<(), StorageError> {
+        if file_exists(self.base_path) {
+            Result.Ok(())
+        } else {
+            Result.Err(StorageError.AccessDenied("base path does not exist"))
+        }
+    }
+
+    async fn available_space_gb(self) -> Result<Float, StorageError> {
+        // Delegate to platform-specific call
+        Result.Ok(@ffi_available_space_gb(self.base_path))
+    }
+}

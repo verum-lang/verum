@@ -1,0 +1,13 @@
+// Test 6: Or patterns
+
+fn test() -> Text {
+    let x = 2;
+    match x {
+        1 | 2 | 3 => "PASS",
+        _ => "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

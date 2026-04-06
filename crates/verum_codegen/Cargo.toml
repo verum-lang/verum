@@ -1,0 +1,87 @@
+[package]
+name = "verum_codegen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MLIR-based code generation and linking for the Verum compiler"
+keywords = ["verum", "codegen", "mlir", "compiler", "llvm"]
+categories = ["compilers"]
+
+[dependencies]
+# Core Verum crates
+verum_common = { workspace = true }
+verum_ast = { workspace = true }
+verum_types = { workspace = true }
+verum_error = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_vbc = { workspace = true, features = ["codegen"] }
+# CBGR escape analysis for optimization
+verum_cbgr = { workspace = true, optional = true }
+
+# LLVM backend for AOT compilation and linking
+verum_llvm = { workspace = true, features = ["lto"] }
+verum_llvm_sys = { workspace = true }
+
+# MLIR bindings (local build)
+verum_mlir = { workspace = true, features = ["ods-dialects"] }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging and tracing
+tracing = { workspace = true }
+
+# Data structures
+indexmap = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+smallvec = { workspace = true }
+
+# Serialization (for caching)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Concurrency
+rayon = { workspace = true }
+
+# Dynamic library loading (for JIT symbol resolution)
+libloading = "0.9"
+
+# Hashing for incremental compilation cache
+blake3 = "1.8"
+
+# Time for statistics and profiling
+instant = "0.1"
+
+# UUID for session management
+uuid = { version = "1.19", features = ["v4", "serde"] }
+
+# Hex encoding for cache file names
+hex = "0.4"
+
+# Temporary files for LTO
+tempfile = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+criterion = { workspace = true }
+verum_fast_parser = { workspace = true }
+
+[[bench]]
+name = "lowering_regression"
+harness = false
+
+[features]
+default = ["jit", "aot"]
+jit = []
+aot = []
+# Enable CBGR optimization passes (requires verum_cbgr)
+cbgr-optimization = ["dep:verum_cbgr"]
+# Enable context monomorphization
+context-mono = []
+# Enable all optimizations
+full-optimization = ["cbgr-optimization", "context-mono"]

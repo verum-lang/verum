@@ -1,0 +1,53 @@
+// Test inline refinement types using curly brace syntax
+// Syntax: type Name is BaseType{predicate};
+// The 'it' variable refers to the value being refined
+
+type Positive is Int{> 0};
+type Negative is Int{< 0};
+type Email is Text{len(it) > 5 && it.contains('@')};
+type BoundedFloat is Float{0.0 <= it && it <= 1.0};
+type NonEmpty is Text{len(it) > 0};
+type Port is Int{> 0 && it < 65536};
+
+// Test positive integers
+fn test_positive(x: Positive) -> Positive {
+    x + 1
+}
+
+// Test bounded floats
+fn test_bounded(x: BoundedFloat) -> BoundedFloat {
+    x * 0.5
+}
+
+// Test email validation (concept - actual validation would be more complex)
+fn display_email(email: Email) -> Text {
+    f"Email: {email}"
+}
+
+fn main() {
+    let _ = print("=== Inline Refinement Type Tests ===");
+
+    // Test 1: Positive integers
+    let _ = print("\nTest 1: Positive integers");
+    let pos1: Positive = 5;
+    let pos2 = test_positive(pos1);
+    let _ = print(f"pos1 = {pos1}, after test_positive = {pos2}");
+
+    // Test 2: Bounded floats
+    let _ = print("\nTest 2: Bounded floats");
+    let bounded1: BoundedFloat = 0.8;
+    let bounded2 = test_bounded(bounded1);
+    let _ = print(f"bounded1 = {bounded1}, after test_bounded = {bounded2}");
+
+    // Test 3: Port numbers
+    let _ = print("\nTest 3: Port numbers");
+    let port: Port = 8080;
+    let _ = print(f"Valid port: {port}");
+
+    // Test 4: Non-empty strings
+    let _ = print("\nTest 4: Non-empty strings");
+    let name: NonEmpty = "Verum";
+    let _ = print(f"Non-empty string: {name}");
+
+    let _ = print("\n=== All inline refinement tests passed ===");
+}

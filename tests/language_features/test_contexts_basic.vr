@@ -1,0 +1,24 @@
+// Define a simple context
+context Logger {
+    fn log(message: Text);
+}
+
+// Function using context
+fn greet(name: Text) using Logger {
+    Logger.log(f"Hello, {name}!");
+}
+
+// Main function with provide
+fn main() {
+    // Provide Logger implementation
+    provide Logger = {
+        fn log(message: Text) {
+            print(f"[LOG] {message}");
+        }
+    };
+
+    // Test context usage
+    greet("World");
+
+    print(f"Context system test complete");
+}

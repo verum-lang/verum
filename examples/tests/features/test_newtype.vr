@@ -1,0 +1,82 @@
+// Test newtype definitions (type wrappers for type safety)
+// Syntax: type Name is (BaseType); or type Name is BaseType;
+// Newtypes provide zero-cost abstraction with distinct types
+
+type Kilometers is (Float);
+type Miles is (Float);
+type UserId is (Int);
+type EmailAddress is (Text);
+type Age is (Int);
+type Temperature is (Float);
+
+// Functions with newtype parameters provide type safety
+fn convert_km_to_miles(km: Kilometers) -> Miles {
+    Miles(km * 0.621371)
+}
+
+fn get_user_name(id: UserId) -> Text {
+    f"User_{id}"
+}
+
+fn is_adult(age: Age) -> Bool {
+    age >= 18
+}
+
+fn celsius_to_fahrenheit(temp: Temperature) -> Temperature {
+    Temperature(temp * 1.8 + 32.0)
+}
+
+// Newtypes prevent mixing incompatible units
+fn distance_sum(a: Kilometers, b: Kilometers) -> Kilometers {
+    Kilometers(a + b)
+}
+
+fn format_email(email: EmailAddress) -> Text {
+    f"<{email}>"
+}
+
+fn main() {
+    let _ = print("=== Newtype Definition Tests ===");
+
+    // Test 1: Distance conversions (type safety)
+    let _ = print("\nTest 1: Distance newtypes");
+    let dist_km: Kilometers = Kilometers(100.0);
+    let dist_miles = convert_km_to_miles(dist_km);
+    let _ = print(f"Distance: {dist_km} km = {dist_miles} miles");
+
+    // Test 2: Combined distances
+    let dist1: Kilometers = Kilometers(50.0);
+    let dist2: Kilometers = Kilometers(75.0);
+    let total = distance_sum(dist1, dist2);
+    let _ = print(f"Total distance: {dist1} + {dist2} = {total} km");
+
+    // Test 3: UserId
+    let _ = print("\nTest 2: UserId newtype");
+    let user_id: UserId = UserId(42);
+    let user_name = get_user_name(user_id);
+    let _ = print(f"User ID: {user_id}, Name: {user_name}");
+
+    // Test 4: Age checks
+    let _ = print("\nTest 3: Age newtype");
+    let age1: Age = Age(25);
+    let age2: Age = Age(15);
+    let adult1 = is_adult(age1);
+    let adult2 = is_adult(age2);
+    let _ = print(f"Age {age1} is adult: {adult1}");
+    let _ = print(f"Age {age2} is adult: {adult2}");
+
+    // Test 5: Temperature conversion
+    let _ = print("\nTest 4: Temperature newtype");
+    let temp_c: Temperature = Temperature(25.0);
+    let temp_f = celsius_to_fahrenheit(temp_c);
+    let _ = print(f"Temperature: {temp_c}°C = {temp_f}°F");
+
+    // Test 6: Email addresses
+    let _ = print("\nTest 5: EmailAddress newtype");
+    let email1: EmailAddress = EmailAddress("alice@example.com");
+    let email2: EmailAddress = EmailAddress("bob@test.org");
+    let _ = print(format_email(email1));
+    let _ = print(format_email(email2));
+
+    let _ = print("\n=== All newtype tests passed ===");
+}

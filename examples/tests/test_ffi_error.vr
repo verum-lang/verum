@@ -1,0 +1,10 @@
+// Test FFI declarations with intentional error
+
+ffi Broken {
+    // Missing semicolon should cause parse error
+    fn bad_func() -> i32
+}
+
+fn main() {
+    let _ = println("This should not run");
+}

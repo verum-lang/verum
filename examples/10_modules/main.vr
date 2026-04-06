@@ -1,0 +1,67 @@
+// 10 — Modules
+// Verum's module system: mount (import), pub (export), and visibility.
+//
+// Key differences from Rust:
+//   Rust:  use foo::bar       Verum:  mount foo.bar
+//   Rust:  crate              Verum:  cog
+//   Path separator: . (dot)   not :: (double colon)
+
+// --- Importing from the standard library ---
+// mount std.collections.{List, Map}
+// mount std.io.{print, read_line}
+
+// --- Defining module-level types ---
+
+// `pub` makes a declaration visible outside this module.
+pub type Color is Red | Green | Blue;
+
+pub type Point is {
+    x: Float,
+    y: Float
+};
+
+// Private — only visible within this file/module.
+type InternalState is {
+    counter: Int,
+    label: Text
+};
+
+// --- Public functions ---
+pub fn distance(a: Point, b: Point) -> Float {
+    let dx = b.x - a.x
+    let dy = b.y - a.y
+    // Simplified: returns dx*dx + dy*dy (no sqrt for this demo)
+    dx * dx + dy * dy
+}
+
+pub fn color_name(c: Color) -> Text {
+    match c {
+        Red   => "red",
+        Green => "green",
+        Blue  => "blue"
+    }
+}
+
+// --- Private helper ---
+fn format_state(s: InternalState) -> Text {
+    f"[{s.label}: {s.counter}]"
+}
+
+fn main() {
+    // In a multi-file project, other modules would do:
+    //   mount my_project.main.{Point, Color, distance}
+
+    let origin = Point { x: 0.0, y: 0.0 }
+    let target = Point { x: 3.0, y: 4.0 }
+    let dist_sq = distance(origin, target)
+    print(f"Distance squared: {dist_sq}")  // 25.0
+
+    let c = Green
+    print(f"Color: {color_name(c)}")
+
+    // Private types work within the module
+    let state = InternalState { counter: 1, label: "init" }
+    print(f"State: {format_state(state)}")
+
+    print("Module system demo complete")
+}

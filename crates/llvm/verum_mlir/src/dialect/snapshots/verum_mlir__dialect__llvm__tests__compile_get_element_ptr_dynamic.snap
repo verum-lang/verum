@@ -1,0 +1,11 @@
+---
+source: melior/src/dialect/llvm.rs
+expression: module.as_operation()
+---
+module {
+  llvm.func @foo(%arg0: !llvm.ptr) {
+    %c42_i64 = arith.constant 42 : i64
+    %0 = llvm.getelementptr %arg0[%c42_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+    llvm.return
+  }
+}

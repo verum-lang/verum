@@ -1,0 +1,33 @@
+// Test control flow constructs
+fn main() {
+    // If-else expression
+    let x = 10
+    let result = if x > 5 {
+        "greater"
+    } else {
+        "smaller or equal"
+    }
+    print(f"x is {result}")
+    
+    // While loop
+    let mut i = 0
+    while i < 3 {
+        print(f"while i = {i}")
+        i = i + 1
+    }
+    
+    // For loop with range
+    for j in 0..3 {
+        print(f"for j = {j}")
+    }
+    
+    // Match expression
+    let num = 2
+    let name = match num {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "other"
+    }
+    print(f"num {num} is {name}")
+}

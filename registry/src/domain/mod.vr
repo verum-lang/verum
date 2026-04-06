@@ -1,0 +1,86 @@
+// Domain module exports
+// This module contains the core domain types for the Verum Registry
+
+module version;
+module package;
+module user;
+module errors;
+module checksum;
+module validation;
+module refinements;
+module repositories;
+module semver_constraint;
+module webhook;
+
+// Re-export commonly used types
+// Note: SemVer must be exported before Package/PackageVersion as they depend on it
+pub import .version.{SemVer, VersionConstraint};
+pub import .package.{Package, PackageVersion, PackageMetadata, Dependency};
+pub import .user.{User, UserRole, ApiToken};
+pub import .errors.RegistryError;
+pub import .checksum.{Checksum, ChecksumAlgorithm};
+
+// Re-export validation functions
+pub import .validation.{
+    is_valid_package_name,
+    is_valid_version,
+    is_valid_username,
+    is_valid_email
+};
+
+// Re-export refinement types for type-safe domain modeling
+pub import .refinements.{
+    // Numeric refinements
+    PositiveInt,
+    NonNegativeInt,
+    EntityId,
+    Timestamp,
+    DownloadCount,
+    VersionComponent,
+    // Text refinements
+    NonEmptyText,
+    Username,
+    PackageName,
+    Description,
+    ShortText,
+    UrlText,
+    LicenseId,
+    TokenValue,
+    Sha256Hash,
+    Email,
+    VersionConstraint,
+    // Pagination refinements
+    PageNumber,
+    PageSize,
+    QueryOffset,
+    QueryLimit,
+    TokenScope,
+    // Utility functions
+    clamp_page_size,
+    clamp_page_number,
+    calculate_offset
+};
+
+// Re-export repository protocols for dependency injection
+pub import .repositories.{
+    PackageRepository,
+    PackageVersionRepository,
+    UserRepository,
+    TokenRepository
+};
+
+// Re-export semantic version constraint parsing
+pub import .semver_constraint.{
+    parse_constraint,
+    satisfies,
+    sort_versions_descending
+};
+
+// Re-export webhook domain types
+pub import .webhook.{
+    WebhookEvent,
+    Webhook,
+    WebhookDelivery,
+    WebhookPayload,
+    WebhookData
+};

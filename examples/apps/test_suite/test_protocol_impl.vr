@@ -1,0 +1,21 @@
+// Test 2: Protocol Implementation
+// Tests: implementing a protocol for a concrete type
+
+type Greeter is protocol {
+    fn greet(&self) -> Int;
+}
+
+type Person is {
+    name: Int
+}
+
+implement Greeter for Person {
+    fn greet(&self) -> Int {
+        self.name
+    }
+}
+
+fn main() -> Int {
+    let p = Person { name: 42 };
+    p.greet()
+}

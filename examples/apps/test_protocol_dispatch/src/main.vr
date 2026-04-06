@@ -1,0 +1,33 @@
+// Test protocol method dispatch with multiple types
+
+type Display is protocol {
+    fn display(self) -> Text
+}
+
+implement Display for Int {
+    fn display(self) -> Text {
+        "integer"
+    }
+}
+
+implement Display for Float {
+    fn display(self) -> Text {
+        "floating point"
+    }
+}
+
+implement Display for Bool {
+    fn display(self) -> Text {
+        "boolean"
+    }
+}
+
+fn main() {
+    let x = 42;
+    let y = 3.14;
+    let z = true;
+
+    print(x.display());
+    print(y.display());
+    print(z.display());
+}

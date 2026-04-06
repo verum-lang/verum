@@ -1,0 +1,108 @@
+// Test extended variant types (sum types / enums) with record syntax
+// This tests more complex variant definitions with named fields
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float }
+    | Point;
+
+type Status is
+    | Pending
+    | Running { progress: Float }
+    | Completed { result: Int }
+    | Failed { error: Text };
+
+// Helper functions for Maybe
+fn unwrap_or<T>(maybe: Maybe<T>, default: T) -> T {
+    match maybe {
+        Some(val) => val,
+        None => default
+    }
+}
+
+// Calculate area for shapes
+fn area(shape: Shape) -> Float {
+    match shape {
+        Circle { radius: r } => 3.14159 * r * r,
+        Rectangle { width: w, height: h } => w * h,
+        Triangle { a: a, b: b, c: c } => {
+            // Simplified area calculation
+            let s = (a + b + c) / 2.0;
+            a * b / 2.0
+        },
+        Point => 0.0
+    }
+}
+
+// Process result
+fn process_result(res: Result<Int, Text>) -> Text {
+    match res {
+        Ok(value) => f"Success: {value}",
+        Err(msg) => f"Error: {msg}"
+    }
+}
+
+// Format status
+fn format_status(status: Status) -> Text {
+    match status {
+        Pending => "Task is pending",
+        Running { progress: p } => f"Task running: {p}% complete",
+        Completed { result: r } => f"Task completed with result: {r}",
+        Failed { error: e } => f"Task failed: {e}"
+    }
+}
+
+fn main() {
+    let _ = print("=== Extended Variant Type Tests ===");
+
+    // Test 1: Maybe type
+    let _ = print("\nTest 1: Maybe<T> type");
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    let unwrapped1 = unwrap_or(some_val, 0);
+    let unwrapped2 = unwrap_or(none_val, 99);
+    let _ = print(f"Some(42) unwrapped: {unwrapped1}");
+    let _ = print(f"None unwrapped with default 99: {unwrapped2}");
+
+    // Test 2: Result type
+    let _ = print("\nTest 2: Result<T, E> type");
+    let ok_res: Result<Int, Text> = Ok(100);
+    let err_res: Result<Int, Text> = Err("Something went wrong");
+    let _ = print(process_result(ok_res));
+    let _ = print(process_result(err_res));
+
+    // Test 3: Shape with record syntax
+    let _ = print("\nTest 3: Shape variants with records");
+    let circle = Circle { radius: 5.0 };
+    let rect = Rectangle { width: 4.0, height: 6.0 };
+    let triangle = Triangle { a: 3.0, b: 4.0, c: 5.0 };
+    let point = Point;
+
+    let _ = print(f"Circle area: {area(circle)}");
+    let _ = print(f"Rectangle area: {area(rect)}");
+    let _ = print(f"Triangle area: {area(triangle)}");
+    let _ = print(f"Point area: {area(point)}");
+
+    // Test 4: Status type with various states
+    let _ = print("\nTest 4: Status type");
+    let pending = Pending;
+    let running = Running { progress: 45.5 };
+    let completed = Completed { result: 42 };
+    let failed = Failed { error: "Network timeout" };
+
+    let _ = print(format_status(pending));
+    let _ = print(format_status(running));
+    let _ = print(format_status(completed));
+    let _ = print(format_status(failed));
+
+    let _ = print("\n=== All extended variant type tests passed ===");
+}

@@ -1,0 +1,191 @@
+// Verum Package Registry — Production Entry Point
+//
+// Initializes context providers, configures middleware, and starts the HTTP server.
+// All infrastructure dependencies are wired through Verum's context system.
+
+mount core.base.{Result, Text, Int, Bool, Maybe};
+mount core.collections.{List, Map};
+mount core.net.http.{HttpServer, HttpServerConfig};
+mount core.async.{spawn, join};
+mount core.sync.{Mutex, AtomicBool, signal_handler};
+mount core.env.{get_env, get_env_or};
+mount core.io.{print, eprintln};
+
+// Server and configuration
+mount crate.server.{RegistryConfig, ServerConfig, DatabaseConfig, StorageConfig, CacheConfig, SearchConfig};
+mount crate.server.{Router, setup_routes, print_routes};
+
+// Context protocols
+mount crate.contexts.{Database, Storage, Cache, Search, Logger, Metrics};
+
+// Context provider implementations
+mount crate.infrastructure.providers.{
+    PostgresDatabaseProvider,
+    FilesystemStorageProvider,
+    LruCacheProvider,
+    MemorySearchProvider,
+    StdoutLoggerProvider,
+    InMemoryMetricsProvider,
+};
+
+// Middleware
+mount crate.middleware.{
+    create_auth_middleware,
+    create_rate_limiter,
+    create_request_logger,
+    create_error_handler,
+};
+
+// ============================================================================
+// Configuration Loading
+// ============================================================================
+
+/// Load registry configuration from environment variables with sensible defaults.
+fn load_config() -> RegistryConfig {
+    let server = ServerConfig {
+        host: get_env_or("REGISTRY_HOST", "0.0.0.0"),
+        port: parse_int_or(get_env_or("REGISTRY_PORT", "8080"), 8080),
+        max_body_size: parse_int_or(get_env_or("REGISTRY_MAX_BODY_SIZE", "10485760"), 10485760),
+        timeout_secs: parse_int_or(get_env_or("REGISTRY_TIMEOUT", "30"), 30),
+    };
+
+    let database = DatabaseConfig {
+        url: get_env_or("DATABASE_URL", "postgres://localhost/verum_registry"),
+        max_connections: parse_int_or(get_env_or("DATABASE_MAX_CONN", "20"), 20),
+        connection_timeout: parse_int_or(get_env_or("DATABASE_TIMEOUT", "5"), 5),
+    };
+
+    let storage = StorageConfig {
+        base_path: get_env_or("STORAGE_PATH", "/var/lib/verum-registry/packages"),
+        max_file_size: parse_int_or(get_env_or("STORAGE_MAX_FILE_SIZE", "104857600"), 104857600),
+    };
+
+    let cache = CacheConfig {
+        url: get_env_or("CACHE_URL", "redis://localhost:6379"),
+        default_ttl: parse_int_or(get_env_or("CACHE_DEFAULT_TTL", "3600"), 3600),
+    };
+
+    let search = SearchConfig {
+        endpoint: get_env_or("SEARCH_ENDPOINT", "http://localhost:9200"),
+        index_name: get_env_or("SEARCH_INDEX", "verum_packages"),
+    };
+
+    RegistryConfig { server, database, storage, cache, search }
+}
+
+/// Parse an integer from text, returning a default on failure.
+fn parse_int_or(text: Text, default: Int) -> Int {
+    match text.parse_int() {
+        Maybe.Some(n) => n,
+        Maybe.None => default,
+    }
+}
+
+// ============================================================================
+// Provider Initialization
+// ============================================================================
+
+/// Create and initialize all context providers from configuration.
+async fn init_providers(config: &RegistryConfig) -> Result<(), Text> {
+    let db = PostgresDatabaseProvider.new(config.database.url, config.database.max_connections);
+    db.connect().await?;
+    provide Database = db;
+
+    let storage = FilesystemStorageProvider.new(config.storage.base_path);
+    storage.ensure_directories().await?;
+    provide Storage = storage;
+
+    let cache = LruCacheProvider.new(config.cache.default_ttl);
+    provide Cache = cache;
+
+    let search = MemorySearchProvider.new();
+    provide Search = search;
+
+    let logger = StdoutLoggerProvider.new();
+    provide Logger = logger;
+
+    let metrics = InMemoryMetricsProvider.new();
+    provide Metrics = metrics;
+
+    Result.Ok(())
+}
+
+// ============================================================================
+// Server Bootstrap
+// ============================================================================
+
+/// Build the full middleware chain for request processing.
+fn build_middleware_chain(config: &RegistryConfig) {
+    create_request_logger();
+    create_error_handler();
+    create_rate_limiter();
+    create_auth_middleware();
+}
+
+/// Main entry point.
+async fn main() -> Int {
+    print("verum-registry: starting");
+
+    // Load configuration
+    let config = load_config();
+
+    // Validate
+    match config.validate() {
+        Result.Ok(()) => {},
+        Result.Err(err) => {
+            eprintln(f"verum-registry: invalid configuration: {err.message()}");
+            return 1;
+        },
+    }
+
+    // Initialize providers
+    match init_providers(&config).await {
+        Result.Ok(()) => {
+            Logger.info("all context providers initialized");
+        },
+        Result.Err(msg) => {
+            eprintln(f"verum-registry: failed to initialize providers: {msg}");
+            return 1;
+        },
+    }
+
+    // Build middleware chain
+    build_middleware_chain(&config);
+
+    // Set up routes
+    let router = setup_routes();
+    Logger.info(f"registered {router.routes().len()} routes");
+
+    // Graceful shutdown signal
+    let shutdown = AtomicBool.new(false);
+    signal_handler("SIGTERM", fn() {
+        shutdown.store(true);
+        Logger.info("received SIGTERM, shutting down gracefully");
+    });
+    signal_handler("SIGINT", fn() {
+        shutdown.store(true);
+        Logger.info("received SIGINT, shutting down gracefully");
+    });
+
+    // Start HTTP server
+    let server_config = HttpServerConfig {
+        host: config.server.host,
+        port: config.server.port,
+        max_body_size: config.server.max_body_size,
+        timeout_secs: config.server.timeout_secs,
+        shutdown_signal: shutdown,
+    };
+
+    Logger.info(f"listening on {config.server.host}:{config.server.port}");
+
+    match HttpServer.serve(server_config, router).await {
+        Result.Ok(()) => {
+            Logger.info("server shut down cleanly");
+            0
+        },
+        Result.Err(err) => {
+            Logger.error(f"server error: {err}");
+            1
+        },
+    }
+}

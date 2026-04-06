@@ -1,0 +1,62 @@
+name: ThreadSanitizer
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-Z sanitizer=thread"
+  TSAN_OPTIONS: "halt_on_error=1 suppressions=.tsan-suppressions.txt"
+
+jobs:
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Rust nightly
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rust-src
+
+    - name: Install ThreadSanitizer dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm
+
+    - name: Run tests with TSAN on verum_cbgr
+      run: |
+        cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu \
+          --package verum_cbgr \
+          -- --test-threads=1
+
+    - name: Run tests with TSAN on verum_std
+      run: |
+        cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu \
+          --package verum_std \
+          -- --test-threads=1
+
+    - name: Run tests with TSAN on verum_runtime
+      run: |
+        cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu \
+          --package verum_runtime \
+          -- --test-threads=1
+
+    - name: Run concurrent stress tests
+      run: |
+        cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu \
+          --package verum_cbgr \
+          concurrent_stress \
+          -- --test-threads=1 --nocapture
+
+    - name: Run memory ordering tests
+      run: |
+        cargo +nightly test -Z build-std --target x86_64-unknown-linux-gnu \
+          --package verum_cbgr \
+          memory_ordering \
+          -- --test-threads=1 --nocapture

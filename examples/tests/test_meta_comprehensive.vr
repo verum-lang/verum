@@ -1,0 +1,126 @@
+// Comprehensive meta programming test
+// Tests all meta features together
+
+// Constants
+const ARRAY_SIZE: Int = 10;
+const MULTIPLIER: Int = 3;
+
+// Meta functions
+meta fn compile_time_fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        compile_time_fibonacci(n - 1) + compile_time_fibonacci(n - 2)
+    }
+}
+
+meta fn compile_time_is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+meta fn compile_time_range_sum(start: Int, end: Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    loop {
+        if i > end {
+            break;
+        }
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+// Meta function using constants
+meta fn compile_time_scaled(n: Int) -> Int {
+    n * MULTIPLIER
+}
+
+fn main() {
+    let _ = println("=== Meta Programming Comprehensive Test ===");
+
+    // Test 1: Constants
+    let _ = println(f"\nTest 1: Constants");
+    let _ = println(f"ARRAY_SIZE: {ARRAY_SIZE}");
+    let _ = println(f"MULTIPLIER: {MULTIPLIER}");
+
+    // Test 2: Simple meta block
+    let _ = println(f"\nTest 2: Simple Meta Block");
+    let simple = meta {
+        10 + 20
+    };
+    let _ = println(f"Simple meta block result: {simple}");
+
+    // Test 3: Meta block with variables
+    let _ = println(f"\nTest 3: Meta Block with Variables");
+    let with_vars = meta {
+        let x = 5;
+        let y = 10;
+        x + y
+    };
+    let _ = println(f"Meta block with vars: {with_vars}");
+
+    // Test 4: Meta function - Fibonacci
+    let _ = println(f"\nTest 4: Meta Function - Fibonacci");
+    let fib5 = compile_time_fibonacci(5);
+    let fib10 = compile_time_fibonacci(10);
+    let _ = println(f"Fibonacci(5): {fib5}");
+    let _ = println(f"Fibonacci(10): {fib10}");
+
+    // Test 5: Meta function - Even check
+    let _ = println(f"\nTest 5: Meta Function - Even Check");
+    let is_even_4 = compile_time_is_even(4);
+    let is_even_7 = compile_time_is_even(7);
+    let _ = println(f"Is 4 even? {is_even_4}");
+    let _ = println(f"Is 7 even? {is_even_7}");
+
+    // Test 6: Meta function - Range sum
+    let _ = println(f"\nTest 6: Meta Function - Range Sum");
+    let sum_1_10 = compile_time_range_sum(1, 10);
+    let sum_1_100 = compile_time_range_sum(1, 100);
+    let _ = println(f"Sum(1..10): {sum_1_10}");
+    let _ = println(f"Sum(1..100): {sum_1_100}");
+
+    // Test 7: Meta function using constants
+    let _ = println(f"\nTest 7: Meta Function Using Constants");
+    let scaled = compile_time_scaled(5);
+    let _ = println(f"5 * MULTIPLIER: {scaled}");
+
+    // Test 8: Nested meta blocks
+    let _ = println(f"\nTest 8: Nested Meta Blocks");
+    let nested = meta {
+        let inner = meta {
+            2 * 3
+        };
+        inner + meta {
+            4 * 5
+        }
+    };
+    let _ = println(f"Nested meta blocks: {nested}");
+
+    // Test 9: Meta block with conditional
+    let _ = println(f"\nTest 9: Meta Block with Conditional");
+    let conditional = meta {
+        let x = 10;
+        if x > 5 {
+            x * 2
+        } else {
+            x / 2
+        }
+    };
+    let _ = println(f"Conditional meta block: {conditional}");
+
+    // Test 10: Combining constants and meta
+    let _ = println(f"\nTest 10: Combining Constants and Meta");
+    let combined = meta {
+        ARRAY_SIZE * MULTIPLIER
+    };
+    let _ = println(f"ARRAY_SIZE * MULTIPLIER: {combined}");
+
+    // Test 11: Runtime using meta results
+    let _ = println(f"\nTest 11: Runtime Using Meta Results");
+    let runtime_calc = fib5 + sum_1_10;
+    let _ = println(f"Runtime: fib(5) + sum(1..10) = {runtime_calc}");
+
+    let _ = println(f"\n=== All Tests Complete ===");
+}

@@ -1,0 +1,16 @@
+// Simple comprehension test to debug parsing issues
+
+fn main() -> Int {
+    // Test 1: Basic list comprehension
+    let numbers = [1, 2, 3];
+    let doubled = [x * 2 for x in numbers];
+
+    println("Basic comprehension:");
+    println(doubled);
+
+    0
+}
+
+fn println(x: [Int]) -> Int {
+    0
+}

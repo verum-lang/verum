@@ -1,0 +1,18 @@
+// Minimal protocol test to identify syntax issues
+
+type Display is protocol {
+    fn display(self) -> Text;
+};
+
+type Point is { x: Int, y: Int };
+
+implement Display for Point {
+    fn display(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+fn main() {
+    let p = Point { x: 10, y: 20 };
+    print(p.display());
+}

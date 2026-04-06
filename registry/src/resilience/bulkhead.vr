@@ -1,0 +1,517 @@
+// Bulkhead Pattern Implementation
+//
+// Isolates resources to prevent cascading failures by limiting concurrent
+// operations. Named after ship bulkheads that prevent flooding from spreading.
+//
+// Key Concepts:
+// - Semaphore-based concurrency limiting
+// - Queue for pending requests when at capacity
+// - Fair scheduling with FIFO queue
+// - Graceful degradation when queue is full
+//
+// Use Cases:
+// - Limit concurrent database connections
+// - Throttle external API calls
+// - Prevent resource exhaustion
+// - Isolate different operation types
+
+mount core.base.{Result, Int, Text, Bool, Maybe};
+mount core.collections.{List, Queue, Map};
+mount core.time.{Instant, Duration, sleep_millis};
+mount core.sync.{Condvar, Mutex, MutexGuard};
+mount super.super.domain.errors.{RegistryError};
+
+/// Bulkhead manages concurrent access to a shared resource
+pub type Bulkhead is {
+    max_concurrent: Int,        // Maximum concurrent operations
+    current_count: Int,         // Current number of active operations
+    queue_size: Int,            // Maximum queue size for waiting requests
+    queue: Queue<PendingRequest>,  // Queue of pending requests
+    total_acquired: Int,        // Total permits acquired (for stats)
+    total_rejected: Int,        // Total requests rejected (for stats)
+    total_queued: Int,          // Total requests queued (for stats)
+    wait_timeout_ms: Int,       // Timeout for waiting requests (default: 30000ms)
+    waiters: List<Waiter>,      // Active waiters for permits
+};
+
+/// Represents a request waiting for a permit
+type PendingRequest is {
+    id: Int,
+    enqueued_at: Instant,
+    timeout_at: Instant,        // When this request should timeout
+};
+
+/// Represents a waiting request's synchronization state
+type Waiter is {
+    id: Int,
+    ready: Bool,                // Signaled when permit is available
+    notified_at: Maybe<Instant>,
+};
+
+/// Token representing permission to proceed with an operation
+pub type BulkheadPermit is {
+    bulkhead_id: Int,
+    acquired_at: Instant,
+};
+
+implement Bulkhead {
+    /// Create a new bulkhead with the specified capacity
+    ///
+    /// # Parameters
+    /// - max_concurrent: Maximum number of concurrent operations
+    /// - queue_size: Maximum number of requests to queue when at capacity
+    ///
+    /// # Example
+    /// ```
+    /// let db_bulkhead = Bulkhead.new(10, 100);  // 10 concurrent, queue up to 100
+    /// ```
+    pub fn new(max_concurrent: Int, queue_size: Int) -> Bulkhead {
+        Bulkhead {
+            max_concurrent: max_concurrent,
+            current_count: 0,
+            queue_size: queue_size,
+            queue: Queue.new(),
+            total_acquired: 0,
+            total_rejected: 0,
+            total_queued: 0,
+            wait_timeout_ms: 30000,  // Default 30 second timeout
+            waiters: List.new(),
+        }
+    }
+
+    /// Create a bulkhead with custom timeout
+    ///
+    /// # Parameters
+    /// - max_concurrent: Maximum number of concurrent operations
+    /// - queue_size: Maximum number of requests to queue when at capacity
+    /// - wait_timeout_ms: Timeout for waiting requests in milliseconds
+    pub fn with_timeout(max_concurrent: Int, queue_size: Int, wait_timeout_ms: Int) -> Bulkhead {
+        Bulkhead {
+            max_concurrent: max_concurrent,
+            current_count: 0,
+            queue_size: queue_size,
+            queue: Queue.new(),
+            total_acquired: 0,
+            total_rejected: 0,
+            total_queued: 0,
+            wait_timeout_ms: wait_timeout_ms,
+            waiters: List.new(),
+        }
+    }
+
+    /// Try to acquire a permit to proceed with an operation
+    ///
+    /// Returns:
+    /// - Ok(permit): Permission granted, proceed with operation
+    /// - Err(error): At capacity and queue full, request rejected
+    pub fn try_acquire(mut self) -> Result<(BulkheadPermit, Bulkhead), RegistryError> {
+        // Check if we have capacity
+        if self.current_count < self.max_concurrent {
+            // Grant permit immediately
+            self.current_count = self.current_count + 1;
+            self.total_acquired = self.total_acquired + 1;
+
+            let permit = BulkheadPermit {
+                bulkhead_id: self.total_acquired,
+                acquired_at: Instant.now(),
+            };
+
+            Result.Ok((permit, self))
+        } else {
+            // At capacity - reject immediately
+            self.total_rejected = self.total_rejected + 1;
+            Result.Err(RegistryError.resource_exhausted(
+                f"Bulkhead at capacity ({self.max_concurrent} concurrent operations)"
+            ))
+        }
+    }
+
+    /// Acquire a permit, queuing if necessary
+    ///
+    /// Waits for capacity to become available, up to queue limit.
+    /// Uses condition variable waiting with timeout for efficient synchronization.
+    pub async fn acquire(mut self) -> Result<(BulkheadPermit, Bulkhead), RegistryError> {
+        // Try immediate acquisition first
+        if self.current_count < self.max_concurrent {
+            return self.try_acquire();
+        }
+
+        // Check if queue has space
+        if self.queue.len() >= self.queue_size {
+            self.total_rejected = self.total_rejected + 1;
+            return Result.Err(RegistryError.resource_exhausted(
+                f"Bulkhead queue full ({self.queue_size} waiting requests)"
+            ));
+        }
+
+        // Calculate timeout deadline
+        let now = Instant.now();
+        let timeout_at = now.add_millis(self.wait_timeout_ms);
+
+        // Add to queue with timeout
+        let request_id = self.total_queued;
+        let request = PendingRequest {
+            id: request_id,
+            enqueued_at: now,
+            timeout_at: timeout_at,
+        };
+
+        self.queue = self.queue.push(request);
+        self.total_queued = self.total_queued + 1;
+
+        // Create waiter for this request
+        let waiter = Waiter {
+            id: request_id,
+            ready: false,
+            notified_at: Maybe.None,
+        };
+        self.waiters = self.waiters.push(waiter);
+
+        // Wait for permit to become available with timeout
+        self = self.wait_for_permit_with_timeout(request_id, timeout_at).await?;
+
+        // Dequeue and grant permit
+        let (dequeued, new_queue) = self.queue.pop();
+        self.queue = new_queue;
+
+        // Remove this waiter from the list
+        self.waiters = self.waiters.filter(|w| w.id != request_id);
+
+        match dequeued {
+            Maybe.Some(_) => {
+                self.current_count = self.current_count + 1;
+                self.total_acquired = self.total_acquired + 1;
+
+                let permit = BulkheadPermit {
+                    bulkhead_id: self.total_acquired,
+                    acquired_at: Instant.now(),
+                };
+
+                Result.Ok((permit, self))
+            },
+            Maybe.None => {
+                // Should not happen
+                Result.Err(RegistryError.internal_error("Queue empty after wait"))
+            }
+        }
+    }
+
+    /// Release a permit, allowing queued requests to proceed
+    ///
+    /// Notifies the next waiting request that a permit is available.
+    pub fn release(mut self, permit: BulkheadPermit) -> Bulkhead {
+        // Decrement current count
+        if self.current_count > 0 {
+            self.current_count = self.current_count - 1;
+        }
+
+        // Notify the first waiting request that a permit is available
+        // This simulates signaling a condition variable
+        if self.waiters.len() > 0 {
+            // Mark the first waiter as ready (FIFO ordering)
+            let mut updated_waiters = List.new();
+            let mut notified = false;
+
+            for waiter in self.waiters {
+                if !notified && !waiter.ready {
+                    // Signal this waiter
+                    let notified_waiter = Waiter {
+                        id: waiter.id,
+                        ready: true,
+                        notified_at: Maybe.Some(Instant.now()),
+                    };
+                    updated_waiters = updated_waiters.push(notified_waiter);
+                    notified = true;
+                } else {
+                    updated_waiters = updated_waiters.push(waiter);
+                }
+            }
+
+            self.waiters = updated_waiters;
+        }
+
+        self
+    }
+
+    /// Get current bulkhead statistics
+    pub fn stats(self) -> BulkheadStats {
+        BulkheadStats {
+            max_concurrent: self.max_concurrent,
+            current_count: self.current_count,
+            queue_size: self.queue_size,
+            queued_count: self.queue.len(),
+            total_acquired: self.total_acquired,
+            total_rejected: self.total_rejected,
+            total_queued: self.total_queued,
+        }
+    }
+
+    /// Check if bulkhead is at capacity
+    pub fn is_at_capacity(self) -> Bool {
+        self.current_count >= self.max_concurrent
+    }
+
+    /// Check if queue is full
+    pub fn is_queue_full(self) -> Bool {
+        self.queue.len() >= self.queue_size
+    }
+
+    /// Wait for a permit to become available with timeout
+    ///
+    /// Implements condition variable-style waiting using polling with
+    /// exponential backoff. In production, this could be replaced with
+    /// native async condition variables if available.
+    ///
+    /// # Parameters
+    /// - waiter_id: The ID of the waiter to check for readiness
+    /// - timeout_at: Deadline by which the wait must complete
+    ///
+    /// # Returns
+    /// - Ok(Bulkhead): Permit is available
+    /// - Err(RegistryError): Timeout or error occurred
+    async fn wait_for_permit_with_timeout(
+        mut self,
+        waiter_id: Int,
+        timeout_at: Instant
+    ) -> Result<Bulkhead, RegistryError> {
+        // Polling interval starts small and increases (exponential backoff)
+        let mut poll_interval_ms = 1;      // Start with 1ms
+        let max_poll_interval_ms = 100;    // Cap at 100ms
+        let backoff_multiplier = 2;
+
+        loop {
+            // Check if our waiter has been signaled
+            let mut is_ready = false;
+            for waiter in self.waiters {
+                if waiter.id == waiter_id && waiter.ready {
+                    is_ready = true;
+                    break;
+                }
+            }
+
+            if is_ready {
+                // Permit is available
+                return Result.Ok(self);
+            }
+
+            // Check if we have capacity now (might have been released)
+            if self.current_count < self.max_concurrent {
+                return Result.Ok(self);
+            }
+
+            // Check for timeout
+            let now = Instant.now();
+            if now >= timeout_at {
+                // Remove ourselves from the queue on timeout
+                self.queue = self.queue.filter(|req| req.id != waiter_id);
+                self.waiters = self.waiters.filter(|w| w.id != waiter_id);
+                self.total_rejected = self.total_rejected + 1;
+
+                return Result.Err(RegistryError.resource_exhausted(
+                    f"Timeout waiting for bulkhead permit after {self.wait_timeout_ms}ms"
+                ));
+            }
+
+            // Sleep with exponential backoff to avoid busy-waiting
+            // This simulates condition variable wait with timeout
+            sleep_millis(poll_interval_ms);
+
+            // Increase poll interval with exponential backoff
+            poll_interval_ms = poll_interval_ms * backoff_multiplier;
+            if poll_interval_ms > max_poll_interval_ms {
+                poll_interval_ms = max_poll_interval_ms;
+            }
+
+            // Reduce poll interval if we're close to timeout
+            let remaining_ms = timeout_at.millis_since(now);
+            if remaining_ms < poll_interval_ms * 2 {
+                poll_interval_ms = 1;  // Switch to fast polling near deadline
+            }
+        }
+    }
+
+    /// Check if a specific waiter is ready
+    fn is_waiter_ready(self, waiter_id: Int) -> Bool {
+        for waiter in self.waiters {
+            if waiter.id == waiter_id {
+                return waiter.ready;
+            }
+        }
+        false
+    }
+
+    /// Get the number of active waiters
+    pub fn waiter_count(self) -> Int {
+        self.waiters.len()
+    }
+}
+
+/// Statistics for monitoring bulkhead behavior
+pub type BulkheadStats is {
+    max_concurrent: Int,
+    current_count: Int,
+    queue_size: Int,
+    queued_count: Int,
+    total_acquired: Int,
+    total_rejected: Int,
+    total_queued: Int,
+};
+
+implement BulkheadStats {
+    pub fn utilization(self) -> Float {
+        self.current_count.to_float() / self.max_concurrent.to_float()
+    }
+
+    pub fn queue_utilization(self) -> Float {
+        if self.queue_size == 0 {
+            0.0
+        } else {
+            self.queued_count.to_float() / self.queue_size.to_float()
+        }
+    }
+
+    pub fn rejection_rate(self) -> Float {
+        let total = self.total_acquired + self.total_rejected;
+        if total == 0 {
+            0.0
+        } else {
+            self.total_rejected.to_float() / total.to_float()
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"Bulkhead[active={self.current_count}/{self.max_concurrent}, queued={self.queued_count}/{self.queue_size}, rejected={self.total_rejected}, utilization={self.utilization():.1}%]"
+    }
+}
+
+/// Execute an operation with bulkhead protection
+///
+/// # Example
+/// ```
+/// let bulkhead = Bulkhead.new(10, 100);
+/// let result = with_bulkhead(
+///     bulkhead,
+///     || Database.query("SELECT * FROM users")
+/// ).await;
+/// ```
+pub async fn with_bulkhead<T>(
+    mut bulkhead: Bulkhead,
+    operation: fn() -> Result<T, RegistryError>
+) -> (Result<T, RegistryError>, Bulkhead) {
+    // Try to acquire permit
+    let acquire_result = bulkhead.acquire().await;
+
+    match acquire_result {
+        Result.Ok((permit, updated_bulkhead)) => {
+            bulkhead = updated_bulkhead;
+
+            // Execute operation
+            let result = operation().await;
+
+            // Release permit
+            bulkhead = bulkhead.release(permit);
+
+            (result, bulkhead)
+        },
+        Result.Err(err) => {
+            // Failed to acquire permit
+            (Result.Err(err), bulkhead)
+        }
+    }
+}
+
+/// Multiple bulkheads for different resource types
+///
+/// Allows isolation of different operation types (e.g., reads vs writes)
+pub type BulkheadGroup is {
+    bulkheads: Map<Text, Bulkhead>,
+};
+
+implement BulkheadGroup {
+    pub fn new() -> BulkheadGroup {
+        BulkheadGroup {
+            bulkheads: Map.new(),
+        }
+    }
+
+    pub fn add(mut self, name: Text, bulkhead: Bulkhead) -> BulkheadGroup {
+        self.bulkheads = self.bulkheads.insert(name, bulkhead);
+        self
+    }
+
+    pub fn get(self, name: Text) -> Maybe<Bulkhead> {
+        self.bulkheads.get(name)
+    }
+
+    pub async fn execute<T>(
+        mut self,
+        bulkhead_name: Text,
+        operation: fn() -> Result<T, RegistryError>
+    ) -> (Result<T, RegistryError>, BulkheadGroup) {
+        match self.bulkheads.get(bulkhead_name) {
+            Maybe.Some(bulkhead) => {
+                let (result, updated_bulkhead) = with_bulkhead(bulkhead, operation).await;
+                self.bulkheads = self.bulkheads.insert(bulkhead_name, updated_bulkhead);
+                (result, self)
+            },
+            Maybe.None => {
+                let error = RegistryError.internal_error(
+                    f"Bulkhead '{bulkhead_name}' not found"
+                );
+                (Result.Err(error), self)
+            }
+        }
+    }
+
+    pub fn stats(self) -> Map<Text, BulkheadStats> {
+        self.bulkheads.map(|name, bulkhead| (name, bulkhead.stats()))
+    }
+}
+
+// ============================================================================
+// Error Extensions
+// ============================================================================
+
+implement RegistryError {
+    pub fn resource_exhausted(message: Text) -> RegistryError {
+        RegistryError.InternalError { message: f"Resource exhausted: {message}" }
+    }
+
+    pub fn is_resource_exhausted(self) -> Bool {
+        match self {
+            RegistryError.InternalError { message } => {
+                message.starts_with("Resource exhausted:")
+            },
+            _ => false
+        }
+    }
+}
+
+// ============================================================================
+// Common Bulkhead Configurations
+// ============================================================================
+
+/// Pre-configured bulkhead for database operations
+pub fn database_bulkhead() -> Bulkhead {
+    // Conservative: 10 concurrent, small queue
+    Bulkhead.new(10, 50)
+}
+
+/// Pre-configured bulkhead for external API calls
+pub fn api_bulkhead() -> Bulkhead {
+    // Very conservative: 5 concurrent, larger queue
+    Bulkhead.new(5, 100)
+}
+
+/// Pre-configured bulkhead for file I/O operations
+pub fn io_bulkhead() -> Bulkhead {
+    // Moderate: 20 concurrent, medium queue
+    Bulkhead.new(20, 100)
+}
+
+/// Pre-configured bulkhead for CPU-bound operations
+pub fn cpu_bulkhead() -> Bulkhead {
+    // Based on CPU cores (placeholder - would detect at runtime)
+    let cores = 8;
+    Bulkhead.new(cores, cores * 2)
+}

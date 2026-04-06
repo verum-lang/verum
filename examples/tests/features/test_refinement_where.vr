@@ -1,0 +1,59 @@
+// Test where clause refinements with lambda expressions
+// Syntax: type Name is BaseType where |param| predicate;
+// This form uses explicit lambda parameters instead of implicit 'it'
+
+type Positive is Int where |x| x > 0;
+type Negative is Int where |x| x < 0;
+type Valid is Text where |s| len(s) > 5;
+type Even is Int where |x| x % 2 == 0;
+type Odd is Int where |x| x % 2 != 0;
+type InRange is Int where |n| n >= 0 && n <= 100;
+
+// Test functions using where clause refinements
+fn increment(x: Positive) -> Int {
+    x + 1
+}
+
+fn double_even(x: Even) -> Even {
+    x * 2
+}
+
+fn clamp(x: InRange) -> InRange {
+    if x < 50 {
+        50
+    } else {
+        x
+    }
+}
+
+fn main() {
+    let _ = print("=== Where Clause Refinement Tests ===");
+
+    // Test 1: Positive integers with lambda
+    let _ = print("\nTest 1: Positive integers");
+    let pos: Positive = 42;
+    let result = increment(pos);
+    let _ = print(f"Positive value: {pos}, incremented: {result}");
+
+    // Test 2: Even numbers
+    let _ = print("\nTest 2: Even numbers");
+    let even1: Even = 10;
+    let even2 = double_even(even1);
+    let _ = print(f"Even value: {even1}, doubled: {even2}");
+
+    // Test 3: In-range values
+    let _ = print("\nTest 3: In-range values");
+    let val1: InRange = 25;
+    let val2: InRange = 75;
+    let clamped1 = clamp(val1);
+    let clamped2 = clamp(val2);
+    let _ = print(f"Value {val1} clamped to: {clamped1}");
+    let _ = print(f"Value {val2} clamped to: {clamped2}");
+
+    // Test 4: Valid text
+    let _ = print("\nTest 4: Valid text");
+    let valid_text: Valid = "Hello World";
+    let _ = print(f"Valid text: {valid_text}");
+
+    let _ = print("\n=== All where clause refinement tests passed ===");
+}

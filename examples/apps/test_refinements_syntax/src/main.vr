@@ -1,0 +1,9 @@
+// Test actual refinement syntax - testing parser support
+
+type Positive is Int{> 0};
+
+fn main() {
+    print("Testing refinement syntax");
+    let x: Positive = 42;
+    print(x);
+}

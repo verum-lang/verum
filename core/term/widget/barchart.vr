@@ -1,0 +1,419 @@
+// =============================================================================
+// barchart.vr - Bar chart widget with grouped bars, labels, and values
+// =============================================================================
+module barchart;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.Block;
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.layout.constraint.Direction;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// =============================================================================
+// Bar — an individual bar in a group
+// =============================================================================
+
+/// A single bar with value, optional label, and per-bar styles.
+public type Bar is {
+    value: Float,
+    label: Maybe<Line>,
+    style: Style,
+    value_style: Style,
+    text_value: Maybe<Text>,
+};
+
+implement Bar {
+    /// Create a new bar with a value and default styles.
+    public fn new(value: Float) -> Bar {
+        Bar {
+            value: value,
+            label: None,
+            style: Style.new().fg(Color.Blue),
+            value_style: Style.DEFAULT,
+            text_value: None,
+        }
+    }
+
+    /// Set the bar label.
+    public fn label(self, label: Text) -> Bar {
+        Bar { label: Some(Line.raw(label)), ..self }
+    }
+
+    /// Set the bar label from a Line.
+    public fn label_line(self, label: Line) -> Bar {
+        Bar { label: Some(label), ..self }
+    }
+
+    /// Set the bar fill style.
+    public fn style(self, style: Style) -> Bar {
+        Bar { style: style, ..self }
+    }
+
+    /// Set the style for the value text.
+    public fn value_style(self, style: Style) -> Bar {
+        Bar { value_style: style, ..self }
+    }
+
+    /// Set a custom text value to display instead of the numeric value.
+    public fn text_value(self, text: Text) -> Bar {
+        Bar { text_value: Some(text), ..self }
+    }
+}
+
+// =============================================================================
+// BarGroup — a group of bars with an optional group label
+// =============================================================================
+
+/// A group of bars rendered together with an optional group label.
+public type BarGroup is {
+    label: Maybe<Line>,
+    bars: List<Bar>,
+};
+
+implement BarGroup {
+    /// Create a new bar group.
+    public fn new(bars: List<Bar>) -> BarGroup {
+        BarGroup { label: None, bars: bars }
+    }
+
+    /// Create a bar group with a label.
+    public fn labeled(label: Text, bars: List<Bar>) -> BarGroup {
+        BarGroup { label: Some(Line.raw(label)), bars: bars }
+    }
+
+    /// Set the group label.
+    public fn label(self, label: Text) -> BarGroup {
+        BarGroup { label: Some(Line.raw(label)), ..self }
+    }
+}
+
+// =============================================================================
+// BarChart — grouped bar chart widget
+// =============================================================================
+
+/// BarChart — grouped bar chart with per-bar styles, labels, and values.
+/// Supports both vertical (bars grow upward) and horizontal (bars grow right).
+public type BarChart is {
+    groups: List<BarGroup>,
+    block: Maybe<Block>,
+    style: Style,
+    bar_width: Int,
+    bar_gap: Int,
+    group_gap: Int,
+    max: Maybe<Float>,
+    direction: Direction,
+    value_formatter: Maybe<fn(Float) -> Text>,
+};
+
+implement BarChart {
+    /// Create a new bar chart with groups.
+    public fn new(groups: List<BarGroup>) -> BarChart {
+        BarChart {
+            groups: groups,
+            block: None,
+            style: Style.DEFAULT,
+            bar_width: 3,
+            bar_gap: 1,
+            group_gap: 2,
+            max: None,
+            direction: Direction.Vertical,
+            value_formatter: None,
+        }
+    }
+
+    /// Create an empty bar chart.
+    public fn empty() -> BarChart {
+        BarChart {
+            groups: List.new(),
+            block: None,
+            style: Style.DEFAULT,
+            bar_width: 3,
+            bar_gap: 1,
+            group_gap: 2,
+            max: None,
+            direction: Direction.Vertical,
+            value_formatter: None,
+        }
+    }
+
+    // Builder API
+    public fn block(self, block: Block) -> BarChart {
+        BarChart { block: Some(block), ..self }
+    }
+
+    public fn style(self, style: Style) -> BarChart {
+        BarChart { style: style, ..self }
+    }
+
+    public fn bar_width(self, w: Int) -> BarChart {
+        BarChart { bar_width: w.max(1), ..self }
+    }
+
+    public fn bar_gap(self, g: Int) -> BarChart {
+        BarChart { bar_gap: g.max(0), ..self }
+    }
+
+    public fn group_gap(self, g: Int) -> BarChart {
+        BarChart { group_gap: g.max(0), ..self }
+    }
+
+    public fn max(self, m: Float) -> BarChart {
+        BarChart { max: Some(m), ..self }
+    }
+
+    public fn direction(self, d: Direction) -> BarChart {
+        BarChart { direction: d, ..self }
+    }
+
+    public fn value_formatter(self, f: fn(Float) -> Text) -> BarChart {
+        BarChart { value_formatter: Some(f), ..self }
+    }
+}
+
+implement Widget for BarChart {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let chart_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if chart_area.width < 1 || chart_area.height < 1 { return; }
+
+        // Collect all bars and compute max
+        let mut all_bars = List.new();
+        for group in &self.groups {
+            for bar in &group.bars {
+                all_bars.push(bar);
+            }
+        }
+        if all_bars.len() == 0 { return; }
+
+        buf.set_style(chart_area, self.style);
+
+        let data_max = match self.max {
+            Some(m) => m,
+            None => {
+                let mut m = 0.0;
+                for bar in &all_bars {
+                    if bar.value > m { m = bar.value; }
+                }
+                m
+            }
+        };
+
+        if data_max <= 0.0 { return; }
+
+        match self.direction {
+            Vertical => render_vertical(&self, chart_area, buf, data_max),
+            Horizontal => render_horizontal(&self, chart_area, buf, data_max),
+        }
+    }
+}
+
+/// Format a bar value as text.
+fn format_value(chart: &BarChart, bar: &Bar) -> Text {
+    // Use custom text_value if set
+    match bar.text_value {
+        Some(ref t) => return t.clone(),
+        None => {}
+    }
+    // Use custom formatter if set
+    match chart.value_formatter {
+        Some(ref fmt) => return fmt(bar.value),
+        None => {}
+    }
+    // Default: integer if whole, else 1 decimal
+    let int_val = bar.value as Int;
+    if (bar.value - int_val as Float).abs() < 0.01 {
+        f"{int_val}"
+    } else {
+        let tenths = ((bar.value * 10.0) as Int) % 10;
+        f"{int_val}.{tenths}"
+    }
+}
+
+/// Render bars vertically (growing upward).
+/// Layout: value row (1) + bar body (height - 2) + label row (1)
+fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Float) {
+    let bar_area_height = (area.height - 2).max(1);
+    let label_y = area.bottom() - 1;
+    let value_y = area.y;
+    let bar_top = area.y + 1;
+
+    let bar_stride = chart.bar_width + chart.bar_gap;
+    let mut x = area.x;
+
+    let blocks = ["▁", "▂", "▃", "▄", "▅", "▆", "▇"];
+
+    for gi in 0..chart.groups.len() {
+        let group = &chart.groups[gi];
+
+        for bi in 0..group.bars.len() {
+            if x + chart.bar_width > area.right() { return; }
+
+            let bar = &group.bars[bi];
+            let normalized = (bar.value / data_max).clamp(0.0, 1.0);
+            let total_levels = bar_area_height * 8;
+            let filled_levels = (normalized * total_levels as Float) as Int;
+
+            // Draw bar from bottom to top
+            let mut remaining = filled_levels;
+            for row_offset in 0..bar_area_height {
+                let y = bar_top + bar_area_height - 1 - row_offset;
+
+                for bx in 0..chart.bar_width {
+                    let cell_x = x + bx;
+                    if cell_x >= area.right() { break; }
+
+                    if remaining >= 8 {
+                        buf.get_mut(cell_x, y).set_char("█", bar.style);
+                    } else if remaining > 0 {
+                        buf.get_mut(cell_x, y).set_char(blocks[remaining - 1], bar.style);
+                    }
+                }
+
+                if remaining >= 8 {
+                    remaining = remaining - 8;
+                } else {
+                    remaining = 0;
+                }
+            }
+
+            // Value text centered above bar
+            let val_text = format_value(chart, bar);
+            let val_x = x + (chart.bar_width - val_text.len()).max(0) / 2;
+            if val_x + val_text.len() <= area.right() {
+                buf.set_string(val_x, value_y, &val_text, bar.value_style);
+            }
+
+            // Bar label centered below bar
+            match bar.label {
+                Some(ref label) => {
+                    let lbl_width = label.width();
+                    let lbl_display = if lbl_width > chart.bar_width {
+                        // Truncate to bar width
+                        let mut truncated = List.new();
+                        let mut w = 0;
+                        for span in &label.spans {
+                            if w >= chart.bar_width { break; }
+                            let remaining_w = chart.bar_width - w;
+                            if span.content.len() <= remaining_w {
+                                truncated.push(span.clone());
+                                w = w + span.content.len();
+                            } else {
+                                truncated.push(Span.styled(span.content.slice(0, remaining_w), span.style));
+                                w = w + remaining_w;
+                            }
+                        }
+                        truncated
+                    } else {
+                        label.spans.clone()
+                    };
+                    let display_width = if lbl_width > chart.bar_width { chart.bar_width } else { lbl_width };
+                    let lbl_x = x + (chart.bar_width - display_width).max(0) / 2;
+                    let mut lx = lbl_x;
+                    for span in &lbl_display {
+                        lx = buf.set_string(lx, label_y, &span.content, span.style);
+                    }
+                }
+                None => {}
+            }
+
+            x = x + bar_stride;
+        }
+
+        // Group gap between groups (but not after last group)
+        if gi < chart.groups.len() - 1 {
+            x = x - chart.bar_gap + chart.group_gap;
+        }
+    }
+}
+
+/// Render bars horizontally (growing rightward).
+/// Layout: label | bar body | value
+fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Float) {
+    // Find widest label for left column
+    let mut max_label_width = 0;
+    for group in &chart.groups {
+        for bar in &group.bars {
+            match bar.label {
+                Some(ref label) => {
+                    let w = label.width();
+                    if w > max_label_width { max_label_width = w; }
+                }
+                None => {}
+            }
+        }
+    }
+
+    let label_col_width = max_label_width + 1;
+    let value_col_width = 6;
+    let bar_max_width = (area.width - label_col_width - value_col_width).max(1);
+
+    let bar_stride = chart.bar_width + chart.bar_gap;
+    let mut y = area.y;
+
+    for gi in 0..chart.groups.len() {
+        let group = &chart.groups[gi];
+
+        for bi in 0..group.bars.len() {
+            if y + chart.bar_width > area.bottom() { return; }
+
+            let bar = &group.bars[bi];
+
+            // Draw label right-aligned in label column
+            match bar.label {
+                Some(ref label) => {
+                    let lbl_width = label.width();
+                    let lbl_x = area.x + (label_col_width - 1 - lbl_width).max(0);
+                    let mid_y = y + chart.bar_width / 2;
+                    if mid_y < area.bottom() {
+                        let mut lx = lbl_x;
+                        for span in &label.spans {
+                            lx = buf.set_string(lx, mid_y, &span.content, span.style);
+                        }
+                    }
+                }
+                None => {}
+            }
+
+            // Compute bar width
+            let normalized = (bar.value / data_max).clamp(0.0, 1.0);
+            let bar_len = (normalized * bar_max_width as Float) as Int;
+            let bar_start_x = area.x + label_col_width;
+
+            // Draw bar fill
+            for by in 0..chart.bar_width {
+                let cell_y = y + by;
+                if cell_y >= area.bottom() { break; }
+                for bx in 0..bar_len {
+                    let cell_x = bar_start_x + bx;
+                    if cell_x >= area.right() { break; }
+                    buf.get_mut(cell_x, cell_y).set_char("█", bar.style);
+                }
+            }
+
+            // Draw value text after bar
+            let val_text = format_value(chart, bar);
+            let val_x = bar_start_x + bar_len + 1;
+            let val_y = y + chart.bar_width / 2;
+            if val_x + val_text.len() <= area.right() && val_y < area.bottom() {
+                buf.set_string(val_x, val_y, &val_text, bar.value_style);
+            }
+
+            y = y + bar_stride;
+        }
+
+        // Group gap
+        if gi < chart.groups.len() - 1 {
+            y = y - chart.bar_gap + chart.group_gap;
+        }
+    }
+}

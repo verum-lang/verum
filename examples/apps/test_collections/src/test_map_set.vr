@@ -1,0 +1,17 @@
+// Test Map and Set literal syntax parsing
+
+fn main() {
+    // Map literal
+    let ages = {
+        "Alice": 30,
+        "Bob": 25
+    };
+
+    // Set literal
+    let primes = {2, 3, 5, 7, 11};
+
+    // Empty map
+    let empty_map = {};
+
+    print("Map and Set parsing test passed!");
+}

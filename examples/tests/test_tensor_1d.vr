@@ -1,0 +1,33 @@
+// Test: 1D Tensor Literals
+// Syntax: tensor<size>Type { expression }
+
+fn main() -> Int {
+    print("=== 1D Tensor Tests ===");
+
+    // Test 1: Scalar initializer (fills tensor with single value)
+    let t1 = tensor<5>Float { 0.0 };
+    print("t1: scalar init");
+
+    // Test 2: Array literal
+    let t2 = tensor<5>Float { [1.0, 2.0, 3.0, 4.0, 5.0] };
+    print("t2: array literal");
+
+    // Test 3: Integer tensor
+    let t3 = tensor<4>Int { [10, 20, 30, 40] };
+    print("t3: int array");
+
+    // Test 4: Bool tensor
+    let t4 = tensor<3>Bool { [true, false, true] };
+    print("t4: bool array");
+
+    // Test 5: Single element
+    let t5 = tensor<1>Float { [42.0] };
+    print("t5: single element");
+
+    // Test 6: Larger tensor
+    let t6 = tensor<10>Int { [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
+    print("t6: 10 elements");
+
+    print("All 1D tensor tests passed");
+    0
+}

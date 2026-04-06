@@ -1,0 +1,34 @@
+// Test 4: Named predicates
+// Syntax: Type where predicate_function
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+fn is_bounded(x: Int) -> Bool {
+    x >= 0 && x <= 100
+}
+
+fn test_named_predicate() -> Int where is_positive {
+    42
+}
+
+fn test_even_number() -> Int where is_even {
+    10
+}
+
+fn test_bounded_number() -> Int where is_bounded {
+    50
+}
+
+fn main() {
+    let pos = test_named_predicate();
+    let even = test_even_number();
+    let bounded = test_bounded_number();
+
+    pos + even + bounded
+}

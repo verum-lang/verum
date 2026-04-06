@@ -1,0 +1,92 @@
+// Test: Contexts - Context system (using keyword)
+// Priority: Critical
+// Expected output: Context usage and dependency injection
+
+// Define contexts
+context Database {
+    fn query(sql: Text) -> Text;
+    fn execute(sql: Text) -> Bool;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+}
+
+context Config {
+    fn get(key: Text) -> Text;
+}
+
+// Function using single context
+fn log_message(msg: Text) using Logger {
+    print(f"Message: {msg}");
+}
+
+// Function using multiple contexts
+fn save_data(data: Text) using [Database, Logger] {
+    print(f"Saving data");
+    let success = true;
+    if success {
+        print(f"Save successful");
+    } else {
+        print(f"Save failed");
+    }
+}
+
+// Function using context with return value
+fn load_config(key: Text) -> Text using Config {
+    "config_value"
+}
+
+// Nested context usage
+fn process_request(request: Text) using [Database, Logger, Config] {
+    print(f"Processing request: {request}");
+    let app_name = "MyApp";
+    print(f"App name: {app_name}");
+    let result = "query_result";
+    print(f"Query result: {result}");
+}
+
+// Context with error handling
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+fn safe_query(sql: Text) -> Result<Text, Text> using [Database, Logger] {
+    print(f"Executing query: {sql}");
+    let result = "result";
+
+    if result == "error" {
+        print(f"Query failed");
+        Result.Err("Query execution failed")
+    } else {
+        print(f"Query succeeded");
+        Result.Ok(result)
+    }
+}
+
+// Main entry point
+fn main() {
+    // Test single context
+    log_message("Hello, contexts!");
+
+    // Test multiple contexts
+    save_data("test data");
+
+    // Test context with return value
+    let config_value = load_config("app_name");
+    print(f"Config value: {config_value}");
+
+    // Test nested context usage
+    process_request("req-123");
+
+    // Test context with error handling
+    let query_result = safe_query("SELECT * FROM users");
+    match query_result {
+        Result.Ok(data) => print(f"Data: {data}"),
+        Result.Err(err) => print(f"Error: {err}"),
+    }
+
+    print(f"Context tests complete!");
+}

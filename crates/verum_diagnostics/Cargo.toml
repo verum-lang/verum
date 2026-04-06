@@ -1,0 +1,30 @@
+[package]
+name = "verum_diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+verum_common = { workspace = true }
+verum_ast = { workspace = true }
+# DEPRECATED: Superseded by stdlib/ and verum_common types
+verum_error = { workspace = true, optional = true }
+verum_smt = { workspace = true, optional = true }
+colored = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+once_cell = "1.21.3"
+backtrace = { version = "0.3", optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[features]
+default = []
+backtrace = ["dep:backtrace"]
+verum-error-integration = ["dep:verum_error"]
+smt-integration = ["dep:verum_smt"]

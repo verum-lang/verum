@@ -1,0 +1,9 @@
+// Test basic spawn expression
+fn background_task() -> Int {
+    42
+}
+
+fn main() {
+    let handle = spawn background_task();
+    println("Spawned task");
+}

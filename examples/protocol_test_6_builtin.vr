@@ -1,0 +1,16 @@
+// Test 6: Using builtin methods (which should work)
+
+fn main() {
+    print("Test 6: Builtin methods");
+
+    // Test string interpolation (built-in)
+    let x = 42;
+    let text = f"The answer is {x}";
+    print(text);
+
+    // Test list methods (built-in)
+    let numbers = [1, 2, 3, 4, 5];
+    print("Created a list");
+
+    print("SUCCESS: Builtin methods work");
+}

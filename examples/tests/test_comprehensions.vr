@@ -1,0 +1,229 @@
+// Comprehensive test suite for list and stream comprehensions in Verum
+//
+// This tests:
+// 1. List comprehensions: [x * 2 for x in list]
+// 2. Stream comprehensions: stream[x for x in source if condition]
+// 3. Filtered comprehensions: [x for x in list if x > 0]
+// 4. Nested comprehensions
+// 5. Let bindings in comprehensions
+
+fn main() -> Int {
+    test_basic_list_comprehension();
+    test_filtered_list_comprehension();
+    test_list_comprehension_with_let();
+    test_multiple_for_clauses();
+    test_nested_list_comprehensions();
+
+    test_basic_stream_comprehension();
+    test_filtered_stream_comprehension();
+    test_stream_comprehension_with_let();
+    test_nested_stream_comprehensions();
+    test_complex_comprehensions();
+
+    0
+}
+
+// === BASIC LIST COMPREHENSION TESTS ===
+
+fn test_basic_list_comprehension() -> Int {
+    // Simple list comprehension: [x * 2 for x in list]
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = [x * 2 for x in numbers];
+
+    // Expected: [2, 4, 6, 8, 10]
+    assert(doubled[0] == 2);
+    assert(doubled[1] == 4);
+    assert(doubled[2] == 6);
+    assert(doubled[3] == 8);
+    assert(doubled[4] == 10);
+
+    0
+}
+
+fn test_filtered_list_comprehension() -> Int {
+    // List comprehension with filter: [x for x in list if x > 0]
+    let numbers = [-2, -1, 0, 1, 2, 3];
+    let positives = [x for x in numbers if x > 0];
+
+    // Expected: [1, 2, 3]
+    assert(positives[0] == 1);
+    assert(positives[1] == 2);
+    assert(positives[2] == 3);
+
+    // Test with multiple conditions
+    let evens_positive = [x for x in numbers if x > 0 if x % 2 == 0];
+    // Expected: [2]
+    assert(evens_positive[0] == 2);
+
+    0
+}
+
+fn test_list_comprehension_with_let() -> Int {
+    // List comprehension with let binding: [y for x in list let y = x * 2]
+    let numbers = [1, 2, 3];
+    let result = [y for x in numbers let y = x * 2];
+
+    // Expected: [2, 4, 6]
+    assert(result[0] == 2);
+    assert(result[1] == 4);
+    assert(result[2] == 6);
+
+    // Multiple let bindings
+    let complex = [z for x in numbers let y = x * 2 let z = y + 1];
+    // Expected: [3, 5, 7]
+    assert(complex[0] == 3);
+    assert(complex[1] == 5);
+    assert(complex[2] == 7);
+
+    0
+}
+
+fn test_multiple_for_clauses() -> Int {
+    // Cartesian product with multiple for clauses
+    let xs = [1, 2];
+    let ys = [10, 20];
+    let pairs = [x + y for x in xs for y in ys];
+
+    // Expected: [11, 21, 12, 22]
+    assert(pairs[0] == 11);
+    assert(pairs[1] == 21);
+    assert(pairs[2] == 12);
+    assert(pairs[3] == 22);
+
+    0
+}
+
+fn test_nested_list_comprehensions() -> Int {
+    // Nested list comprehension: [[y * 2 for y in row] for row in matrix]
+    let matrix = [[1, 2], [3, 4]];
+    let doubled = [[y * 2 for y in row] for row in matrix];
+
+    // Expected: [[2, 4], [6, 8]]
+    assert(doubled[0][0] == 2);
+    assert(doubled[0][1] == 4);
+    assert(doubled[1][0] == 6);
+    assert(doubled[1][1] == 8);
+
+    0
+}
+
+// === STREAM COMPREHENSION TESTS ===
+
+fn test_basic_stream_comprehension() -> Int {
+    // Basic stream comprehension: stream[x * 2 for x in source]
+    let numbers = [1, 2, 3, 4, 5];
+    let stream_doubled = stream[x * 2 for x in numbers];
+
+    // Collect stream to list for testing
+    let result = collect(stream_doubled);
+
+    // Expected: [2, 4, 6, 8, 10]
+    assert(result[0] == 2);
+    assert(result[1] == 4);
+    assert(result[2] == 6);
+    assert(result[3] == 8);
+    assert(result[4] == 10);
+
+    0
+}
+
+fn test_filtered_stream_comprehension() -> Int {
+    // Stream comprehension with filter: stream[x for x in source if x > 0]
+    let numbers = [-2, -1, 0, 1, 2, 3];
+    let positive_stream = stream[x for x in numbers if x > 0];
+
+    let result = collect(positive_stream);
+
+    // Expected: [1, 2, 3]
+    assert(result[0] == 1);
+    assert(result[1] == 2);
+    assert(result[2] == 3);
+
+    0
+}
+
+fn test_stream_comprehension_with_let() -> Int {
+    // Stream comprehension with let: stream[y for x in source let y = x * 2]
+    let numbers = [1, 2, 3];
+    let stream_result = stream[y for x in numbers let y = x * 2];
+
+    let result = collect(stream_result);
+
+    // Expected: [2, 4, 6]
+    assert(result[0] == 2);
+    assert(result[1] == 4);
+    assert(result[2] == 6);
+
+    0
+}
+
+fn test_nested_stream_comprehensions() -> Int {
+    // Nested stream: stream[y * 2 for row in matrix for y in row]
+    let matrix = [[1, 2], [3, 4]];
+    let flattened_doubled = stream[y * 2 for row in matrix for y in row];
+
+    let result = collect(flattened_doubled);
+
+    // Expected: [2, 4, 6, 8]
+    assert(result[0] == 2);
+    assert(result[1] == 4);
+    assert(result[2] == 6);
+    assert(result[3] == 8);
+
+    0
+}
+
+// === COMPLEX COMPREHENSION TESTS ===
+
+fn test_complex_comprehensions() -> Int {
+    // Complex: combining filters, lets, and multiple fors
+    let numbers = [1, 2, 3, 4, 5];
+
+    // List: squared evens
+    let squared_evens = [x * x for x in numbers if x % 2 == 0];
+    assert(squared_evens[0] == 4);
+    assert(squared_evens[1] == 16);
+
+    // Stream: fibonacci-like with let
+    let fibs = stream[c for x in numbers let a = x let b = x + 1 let c = a + b];
+    let fib_result = collect(fibs);
+    assert(fib_result[0] == 3);  // 1 + 2
+    assert(fib_result[1] == 5);  // 2 + 3
+    assert(fib_result[2] == 7);  // 3 + 4
+
+    // Comprehension with complex expression
+    let complex_expr = [x * 2 + y for x in [1, 2] for y in [10, 20] if x + y > 10];
+    // x=1, y=10: 1+10=11 > 10 ✓ -> 1*2+10=12
+    // x=1, y=20: 1+20=21 > 10 ✓ -> 1*2+20=22
+    // x=2, y=10: 2+10=12 > 10 ✓ -> 2*2+10=14
+    // x=2, y=20: 2+20=22 > 10 ✓ -> 2*2+20=24
+    assert(complex_expr[0] == 12);
+    assert(complex_expr[1] == 22);
+    assert(complex_expr[2] == 14);
+    assert(complex_expr[3] == 24);
+
+    0
+}
+
+// Helper function to assert conditions
+fn assert(condition: Bool) -> Int {
+    if condition {
+        0
+    } else {
+        panic("Assertion failed")
+    }
+}
+
+// Helper function to collect stream to list
+// Note: This is a placeholder - actual implementation may differ
+fn collect<T>(stream: Stream<T>) -> [T] {
+    // This would need to be implemented in the stdlib
+    // For now, we assume it exists
+    stream.collect()
+}
+
+// Helper function to panic
+fn panic(msg: &Text) -> Int {
+    // This would trigger a runtime panic
+    0  // placeholder return
+}

@@ -1,0 +1,7 @@
+[package]
+name = "generics"
+version = "0.1.0"
+description = "Generic functions and types"
+
+[language]
+profile = "application"

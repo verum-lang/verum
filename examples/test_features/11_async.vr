@@ -1,0 +1,53 @@
+// Test async/await functionality
+// Tests asynchronous operations and concurrent execution
+
+// Simple async function
+async fn fetch_data(id: Int) -> Text {
+    print(f"Fetching data for ID {id}...")
+    // Simulate async work
+    f"Data for {id}"
+}
+
+// Async function with await
+async fn process_item(id: Int) -> Int {
+    let data = fetch_data(id).await
+    print(f"Processing: {data}")
+    id * 2
+}
+
+// Async function returning Result
+async fn fetch_with_error(id: Int) -> Result<Text, Text> {
+    if id < 0 {
+        Err("Invalid ID")
+    } else {
+        Ok(f"Item {id}")
+    }
+}
+
+// Chaining async operations
+async fn chain_operations(n: Int) -> Int {
+    let result1 = process_item(n).await
+    let result2 = process_item(result1).await
+    result2
+}
+
+fn main() {
+    print("=== Async/Await Tests ===")
+
+    // Note: Actual async execution may require async runtime
+    // This demonstrates the syntax
+
+    print("Test 1: Simple async call")
+    // let data = fetch_data(42).await
+    print("Async function defined")
+
+    print("\nTest 2: Async with Result")
+    // let result = fetch_with_error(10).await
+    print("Async Result function defined")
+
+    print("\nTest 3: Chained async")
+    // let final_result = chain_operations(5).await
+    print("Chained async operations defined")
+
+    print("\nAsync tests complete (syntax verified)")
+}

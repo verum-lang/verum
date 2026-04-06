@@ -1,0 +1,31 @@
+// Simplified pattern matching tests
+
+type Color is Red | Green | Blue;
+
+fn main() {
+    let _ = print("=== Simple Pattern Tests ===");
+
+    // Simple variant match
+    let c: Color = Red;
+    match c {
+        Red => { let _ = print("Red"); },
+        Green => { let _ = print("Green"); },
+        Blue => { let _ = print("Blue"); }
+    }
+
+    // Literal pattern
+    let x = 1.0;
+    match x {
+        0.0 => { let _ = print("zero"); },
+        1.0 => { let _ = print("one"); },
+        _ => { let _ = print("other"); }
+    }
+
+    // Tuple pattern
+    let pair = (5.0, 10.0);
+    match pair {
+        (a, b) => { let _ = print(f"pair: ({a}, {b})"); }
+    }
+
+    let _ = print("=== Done ===");
+}

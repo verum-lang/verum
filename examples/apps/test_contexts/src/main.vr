@@ -1,0 +1,385 @@
+// Comprehensive Context System Test Application
+// Tests all features of Verum's context-based dependency injection system
+//
+// This test covers:
+// 1. Context type definitions
+// 2. Using contexts in functions: fn foo() using [Context]
+// 3. Providing contexts: provide Context = value
+// 4. Multiple contexts
+// 5. Context composition
+// 6. Context access within functions
+
+// ===== 1. CONTEXT TYPE DEFINITIONS =====
+
+// Simple sync context
+context Logger {
+    fn log(msg: Text)
+    fn info(msg: Text)
+    fn error(msg: Text)
+    fn debug(msg: Text)
+}
+
+// Async context with Result returns
+context async Database {
+    async fn query(sql: Text) -> Result<List<Map<Text, Text>>, Text>
+    async fn execute(sql: Text) -> Result<Int, Text>
+}
+
+// State management context (generic)
+context State<T> {
+    fn get() -> T
+    fn put(value: T)
+    fn modify(f: fn(T) -> T)
+}
+
+// I/O context
+context IO {
+    fn read_line() -> Text
+    fn print_line(msg: Text)
+    fn read_file(path: Text) -> Result<Text, Text>
+}
+
+// Configuration context
+context Config {
+    fn get(key: Text) -> Maybe<Text>
+    fn get_int(key: Text) -> Maybe<Int>
+}
+
+// Metrics/telemetry context
+context Metrics {
+    fn increment(name: Text)
+    fn record(name: Text, value: Float)
+}
+
+// ===== 2. HELPER TYPES =====
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Text
+}
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// ===== 3. FUNCTIONS USING SINGLE CONTEXT =====
+
+// Function using single context - brackets optional
+fn log_message(msg: Text) using Logger {
+    Logger.log(f"[APP] {msg}");
+}
+
+fn get_counter() -> Int using State<Int> {
+    State.get()
+}
+
+fn increment_counter() using State<Int> {
+    let current = State.get();
+    State.put(current + 1);
+}
+
+fn read_user_input() -> Text using IO {
+    IO.print_line("Enter your name:");
+    IO.read_line()
+}
+
+fn get_database_url() -> Text using Config {
+    match Config.get("database_url") {
+        Some(url) => url,
+        None => "sqlite://default.db"
+    }
+}
+
+fn track_event(name: Text) using Metrics {
+    Metrics.increment(name);
+}
+
+// ===== 4. FUNCTIONS USING MULTIPLE CONTEXTS =====
+
+// Function with two contexts - brackets required
+fn log_and_increment() using [Logger, State<Int>] {
+    let count = State.get();
+    Logger.info(f"Current count: {count}");
+    State.put(count + 1);
+    Logger.info(f"Incremented to: {count + 1}");
+}
+
+// Function with three contexts
+fn process_with_logging(data: Text) using [Logger, Metrics, Config] {
+    Logger.info("Processing data");
+    Metrics.increment("data.processed");
+
+    let max_size = match Config.get_int("max_size") {
+        Some(size) => size,
+        None => 1000
+    };
+
+    Logger.debug(f"Max size: {max_size}");
+    Metrics.record("data.size", 42.0);
+}
+
+// ===== 5. CONTEXT COMPOSITION (calling functions with different contexts) =====
+
+// This function uses Logger and calls functions with other contexts
+fn orchestrate() using [Logger, State<Int>, Metrics, Config] {
+    Logger.info("Starting orchestration");
+
+    // Call function with single context
+    log_message("Orchestration started");
+
+    // Call function with State
+    let initial = get_counter();
+    Logger.info(f"Initial counter: {initial}");
+
+    // Call function with multiple contexts
+    log_and_increment();
+
+    // Track metrics
+    track_event("orchestration.started");
+
+    // Process with logging
+    process_with_logging("test data");
+
+    Logger.info("Orchestration complete");
+}
+
+// ===== 6. CONTEXT GROUPS (Reusable context sets) =====
+
+// Define context group for application contexts
+using AppContext = [Logger, Metrics, Config];
+
+// Use context group
+fn app_function(data: Text) using AppContext {
+    Logger.info(f"Processing: {data}");
+    Metrics.increment("app.operations");
+
+    let setting = match Config.get("mode") {
+        Some(mode) => mode,
+        None => "default"
+    };
+
+    Logger.debug(f"Mode: {setting}");
+}
+
+// Combine context group with additional contexts
+using FullContext = [AppContext, State<Int>];
+
+fn full_operation() using FullContext {
+    Logger.info("Full operation starting");
+    let count = get_counter();
+    Logger.info(f"Count: {count}");
+    increment_counter();
+    Metrics.increment("full.operations");
+}
+
+// ===== 7. CONTEXT PROVIDERS (Implementations) =====
+
+// Console logger implementation
+fn create_console_logger() -> Logger {
+    Logger {
+        log: fn(msg: Text) {
+            print(f"LOG: {msg}");
+        },
+        info: fn(msg: Text) {
+            print(f"INFO: {msg}");
+        },
+        error: fn(msg: Text) {
+            print(f"ERROR: {msg}");
+        },
+        debug: fn(msg: Text) {
+            print(f"DEBUG: {msg}");
+        }
+    }
+}
+
+// State provider with initial value
+fn create_state(initial: Int) -> State<Int> {
+    // In a real implementation, this would use a cell or mutable container
+    // For this test, we'll use a simple wrapper
+    let value = initial;
+    State<Int> {
+        get: fn() -> Int {
+            value
+        },
+        put: fn(new_value: Int) {
+            // In real implementation: cell.set(new_value)
+            print(f"State.put: {new_value}");
+        },
+        modify: fn(f: fn(Int) -> Int) {
+            let current = value;
+            let new_val = f(current);
+            print(f"State.modify: {current} -> {new_val}");
+        }
+    }
+}
+
+// Metrics provider
+fn create_metrics() -> Metrics {
+    Metrics {
+        increment: fn(name: Text) {
+            print(f"METRIC[{name}] += 1");
+        },
+        record: fn(name: Text, value: Float) {
+            print(f"METRIC[{name}] = {value}");
+        }
+    }
+}
+
+// Config provider
+fn create_config() -> Config {
+    Config {
+        get: fn(key: Text) -> Maybe<Text> {
+            if key == "database_url" {
+                Some("postgresql://localhost/testdb")
+            } else if key == "mode" {
+                Some("production")
+            } else {
+                None
+            }
+        },
+        get_int: fn(key: Text) -> Maybe<Int> {
+            if key == "max_size" {
+                Some(5000)
+            } else if key == "port" {
+                Some(8080)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// Mock IO provider
+fn create_mock_io() -> IO {
+    IO {
+        read_line: fn() -> Text {
+            "mock_input"
+        },
+        print_line: fn(msg: Text) {
+            print(f"IO: {msg}");
+        },
+        read_file: fn(path: Text) -> Result<Text, Text> {
+            Ok(f"Contents of {path}")
+        }
+    }
+}
+
+// ===== 8. MAIN TEST FUNCTION =====
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║     Comprehensive Context System Test Application         ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    // ===== Provide all contexts =====
+    print("📦 Providing contexts...");
+    provide Logger = create_console_logger();
+    provide State<Int> = create_state(0);
+    provide Metrics = create_metrics();
+    provide Config = create_config();
+    provide IO = create_mock_io();
+    print("");
+
+    // ===== Test 1: Single Context Usage =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 1: Single Context Usage");
+    print("─────────────────────────────────────────────────────────────");
+    log_message("Testing single context");
+    let count1 = get_counter();
+    print(f"Counter value: {count1}");
+    let url = get_database_url();
+    print(f"Database URL: {url}");
+    track_event("test.single_context");
+    print("");
+
+    // ===== Test 2: Multiple Contexts =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 2: Multiple Contexts");
+    print("─────────────────────────────────────────────────────────────");
+    log_and_increment();
+    print("");
+
+    // ===== Test 3: Three Contexts Together =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 3: Three Contexts Together");
+    print("─────────────────────────────────────────────────────────────");
+    process_with_logging("sample data");
+    print("");
+
+    // ===== Test 4: Context Composition =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 4: Context Composition (Nested Calls)");
+    print("─────────────────────────────────────────────────────────────");
+    orchestrate();
+    print("");
+
+    // ===== Test 5: Context Groups =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 5: Context Groups");
+    print("─────────────────────────────────────────────────────────────");
+    app_function("context group test");
+    print("");
+
+    // ===== Test 6: Combined Context Groups =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 6: Combined Context Groups");
+    print("─────────────────────────────────────────────────────────────");
+    full_operation();
+    print("");
+
+    // ===== Test 7: Scoped Context Provision =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 7: Scoped Context Provision");
+    print("─────────────────────────────────────────────────────────────");
+    {
+        // Create a new logger for this scope
+        provide Logger = Logger {
+            log: fn(msg: Text) { print(f"SCOPED-LOG: {msg}"); },
+            info: fn(msg: Text) { print(f"SCOPED-INFO: {msg}"); },
+            error: fn(msg: Text) { print(f"SCOPED-ERROR: {msg}"); },
+            debug: fn(msg: Text) { print(f"SCOPED-DEBUG: {msg}"); }
+        };
+
+        log_message("This uses the scoped logger");
+    }
+    // Outside scope, original logger is restored
+    log_message("Back to original logger");
+    print("");
+
+    // ===== Test 8: Context Method Invocation =====
+    print("─────────────────────────────────────────────────────────────");
+    print("Test 8: Direct Context Method Invocation");
+    print("─────────────────────────────────────────────────────────────");
+    Logger.info("Direct call to Logger.info");
+    Logger.debug("Direct call to Logger.debug");
+    Logger.error("Direct call to Logger.error");
+    Metrics.increment("direct.call");
+    Metrics.record("test.metric", 3.14159);
+    print("");
+
+    // ===== Summary =====
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║              Context System Features Tested                ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("✓ Context type definitions (Logger, State, Metrics, Config, IO)");
+    print("✓ Single context usage: using Context");
+    print("✓ Multiple contexts: using [C1, C2, C3]");
+    print("✓ Context providers: provide Context = value");
+    print("✓ Context composition (nested function calls)");
+    print("✓ Context groups: using Group = [C1, C2, ...]");
+    print("✓ Combined context groups");
+    print("✓ Scoped context provision");
+    print("✓ Direct context method invocation");
+    print("✓ Generic contexts: State<T>");
+    print("✓ Sync and async contexts");
+    print("");
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║                    Test Complete! ✓                        ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

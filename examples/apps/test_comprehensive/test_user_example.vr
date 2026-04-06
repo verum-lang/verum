@@ -1,0 +1,7 @@
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn main() -> Int {
+    42
+}

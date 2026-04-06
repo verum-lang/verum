@@ -1,0 +1,250 @@
+// =============================================================================
+// instant.vr - Monotonic time instant
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Dependencies: core, time/duration, sys/{linux,darwin,windows}/time
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// Uses native platform monotonic time instead of verum_runtime FFI:
+// - Linux: clock_gettime(CLOCK_MONOTONIC) via sys/linux/time.monotonic_nanos
+// - macOS: mach_absolute_time() via sys/darwin/time.monotonic_nanos
+// - Windows: QueryPerformanceCounter() via sys/windows/time.monotonic_nanos
+//
+// =============================================================================
+//
+// Instant represents a point in monotonic time, useful for measuring
+// elapsed time. Unlike wall-clock time, monotonic time never goes backwards
+// and is not affected by system clock adjustments.
+//
+// # Example
+// ```verum
+// let start = Instant.now();
+// do_expensive_work();
+// let elapsed = start.elapsed();
+// print(f"Work took {elapsed.as_millis()}ms");
+// ```
+//
+// =============================================================================
+
+module core.time.instant;
+mount core.*;
+mount time.duration.Duration;
+
+// =============================================================================
+// V-LLSI Native Time Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// - Linux: clock_gettime(CLOCK_MONOTONIC)
+// - macOS: mach_absolute_time()
+// - Windows: QueryPerformanceCounter()
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.time.monotonic_nanos;
+
+@cfg(target_os = "macos")
+mount sys.darwin.time.monotonic_nanos;
+
+@cfg(target_os = "windows")
+mount sys.windows.time.monotonic_nanos;
+
+// =============================================================================
+// Instant
+// =============================================================================
+
+/// A point in monotonic time.
+///
+/// Instant is opaque: you cannot construct one directly from a number.
+/// The only way to get an Instant is via `Instant.now()`.
+///
+/// Instants are guaranteed to be:
+/// - Monotonically non-decreasing (never goes backwards)
+/// - Independent of wall-clock time (unaffected by NTP, daylight saving, etc.)
+///
+/// # Example
+/// ```verum
+/// let start = Instant.now();
+///
+/// // Do some work...
+/// process_data();
+///
+/// // Measure elapsed time
+/// let elapsed = start.elapsed();
+/// if elapsed > Duration.secs(1) {
+///     print("Warning: operation took more than 1 second");
+/// }
+/// ```
+public type Instant is {
+    /// Nanoseconds since an arbitrary epoch (private)
+    nanos: Int,
+};
+
+implement Instant {
+    /// Get the current instant.
+    ///
+    /// Uses native platform time:
+    /// - Linux: clock_gettime(CLOCK_MONOTONIC)
+    /// - macOS: mach_absolute_time()
+    /// - Windows: QueryPerformanceCounter()
+    ///
+    /// # Example
+    /// ```verum
+    /// let now = Instant.now();
+    /// ```
+    public fn now() -> Instant {
+        let nanos = monotonic_nanos() as Int;
+        Instant { nanos: nanos }
+    }
+
+    /// Get the elapsed time since this instant.
+    ///
+    /// # Panics
+    /// Panics if the current time is somehow before this instant
+    /// (should never happen with monotonic time).
+    ///
+    /// # Example
+    /// ```verum
+    /// let start = Instant.now();
+    /// do_work();
+    /// let elapsed = start.elapsed();
+    /// ```
+    public fn elapsed(&self) -> Duration {
+        let now = Instant.now();
+        self.duration_since(now).unwrap_or(Duration.zero())
+    }
+
+    /// Get the duration from this instant to another.
+    ///
+    /// Returns None if `earlier` is actually later than `self`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let start = Instant.now();
+    /// // ... work ...
+    /// let end = Instant.now();
+    /// let duration = end.duration_since(start);
+    /// ```
+    public fn duration_since(&self, earlier: Instant) -> Maybe<Duration> {
+        if self.nanos >= earlier.nanos {
+            Some(Duration.from_nanos(self.nanos - earlier.nanos))
+        } else {
+            None
+        }
+    }
+
+    /// Get the duration from this instant to another, saturating at zero.
+    public fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier).unwrap_or(Duration.zero())
+    }
+
+    /// Add a duration to this instant.
+    ///
+    /// # Panics
+    /// May panic on overflow (far future times).
+    public fn checked_add(&self, duration: Duration) -> Maybe<Instant> {
+        let res = self.nanos + duration.as_nanos();
+        if res < self.nanos {
+            // Overflow
+            None
+        } else {
+            Some(Instant { nanos: res })
+        }
+    }
+
+    /// Subtract a duration from this instant.
+    ///
+    /// Returns None if the result would be before the epoch.
+    public fn checked_sub(&self, duration: Duration) -> Maybe<Instant> {
+        let dur_nanos = duration.as_nanos();
+        if dur_nanos > self.nanos {
+            None
+        } else {
+            Some(Instant { nanos: self.nanos - dur_nanos })
+        }
+    }
+}
+
+// =============================================================================
+// Operator Implementations
+// =============================================================================
+
+implement Add<Duration> for Instant {
+    type Output = Instant;
+
+    fn add(self, duration: Duration) -> Instant {
+        self.checked_add(duration).expect("Instant overflow")
+    }
+}
+
+implement Sub<Duration> for Instant {
+    type Output = Instant;
+
+    fn sub(self, duration: Duration) -> Instant {
+        self.checked_sub(duration).expect("Instant underflow")
+    }
+}
+
+implement Sub<Instant> for Instant {
+    type Output = Duration;
+
+    fn sub(self, other: Instant) -> Duration {
+        self.saturating_duration_since(other)
+    }
+}
+
+// =============================================================================
+// Comparison Implementations
+// =============================================================================
+
+implement Eq for Instant {
+    fn eq(&self, other: &Instant) -> Bool {
+        self.nanos == other.nanos
+    }
+}
+
+implement Ord for Instant {
+    fn cmp(&self, other: &Instant) -> Ordering {
+        self.nanos.cmp(&other.nanos)
+    }
+}
+
+implement PartialOrd for Instant {
+    fn partial_cmp(&self, other: &Instant) -> Maybe<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// =============================================================================
+// Other Implementations
+// =============================================================================
+
+implement Clone for Instant {
+    fn clone(&self) -> Instant {
+        Instant { nanos: self.nanos }
+    }
+}
+
+implement Copy for Instant {}
+
+implement Hash for Instant {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.nanos.hash(hasher);
+    }
+}
+
+implement Debug for Instant {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Instant({self.nanos}ns)")
+    }
+}
+
+implement Display for Instant {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Display as human-readable elapsed time from epoch
+        let secs = self.nanos / 1_000_000_000;
+        let subsec_ms = (self.nanos % 1_000_000_000) / 1_000_000;
+        f.write_str(f"{secs}.{subsec_ms:03}s")
+    }
+}

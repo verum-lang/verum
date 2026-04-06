@@ -1,0 +1,302 @@
+// =============================================================================
+// task.vr - Task spawning and joining
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, sync, async/future
+// =============================================================================
+//
+// Task represents a spawned asynchronous computation.
+// Tasks run concurrently and can be awaited via JoinHandle.
+//
+// =============================================================================
+
+module core.async.task;
+mount core.*;
+mount sync.*;
+mount .poll.*;
+mount .waker.*;
+mount .future.*;
+
+// =============================================================================
+// Task State
+// =============================================================================
+
+// Internal state of a task.
+type TaskState<T> is
+    | Pending           // Not yet started
+    | Running           // Currently executing
+    | Completed(T)      // Finished with result
+    | Cancelled;        // Was cancelled
+
+// =============================================================================
+// Task<T>
+// =============================================================================
+
+// Identifier for a spawned task.
+public type TaskId is {
+    id: Int,
+};
+
+implement TaskId {
+    // Create new task ID.
+    fn new() -> TaskId {
+        // Use atomic counter for unique IDs
+        static NEXT_ID: AtomicInt = AtomicInt.new(1);
+        TaskId { id: NEXT_ID.fetch_add(1, MemoryOrdering.Relaxed) }
+    }
+}
+
+implement Eq for TaskId {
+    fn eq(&self, other: &TaskId) -> Bool {
+        self.id == other.id
+    }
+}
+
+implement Hash for TaskId {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.id.hash(hasher);
+    }
+}
+
+implement Debug for TaskId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TaskId(")?;
+        self.id.fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// Task
+// =============================================================================
+
+// A spawned asynchronous task.
+public type Task<T> is {
+    id: TaskId,
+    state: AtomicInt,  // 0=pending, 1=running, 2=completed, 3=cancelled
+    result: Mutex<Maybe<T>>,
+};
+
+implement<T> Task<T> {
+    // Get task ID.
+    public fn id(&self) -> TaskId {
+        self.id
+    }
+
+    // Check if task is finished.
+    public fn is_finished(&self) -> Bool {
+        let state = self.state.load(MemoryOrdering.Acquire);
+        state >= 2  // Completed || Cancelled
+    }
+
+    // Check if task was cancelled.
+    public fn is_cancelled(&self) -> Bool {
+        self.state.load(MemoryOrdering.Acquire) == 3
+    }
+
+    // Cancel the task.
+    public fn cancel(&self) -> Bool {
+        // Can only cancel if pending || running
+        loop {
+            let state = self.state.load(MemoryOrdering.Acquire);
+            if state >= 2 {
+                return false;  // Already finished
+            }
+            if self.state.compare_exchange(state, 3, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
+                return true;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// JoinHandle<T>
+// =============================================================================
+
+// Handle for awaiting a spawned task's result.
+public type JoinHandle<T> is {
+    task: Shared<Task<T>>,
+};
+
+implement<T> JoinHandle<T> {
+    // Get task ID.
+    public fn id(&self) -> TaskId {
+        self.task.id()
+    }
+
+    // Check if task is finished.
+    public fn is_finished(&self) -> Bool {
+        self.task.is_finished()
+    }
+
+    // Cancel the task.
+    public fn cancel(&self) {
+        self.task.cancel();
+    }
+
+    // Detach from task - let it run to completion without waiting.
+    public fn detach(self) {
+        // Just drop the handle
+    }
+}
+
+implement<T> Future for JoinHandle<T> {
+    type Output = Result<T, JoinError>;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Result<T, JoinError>> {
+        if self.task.is_finished() {
+            if self.task.is_cancelled() {
+                Poll.Ready(Err(JoinError.Cancelled))
+            } else {
+                let mut guard = self.task.result.lock().unwrap();
+                match guard.take() {
+                    Some(res) => Poll.Ready(Ok(res)),
+                    None => Poll.Ready(Err(JoinError.Panicked)),
+                }
+            }
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+// =============================================================================
+// JoinError
+// =============================================================================
+
+// Error when joining a task.
+public type JoinError is
+    | Cancelled      // Task was cancelled
+    | Panicked;      // Task panicked
+
+implement Debug for JoinError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cancelled => f.write_str("JoinError.Cancelled"),
+            Panicked => f.write_str("JoinError.Panicked"),
+        }
+    }
+}
+
+// =============================================================================
+// Spawn Functions
+// =============================================================================
+
+// Thread-local task queue (simplified - real impl uses executor)
+static TASK_QUEUE: Mutex<List<Shared<Task<()>>>> = Mutex.new(List.new());
+
+// Spawn a future as a new task.
+// Returns a JoinHandle to await the result.
+public fn spawn<F: Future>(future: F) -> JoinHandle<F.Output>
+where F.Output: Send
+{
+    // In a real implementation, this would submit to an executor
+    let task = Shared.new(Task {
+        id: TaskId.new(),
+        state: AtomicInt.new(0),  // Pending
+        result: Mutex.new(None),
+    });
+
+    JoinHandle { task: task }
+}
+
+// Spawn a blocking operation on a dedicated thread pool.
+public fn spawn_blocking<F: fn() -> T, T: Send>(f: F) -> JoinHandle<T> {
+    // Simplified: just treat as regular spawn
+    spawn(lazy(f))
+}
+
+// Spawn a future as a detached task (fire-and-forget).
+// The task runs to completion without waiting for the result.
+public fn spawn_detached<F: Future>(future: F)
+where F.Output: Send
+{
+    let handle = spawn(future);
+    handle.detach();
+}
+
+// Yield control back to the runtime.
+// Other tasks may run before this task resumes.
+public fn yield_now() -> YieldNow {
+    YieldNow { yielded: false }
+}
+
+// Future for yield_now.
+public type YieldNow is {
+    yielded: Bool,
+};
+
+implement Future for YieldNow {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.yielded {
+            Poll.Ready(())
+        } else {
+            self.yielded = true;
+            // Wake immediately so we get polled again
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+// =============================================================================
+// JoinSet - Manage multiple tasks
+// =============================================================================
+
+// A collection of spawned tasks.
+public type JoinSet<T> is {
+    handles: List<JoinHandle<T>>,
+};
+
+implement<T> JoinSet<T> {
+    // Create empty join set.
+    public fn new() -> JoinSet<T> {
+        JoinSet { handles: List.new() }
+    }
+
+    // Spawn a task && add to set.
+    public fn spawn<F: Future<Output = T>>(&mut self, future: F)
+    where T: Send
+    {
+        self.handles.push(spawn(future));
+    }
+
+    // Number of tasks in set.
+    public fn len(&self) -> Int {
+        self.handles.len()
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.handles.is_empty()
+    }
+
+    // Cancel all tasks.
+    public fn cancel_all(&mut self) {
+        for handle in self.handles.iter_mut() {
+            handle.cancel();
+        }
+    }
+
+    // Detach all tasks.
+    public fn detach_all(&mut self) {
+        self.handles.clear();
+    }
+}
+
+implement<T> Future for JoinSet<T> {
+    type Output = Result<T, JoinError>;
+
+    // Poll until any task completes.
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, JoinError>> {
+        for i in range(0, self.handles.len()) {
+            if let Poll.Ready(res) = self.handles.get_mut(i).unwrap().poll(cx) {
+                self.handles.remove(i);
+                return Poll.Ready(res);
+            }
+        }
+        Poll.Pending
+    }
+}

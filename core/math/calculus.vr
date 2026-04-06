@@ -1,0 +1,1155 @@
+// =============================================================================
+// calculus.vr - Numerical Analysis Module
+// =============================================================================
+// Layer: 3 (Analysis)
+//
+// Provides numerical methods for calculus and analysis:
+// - Numerical differentiation (finite differences, gradients, Jacobians)
+// - Numerical integration (Newton-Cotes, Gaussian quadrature, adaptive)
+// - ODE solvers (Euler, Runge-Kutta, adaptive step)
+// - Root finding (bisection, Newton-Raphson, secant)
+// - Optimization (gradient descent, Newton's method)
+//
+// # Design Philosophy
+//
+// Functions accept closures for the target function, allowing flexibility
+// while maintaining type safety through protocols.
+//
+// Spec: docs/architecture/math-spec.md Section 10-12
+// =============================================================================
+
+module core.math.calculus;
+
+mount super.constants.{PI, EPSILON};
+mount super.elementary.{sqrt, abs, cos, sin, pow, cbrt, fma, exp};
+mount super.linalg.{Vector, Matrix, solve, lu, lu_solve};
+
+// =============================================================================
+// Numerical Differentiation
+// =============================================================================
+
+// Forward difference approximation: f'(x) ≈ (f(x+h) - f(x)) / h
+// Error: O(h)
+@inline(always)
+public fn diff_forward<F>(f: F, x: Float, h: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    (f(x + h) - f(x)) / h
+}
+
+// Backward difference approximation: f'(x) ≈ (f(x) - f(x-h)) / h
+// Error: O(h)
+@inline(always)
+public fn diff_backward<F>(f: F, x: Float, h: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    (f(x) - f(x - h)) / h
+}
+
+// Central difference approximation: f'(x) ≈ (f(x+h) - f(x-h)) / 2h
+// Error: O(h²)
+@inline(always)
+public fn diff_central<F>(f: F, x: Float, h: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    (f(x + h) - f(x - h)) / (2.0 * h)
+}
+
+// Second derivative using central difference: f''(x) ≈ (f(x+h) - 2f(x) + f(x-h)) / h²
+// Error: O(h²)
+@inline(always)
+public fn diff2_central<F>(f: F, x: Float, h: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    (f(x + h) - 2.0 * f(x) + f(x - h)) / (h * h)
+}
+
+// Higher-order central difference (5-point stencil)
+// Error: O(h⁴)
+public fn diff_central_5pt<F>(f: F, x: Float, h: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    (-f(x + 2.0 * h) + 8.0 * f(x + h) - 8.0 * f(x - h) + f(x - 2.0 * h)) / (12.0 * h)
+}
+
+// Optimal step size for numerical differentiation
+// Based on machine epsilon and function scale
+public fn optimal_h(x: Float) -> Float {
+    let eps = EPSILON;
+    let scale = if abs(x) > 1.0 { abs(x) } else { 1.0 };
+    cbrt(eps) * scale
+}
+
+// Derivative with automatic optimal step size
+public fn derivative<F>(f: F, x: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    let h = optimal_h(x);
+    diff_central(f, x, h)
+}
+
+// Richardson extrapolation for improved accuracy
+// Builds Romberg-style table to eliminate lower-order error terms
+public fn richardson<F>(f: F, x: Float, h: Float, order: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    assert(order > 0 && order <= 10, "order must be between 1 and 10");
+
+    let mut table = Matrix.zeros(order, order);
+
+    // First column: central differences with decreasing h
+    for i in 0..order {
+        let hi = h / pow(2.0, i as Float);
+        table.set(i, 0, diff_central(&f, x, hi));
+    }
+
+    // Richardson extrapolation
+    for j in 1..order {
+        let factor = pow(4.0, j as Float);
+        for i in j..order {
+            let t1 = table.get(i, j - 1);
+            let t0 = table.get(i - 1, j - 1);
+            table.set(i, j, (factor * t1 - t0) / (factor - 1.0));
+        }
+    }
+
+    table.get(order - 1, order - 1)
+}
+
+// Gradient of a scalar function: ∇f(x)
+// Uses central differences
+public fn gradient<F>(f: F, x: &Vector<Float>, h: Float) -> Vector<Float>
+where F: Fn(&Vector<Float>) -> Float
+{
+    let n = x.len();
+    let mut grad = Vector.zeros(n);
+
+    for i in 0..n {
+        let mut x_plus = x.clone();
+        let mut x_minus = x.clone();
+        x_plus.set(i, x.get(i) + h);
+        x_minus.set(i, x.get(i) - h);
+        grad.set(i, (f(&x_plus) - f(&x_minus)) / (2.0 * h));
+    }
+
+    grad
+}
+
+// Jacobian of a vector function: J[i,j] = ∂fᵢ/∂xⱼ
+public fn jacobian<F>(f: F, x: &Vector<Float>, h: Float) -> Matrix<Float>
+where F: Fn(&Vector<Float>) -> Vector<Float>
+{
+    let fx = f(x);
+    let m = fx.len();
+    let n = x.len();
+    let mut jac = Matrix.zeros(m, n);
+
+    for j in 0..n {
+        let mut x_plus = x.clone();
+        let mut x_minus = x.clone();
+        x_plus.set(j, x.get(j) + h);
+        x_minus.set(j, x.get(j) - h);
+
+        let f_plus = f(&x_plus);
+        let f_minus = f(&x_minus);
+
+        for i in 0..m {
+            jac.set(i, j, (f_plus.get(i) - f_minus.get(i)) / (2.0 * h));
+        }
+    }
+
+    jac
+}
+
+// Hessian of a scalar function: H[i,j] = ∂²f/∂xᵢ∂xⱼ
+public fn hessian<F>(f: F, x: &Vector<Float>, h: Float) -> Matrix<Float>
+where F: Fn(&Vector<Float>) -> Float
+{
+    let n = x.len();
+    let mut hess = Matrix.zeros(n, n);
+
+    for i in 0..n {
+        for j in i..n {
+            let mut xpp = x.clone();
+            let mut xpm = x.clone();
+            let mut xmp = x.clone();
+            let mut xmm = x.clone();
+
+            xpp.set(i, x.get(i) + h);
+            xpp.set(j, xpp.get(j) + h);
+
+            xpm.set(i, x.get(i) + h);
+            xpm.set(j, xpm.get(j) - h);
+
+            xmp.set(i, x.get(i) - h);
+            xmp.set(j, xmp.get(j) + h);
+
+            xmm.set(i, x.get(i) - h);
+            xmm.set(j, xmm.get(j) - h);
+
+            let d2f = (f(&xpp) - f(&xpm) - f(&xmp) + f(&xmm)) / (4.0 * h * h);
+            hess.set(i, j, d2f);
+            hess.set(j, i, d2f);  // Symmetric
+        }
+    }
+
+    hess
+}
+
+// =============================================================================
+// Numerical Integration
+// =============================================================================
+
+// Trapezoidal rule: ∫f(x)dx ≈ h/2 * (f(a) + 2Σf(xᵢ) + f(b))
+// Error: O(h²)
+public fn trapezoid<F>(f: F, a: Float, b: Float, n: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    assert(n > 0, "n must be positive");
+    let h = (b - a) / (n as Float);
+    let mut sum = 0.5 * (f(a) + f(b));
+    for i in 1..n {
+        sum = sum + f(a + (i as Float) * h);
+    }
+    sum * h
+}
+
+// Simpson's rule: ∫f(x)dx ≈ h/3 * (f(a) + 4Σf(x₂ᵢ₋₁) + 2Σf(x₂ᵢ) + f(b))
+// Error: O(h⁴)
+public fn simpson<F>(f: F, a: Float, b: Float, n: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    assert(n > 0 && n % 2 == 0, "Simpson requires positive even n");
+    let h = (b - a) / (n as Float);
+
+    let mut sum = f(a) + f(b);
+    for i in 1..n {
+        let x = a + (i as Float) * h;
+        sum = sum + (if i % 2 == 0 { 2.0 } else { 4.0 }) * f(x);
+    }
+    sum * h / 3.0
+}
+
+// Simpson's 3/8 rule (cubic interpolation)
+// Error: O(h⁴)
+public fn simpson38<F>(f: F, a: Float, b: Float, n: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    assert(n > 0 && n % 3 == 0, "Simpson 3/8 requires n divisible by 3");
+    let h = (b - a) / (n as Float);
+
+    let mut sum = f(a) + f(b);
+    for i in 1..n {
+        let x = a + (i as Float) * h;
+        sum = sum + (if i % 3 == 0 { 2.0 } else { 3.0 }) * f(x);
+    }
+    sum * 3.0 * h / 8.0
+}
+
+// Romberg integration (successive refinement with Richardson extrapolation)
+// Achieves high accuracy with adaptive refinement
+public fn romberg<F>(f: F, a: Float, b: Float, max_iter: USize, tol: Float) -> Float
+where F: Fn(Float) -> Float
+{
+    let mut r = Matrix.zeros(max_iter, max_iter);
+
+    // Initial trapezoidal estimate
+    r.set(0, 0, (b - a) * 0.5 * (f(a) + f(b)));
+
+    for i in 1..max_iter {
+        // Refined trapezoidal estimate
+        let h = (b - a) / pow(2.0, i as Float);
+        let mut sum = 0.0;
+        let num_new_points = pow(2.0, (i - 1) as Float) as USize;
+        for k in 0..num_new_points {
+            let x = a + (2.0 * (k as Float) + 1.0) * h;
+            sum = sum + f(x);
+        }
+        r.set(i, 0, 0.5 * r.get(i - 1, 0) + h * sum);
+
+        // Richardson extrapolation
+        for j in 1..=i {
+            let factor = pow(4.0, j as Float);
+            r.set(i, j, (factor * r.get(i, j - 1) - r.get(i - 1, j - 1)) / (factor - 1.0));
+        }
+
+        // Check convergence
+        if i > 0 && abs(r.get(i, i) - r.get(i - 1, i - 1)) < tol {
+            return r.get(i, i);
+        }
+    }
+
+    r.get(max_iter - 1, max_iter - 1)
+}
+
+// Gauss-Legendre quadrature nodes and weights (2-point)
+fn gauss_legendre_2() -> (List<Float>, List<Float>) {
+    let x = List.from_slice(&[-0.5773502691896257, 0.5773502691896257]);
+    let w = List.from_slice(&[1.0, 1.0]);
+    (x, w)
+}
+
+// Gauss-Legendre quadrature nodes and weights (3-point)
+fn gauss_legendre_3() -> (List<Float>, List<Float>) {
+    let x = List.from_slice(&[-0.7745966692414834, 0.0, 0.7745966692414834]);
+    let w = List.from_slice(&[0.5555555555555556, 0.8888888888888888, 0.5555555555555556]);
+    (x, w)
+}
+
+// Gauss-Legendre quadrature nodes and weights (5-point)
+fn gauss_legendre_5() -> (List<Float>, List<Float>) {
+    let x = List.from_slice(&[
+        -0.9061798459386640, -0.5384693101056831, 0.0,
+         0.5384693101056831, 0.9061798459386640
+    ]);
+    let w = List.from_slice(&[
+        0.2369268850561891, 0.4786286704993665, 0.5688888888888889,
+        0.4786286704993665, 0.2369268850561891
+    ]);
+    (x, w)
+}
+
+// Gauss-Legendre integration on [a, b]
+public fn gauss_legendre<F>(f: F, a: Float, b: Float, n: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    let (nodes, weights) = match n {
+        2 => gauss_legendre_2(),
+        3 => gauss_legendre_3(),
+        5 => gauss_legendre_5(),
+        _ => gauss_legendre_5(),  // Default to 5-point
+    };
+
+    let mid = (a + b) / 2.0;
+    let half_width = (b - a) / 2.0;
+
+    let mut sum = 0.0;
+    for i in 0..nodes.len() {
+        let x = mid + half_width * nodes[i];
+        sum = sum + weights[i] * f(x);
+    }
+    sum * half_width
+}
+
+// Adaptive Simpson's rule with error control
+public fn adaptive_simpson<F>(f: F, a: Float, b: Float, tol: Float, max_depth: USize) -> Float
+where F: Fn(Float) -> Float
+{
+    let whole = simpson(&f, a, b, 2);
+    adaptive_simpson_impl(&f, a, b, tol, max_depth, 0, whole)
+}
+
+fn adaptive_simpson_impl<F>(
+    f: &F,
+    a: Float,
+    b: Float,
+    tol: Float,
+    max_depth: USize,
+    depth: USize,
+    whole: Float,
+) -> Float
+where F: Fn(Float) -> Float
+{
+    let mid = (a + b) / 2.0;
+    let left = simpson(f, a, mid, 2);
+    let right = simpson(f, mid, b, 2);
+    let delta = left + right - whole;
+
+    if depth >= max_depth || abs(delta) <= 15.0 * tol {
+        // Richardson extrapolation correction
+        left + right + delta / 15.0
+    } else {
+        let half_tol = tol / 2.0;
+        adaptive_simpson_impl(f, a, mid, half_tol, max_depth, depth + 1, left)
+            + adaptive_simpson_impl(f, mid, b, half_tol, max_depth, depth + 1, right)
+    }
+}
+
+// =============================================================================
+// ODE Solvers
+// =============================================================================
+
+// ODE system type: dy/dt = f(t, y)
+public type ODESystem is fn(Float, &Vector<Float>) -> Vector<Float>;
+
+// ODE solution trajectory: list of (time, state) pairs
+public type ODESolution is List<(Float, Vector<Float>)>;
+
+// Euler's method (first-order explicit)
+public fn euler(
+    f: ODESystem,
+    y0: &Vector<Float>,
+    t0: Float,
+    tf: Float,
+    h: Float,
+) -> ODESolution {
+    let mut t = t0;
+    let mut y = y0.clone();
+    let mut result = List.new();
+    result.push((t, y.clone()));
+
+    while t < tf {
+        let step = if h < tf - t { h } else { tf - t };
+        let dy = f(t, &y);
+        y.axpy(step, &dy);
+        t = t + step;
+        result.push((t, y.clone()));
+    }
+
+    result
+}
+
+// Heun's method (improved Euler, second-order)
+public fn heun(
+    f: ODESystem,
+    y0: &Vector<Float>,
+    t0: Float,
+    tf: Float,
+    h: Float,
+) -> ODESolution {
+    let mut t = t0;
+    let mut y = y0.clone();
+    let mut result = List.new();
+    result.push((t, y.clone()));
+
+    while t < tf {
+        let step = if h < tf - t { h } else { tf - t };
+
+        // Predictor (Euler)
+        let k1 = f(t, &y);
+        let mut y_pred = y.clone();
+        y_pred.axpy(step, &k1);
+
+        // Corrector
+        let k2 = f(t + step, &y_pred);
+
+        // Average slopes
+        y.axpy(step / 2.0, &k1);
+        y.axpy(step / 2.0, &k2);
+
+        t = t + step;
+        result.push((t, y.clone()));
+    }
+
+    result
+}
+
+// Midpoint method (second-order)
+public fn midpoint(
+    f: ODESystem,
+    y0: &Vector<Float>,
+    t0: Float,
+    tf: Float,
+    h: Float,
+) -> ODESolution {
+    let mut t = t0;
+    let mut y = y0.clone();
+    let mut result = List.new();
+    result.push((t, y.clone()));
+
+    while t < tf {
+        let step = if h < tf - t { h } else { tf - t };
+
+        let k1 = f(t, &y);
+        let mut y_mid = y.clone();
+        y_mid.axpy(step / 2.0, &k1);
+
+        let k2 = f(t + step / 2.0, &y_mid);
+        y.axpy(step, &k2);
+
+        t = t + step;
+        result.push((t, y.clone()));
+    }
+
+    result
+}
+
+// Classical 4th-order Runge-Kutta (RK4)
+public fn rk4(
+    f: ODESystem,
+    y0: &Vector<Float>,
+    t0: Float,
+    tf: Float,
+    h: Float,
+) -> ODESolution {
+    let mut t = t0;
+    let mut y = y0.clone();
+    let mut result = List.new();
+    result.push((t, y.clone()));
+
+    while t < tf {
+        let step = if h < tf - t { h } else { tf - t };
+
+        // k1 = f(t, y)
+        let k1 = f(t, &y);
+
+        // k2 = f(t + h/2, y + h/2 * k1)
+        let mut yt2 = y.clone();
+        yt2.axpy(step / 2.0, &k1);
+        let k2 = f(t + step / 2.0, &yt2);
+
+        // k3 = f(t + h/2, y + h/2 * k2)
+        let mut yt3 = y.clone();
+        yt3.axpy(step / 2.0, &k2);
+        let k3 = f(t + step / 2.0, &yt3);
+
+        // k4 = f(t + h, y + h * k3)
+        let mut yt4 = y.clone();
+        yt4.axpy(step, &k3);
+        let k4 = f(t + step, &yt4);
+
+        // y = y + h/6 * (k1 + 2*k2 + 2*k3 + k4)
+        y.axpy(step / 6.0, &k1);
+        y.axpy(step / 3.0, &k2);
+        y.axpy(step / 3.0, &k3);
+        y.axpy(step / 6.0, &k4);
+
+        t = t + step;
+        result.push((t, y.clone()));
+    }
+
+    result
+}
+
+// RK45 (Dormand-Prince) with adaptive step size
+// Uses 4th/5th order embedded pair for error estimation
+public fn rk45(
+    f: ODESystem,
+    y0: &Vector<Float>,
+    t0: Float,
+    tf: Float,
+    tol: Float,
+) -> ODESolution {
+    // Dormand-Prince coefficients
+    let c = [0.0, 0.2, 0.3, 0.8, 8.0 / 9.0, 1.0, 1.0];
+    let b5 = [35.0 / 384.0, 0.0, 500.0 / 1113.0, 125.0 / 192.0, -2187.0 / 6784.0, 11.0 / 84.0, 0.0];
+    let b4 = [5179.0 / 57600.0, 0.0, 7571.0 / 16695.0, 393.0 / 640.0, -92097.0 / 339200.0, 187.0 / 2100.0, 1.0 / 40.0];
+
+    let mut t = t0;
+    let mut y = y0.clone();
+    let mut h = (tf - t0) / 100.0;  // Initial step
+    let mut result = List.new();
+    result.push((t, y.clone()));
+
+    let n = y.len();
+
+    while t < tf {
+        h = if h < tf - t { h } else { tf - t };
+
+        // Compute stages k1..k7
+        let k1 = f(t, &y);
+
+        let mut s2 = y.clone();
+        s2.axpy(h * 0.2, &k1);
+        let k2 = f(t + h * 0.2, &s2);
+
+        let mut s3 = y.clone();
+        s3.axpy(h * 3.0 / 40.0, &k1);
+        s3.axpy(h * 9.0 / 40.0, &k2);
+        let k3 = f(t + h * 0.3, &s3);
+
+        let mut s4 = y.clone();
+        s4.axpy(h * 44.0 / 45.0, &k1);
+        s4.axpy(h * -56.0 / 15.0, &k2);
+        s4.axpy(h * 32.0 / 9.0, &k3);
+        let k4 = f(t + h * 0.8, &s4);
+
+        let mut s5 = y.clone();
+        s5.axpy(h * 19372.0 / 6561.0, &k1);
+        s5.axpy(h * -25360.0 / 2187.0, &k2);
+        s5.axpy(h * 64448.0 / 6561.0, &k3);
+        s5.axpy(h * -212.0 / 729.0, &k4);
+        let k5 = f(t + h * 8.0 / 9.0, &s5);
+
+        let mut s6 = y.clone();
+        s6.axpy(h * 9017.0 / 3168.0, &k1);
+        s6.axpy(h * -355.0 / 33.0, &k2);
+        s6.axpy(h * 46732.0 / 5247.0, &k3);
+        s6.axpy(h * 49.0 / 176.0, &k4);
+        s6.axpy(h * -5103.0 / 18656.0, &k5);
+        let k6 = f(t + h, &s6);
+
+        // 5th order solution
+        let mut y5 = y.clone();
+        y5.axpy(h * b5[0], &k1);
+        y5.axpy(h * b5[2], &k3);
+        y5.axpy(h * b5[3], &k4);
+        y5.axpy(h * b5[4], &k5);
+        y5.axpy(h * b5[5], &k6);
+
+        // 4th order solution for error estimate
+        let k7 = f(t + h, &y5);
+        let mut y4 = y.clone();
+        y4.axpy(h * b4[0], &k1);
+        y4.axpy(h * b4[2], &k3);
+        y4.axpy(h * b4[3], &k4);
+        y4.axpy(h * b4[4], &k5);
+        y4.axpy(h * b4[5], &k6);
+        y4.axpy(h * b4[6], &k7);
+
+        // Error estimate
+        let mut err = 0.0;
+        for i in 0..n {
+            let e = abs(y5.get(i) - y4.get(i));
+            let scale = tol * (if abs(y.get(i)) > 1.0 { abs(y.get(i)) } else { 1.0 });
+            let e_scaled = e / scale;
+            if e_scaled > err {
+                err = e_scaled;
+            }
+        }
+
+        if err <= 1.0 {
+            // Accept step
+            t = t + h;
+            y = y5;
+            result.push((t, y.clone()));
+        }
+
+        // Adjust step size
+        let safety = 0.9;
+        let factor = safety * pow(1.0 / (if err > 1e-10 { err } else { 1e-10 }), 0.2);
+        let factor_clamped = if factor < 0.1 { 0.1 } else if factor > 5.0 { 5.0 } else { factor };
+        h = h * factor_clamped;
+    }
+
+    result
+}
+
+// =============================================================================
+// Root Finding
+// =============================================================================
+
+// Result of root-finding algorithm
+public type RootResult is
+    | Found(Float)
+    | NoConvergence(Float);  // Last approximation
+
+// Bisection method for finding roots in [a, b]
+// Requires f(a) and f(b) to have opposite signs
+public fn bisection<F>(f: F, a: Float, b: Float, tol: Float, max_iter: USize) -> RootResult
+where F: Fn(Float) -> Float
+{
+    let mut a = a;
+    let mut b = b;
+    let mut fa = f(a);
+    let fb = f(b);
+
+    // Check that interval brackets a root
+    if fa * fb > 0.0 {
+        return RootResult.NoConvergence((a + b) / 2.0);
+    }
+
+    for _ in 0..max_iter {
+        let mid = (a + b) / 2.0;
+        let fm = f(mid);
+
+        if abs(fm) < tol || (b - a) / 2.0 < tol {
+            return RootResult.Found(mid);
+        }
+
+        if fa * fm < 0.0 {
+            b = mid;
+        } else {
+            a = mid;
+            fa = fm;
+        }
+    }
+
+    RootResult.NoConvergence((a + b) / 2.0)
+}
+
+// Newton-Raphson method for finding roots
+// Requires derivative function
+public fn newton_raphson<F, G>(
+    f: F,
+    df: G,
+    x0: Float,
+    tol: Float,
+    max_iter: USize,
+) -> RootResult
+where
+    F: Fn(Float) -> Float,
+    G: Fn(Float) -> Float,
+{
+    let mut x = x0;
+
+    for _ in 0..max_iter {
+        let fx = f(x);
+        if abs(fx) < tol {
+            return RootResult.Found(x);
+        }
+
+        let dfx = df(x);
+        if abs(dfx) < EPSILON {
+            return RootResult.NoConvergence(x);
+        }
+
+        let x_new = x - fx / dfx;
+        if abs(x_new - x) < tol {
+            return RootResult.Found(x_new);
+        }
+        x = x_new;
+    }
+
+    RootResult.NoConvergence(x)
+}
+
+// Newton-Raphson with automatic differentiation
+public fn newton<F>(f: F, x0: Float, tol: Float, max_iter: USize) -> RootResult
+where F: Fn(Float) -> Float
+{
+    let mut x = x0;
+
+    for _ in 0..max_iter {
+        let fx = f(x);
+        if abs(fx) < tol {
+            return RootResult.Found(x);
+        }
+
+        let h = optimal_h(x);
+        let dfx = diff_central(&f, x, h);
+        if abs(dfx) < EPSILON {
+            return RootResult.NoConvergence(x);
+        }
+
+        let x_new = x - fx / dfx;
+        if abs(x_new - x) < tol {
+            return RootResult.Found(x_new);
+        }
+        x = x_new;
+    }
+
+    RootResult.NoConvergence(x)
+}
+
+// Secant method (no derivative required)
+public fn secant<F>(f: F, x0: Float, x1: Float, tol: Float, max_iter: USize) -> RootResult
+where F: Fn(Float) -> Float
+{
+    let mut x_prev = x0;
+    let mut x = x1;
+    let mut f_prev = f(x_prev);
+
+    for _ in 0..max_iter {
+        let fx = f(x);
+        if abs(fx) < tol {
+            return RootResult.Found(x);
+        }
+
+        let denominator = fx - f_prev;
+        if abs(denominator) < EPSILON {
+            return RootResult.NoConvergence(x);
+        }
+
+        let x_new = x - fx * (x - x_prev) / denominator;
+        if abs(x_new - x) < tol {
+            return RootResult.Found(x_new);
+        }
+
+        x_prev = x;
+        f_prev = fx;
+        x = x_new;
+    }
+
+    RootResult.NoConvergence(x)
+}
+
+// Brent's method (combines bisection, secant, and inverse quadratic interpolation)
+// Robust and efficient
+public fn brent<F>(f: F, a: Float, b: Float, tol: Float, max_iter: USize) -> RootResult
+where F: Fn(Float) -> Float
+{
+    let mut a = a;
+    let mut b = b;
+    let mut fa = f(a);
+    let mut fb = f(b);
+
+    if fa * fb > 0.0 {
+        return RootResult.NoConvergence((a + b) / 2.0);
+    }
+
+    if abs(fa) < abs(fb) {
+        // Swap so |f(b)| <= |f(a)|
+        let tmp = a; a = b; b = tmp;
+        let tmp_f = fa; fa = fb; fb = tmp_f;
+    }
+
+    let mut c = a;
+    let mut fc = fa;
+    let mut d = b - a;
+    let mut e = d;
+
+    for _ in 0..max_iter {
+        if abs(fb) < tol {
+            return RootResult.Found(b);
+        }
+
+        if abs(fc) < abs(fb) {
+            a = b; b = c; c = a;
+            fa = fb; fb = fc; fc = fa;
+        }
+
+        let tol1 = 2.0 * EPSILON * abs(b) + tol / 2.0;
+        let xm = (c - b) / 2.0;
+
+        if abs(xm) <= tol1 || abs(fb) < EPSILON {
+            return RootResult.Found(b);
+        }
+
+        let mut use_bisection = true;
+
+        if abs(e) >= tol1 && abs(fa) > abs(fb) {
+            // Try interpolation
+            let s = fb / fa;
+            let (p, q) = if abs(a - c) < EPSILON {
+                // Secant
+                (2.0 * xm * s, 1.0 - s)
+            } else {
+                // Inverse quadratic
+                let q_val = fa / fc;
+                let r = fb / fc;
+                (s * (2.0 * xm * q_val * (q_val - r) - (b - a) * (r - 1.0)),
+                 (q_val - 1.0) * (r - 1.0) * (s - 1.0))
+            };
+
+            let p = if p > 0.0 { p } else { -p };
+            let q = if q > 0.0 { q } else { -q };
+
+            if 2.0 * p < 3.0 * xm * q - abs(tol1 * q) && p < abs(0.5 * e * q) {
+                e = d;
+                d = p / q;
+                use_bisection = false;
+            }
+        }
+
+        if use_bisection {
+            d = xm;
+            e = d;
+        }
+
+        a = b;
+        fa = fb;
+
+        if abs(d) > tol1 {
+            b = b + d;
+        } else {
+            b = b + (if xm > 0.0 { tol1 } else { -tol1 });
+        }
+
+        fb = f(b);
+
+        if (fb > 0.0) == (fc > 0.0) {
+            c = a;
+            fc = fa;
+            d = b - a;
+            e = d;
+        }
+    }
+
+    RootResult.NoConvergence(b)
+}
+
+// =============================================================================
+// Optimization
+// =============================================================================
+
+// Result of optimization algorithm
+public type OptimResult is {
+    x: Vector<Float>,      // Optimal point
+    f_val: Float,          // Function value at optimal point
+    converged: Bool,       // Whether algorithm converged
+    iterations: USize,     // Number of iterations
+};
+
+// Gradient descent with fixed step size
+public fn gradient_descent<F, G>(
+    f: F,
+    grad_f: G,
+    x0: &Vector<Float>,
+    alpha: Float,
+    tol: Float,
+    max_iter: USize,
+) -> OptimResult
+where
+    F: Fn(&Vector<Float>) -> Float,
+    G: Fn(&Vector<Float>) -> Vector<Float>,
+{
+    let mut x = x0.clone();
+    let mut f_val = f(&x);
+
+    for iter in 0..max_iter {
+        let g = grad_f(&x);
+        let g_norm = g.norm_l2();
+
+        if g_norm < tol {
+            return OptimResult {
+                x,
+                f_val,
+                converged: true,
+                iterations: iter,
+            };
+        }
+
+        // x = x - α * ∇f
+        x.axpy(-alpha, &g);
+        f_val = f(&x);
+    }
+
+    OptimResult {
+        x,
+        f_val,
+        converged: false,
+        iterations: max_iter,
+    }
+}
+
+// Gradient descent with backtracking line search
+public fn gradient_descent_bt<F, G>(
+    f: F,
+    grad_f: G,
+    x0: &Vector<Float>,
+    tol: Float,
+    max_iter: USize,
+) -> OptimResult
+where
+    F: Fn(&Vector<Float>) -> Float,
+    G: Fn(&Vector<Float>) -> Vector<Float>,
+{
+    let mut x = x0.clone();
+    let mut f_val = f(&x);
+    let c = 0.5;     // Armijo parameter
+    let rho = 0.5;   // Step reduction factor
+
+    for iter in 0..max_iter {
+        let g = grad_f(&x);
+        let g_norm = g.norm_l2();
+
+        if g_norm < tol {
+            return OptimResult {
+                x,
+                f_val,
+                converged: true,
+                iterations: iter,
+            };
+        }
+
+        // Backtracking line search
+        let mut alpha = 1.0;
+        let descent = g.dot(&g);  // ∇f · ∇f (descent direction is -∇f)
+
+        loop {
+            let mut x_new = x.clone();
+            x_new.axpy(-alpha, &g);
+            let f_new = f(&x_new);
+
+            // Armijo condition
+            if f_new <= f_val - c * alpha * descent {
+                x = x_new;
+                f_val = f_new;
+                break;
+            }
+
+            alpha = alpha * rho;
+            if alpha < 1e-12 {
+                // Step too small, likely at minimum
+                return OptimResult {
+                    x,
+                    f_val,
+                    converged: false,
+                    iterations: iter,
+                };
+            }
+        }
+    }
+
+    OptimResult {
+        x,
+        f_val,
+        converged: false,
+        iterations: max_iter,
+    }
+}
+
+// Newton's method for optimization (uses Hessian)
+public fn newton_optimize<F, G, H>(
+    f: F,
+    grad_f: G,
+    hess_f: H,
+    x0: &Vector<Float>,
+    tol: Float,
+    max_iter: USize,
+) -> OptimResult
+where
+    F: Fn(&Vector<Float>) -> Float,
+    G: Fn(&Vector<Float>) -> Vector<Float>,
+    H: Fn(&Vector<Float>) -> Matrix<Float>,
+{
+    let mut x = x0.clone();
+    let mut f_val = f(&x);
+
+    for iter in 0..max_iter {
+        let g = grad_f(&x);
+        let g_norm = g.norm_l2();
+
+        if g_norm < tol {
+            return OptimResult {
+                x,
+                f_val,
+                converged: true,
+                iterations: iter,
+            };
+        }
+
+        let hess = hess_f(&x);
+
+        // Solve H * p = -g for Newton direction p
+        let mut neg_g = g.clone();
+        neg_g.scale(-1.0);
+
+        match solve(&hess, &neg_g) {
+            Maybe.Some(p) => {
+                // Line search along Newton direction
+                let mut alpha = 1.0;
+                let c = 0.5;
+                let rho = 0.5;
+                let descent = g.dot(&p);
+
+                loop {
+                    let mut x_new = x.clone();
+                    x_new.axpy(alpha, &p);
+                    let f_new = f(&x_new);
+
+                    if f_new <= f_val + c * alpha * descent {
+                        x = x_new;
+                        f_val = f_new;
+                        break;
+                    }
+
+                    alpha = alpha * rho;
+                    if alpha < 1e-12 {
+                        break;
+                    }
+                }
+            }
+            Maybe.None => {
+                // Hessian singular, fall back to gradient descent
+                x.axpy(-0.01, &g);
+                f_val = f(&x);
+            }
+        }
+    }
+
+    OptimResult {
+        x,
+        f_val,
+        converged: false,
+        iterations: max_iter,
+    }
+}
+
+// BFGS quasi-Newton optimization
+// Approximates inverse Hessian iteratively
+public fn bfgs<F, G>(
+    f: F,
+    grad_f: G,
+    x0: &Vector<Float>,
+    tol: Float,
+    max_iter: USize,
+) -> OptimResult
+where
+    F: Fn(&Vector<Float>) -> Float,
+    G: Fn(&Vector<Float>) -> Vector<Float>,
+{
+    let n = x0.len();
+    let mut x = x0.clone();
+    let mut f_val = f(&x);
+    let mut g = grad_f(&x);
+
+    // Initialize inverse Hessian approximation as identity
+    let mut h_inv = Matrix.eye(n);
+
+    for iter in 0..max_iter {
+        let g_norm = g.norm_l2();
+        if g_norm < tol {
+            return OptimResult {
+                x,
+                f_val,
+                converged: true,
+                iterations: iter,
+            };
+        }
+
+        // Search direction: p = -H⁻¹ * g
+        let p = h_inv.matvec(&g);
+        let mut p = p;
+        p.scale(-1.0);
+
+        // Line search
+        let mut alpha = 1.0;
+        let c = 1e-4;
+        let rho = 0.5;
+
+        loop {
+            let mut x_new = x.clone();
+            x_new.axpy(alpha, &p);
+            let f_new = f(&x_new);
+
+            if f_new <= f_val + c * alpha * g.dot(&p) {
+                let g_new = grad_f(&x_new);
+
+                // BFGS update
+                let x_copy = x.clone();
+                let g_copy = g.clone();
+                let s = x_new.sub(&x_copy);  // s = x_new - x
+                let y = g_new.sub(&g_copy);  // y = g_new - g
+
+                let sy = s.dot(&y);
+                if sy > EPSILON {
+                    // H⁻¹ := (I - ρsy') H⁻¹ (I - ρys') + ρss'
+                    // where ρ = 1 / (y's)
+                    let rho_val = 1.0 / sy;
+
+                    // Compute H⁻¹ * y
+                    let hy = h_inv.matvec(&y);
+
+                    // Update H⁻¹
+                    for i in 0..n {
+                        for j in 0..n {
+                            let val = h_inv.get(i, j);
+                            let update = rho_val * (
+                                s.get(i) * s.get(j) * (1.0 + rho_val * y.dot(&hy))
+                                - hy.get(i) * s.get(j)
+                                - s.get(i) * hy.get(j)
+                            );
+                            h_inv.set(i, j, val + update);
+                        }
+                    }
+                }
+
+                x = x_new;
+                f_val = f_new;
+                g = g_new;
+                break;
+            }
+
+            alpha = alpha * rho;
+            if alpha < 1e-12 {
+                // Return with current best
+                return OptimResult {
+                    x,
+                    f_val,
+                    converged: false,
+                    iterations: iter,
+                };
+            }
+        }
+    }
+
+    OptimResult {
+        x,
+        f_val,
+        converged: false,
+        iterations: max_iter,
+    }
+}
+

@@ -1,0 +1,132 @@
+// Test advanced type system features
+// Tests refinement types, dependent types, GATs, and type-level programming
+
+// Refinement type: positive integers
+type PositiveInt is Int where value it > 0;
+
+// Refinement type: non-empty list
+type NonEmptyList<T> is List<T> where value it.len() > 0;
+
+// Type with constraints
+type BoundedInt is Int where value it >= 0 && it <= 100;
+
+// Generic type with constraint
+type ComparablePair<T: Comparable> is {
+    first: T,
+    second: T
+};
+
+// Higher-kinded type (type constructor)
+type Functor<F> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+}
+
+// Protocol with Generic Associated Type (GAT)
+type Collection is protocol {
+    type Item;
+    type Iter<'a>: Iterator where Self: 'a;
+
+    fn iter(self: &Self) -> Self.Iter;
+    fn len(self: &Self) -> Int;
+}
+
+// Type alias for function types
+type BinaryOp is fn(Int, Int) -> Int;
+type Predicate<T> is fn(T) -> Bool;
+
+// Existential type
+type AnyIterator<T> is protocol {
+    fn next(self: &mut Self) -> Maybe<T>;
+}
+
+// Phantom type (zero-size marker)
+type Phantom<T> is {};
+
+// Newtype pattern
+type Seconds is Int;
+type Meters is Float;
+
+// Function using refinement type
+fn create_positive(n: Int) -> Maybe<PositiveInt> {
+    if n > 0 {
+        Some(n as PositiveInt)
+    } else {
+        None
+    }
+}
+
+// Function with type constraint
+fn max<T: Comparable>(a: T, b: T) -> T {
+    if a.compare(&b) > 0 {
+        a
+    } else {
+        b
+    }
+}
+
+// Function using function type alias
+fn apply_op(op: BinaryOp, a: Int, b: Int) -> Int {
+    op(a, b)
+}
+
+fn filter_list<T>(items: List<T>, pred: Predicate<T>) -> List<T> {
+    items.filter(pred)
+}
+
+fn main() {
+    print("=== Advanced Type Tests ===")
+
+    // Test 1: Refinement types
+    print("\nTest 1: Refinement types")
+    match create_positive(42) {
+        Some(val) => print(f"Valid positive: {val}"),
+        None => print("Invalid")
+    }
+
+    match create_positive(-5) {
+        Some(val) => print(f"Positive: {val}"),
+        None => print("Rejected negative (expected)")
+    }
+
+    // Test 2: Type aliases
+    print("\nTest 2: Type aliases")
+    let add: BinaryOp = |a, b| a + b
+    let result = apply_op(add, 10, 20)
+    print(f"10 + 20 = {result}")
+
+    // Test 3: Newtypes for domain modeling
+    print("\nTest 3: Newtypes")
+    let duration: Seconds = 60
+    let distance: Meters = 100.0
+    print(f"Duration: {duration}s, Distance: {distance}m")
+
+    // Test 4: Generic constraints
+    print("\nTest 4: Generic constraints")
+    // let pair = ComparablePair { first: 10, second: 20 }
+    print("ComparablePair requires T: Comparable")
+
+    // Test 5: Function type predicates
+    print("\nTest 5: Higher-order with type aliases")
+    let is_even: Predicate<Int> = |x| x % 2 == 0
+    let numbers = [1, 2, 3, 4, 5, 6]
+    let evens = filter_list(numbers, is_even)
+    print(f"Even numbers: {evens}")
+
+    // Test 6: Bounded types
+    print("\nTest 6: Bounded types")
+    print("BoundedInt: 0 <= value <= 100")
+    // let valid: BoundedInt = 50
+    // let invalid: BoundedInt = 150  // Would fail
+
+    // Test 7: Complex type expressions
+    print("\nTest 7: Complex type expressions")
+    print("Type: Maybe<Result<List<Int>, Text>>")
+    let complex: Maybe<Result<List<Int>, Text>> = Some(Ok([1, 2, 3]))
+    match complex {
+        Some(Ok(list)) => print(f"Got list: {list}"),
+        Some(Err(e)) => print(f"Error: {e}"),
+        None => print("None")
+    }
+
+    print("\nAdvanced type tests complete")
+}

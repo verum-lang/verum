@@ -1,0 +1,463 @@
+// =============================================================================
+// core/intrinsics/lowlevel/aarch64.vr - ARM64 Low-Level Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: LLVM AOT compilation
+//
+// ARM64-specific intrinsics that require AOT compilation.
+// Many functions in this module are @llvm_only.
+//
+// # Categories
+//
+// - CPU Feature Detection: cpu_features, detect_sve, detect_sve2
+// - NEON: vfmaq_f32, vsqrtq_f32, vrecpeq_f32, vpaddq_f32, vdotq_s32
+// - Cryptographic: vaeseq_u8, vaesmcq_u8, vsha256hq_u32
+// - LSE Atomics: ldadd_i64, swp_i64, cas_i64
+// - System Registers: read_id_aa64isar0_el1, read_cntvct_el0
+// - Memory Barriers: dmb_sy, dmb_ish, dsb_sy, isb
+// - Cache Operations: dc_cvac, dc_civac, ic_ivau
+// - Hint Instructions: yield_cpu, wfi, wfe, sev
+//
+// # Safety
+//
+// Most intrinsics are safe because they operate on values. Intrinsics
+// that access system registers or execute privileged instructions
+// require unsafe blocks and are marked accordingly.
+//
+// Spec: docs/architecture/low-level-features.md Section 5.4
+// =============================================================================
+
+// Only compile this module for aarch64
+@cfg(target_arch = "aarch64")
+
+module core.intrinsics.lowlevel.aarch64;
+
+// =============================================================================
+// CPU FEATURE DETECTION
+// =============================================================================
+
+/// CPU feature flags detected at runtime.
+public type Aarch64CpuFeatures is {
+    // Always present on AArch64
+    has_neon: Bool,
+
+    // Optional features
+    has_sve: Bool,
+    has_sve2: Bool,
+    sve_width: UInt32,  // SVE vector width in bits (128, 256, 512, etc.)
+    has_dotprod: Bool,
+    has_fp16: Bool,
+    has_bf16: Bool,
+    has_i8mm: Bool,
+    has_sha256: Bool,
+    has_sha512: Bool,
+    has_aes: Bool,
+    has_crc32: Bool,
+    has_lse: Bool,      // LSE atomics (ARMv8.1)
+    has_rdm: Bool,      // Rounding double multiply (ARMv8.1)
+};
+
+/// Alias for convenience - matches x86_64 naming convention.
+public type CpuFeatures is Aarch64CpuFeatures;
+
+/// Detect CPU features at runtime.
+@inline(never)
+public fn cpu_features() -> Aarch64CpuFeatures {
+    // NEON is mandatory on AArch64
+    Aarch64CpuFeatures {
+        has_neon: true,
+        has_sve: detect_sve(),
+        has_sve2: detect_sve2(),
+        sve_width: detect_sve_width(),
+        has_dotprod: detect_feature_id_aa64isar0_el1(44, 0xF),
+        has_fp16: detect_feature_id_aa64pfr0_el1(16, 0xF),
+        has_bf16: detect_feature_id_aa64isar1_el1(44, 0xF),
+        has_i8mm: detect_feature_id_aa64isar1_el1(52, 0xF),
+        has_sha256: detect_feature_id_aa64isar0_el1(12, 0xF),
+        has_sha512: detect_feature_id_aa64isar0_el1(12, 0x2),
+        has_aes: detect_feature_id_aa64isar0_el1(4, 0xF),
+        has_crc32: detect_feature_id_aa64isar0_el1(16, 0xF),
+        has_lse: detect_feature_id_aa64isar0_el1(20, 0xF),
+        has_rdm: detect_feature_id_aa64isar0_el1(28, 0xF),
+    }
+}
+
+// Feature detection helpers
+fn detect_sve() -> Bool {
+    @cfg(target_os = "linux") {
+        let hwcap = get_hwcap();
+        return (hwcap & (1 << 22)) != 0;
+    }
+    false
+}
+
+fn detect_sve2() -> Bool {
+    @cfg(target_os = "linux") {
+        let hwcap2 = get_hwcap2();
+        return (hwcap2 & (1 << 1)) != 0;
+    }
+    false
+}
+
+fn detect_sve_width() -> UInt32 {
+    if !detect_sve() { return 0; }
+    // Query SVE vector length
+    @cfg(target_os = "linux") {
+        // Use prctl PR_SVE_GET_VL
+        128 // Default, actual implementation uses syscall
+    }
+    @cfg(not(target_os = "linux")) {
+        0
+    }
+}
+
+fn detect_feature_id_aa64isar0_el1(shift: UInt32, mask: UInt64) -> Bool {
+    let reg = read_id_aa64isar0_el1();
+    ((reg >> shift) & mask) != 0
+}
+
+fn detect_feature_id_aa64isar1_el1(shift: UInt32, mask: UInt64) -> Bool {
+    let reg = read_id_aa64isar1_el1();
+    ((reg >> shift) & mask) != 0
+}
+
+fn detect_feature_id_aa64pfr0_el1(shift: UInt32, mask: UInt64) -> Bool {
+    let reg = read_id_aa64pfr0_el1();
+    ((reg >> shift) & mask) != 0
+}
+
+// =============================================================================
+// NEON INTRINSICS (always available on AArch64)
+// =============================================================================
+
+/// Fused multiply-add: a + (b * c)
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.fmla.v4f32")
+public fn vfmaq_f32(a: Vec4f, b: Vec4f, c: Vec4f) -> Vec4f;
+
+/// Fused multiply-subtract: a - (b * c)
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.fmls.v4f32")
+public fn vfmsq_f32(a: Vec4f, b: Vec4f, c: Vec4f) -> Vec4f;
+
+/// Square root of 4 floats.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.fsqrt.v4f32")
+public fn vsqrtq_f32(a: Vec4f) -> Vec4f;
+
+/// Reciprocal estimate (1/x).
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.frecpe.v4f32")
+public fn vrecpeq_f32(a: Vec4f) -> Vec4f;
+
+/// Reciprocal square root estimate (1/sqrt(x)).
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.frsqrte.v4f32")
+public fn vrsqrteq_f32(a: Vec4f) -> Vec4f;
+
+/// Reciprocal refinement step.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.frecps.v4f32")
+public fn vrecpsq_f32(a: Vec4f, b: Vec4f) -> Vec4f;
+
+/// Pairwise add (adjacent lanes).
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.addp.v4f32")
+public fn vpaddq_f32(a: Vec4f, b: Vec4f) -> Vec4f;
+
+/// Maximum across vector.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.fmaxv.f32.v4f32")
+public fn vmaxvq_f32(a: Vec4f) -> Float32;
+
+/// Minimum across vector.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.fminv.f32.v4f32")
+public fn vminvq_f32(a: Vec4f) -> Float32;
+
+/// Sum across vector.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.faddv.f32.v4f32")
+public fn vaddvq_f32(a: Vec4f) -> Float32;
+
+// =============================================================================
+// NEON INTEGER INTRINSICS
+// =============================================================================
+
+/// Pairwise add 8x16-bit integers.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.addp.v8i16")
+public fn vpaddq_s16(a: Vec8s, b: Vec8s) -> Vec8s;
+
+/// Multiply-accumulate long (widens result).
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.smlal.v4i32.v4i16")
+public fn vmlal_s16(a: Vec4i, b: Vec<Int16, 4>, c: Vec<Int16, 4>) -> Vec4i;
+
+/// Absolute difference and accumulate.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.sabd.v16i8")
+public fn vabdq_s8(a: Vec16b, b: Vec16b) -> Vec16b;
+
+/// Table lookup (permute bytes).
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.tbl1.v16i8")
+public fn vqtbl1q_u8(table: Vec16b, indices: Vec16b) -> Vec16b;
+
+/// Reverse bytes within 32-bit elements.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.rev32.v16i8")
+public fn vrev32q_u8(a: Vec16b) -> Vec16b;
+
+/// Reverse bytes within 64-bit elements.
+@inline(always)
+@target_feature(enable = "neon")
+@intrinsic("llvm.aarch64.neon.rev64.v16i8")
+public fn vrev64q_u8(a: Vec16b) -> Vec16b;
+
+// =============================================================================
+// DOT PRODUCT INTRINSICS (ARMv8.2-A)
+// =============================================================================
+
+/// Dot product of 8-bit integers, accumulating to 32-bit.
+@inline(always)
+@target_feature(enable = "dotprod")
+@intrinsic("llvm.aarch64.neon.sdot.v4i32.v16i8")
+public fn vdotq_s32(acc: Vec4i, a: Vec16b, b: Vec16b) -> Vec4i;
+
+/// Unsigned dot product.
+@inline(always)
+@target_feature(enable = "dotprod")
+@intrinsic("llvm.aarch64.neon.udot.v4i32.v16i8")
+public fn vdotq_u32(acc: Vec<UInt32, 4>, a: Vec16b, b: Vec16b) -> Vec<UInt32, 4>;
+
+// =============================================================================
+// CRYPTOGRAPHIC INTRINSICS
+// =============================================================================
+
+/// AES single round encryption.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.aarch64.crypto.aese")
+public fn vaeseq_u8(data: Vec16b, key: Vec16b) -> Vec16b;
+
+/// AES mix columns.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.aarch64.crypto.aesmc")
+public fn vaesmcq_u8(data: Vec16b) -> Vec16b;
+
+/// AES single round decryption.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.aarch64.crypto.aesd")
+public fn vaesdq_u8(data: Vec16b, key: Vec16b) -> Vec16b;
+
+/// SHA256 hash update (part 1).
+@inline(always)
+@target_feature(enable = "sha2")
+@intrinsic("llvm.aarch64.crypto.sha256h")
+public fn vsha256hq_u32(hash: Vec<UInt32, 4>, hash2: Vec<UInt32, 4>, w: Vec<UInt32, 4>) -> Vec<UInt32, 4>;
+
+/// SHA256 hash update (part 2).
+@inline(always)
+@target_feature(enable = "sha2")
+@intrinsic("llvm.aarch64.crypto.sha256h2")
+public fn vsha256h2q_u32(hash: Vec<UInt32, 4>, hash2: Vec<UInt32, 4>, w: Vec<UInt32, 4>) -> Vec<UInt32, 4>;
+
+/// SHA256 message schedule update.
+@inline(always)
+@target_feature(enable = "sha2")
+@intrinsic("llvm.aarch64.crypto.sha256su0")
+public fn vsha256su0q_u32(w0: Vec<UInt32, 4>, w1: Vec<UInt32, 4>) -> Vec<UInt32, 4>;
+
+/// Polynomial multiply long (for GCM).
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.aarch64.neon.pmull64")
+public fn vmull_p64(a: UInt64, b: UInt64) -> Vec2l;
+
+// =============================================================================
+// ATOMIC INTRINSICS (LSE - ARMv8.1-A)
+// =============================================================================
+
+/// Atomic add and return old value.
+@inline(always)
+@target_feature(enable = "lse")
+@intrinsic("llvm.aarch64.ldadd.i64.p0i64")
+public fn ldadd_i64(val: Int64, ptr: *mut Int64) -> Int64;
+
+/// Atomic swap and return old value.
+@inline(always)
+@target_feature(enable = "lse")
+@intrinsic("llvm.aarch64.swp.i64.p0i64")
+public fn swp_i64(val: Int64, ptr: *mut Int64) -> Int64;
+
+/// Atomic compare-and-swap.
+@inline(always)
+@target_feature(enable = "lse")
+@intrinsic("llvm.aarch64.cas.i64.p0i64")
+public fn cas_i64(expected: Int64, desired: Int64, ptr: *mut Int64) -> Int64;
+
+// =============================================================================
+// SYSTEM REGISTERS - @llvm_only
+// =============================================================================
+
+/// Read ID_AA64ISAR0_EL1 (instruction set feature register).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, ID_AA64ISAR0_EL1")
+public fn read_id_aa64isar0_el1() -> UInt64;
+
+/// Read ID_AA64ISAR1_EL1.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, ID_AA64ISAR1_EL1")
+public fn read_id_aa64isar1_el1() -> UInt64;
+
+/// Read ID_AA64PFR0_EL1 (processor feature register).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, ID_AA64PFR0_EL1")
+public fn read_id_aa64pfr0_el1() -> UInt64;
+
+/// Read cycle counter.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, CNTVCT_EL0")
+public fn read_cntvct_el0() -> UInt64;
+
+/// Read counter frequency.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, CNTFRQ_EL0")
+public fn read_cntfrq_el0() -> UInt64;
+
+// =============================================================================
+// MEMORY BARRIERS - @llvm_only
+// =============================================================================
+
+/// Data Memory Barrier - full system.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dmb sy")
+public fn dmb_sy();
+
+/// Data Memory Barrier - inner shareable.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dmb ish")
+public fn dmb_ish();
+
+/// Data Memory Barrier - inner shareable, stores only.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dmb ishst")
+public fn dmb_ishst();
+
+/// Data Memory Barrier - inner shareable, loads only.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dmb ishld")
+public fn dmb_ishld();
+
+/// Data Synchronization Barrier.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dsb sy")
+public fn dsb_sy();
+
+/// Instruction Synchronization Barrier.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("isb")
+public fn isb();
+
+// =============================================================================
+// CACHE OPERATIONS - @llvm_only
+// =============================================================================
+
+/// Clean data cache by virtual address to point of coherency.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc cvac, {0}")
+public unsafe fn dc_cvac(addr: USize);
+
+/// Clean and invalidate data cache by virtual address.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc civac, {0}")
+public unsafe fn dc_civac(addr: USize);
+
+/// Invalidate instruction cache by virtual address.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("ic ivau, {0}")
+public unsafe fn ic_ivau(addr: USize);
+
+// =============================================================================
+// HINT INSTRUCTIONS - @llvm_only
+// =============================================================================
+
+/// Yield hint (spin-wait optimization).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("yield")
+public fn yield_cpu();
+
+/// Wait for interrupt (low-power wait).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("wfi")
+public fn wfi();
+
+/// Wait for event.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("wfe")
+public fn wfe();
+
+/// Send event (wake up WFE waiters).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sev")
+public fn sev();
+
+// =============================================================================
+// LINUX HWCAP ACCESS (no libc)
+// =============================================================================
+
+// Import native getauxval from sys/linux/auxv (no libc dependency)
+@cfg(target_os = "linux")
+mount core.sys.linux.auxv.{getauxval, AT_HWCAP, AT_HWCAP2};
+
+@cfg(target_os = "linux")
+fn get_hwcap() -> UInt64 {
+    getauxval(AT_HWCAP)
+}
+
+@cfg(target_os = "linux")
+fn get_hwcap2() -> UInt64 {
+    getauxval(AT_HWCAP2)
+}
+
+@cfg(not(target_os = "linux"))
+fn get_hwcap() -> UInt64 { 0 }
+
+@cfg(not(target_os = "linux"))
+fn get_hwcap2() -> UInt64 { 0 }

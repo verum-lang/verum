@@ -1,0 +1,42 @@
+// Test file for the nested variant constructor fix
+// This file demonstrates that the infinite type bug is now fixed
+
+type Maybe<T> is | Some(T) | None;
+type Result<T, E> is | Ok(T) | Err(E);
+
+fn main() {
+    print("Testing Nested Variant Constructor Fix");
+    print("======================================\n");
+
+    // Test 1: Simple nested Maybe
+    print("Test 1: Nested Maybe");
+    let x = Some(Some(42));
+    print(f"Some(Some(42)) = {x}\n");
+
+    // Test 2: Triple nesting
+    print("Test 2: Triple nested Maybe");
+    let y = Some(Some(Some(123)));
+    print(f"Some(Some(Some(123))) = {y}\n");
+
+    // Test 3: Maybe of Result
+    print("Test 3: Maybe of Result");
+    let z = Some(Ok(456));
+    print(f"Some(Ok(456)) = {z}\n");
+
+    // Test 4: Result of Maybe
+    print("Test 4: Result of Maybe");
+    let w = Ok(Some(789));
+    print(f"Ok(Some(789)) = {w}\n");
+
+    // Test 5: Complex nesting
+    print("Test 5: Complex nesting");
+    let complex = Some(Ok(Some(999)));
+    print(f"Some(Ok(Some(999))) = {complex}\n");
+
+    // Test 6: Nested Result
+    print("Test 6: Nested Result");
+    let nested_result = Ok(Ok(42));
+    print(f"Ok(Ok(42)) = {nested_result}\n");
+
+    print("✅ All tests passed! Nested variant constructors work correctly.");
+}

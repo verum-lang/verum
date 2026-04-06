@@ -1,0 +1,23 @@
+// Test record types
+type Person is {
+    name: Text,
+    age: Int
+};
+
+type Rectangle is {
+    width: Float,
+    height: Float
+};
+
+fn area(rect: Rectangle) -> Float {
+    rect.width * rect.height
+}
+
+fn main() {
+    let person = Person { name: "Bob", age: 30 }
+    print(f"Person: {person.name}, age {person.age}")
+    
+    let rect = Rectangle { width: 10.0, height: 5.0 }
+    let a = area(rect)
+    print(f"Rectangle area: {a}")
+}

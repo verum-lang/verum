@@ -1,0 +1,277 @@
+// User Repository Protocol
+//
+// Defines the UserRepository protocol for persisting and retrieving User entities.
+// This protocol handles user account management, authentication, and authorization.
+//
+// Design Principles:
+// - User identity is central to registry security
+// - Separates user management from token management (see TokenRepository)
+// - Supports role-based access control (RBAC)
+//
+// Security Considerations:
+// - Password hashing should be handled by authentication layer, not repository
+// - Email addresses should be unique and validated
+// - Username changes may require special handling (not supported in this protocol)
+//
+// All methods are async for non-blocking I/O and return Result<T, RegistryError>
+// for explicit error handling.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount super.super.user.{User, UserRole};
+mount super.super.errors.RegistryError;
+mount super.super.refinements.{EntityId, Username, Email, QueryOffset, QueryLimit};
+
+/// UserRepository protocol defines the contract for User persistence
+///
+/// Implementations must provide thread-safe, async database operations for:
+/// - User CRUD operations (Create, Read, Update, Delete)
+/// - User queries (find by username, email, role)
+/// - Authentication support (credential validation)
+/// - Account management (activation, deactivation)
+///
+/// Example Usage:
+/// ```verum
+/// using [UserRepository] async fn register_user(
+///     username: Username,
+///     email: Email
+/// ) -> Result<User, RegistryError> {
+///     // Check if username is taken
+///     if UserRepository.exists_by_username(username).await? {
+///         return Result.Err(RegistryError.validation_error(
+///             "username",
+///             "Username already taken"
+///         ));
+///     }
+///
+///     // Check if email is already registered
+///     if UserRepository.exists_by_email(email).await? {
+///         return Result.Err(RegistryError.validation_error(
+///             "email",
+///             "Email already registered"
+///         ));
+///     }
+///
+///     // Create and save new user
+///     let new_id = UserRepository.next_id().await?;
+///     let user = User.new(new_id, username, email);
+///     UserRepository.save(user).await?;
+///     Result.Ok(user)
+/// }
+/// ```
+pub protocol UserRepository {
+    /// Retrieve a user by their unique ID
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(user)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_id(id: EntityId) -> Result<Maybe<User>, RegistryError>;
+
+    /// Retrieve a user by their unique username
+    ///
+    /// Usernames are case-sensitive unique identifiers.
+    ///
+    /// Parameters:
+    /// - username: The username to search for
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(user)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_username(username: Username) -> Result<Maybe<User>, RegistryError>;
+
+    /// Retrieve a user by their email address
+    ///
+    /// Email addresses are case-insensitive unique identifiers.
+    ///
+    /// Parameters:
+    /// - email: The email address to search for
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(user)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_email(email: Email) -> Result<Maybe<User>, RegistryError>;
+
+    /// Persist a user (insert new or update existing)
+    ///
+    /// This operation is idempotent - calling it multiple times with the same
+    /// user should have the same effect as calling it once.
+    ///
+    /// Parameters:
+    /// - user: The User to persist
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on persistence failure
+    /// - Err(RegistryError.ValidationError) if user data is invalid
+    async fn save(user: User) -> Result<(), RegistryError>;
+
+    /// Delete a user by ID
+    ///
+    /// This is a destructive operation that should:
+    /// - Remove the user account
+    /// - Optionally transfer package ownership (implementation-specific)
+    /// - Invalidate all user's API tokens
+    ///
+    /// Parameters:
+    /// - id: The user ID to delete
+    ///
+    /// Returns:
+    /// - Ok(()) if user was deleted or didn't exist (idempotent)
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete(id: EntityId) -> Result<(), RegistryError>;
+
+    /// Check if a user exists by ID
+    ///
+    /// More efficient than get_by_id when only existence needs to be checked.
+    ///
+    /// Parameters:
+    /// - id: The user ID to check
+    ///
+    /// Returns:
+    /// - Ok(true) if user exists
+    /// - Ok(false) if user does not exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists(id: EntityId) -> Result<Bool, RegistryError>;
+
+    /// Check if a username is already taken
+    ///
+    /// Useful for registration validation.
+    ///
+    /// Parameters:
+    /// - username: The username to check
+    ///
+    /// Returns:
+    /// - Ok(true) if username exists
+    /// - Ok(false) if username is available
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists_by_username(username: Username) -> Result<Bool, RegistryError>;
+
+    /// Check if an email is already registered
+    ///
+    /// Useful for registration and email change validation.
+    ///
+    /// Parameters:
+    /// - email: The email address to check
+    ///
+    /// Returns:
+    /// - Ok(true) if email is registered
+    /// - Ok(false) if email is available
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists_by_email(email: Email) -> Result<Bool, RegistryError>;
+
+    /// List all users with pagination
+    ///
+    /// Returns users in ascending order by ID.
+    ///
+    /// Parameters:
+    /// - offset: Number of users to skip (for pagination)
+    /// - limit: Maximum number of users to return
+    ///
+    /// Returns:
+    /// - Ok(List<User>) with requested page
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<User>, RegistryError>;
+
+    /// Count total number of users
+    ///
+    /// Useful for pagination metadata and statistics.
+    ///
+    /// Returns:
+    /// - Ok(count) with total user count
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count() -> Result<Int, RegistryError>;
+
+    /// Find users by role
+    ///
+    /// Useful for admin operations and auditing.
+    ///
+    /// Parameters:
+    /// - role: The UserRole to filter by
+    ///
+    /// Returns:
+    /// - Ok(List<User>) with users of specified role
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn find_by_role(role: UserRole) -> Result<List<User>, RegistryError>;
+
+    /// Update user role
+    ///
+    /// Changes a user's permission level. Should be restricted to admins.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user to update
+    /// - new_role: The new role to assign
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.UserNotFound) if user doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn update_role(user_id: EntityId, new_role: UserRole) -> Result<(), RegistryError>;
+
+    /// Deactivate a user account
+    ///
+    /// Sets is_active to false, preventing login and API access.
+    /// This is a soft delete - data is preserved.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user to deactivate
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.UserNotFound) if user doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn deactivate(user_id: EntityId) -> Result<(), RegistryError>;
+
+    /// Reactivate a user account
+    ///
+    /// Sets is_active to true, restoring login and API access.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user to reactivate
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.UserNotFound) if user doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn activate(user_id: EntityId) -> Result<(), RegistryError>;
+
+    /// Update user email address
+    ///
+    /// Email must be unique and validated before calling this.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user to update
+    /// - new_email: The new email address
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.UserNotFound) if user doesn't exist
+    /// - Err(RegistryError.ValidationError) if email is already taken
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn update_email(user_id: EntityId, new_email: Email) -> Result<(), RegistryError>;
+
+    /// Search users by username or email
+    ///
+    /// Performs case-insensitive substring search.
+    ///
+    /// Parameters:
+    /// - query: Search query string
+    /// - offset: Number of results to skip (for pagination)
+    /// - limit: Maximum number of results to return
+    ///
+    /// Returns:
+    /// - Ok(List<User>) with matching users
+    /// - Err(RegistryError.DatabaseError) on search failure
+    async fn search(query: Text, offset: QueryOffset, limit: QueryLimit) -> Result<List<User>, RegistryError>;
+
+    /// Get next available user ID
+    ///
+    /// Helper for generating unique IDs. Implementation may use auto-increment,
+    /// UUID, or other strategies.
+    ///
+    /// Returns:
+    /// - Ok(id) with next available ID
+    /// - Err(RegistryError.DatabaseError) on failure
+    async fn next_id() -> Result<EntityId, RegistryError>;
+}

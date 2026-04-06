@@ -1,0 +1,13 @@
+// Test protocol extension syntax
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Ord is protocol extends Eq {
+    fn cmp(&self, other: &Self) -> Int;
+};
+
+fn main() {
+    print("Protocol extension parsed successfully");
+}

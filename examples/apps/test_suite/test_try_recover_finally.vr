@@ -1,0 +1,23 @@
+// Test: Try-recover-finally expression
+// Tests if all three blocks work together
+
+fn may_fail(should_fail: Bool) -> Result<Int, Text> {
+    if should_fail {
+        Err("Operation failed")
+    } else {
+        Ok(42)
+    }
+}
+
+fn main() {
+    let result = try {
+        may_fail(true)?
+    } recover {
+        print("Error recovered");
+        0
+    } finally {
+        print("Cleanup executed");
+    };
+
+    print(result);
+}

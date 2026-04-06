@@ -1,0 +1,350 @@
+// Semantic version constraint parsing and matching
+// Provides parsing of version constraint strings and matching logic
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount super.version.{SemVer, VersionConstraint};
+mount super.errors.RegistryError;
+mount super.package.PackageVersion;
+
+/// Parse a version constraint string into a VersionConstraint
+///
+/// Supports:
+/// - Exact: "1.0.0" or "=1.0.0"
+/// - Caret: "^1.0.0" (compatible changes)
+/// - Tilde: "~1.0.0" (approximately equivalent)
+/// - Greater than: ">1.0.0"
+/// - Greater than or equal: ">=1.0.0"
+/// - Less than: "<1.0.0"
+/// - Less than or equal: "<=1.0.0"
+/// - Wildcard: "*" or "1.*" or "1.2.*"
+/// - Any: "*"
+///
+/// Examples:
+/// - "^1.0.0" allows >=1.0.0 <2.0.0
+/// - "~1.0.0" allows >=1.0.0 <1.1.0
+/// - "1.2.*" allows 1.2.x for any x
+pub fn parse_constraint(constraint_str: Text) -> Result<VersionConstraint, RegistryError> {
+    let trimmed = trim(constraint_str);
+
+    // Check for wildcard
+    if trimmed == "*" {
+        return Result.Ok(VersionConstraint.Any);
+    }
+
+    // Check for caret constraint (^)
+    if starts_with(trimmed, "^") {
+        let version_str = substring(trimmed, 1);
+        return parse_version(version_str).map(|v| VersionConstraint.Caret { version: v });
+    }
+
+    // Check for tilde constraint (~)
+    if starts_with(trimmed, "~") {
+        let version_str = substring(trimmed, 1);
+        return parse_version(version_str).map(|v| VersionConstraint.Tilde { version: v });
+    }
+
+    // Check for >= constraint
+    if starts_with(trimmed, ">=") {
+        let version_str = substring(trimmed, 2);
+        return parse_version(version_str).map(|v| VersionConstraint.GreaterThanOrEqual { version: v });
+    }
+
+    // Check for > constraint
+    if starts_with(trimmed, ">") {
+        let version_str = substring(trimmed, 1);
+        return parse_version(version_str).map(|v| VersionConstraint.GreaterThan { version: v });
+    }
+
+    // Check for <= constraint
+    if starts_with(trimmed, "<=") {
+        let version_str = substring(trimmed, 2);
+        return parse_version(version_str).map(|v| VersionConstraint.LessThanOrEqual { version: v });
+    }
+
+    // Check for < constraint
+    if starts_with(trimmed, "<") {
+        let version_str = substring(trimmed, 1);
+        return parse_version(version_str).map(|v| VersionConstraint.LessThan { version: v });
+    }
+
+    // Check for = constraint
+    if starts_with(trimmed, "=") {
+        let version_str = substring(trimmed, 1);
+        return parse_version(version_str).map(|v| VersionConstraint.Exact { version: v });
+    }
+
+    // Check for wildcard patterns (1.*, 1.2.*)
+    if contains(trimmed, "*") {
+        return parse_wildcard(trimmed);
+    }
+
+    // Default: exact version
+    parse_version(trimmed).map(|v| VersionConstraint.Exact { version: v })
+}
+
+/// Parse a SemVer from a string
+fn parse_version(version_str: Text) -> Result<SemVer, RegistryError> {
+    let trimmed = trim(version_str);
+
+    match SemVer.parse(trimmed) {
+        Result.Ok(v) => Result.Ok(v),
+        Result.Err(e) => Result.Err(RegistryError.InvalidVersion {
+            version: version_str,
+            reason: e
+        }),
+    }
+}
+
+/// Parse wildcard constraint (e.g., "1.*" or "1.2.*")
+fn parse_wildcard(constraint_str: Text) -> Result<VersionConstraint, RegistryError> {
+    let parts = split(constraint_str, ".");
+
+    if parts.len() == 1 && parts.get(0).unwrap() == "*" {
+        return Result.Ok(VersionConstraint.Any);
+    }
+
+    if parts.len() == 2 {
+        // Format: "1.*"
+        let major = parse_int_safe(parts.get(0).unwrap_or(""))?;
+        let second = parts.get(1).unwrap_or("");
+
+        if second == "*" {
+            // Match any minor version for this major
+            return Result.Ok(VersionConstraint.Wildcard { major: major, minor: -1 });
+        }
+    }
+
+    if parts.len() == 3 {
+        // Format: "1.2.*"
+        let major = parse_int_safe(parts.get(0).unwrap_or(""))?;
+        let minor = parse_int_safe(parts.get(1).unwrap_or(""))?;
+        let third = parts.get(2).unwrap_or("");
+
+        if third == "*" {
+            return Result.Ok(VersionConstraint.Wildcard { major: major, minor: minor });
+        }
+    }
+
+    Result.Err(RegistryError.InvalidVersion {
+        version: constraint_str,
+        reason: "Invalid wildcard pattern"
+    })
+}
+
+/// Parse integer safely with error handling
+fn parse_int_safe(s: Text) -> Result<Int, RegistryError> {
+    let trimmed = trim(s);
+
+    if trimmed.len() == 0 {
+        return Result.Err(RegistryError.InvalidVersion {
+            version: s,
+            reason: "Empty version component"
+        });
+    }
+
+    let value = parse_int(trimmed);
+
+    if value < 0 {
+        return Result.Err(RegistryError.InvalidVersion {
+            version: s,
+            reason: "Version components must be non-negative"
+        });
+    }
+
+    Result.Ok(value)
+}
+
+/// Enhanced version matching that uses the constraint matching from version.vr
+/// This is the main entry point for checking if a version satisfies a constraint
+pub fn satisfies(version: SemVer, constraint: VersionConstraint) -> Bool {
+    // Delegate to the VersionConstraint.matches implementation
+    constraint.matches(version)
+}
+
+/// Sort versions in descending order (highest first)
+pub fn sort_versions_descending(versions: &mut List<PackageVersion>) {
+    // Simple bubble sort (adequate for registry use cases)
+    let n = versions.len();
+
+    for i in 0..n {
+        for j in 0..(n - i - 1) {
+            let curr = versions.get(j).unwrap();
+            let next = versions.get(j + 1).unwrap();
+
+            if curr.version.compare(next.version) < 0 {
+                // Swap
+                let temp = curr;
+                versions.set(j, next);
+                versions.set(j + 1, temp);
+            }
+        }
+    }
+}
+
+// Helper string functions
+// These would ideally be in core.text but implementing inline for now
+
+fn trim(s: Text) -> Text {
+    let mut start = 0;
+    let mut end = s.len();
+
+    // Find first non-whitespace
+    for i in 0..s.len() {
+        let ch = s.char_at(i);
+        if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+            start = i;
+            break;
+        }
+    }
+
+    // Find last non-whitespace
+    for i in (0..s.len()).rev() {
+        let ch = s.char_at(i);
+        if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+            end = i + 1;
+            break;
+        }
+    }
+
+    if start >= end {
+        return "";
+    }
+
+    substring(s, start, end)
+}
+
+fn starts_with(s: Text, prefix: Text) -> Bool {
+    if prefix.len() > s.len() {
+        return false;
+    }
+
+    for i in 0..prefix.len() {
+        if s.char_at(i) != prefix.char_at(i) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn contains(s: Text, substr: Text) -> Bool {
+    if substr.len() == 0 {
+        return true;
+    }
+
+    if substr.len() > s.len() {
+        return false;
+    }
+
+    for i in 0..(s.len() - substr.len() + 1) {
+        let mut matches = true;
+        for j in 0..substr.len() {
+            if s.char_at(i + j) != substr.char_at(j) {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn substring(s: Text, start: Int) -> Text {
+    if start >= s.len() {
+        return "";
+    }
+
+    let mut result = "";
+    for i in start..s.len() {
+        result = result + s.char_at(i).to_string();
+    }
+    result
+}
+
+fn substring_range(s: Text, start: Int, end: Int) -> Text {
+    if start >= s.len() || start >= end {
+        return "";
+    }
+
+    let actual_end = if end > s.len() { s.len() } else { end };
+    let mut result = "";
+
+    for i in start..actual_end {
+        result = result + s.char_at(i).to_string();
+    }
+
+    result
+}
+
+fn split(s: Text, delimiter: Text) -> List<Text> {
+    let mut result = List.new();
+
+    if s.len() == 0 {
+        return result;
+    }
+
+    let mut current = "";
+    let mut i = 0;
+
+    while i < s.len() {
+        let ch = s.char_at(i);
+
+        if delimiter.len() == 1 && ch.to_string() == delimiter {
+            result.push(current);
+            current = "";
+            i = i + 1;
+        } else if delimiter.len() > 1 {
+            let mut matches = true;
+            for j in 0..delimiter.len() {
+                if i + j >= s.len() || s.char_at(i + j) != delimiter.char_at(j) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if matches {
+                result.push(current);
+                current = "";
+                i = i + delimiter.len();
+            } else {
+                current = current + ch.to_string();
+                i = i + 1;
+            }
+        } else {
+            current = current + ch.to_string();
+            i = i + 1;
+        }
+    }
+
+    result.push(current);
+    result
+}
+
+fn parse_int(s: Text) -> Int {
+    let mut result = 0;
+    let mut is_neg = false;
+    let mut started = false;
+
+    for ch in s.chars() {
+        let cs = ch.to_string();
+        if cs == "-" && !started {
+            is_neg = true;
+            started = true;
+        } else if cs >= "0" && cs <= "9" {
+            started = true;
+            let digit = match cs {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_neg { -result } else { result }
+}

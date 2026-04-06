@@ -1,0 +1,26 @@
+// Test basic stream comprehensions: stream[x * 2 for x in source]
+
+fn main() -> Int {
+    // Test 1: Simple stream transformation
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled_stream = stream[x * 2 for x in numbers];
+    // Should produce stream of [2, 4, 6, 8, 10]
+
+    // Test 2: Identity stream
+    let identity_stream = stream[x for x in numbers];
+    // Should produce stream of [1, 2, 3, 4, 5]
+
+    // Test 3: Empty stream
+    let empty: [Int] = [];
+    let empty_stream = stream[x * 2 for x in empty];
+    // Should produce empty stream
+
+    // Test 4: Stream with complex transformation
+    let squares = stream[x * x for x in numbers];
+    // Should produce stream of [1, 4, 9, 16, 25]
+
+    // Test 5: Stream from range (if ranges are supported)
+    // let range_stream = stream[x for x in 1..10];
+
+    0
+}

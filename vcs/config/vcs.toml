@@ -1,0 +1,433 @@
+# Verum Compliance Suite (VCS) Configuration
+# Version: 1.0
+#
+# This file configures the VCS test runner (vtest), fuzzer (vfuzz),
+# and benchmark runner (vbench).
+#
+# Configuration can be overridden via:
+# - Command-line arguments (highest priority)
+# - Environment variables (VCS_* prefix)
+# - This configuration file
+
+# =============================================================================
+# Test Discovery
+# =============================================================================
+[discovery]
+# Directories to search for test files
+paths = [
+    "specs/",
+    "differential/",
+]
+
+# File pattern for test discovery
+pattern = "*.vr"
+
+# Patterns to exclude from discovery
+exclude = [
+    "**/skip/**",        # Explicitly skipped tests
+    "**/wip/**",         # Work in progress
+    "**/disabled/**",    # Disabled tests
+    "**/.git/**",        # Git directory
+    "**/target/**",      # Build artifacts
+]
+
+# Whether to follow symlinks
+follow_symlinks = false
+
+# Maximum recursion depth for directory traversal
+max_depth = 20
+
+# =============================================================================
+# Test Execution
+# =============================================================================
+[execution]
+# Number of parallel test workers
+# Set to 0 or "auto" to use CPU count
+parallel = 8
+
+# Default timeout for individual tests (milliseconds)
+timeout_default = 30000
+
+# Extended timeout for slow tests (milliseconds)
+timeout_extended = 600000
+
+# Default execution tier(s)
+# Options: "all", "0", "1", "2", "3", "0,3", etc.
+tier_default = "all"
+
+# Stop on first failure
+fail_fast = false
+
+# Shuffle test execution order
+shuffle = false
+
+# Random seed for shuffle (0 = random)
+shuffle_seed = 0
+
+# Retry flaky tests
+retry_count = 0
+
+# Delay between retries (milliseconds)
+retry_delay = 1000
+
+# =============================================================================
+# Execution Tiers
+# =============================================================================
+# Tier 0: Interpreter (reference implementation)
+[tiers.tier0]
+name = "Interpreter"
+command = "verum-interpreter"
+args = ["--no-optimize"]
+timeout_multiplier = 1.0
+enabled = true
+
+# Tier 1: Baseline JIT
+[tiers.tier1]
+name = "JIT Baseline"
+command = "verum-jit"
+args = ["--baseline"]
+timeout_multiplier = 0.8
+enabled = true
+
+# Tier 2: Optimizing JIT
+[tiers.tier2]
+name = "JIT Optimized"
+command = "verum-jit"
+args = ["--optimize"]
+timeout_multiplier = 0.5
+enabled = true
+
+# Tier 3: Ahead-of-Time Compilation
+[tiers.tier3]
+name = "AOT"
+command = "verum-aot"
+args = []
+timeout_multiplier = 0.3
+enabled = true
+
+# =============================================================================
+# Test Levels
+# =============================================================================
+[levels.L0]
+name = "Critical"
+description = "Semantic correctness, memory safety - must be 100%"
+required_pass_rate = 100.0
+blocking = true
+paths = ["specs/L0-critical/"]
+
+[levels.L1]
+name = "Core"
+description = "Type system, basic constructs - must be 100%"
+required_pass_rate = 100.0
+blocking = true
+paths = ["specs/L1-core/"]
+
+[levels.L2]
+name = "Standard"
+description = "Standard library, common patterns - 95%+ required"
+required_pass_rate = 95.0
+blocking = true
+paths = ["specs/L2-standard/"]
+
+[levels.L3]
+name = "Extended"
+description = "Advanced features (GPU, dependent types) - 90%+ required"
+required_pass_rate = 90.0
+blocking = false
+paths = ["specs/L3-extended/"]
+
+[levels.L4]
+name = "Performance"
+description = "Timing characteristics - advisory only"
+required_pass_rate = 0.0
+blocking = false
+paths = ["specs/L4-performance/"]
+
+# =============================================================================
+# Reporting
+# =============================================================================
+[reporting]
+# Output format: "console", "json", "junit", "html"
+format = "console"
+
+# Enable colored output
+colors = true
+
+# Verbose output
+verbose = false
+
+# Show timing information
+show_timing = true
+
+# Show memory usage
+show_memory = false
+
+# Show stack traces on failure
+show_stacktrace = true
+
+# Maximum output length per test (characters)
+max_output_length = 10000
+
+# Truncate long output
+truncate_output = true
+
+# =============================================================================
+# Console Output
+# =============================================================================
+[reporting.console]
+# Show progress bar
+progress_bar = true
+
+# Update interval (milliseconds)
+progress_interval = 100
+
+# Show live test output
+live_output = false
+
+# Success symbol
+success_symbol = "[PASS]"
+
+# Failure symbol
+failure_symbol = "[FAIL]"
+
+# Skip symbol
+skip_symbol = "[SKIP]"
+
+# =============================================================================
+# HTML Report
+# =============================================================================
+[reporting.html]
+# Report title
+title = "VCS Test Report"
+
+# Include source snippets
+include_source = true
+
+# Include timing charts
+include_charts = true
+
+# Embed CSS (vs external stylesheet)
+embed_css = true
+
+# =============================================================================
+# Differential Testing
+# =============================================================================
+[differential]
+# Tiers to compare for semantic equivalence
+compare_tiers = [0, 3]
+
+# Memory tolerance for comparison (percentage)
+tolerance_memory = 10.0
+
+# Output tolerance for floating-point (epsilon)
+tolerance_float = 1e-10
+
+# Ignore timing differences
+ignore_timing = true
+
+# Paths for differential tests
+paths = ["differential/"]
+
+# =============================================================================
+# Fuzzing Configuration
+# =============================================================================
+[fuzzing]
+# Generator strategy: "type_aware", "random", "grammar", "mutation"
+generator = "type_aware"
+
+# Maximum AST depth for generated programs
+max_depth = 10
+
+# Maximum input length (bytes)
+max_length = 4096
+
+# Seed corpus directory
+seed_corpus = "fuzz/seeds/"
+
+# Crash output directory
+crash_dir = "fuzz/crashes/"
+
+# Artifact directory (minimized crashes)
+artifact_dir = "fuzz/artifacts/"
+
+# Number of fuzzer threads
+parallel = 4
+
+# Default duration
+default_duration = "1h"
+
+# Save interesting inputs
+save_interesting = true
+
+# Minimize corpus periodically
+minimize_corpus = true
+
+# =============================================================================
+# Fuzz Targets
+# =============================================================================
+[fuzzing.targets.lexer]
+enabled = true
+weight = 1.0
+max_length = 1024
+
+[fuzzing.targets.parser]
+enabled = true
+weight = 2.0
+max_length = 4096
+
+[fuzzing.targets.cbgr]
+enabled = true
+weight = 3.0  # Higher weight for memory safety
+max_length = 2048
+
+[fuzzing.targets.types]
+enabled = true
+weight = 2.0
+max_length = 4096
+
+[fuzzing.targets.smt]
+enabled = true
+weight = 1.0
+max_length = 2048
+timeout = 60000  # SMT can be slow
+
+# =============================================================================
+# Benchmarking
+# =============================================================================
+[benchmarks]
+# Warmup iterations before measurement
+warmup_iterations = 100
+
+# Number of measurement iterations
+measure_iterations = 1000
+
+# Baseline file path
+baseline_path = "baselines/"
+
+# Regression threshold (percentage)
+regression_threshold = 10.0
+
+# Improvement threshold for notification
+improvement_threshold = 5.0
+
+# Statistical confidence level
+confidence_level = 0.95
+
+# Outlier detection (IQR multiplier)
+outlier_threshold = 1.5
+
+# =============================================================================
+# Benchmark Suites
+# =============================================================================
+[benchmarks.suites.compilation]
+name = "Compilation Performance"
+enabled = true
+paths = ["benchmarks/compilation/"]
+metrics = ["time", "memory"]
+
+[benchmarks.suites.runtime]
+name = "Runtime Performance"
+enabled = true
+paths = ["benchmarks/runtime/"]
+metrics = ["time", "memory", "allocations"]
+
+[benchmarks.suites.memory]
+name = "Memory Usage"
+enabled = true
+paths = ["benchmarks/memory/"]
+metrics = ["heap", "stack", "fragmentation"]
+
+[benchmarks.suites.cbgr]
+name = "CBGR Tier Latency"
+enabled = true
+paths = ["benchmarks/cbgr/"]
+metrics = ["latency_p50", "latency_p99", "latency_max"]
+
+[benchmarks.suites.comparison]
+name = "Cross-Language Comparison"
+enabled = true
+paths = ["benchmarks/comparison/"]
+metrics = ["time", "memory"]
+compare_to = ["c", "rust", "go"]
+
+# =============================================================================
+# SMT Verification
+# =============================================================================
+[smt]
+# SMT solver command
+solver = "z3"
+
+# Solver timeout (milliseconds)
+timeout = 30000
+
+# Enable incremental solving
+incremental = true
+
+# Model generation
+produce_models = true
+
+# Unsat core extraction
+produce_unsat_cores = true
+
+# Random seed for solver
+random_seed = 0
+
+# Proof logging
+log_proofs = false
+
+# =============================================================================
+# Proof Stability
+# =============================================================================
+[proof_stability]
+# Enable proof stability tracking
+enabled = true
+
+# Baseline file
+baseline_file = "baselines/proof-stability.json"
+
+# Timeout regression threshold (percentage)
+timeout_regression_threshold = 50.0
+
+# Alert on new timeouts
+alert_new_timeouts = true
+
+# Number of verification attempts for flaky detection
+verification_attempts = 3
+
+# =============================================================================
+# CI/CD Integration
+# =============================================================================
+[ci]
+# Generate JUnit XML by default in CI
+ci_format = "junit"
+
+# Fail on L0/L1 failures
+fail_on_critical = true
+
+# Warn on L2 degradation
+warn_on_standard = true
+
+# Post PR comments
+pr_comments = true
+
+# Upload artifacts
+upload_artifacts = true
+
+# Artifact retention (days)
+artifact_retention = 30
+
+# =============================================================================
+# Environment
+# =============================================================================
+[environment]
+# Additional environment variables for test execution
+[environment.vars]
+VERUM_TEST_MODE = "true"
+RUST_BACKTRACE = "1"
+VERUM_LOG_LEVEL = "warn"
+
+# Path additions
+path_additions = [
+    "../target/release",
+    "../target/debug",
+]

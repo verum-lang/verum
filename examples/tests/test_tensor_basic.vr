@@ -1,0 +1,19 @@
+// Test: Basic Tensor Literals - 1D Tensors
+// Grammar: tensor_literal_expr = 'tensor' , '<' , shape_params , '>' , type_expr , '{' , tensor_elements , '}'
+
+fn main() {
+    // Test 1: Simple 1D tensor with 5 Float elements
+    let t1 = tensor<5>Float { 1.0, 2.0, 3.0, 4.0, 5.0 };
+
+    // Test 2: 1D tensor with Int elements
+    let t2 = tensor<4>Int { 10, 20, 30, 40 };
+
+    // Test 3: Empty dimension edge case (should fail or require special handling)
+    let t3 = tensor<0>Float { };
+
+    // Test 4: Single element tensor
+    let t4 = tensor<1>Float { 42.0 };
+
+    // Test 5: Larger 1D tensor
+    let t5 = tensor<10>Int { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+}

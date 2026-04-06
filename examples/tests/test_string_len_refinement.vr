@@ -1,0 +1,8 @@
+// Test: String length refinement
+type NonEmptyText is Text{len(it) > 0};
+
+fn main() {
+    let s: NonEmptyText = "hello";
+    let _ = println(s);
+    0
+}

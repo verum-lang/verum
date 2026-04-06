@@ -1,0 +1,858 @@
+// =============================================================================
+// mem/segment.vr - Mimalloc-Style Segment Management
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/{platform}/mem
+// =============================================================================
+//
+// Segments are 32MiB chunks of virtual memory divided into 64KiB slices.
+// This architecture follows mimalloc's proven design for:
+// - Efficient memory layout with commit/purge masks
+// - Cross-thread segment abandonment and reclamation
+// - Lazy physical memory commitment
+//
+// # Architecture
+//
+// ```
+// Segment (32 MiB)
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │ SegmentHeader (4 KiB, first slice)                                      │
+// │ - thread_id, used_slices, commit_mask, purge_mask                       │
+// │ - slice_info[512] for tracking slice usage                              │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │ Slice 1 (64 KiB) - can be PageHeader + blocks                           │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │ Slice 2 (64 KiB)                                                        │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │ ...                                                                     │
+// ├─────────────────────────────────────────────────────────────────────────┤
+// │ Slice 511 (64 KiB)                                                      │
+// └─────────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// Spec: docs/architecture/mimalloc-allocator-plan.md
+// =============================================================================
+
+module core.mem.segment;
+mount super.epoch.{GLOBAL_EPOCH};
+
+// Import intrinsics as functions (from submodules directly for reliable resolution)
+mount core.intrinsics.memory.{ptr_offset};
+mount core.intrinsics.platform.{spin_hint};
+mount core.intrinsics.atomic.{
+    atomic_load_u64, atomic_store_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
+    atomic_load_u32, atomic_store_u32, atomic_compare_exchange_u32,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+
+// Popcount intrinsic wrapper
+fn popcnt_u64(x: UInt64) -> UInt64 { @intrinsic("ctpop", x) }
+
+// Platform-specific memory operations
+@cfg(target_os = "linux")
+mount sys.linux.mem.{mmap, munmap, mprotect, madvise, PROT_READ, PROT_WRITE, PROT_NONE, MAP_PRIVATE, MAP_ANONYMOUS, MAP_NORESERVE, MADV_DONTNEED, MADV_HUGEPAGE};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{mmap_ffi as mmap, munmap, mprotect, madvise, PROT_READ, PROT_WRITE, PROT_NONE, MAP_PRIVATE, MAP_ANON, MADV_FREE};
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{VirtualAlloc, VirtualFree};
+
+@cfg(target_os = "windows")
+mount sys.windows.ntdll.{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, MEM_DECOMMIT, PAGE_READWRITE, PAGE_NOACCESS};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Segment size: 32 MiB (2^25 bytes)
+public const SEGMENT_SIZE: Int = 32 * 1024 * 1024;
+
+/// Slice size: 64 KiB (2^16 bytes)
+public const SLICE_SIZE: Int = 64 * 1024;
+
+/// Number of slices per segment
+public const SLICES_PER_SEGMENT: Int = 512;
+
+/// Mask words for 512 slices (512 / 64 = 8 words)
+public const MASK_WORDS: Int = 8;
+
+/// Segment alignment (same as size for easy pointer math)
+public const SEGMENT_ALIGN: Int = SEGMENT_SIZE;
+
+/// Small page size (1 slice = 64 KiB)
+public const SMALL_PAGE_SIZE: Int = SLICE_SIZE;
+
+/// Medium page size (8 slices = 512 KiB)
+public const MEDIUM_PAGE_SIZE: Int = 8 * SLICE_SIZE;
+
+/// Large page threshold (> 512 KiB uses dedicated slices)
+public const LARGE_PAGE_THRESHOLD: Int = MEDIUM_PAGE_SIZE;
+
+/// Purge delay in nanoseconds (10ms default)
+public const PURGE_DELAY_NS: Int = 10_000_000;
+
+/// Maximum segments to reclaim per operation
+public const MAX_RECLAIM_PER_OP: Int = 8;
+
+// =============================================================================
+// Slice Info
+// =============================================================================
+
+/// Information about a single slice (8 bytes)
+@repr(C, packed)
+public type SliceInfo is {
+    /// Slice state (free, used, span_start, span_continue)
+    state: UInt8,
+
+    /// If span_start: number of slices in this span
+    span_count: UInt8,
+
+    /// Size class if this slice starts a page
+    size_class: UInt8,
+
+    /// Flags
+    flags: UInt8,
+
+    /// Reserved
+    reserved: UInt32,
+};
+
+/// Slice states
+public const SLICE_FREE: UInt8 = 0;
+public const SLICE_USED: UInt8 = 1;
+public const SLICE_SPAN_START: UInt8 = 2;
+public const SLICE_SPAN_CONTINUE: UInt8 = 3;
+
+implement SliceInfo {
+    /// Create a free slice info
+    @inline
+    public fn free() -> SliceInfo {
+        SliceInfo {
+            state: SLICE_FREE,
+            span_count: 0,
+            size_class: 0,
+            flags: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Create a span start slice info
+    @inline
+    public fn span_start(count: Int, size_class: Int) -> SliceInfo {
+        SliceInfo {
+            state: SLICE_SPAN_START,
+            span_count: count as UInt8,
+            size_class: size_class as UInt8,
+            flags: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Create a span continuation slice info
+    @inline
+    public fn span_continue() -> SliceInfo {
+        SliceInfo {
+            state: SLICE_SPAN_CONTINUE,
+            span_count: 0,
+            size_class: 0,
+            flags: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Check if slice is free
+    @inline
+    public fn is_free(&self) -> Bool {
+        self.state == SLICE_FREE
+    }
+
+    /// Check if slice starts a span
+    @inline
+    public fn is_span_start(&self) -> Bool {
+        self.state == SLICE_SPAN_START
+    }
+}
+
+// =============================================================================
+// Segment Header
+// =============================================================================
+
+/// Segment header structure (fits in first slice, < 4 KiB)
+/// Manages 32 MiB of virtual memory divided into 512 slices.
+@repr(C, align(64))
+public type Segment is {
+    // =========================================================================
+    // Identity & State (64 bytes)
+    // =========================================================================
+
+    /// Owning thread ID (0 = abandoned)
+    thread_id: UInt64,
+
+    /// Number of slices currently in use
+    used_slices: UInt32,
+
+    /// Number of abandoned slices (pages with live blocks but no owner)
+    abandoned_slices: UInt32,
+
+    /// Segment kind (normal, huge)
+    kind: UInt8,
+
+    /// Flags
+    flags: UInt8,
+
+    /// Visit count for reclamation heuristics
+    abandoned_visits: UInt16,
+
+    /// Reserved padding
+    _pad0: UInt32,
+
+    // =========================================================================
+    // CBGR Integration (32 bytes)
+    // =========================================================================
+
+    /// Base generation for all pages in this segment
+    base_generation: UInt32,
+
+    /// Current epoch
+    epoch: UInt16,
+
+    /// Reserved
+    _pad1: UInt16,
+
+    /// Epoch when segment was created
+    creation_epoch: UInt64,
+
+    /// Reserved
+    _pad2: [UInt64; 2],
+
+    // =========================================================================
+    // Commit/Purge Tracking (128 bytes)
+    // =========================================================================
+
+    /// Commit mask: which slices have physical memory committed
+    /// Each bit represents one slice (512 slices / 64 bits = 8 words)
+    commit_mask: [UInt64; 8],
+
+    /// Purge mask: which slices are scheduled for purging
+    purge_mask: [UInt64; 8],
+
+    // =========================================================================
+    // Timing (16 bytes)
+    // =========================================================================
+
+    /// Purge expiration time (monotonic nanoseconds)
+    purge_expire: UInt64,
+
+    /// Last access time
+    last_access: UInt64,
+
+    // =========================================================================
+    // Linking (16 bytes)
+    // =========================================================================
+
+    /// Next segment in global list
+    next: &unsafe Segment,
+
+    /// Previous segment in global list
+    prev: &unsafe Segment,
+
+    // =========================================================================
+    // Slice Info Array (4096 bytes = 512 * 8)
+    // =========================================================================
+
+    /// Per-slice information
+    slices: [SliceInfo; 512],
+};
+
+/// Segment kinds
+public const SEGMENT_NORMAL: UInt8 = 0;
+public const SEGMENT_HUGE: UInt8 = 1;
+
+implement Segment {
+    /// Header size (fits in first slice)
+    public const HEADER_SIZE: Int = 4352;  // 64 + 32 + 128 + 16 + 16 + 4096
+
+    /// Get pointer to slice data
+    @inline
+    public fn slice_ptr(&self, index: Int) -> &unsafe Byte {
+        let base = self as &unsafe Byte;
+        let offset = index * SLICE_SIZE;
+        unsafe { ptr_offset(base, offset) }
+    }
+
+    /// Get slice index from pointer
+    @inline
+    public fn slice_index(&self, ptr: &unsafe Byte) -> Int {
+        let base = self as Int;
+        let addr = ptr as Int;
+        (addr - base) / SLICE_SIZE
+    }
+
+    /// Check if a slice is committed
+    @inline
+    public fn is_committed(&self, slice_idx: Int) -> Bool {
+        let word = slice_idx / 64;
+        let bit = slice_idx % 64;
+        (self.commit_mask[word] & (1 << bit)) != 0
+    }
+
+    /// Mark a slice as committed
+    @inline
+    public fn set_committed(&mut self, slice_idx: Int) {
+        let word = slice_idx / 64;
+        let bit = slice_idx % 64;
+        self.commit_mask[word] = self.commit_mask[word] | (1 << bit);
+    }
+
+    /// Mark a range of slices as committed
+    public fn set_committed_range(&mut self, start: Int, count: Int) {
+        for i in start..(start + count) {
+            self.set_committed(i);
+        }
+    }
+
+    /// Clear committed bit for a slice
+    @inline
+    public fn clear_committed(&mut self, slice_idx: Int) {
+        let word = slice_idx / 64;
+        let bit = slice_idx % 64;
+        self.commit_mask[word] = self.commit_mask[word] & !(1 << bit);
+    }
+
+    /// Schedule a slice for purging
+    @inline
+    public fn schedule_purge(&mut self, slice_idx: Int) {
+        let word = slice_idx / 64;
+        let bit = slice_idx % 64;
+        self.purge_mask[word] = self.purge_mask[word] | (1 << bit);
+    }
+
+    /// Check if segment is abandoned
+    @inline
+    public fn is_abandoned(&self) -> Bool {
+        atomic_load_u64(&self.thread_id, "acquire") == 0
+    }
+
+    /// Abandon this segment (set thread_id to 0)
+    public fn abandon(&mut self) {
+        atomic_store_u64(&self.thread_id, 0, "release");
+        self.abandoned_visits = 1;
+    }
+
+    /// Try to claim this segment for a thread
+    public fn try_claim(&mut self, new_thread_id: UInt64) -> Bool {
+        let result = atomic_compare_exchange_u64(
+            &self.thread_id,
+            0,  // expected: abandoned
+            new_thread_id,
+            "acq_rel",
+            "acquire"
+        );
+        result.1  // true if CAS succeeded
+    }
+
+    /// Allocate slices for a page
+    /// Returns starting slice index or None if not enough contiguous slices
+    public fn alloc_slices(&mut self, count: Int, size_class: Int) -> Maybe<Int> {
+        // Simple first-fit for now
+        let mut run_start = 1;  // Skip slice 0 (header)
+        let mut run_len = 0;
+
+        for i in 1..SLICES_PER_SEGMENT {
+            if self.slices[i].is_free() {
+                if run_len == 0 {
+                    run_start = i;
+                }
+                run_len = run_len + 1;
+
+                if run_len >= count {
+                    // Found enough contiguous slices
+                    self.mark_slices_used(run_start, count, size_class);
+                    return Some(run_start);
+                }
+            } else {
+                run_len = 0;
+            }
+        }
+
+        None  // Not enough contiguous free slices
+    }
+
+    /// Mark slices as used
+    fn mark_slices_used(&mut self, start: Int, count: Int, size_class: Int) {
+        // First slice is span start
+        self.slices[start] = SliceInfo.span_start(count, size_class);
+
+        // Remaining slices are continuations
+        for i in (start + 1)..(start + count) {
+            self.slices[i] = SliceInfo.span_continue();
+        }
+
+        self.used_slices = self.used_slices + count as UInt32;
+    }
+
+    /// Free slices
+    public fn free_slices(&mut self, start: Int) {
+        let count = self.slices[start].span_count as Int;
+
+        for i in start..(start + count) {
+            self.slices[i] = SliceInfo.free();
+        }
+
+        self.used_slices = self.used_slices - count as UInt32;
+
+        // Schedule for purge if this was a large span
+        if count >= 4 {
+            for i in start..(start + count) {
+                self.schedule_purge(i);
+            }
+            self.purge_expire = get_monotonic_time() + PURGE_DELAY_NS as UInt64;
+        }
+    }
+
+    /// Execute pending purges (return memory to OS)
+    public fn execute_purge(&mut self) {
+        let now = get_monotonic_time();
+        if now < self.purge_expire {
+            return;  // Not yet time
+        }
+
+        for word in 0..MASK_WORDS {
+            let mask = atomic_exchange_u64(&self.purge_mask[word], 0, "acq_rel");
+            if mask == 0 {
+                continue;
+            }
+
+            for bit in 0..64 {
+                if (mask & (1 << bit)) != 0 {
+                    let slice_idx = word * 64 + bit;
+                    let addr = self.slice_ptr(slice_idx);
+
+                    purge_memory(addr, SLICE_SIZE);
+                    self.clear_committed(slice_idx);
+                }
+            }
+        }
+    }
+
+    /// Check if segment is empty (can be fully released)
+    @inline
+    public fn is_empty(&self) -> Bool {
+        self.used_slices == 0
+    }
+
+    /// Increment base generation (called on epoch advance)
+    public fn increment_generation(&mut self) {
+        let old_gen = atomic_load_u32(&self.base_generation, "acquire");
+        let new_gen = old_gen + 1;
+
+        // Check for wraparound
+        if new_gen == 0 {
+            // Notify epoch manager
+            GLOBAL_EPOCH.on_generation_wraparound();
+            self.epoch = self.epoch + 1;
+        }
+
+        atomic_store_u32(&self.base_generation, new_gen, "release");
+    }
+}
+
+// =============================================================================
+// Segment Cache (Global)
+// =============================================================================
+
+/// Global segment list for tracking all segments
+static mut ALL_SEGMENTS: &unsafe Segment = 0 as &unsafe Segment;
+static mut SEGMENT_COUNT: UInt32 = 0;
+static mut SEGMENT_LOCK: UInt32 = 0;
+
+/// Abandoned segments list
+static mut ABANDONED_SEGMENTS: &unsafe Segment = 0 as &unsafe Segment;
+static mut ABANDONED_COUNT: UInt32 = 0;
+
+/// Lock the segment manager
+@inline
+fn lock_segments() {
+    loop {
+        let result = atomic_compare_exchange_u32(
+            unsafe { &SEGMENT_LOCK as *mut UInt32 },
+            0,
+            1,
+            ORDERING_ACQUIRE,
+            ORDERING_RELAXED
+        );
+        if result.1 {
+            break;
+        }
+        spin_hint();
+    }
+}
+
+/// Unlock the segment manager
+@inline
+fn unlock_segments() {
+    atomic_store_u32(unsafe { &SEGMENT_LOCK as *mut UInt32 }, 0, ORDERING_RELEASE);
+}
+
+/// Allocate a new segment
+public fn segment_alloc(thread_id: UInt64) -> Result<&mut Segment, SegmentError> {
+    // First try to reclaim an abandoned segment
+    if let Some(seg) = try_reclaim_abandoned(thread_id) {
+        return Ok(seg);
+    }
+
+    // Allocate new segment via mmap
+    let ptr = os_alloc_segment()?;
+    let segment = ptr as &mut Segment;
+
+    // Initialize segment
+    segment.thread_id = thread_id;
+    segment.used_slices = 1;  // Slice 0 is header
+    segment.abandoned_slices = 0;
+    segment.kind = SEGMENT_NORMAL;
+    segment.flags = 0;
+    segment.abandoned_visits = 0;
+
+    let epoch = GLOBAL_EPOCH.current_epoch() as UInt16;
+    segment.base_generation = 0;
+    segment.epoch = epoch;
+    segment.creation_epoch = epoch as UInt64;
+
+    // Clear masks
+    for i in 0..MASK_WORDS {
+        segment.commit_mask[i] = 0;
+        segment.purge_mask[i] = 0;
+    }
+
+    // Mark slice 0 as committed (header)
+    segment.set_committed(0);
+
+    segment.purge_expire = 0;
+    segment.last_access = get_monotonic_time();
+    segment.next = 0 as &unsafe Segment;
+    segment.prev = 0 as &unsafe Segment;
+
+    // Initialize slice info
+    segment.slices[0] = SliceInfo.span_start(1, 0);  // Header uses slice 0
+    for i in 1..SLICES_PER_SEGMENT {
+        segment.slices[i] = SliceInfo.free();
+    }
+
+    // Add to global list
+    lock_segments();
+    unsafe {
+        segment.next = ALL_SEGMENTS;
+        if (ALL_SEGMENTS as Int) != 0 {
+            ALL_SEGMENTS.prev = segment as &unsafe Segment;
+        }
+        ALL_SEGMENTS = segment as &unsafe Segment;
+        SEGMENT_COUNT = SEGMENT_COUNT + 1;
+    }
+    unlock_segments();
+
+    Ok(segment)
+}
+
+/// Free a segment (return to OS)
+public fn segment_free(segment: &mut Segment) {
+    // Remove from global list
+    lock_segments();
+    unsafe {
+        if (segment.prev as Int) != 0 {
+            segment.prev.next = segment.next;
+        } else {
+            ALL_SEGMENTS = segment.next;
+        }
+        if (segment.next as Int) != 0 {
+            segment.next.prev = segment.prev;
+        }
+        SEGMENT_COUNT = SEGMENT_COUNT - 1;
+    }
+    unlock_segments();
+
+    // Return memory to OS
+    os_free_segment(segment as &unsafe Byte);
+}
+
+/// Abandon a segment (when thread exits)
+public fn segment_abandon(segment: &mut Segment) {
+    // Execute any pending purges first
+    segment.execute_purge();
+
+    // Mark as abandoned
+    segment.abandon();
+
+    // Add to abandoned list
+    lock_segments();
+    unsafe {
+        // Remove from main list
+        if (segment.prev as Int) != 0 {
+            segment.prev.next = segment.next;
+        } else {
+            ALL_SEGMENTS = segment.next;
+        }
+        if (segment.next as Int) != 0 {
+            segment.next.prev = segment.prev;
+        }
+
+        // Add to abandoned list
+        segment.next = ABANDONED_SEGMENTS;
+        segment.prev = 0 as &unsafe Segment;
+        if (ABANDONED_SEGMENTS as Int) != 0 {
+            ABANDONED_SEGMENTS.prev = segment as &unsafe Segment;
+        }
+        ABANDONED_SEGMENTS = segment as &unsafe Segment;
+        ABANDONED_COUNT = ABANDONED_COUNT + 1;
+    }
+    unlock_segments();
+}
+
+/// Try to reclaim an abandoned segment
+fn try_reclaim_abandoned(thread_id: UInt64) -> Maybe<&mut Segment> {
+    lock_segments();
+
+    unsafe {
+        let mut current = ABANDONED_SEGMENTS;
+        let mut visit_count = 0;
+
+        while (current as Int) != 0 && visit_count < MAX_RECLAIM_PER_OP {
+            let segment = current as &mut Segment;
+            current = segment.next;
+            visit_count = visit_count + 1;
+
+            // Try to claim
+            if segment.try_claim(thread_id) {
+                // Remove from abandoned list
+                if (segment.prev as Int) != 0 {
+                    segment.prev.next = segment.next;
+                } else {
+                    ABANDONED_SEGMENTS = segment.next;
+                }
+                if (segment.next as Int) != 0 {
+                    segment.next.prev = segment.prev;
+                }
+                ABANDONED_COUNT = ABANDONED_COUNT - 1;
+
+                // Add back to main list
+                segment.next = ALL_SEGMENTS;
+                segment.prev = 0 as &unsafe Segment;
+                if (ALL_SEGMENTS as Int) != 0 {
+                    ALL_SEGMENTS.prev = segment as &unsafe Segment;
+                }
+                ALL_SEGMENTS = segment as &unsafe Segment;
+
+                unlock_segments();
+                return Some(segment);
+            }
+
+            // Increment visit count
+            segment.abandoned_visits = segment.abandoned_visits + 1;
+        }
+    }
+
+    unlock_segments();
+    None
+}
+
+/// Get segment from pointer (uses alignment to find segment start)
+@inline
+public fn ptr_to_segment(ptr: &unsafe Byte) -> &Segment {
+    let addr = ptr as Int;
+    let segment_addr = addr & !(SEGMENT_SIZE - 1);
+    segment_addr as &Segment
+}
+
+// =============================================================================
+// Segment Errors
+// =============================================================================
+
+/// Segment allocation errors
+public type SegmentError is
+    | MmapFailed { code: Int }
+    | MunmapFailed { code: Int }
+    | OutOfMemory
+    ;
+
+implement SegmentError {
+    public fn message(&self) -> Text {
+        match self {
+            MmapFailed { code } => f"segment mmap failed: {code}",
+            MunmapFailed { code } => f"segment munmap failed: {code}",
+            OutOfMemory => "out of memory for segment allocation",
+        }
+    }
+}
+
+// =============================================================================
+// OS Operations
+// =============================================================================
+
+/// Allocate a segment from OS
+fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
+    @cfg(target_os = "linux") {
+        // Reserve virtual address space (no physical memory yet)
+        let result = mmap(
+            0 as &unsafe Byte,
+            SEGMENT_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+            -1,
+            0
+        );
+
+        if (result as Int) == -1 {
+            return Err(SegmentError.MmapFailed { code: sys.linux.errno.get_errno() });
+        }
+
+        // Advise kernel about huge pages
+        madvise(result, SEGMENT_SIZE, MADV_HUGEPAGE);
+
+        return Ok(result);
+    }
+
+    @cfg(target_os = "macos") {
+        let result = mmap(
+            0 as &unsafe Byte,
+            SEGMENT_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON,
+            -1,
+            0
+        );
+
+        if (result as Int) == -1 {
+            return Err(SegmentError.MmapFailed { code: sys.darwin.libsystem.errno() });
+        }
+
+        return Ok(result);
+    }
+
+    @cfg(target_os = "windows") {
+        // Reserve virtual address space
+        let result = VirtualAlloc(
+            0 as &unsafe Byte,
+            SEGMENT_SIZE,
+            MEM_RESERVE,
+            PAGE_READWRITE
+        );
+
+        if (result as Int) == 0 {
+            return Err(SegmentError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+        }
+
+        return Ok(result);
+    }
+
+    // Unreachable - all supported platforms covered above
+    unreachable()
+}
+
+/// Free a segment back to OS
+fn os_free_segment(ptr: &unsafe Byte) {
+    @cfg(target_os = "linux") {
+        munmap(ptr, SEGMENT_SIZE);
+        return;
+    }
+
+    @cfg(target_os = "macos") {
+        munmap(ptr, SEGMENT_SIZE);
+        return;
+    }
+
+    @cfg(target_os = "windows") {
+        VirtualFree(ptr, 0, MEM_RELEASE);
+        return;
+    }
+
+    unreachable()
+}
+
+/// Purge memory (return physical pages to OS but keep virtual mapping)
+fn purge_memory(ptr: &unsafe Byte, size: Int) {
+    @cfg(target_os = "linux") {
+        madvise(ptr, size, MADV_DONTNEED);
+        return;
+    }
+
+    @cfg(target_os = "macos") {
+        madvise(ptr, size, MADV_FREE);
+        return;
+    }
+
+    @cfg(target_os = "windows") {
+        VirtualFree(ptr, size, MEM_DECOMMIT);
+        return;
+    }
+
+    unreachable()
+}
+
+/// Get monotonic time in nanoseconds
+@inline
+fn get_monotonic_time() -> UInt64 {
+    @cfg(target_os = "linux") {
+        return sys.linux.time.monotonic_nanos();
+    }
+
+    @cfg(target_os = "macos") {
+        return sys.darwin.time.monotonic_nanos();
+    }
+
+    @cfg(target_os = "windows") {
+        return sys.windows.time.query_performance_counter_ns();
+    }
+
+    unreachable()
+}
+
+// =============================================================================
+// Statistics
+// =============================================================================
+
+/// Segment statistics
+public type SegmentStats is {
+    /// Total segments allocated
+    public total_segments: UInt32,
+    /// Abandoned segments
+    public abandoned_segments: UInt32,
+    /// Total slices in use
+    public used_slices: UInt64,
+    /// Total committed memory (bytes)
+    public committed_bytes: UInt64,
+};
+
+/// Get segment statistics
+public fn get_segment_stats() -> SegmentStats {
+    lock_segments();
+
+    let mut stats = SegmentStats {
+        total_segments: 0,
+        abandoned_segments: 0,
+        used_slices: 0,
+        committed_bytes: 0,
+    };
+
+    unsafe {
+        stats.total_segments = SEGMENT_COUNT;
+        stats.abandoned_segments = ABANDONED_COUNT;
+
+        // Walk all segments to count slices and committed memory
+        let mut current = ALL_SEGMENTS;
+        while (current as Int) != 0 {
+            let seg = current as &Segment;
+            stats.used_slices = stats.used_slices + seg.used_slices as UInt64;
+
+            // Count committed bits
+            for word in 0..MASK_WORDS {
+                let bits = popcnt_u64(seg.commit_mask[word]);
+                stats.committed_bytes = stats.committed_bytes + (bits as UInt64 * SLICE_SIZE as UInt64);
+            }
+
+            current = seg.next;
+        }
+    }
+
+    unlock_segments();
+    stats
+}

@@ -1,0 +1,97 @@
+// Simple Todo List Application
+// Demonstrates: records, variants, pattern matching, closures
+
+type Priority is Low | Medium | High | Critical;
+type Status is Todo | InProgress | Done;
+
+type Task is {
+    id: Float,
+    title: Text,
+    priority: Priority,
+    status: Status
+};
+
+type TaskList is {
+    tasks: [Task],
+    next_id: Float
+};
+
+// Create a new task
+fn create_task(id: Float, title: Text, priority: Priority) -> Task {
+    Task {
+        id: id,
+        title: title,
+        priority: priority,
+        status: Todo
+    }
+}
+
+// Get priority name
+fn priority_name(p: Priority) -> Text {
+    match p {
+        Low => "Low",
+        Medium => "Medium",
+        High => "High",
+        Critical => "CRITICAL"
+    }
+}
+
+// Get status name
+fn status_name(s: Status) -> Text {
+    match s {
+        Todo => "[ ]",
+        InProgress => "[~]",
+        Done => "[x]"
+    }
+}
+
+// Print a task
+fn print_task(task: Task) {
+    let status = status_name(task.status);
+    let priority = priority_name(task.priority);
+    let _ = print(f"  {status} #{task.id} [{priority}] {task.title}");
+}
+
+// Count tasks by status
+fn count_by_status(tasks: [Task], target: Status) -> Float {
+    // Simplified: just return 0 for now (array iteration not fully working)
+    0.0
+}
+
+fn main() {
+    let _ = print("=== Todo List Application ===");
+    let _ = print("");
+
+    // Create some tasks
+    let task1 = create_task(1.0, "Implement parser", High);
+    let task2 = create_task(2.0, "Write documentation", Medium);
+    let task3 = create_task(3.0, "Add tests", High);
+    let task4 = create_task(4.0, "Review code", Low);
+    let task5 = create_task(5.0, "Fix critical bug", Critical);
+
+    // Print all tasks
+    let _ = print("Current Tasks:");
+    print_task(task1);
+    print_task(task2);
+    print_task(task3);
+    print_task(task4);
+    print_task(task5);
+    let _ = print("");
+
+    // Demonstrate status change (would need mutable tasks in real app)
+    let _ = print("Status Legend:");
+    let _ = print("  [ ] = Todo");
+    let _ = print("  [~] = In Progress");
+    let _ = print("  [x] = Done");
+    let _ = print("");
+
+    // Priority breakdown
+    let _ = print("Priority Levels:");
+    let _ = print(f"  Low priority: {priority_name(Low)}");
+    let _ = print(f"  Medium priority: {priority_name(Medium)}");
+    let _ = print(f"  High priority: {priority_name(High)}");
+    let _ = print(f"  Critical priority: {priority_name(Critical)}");
+
+    let _ = print("");
+    let _ = print("=== End ===");
+}

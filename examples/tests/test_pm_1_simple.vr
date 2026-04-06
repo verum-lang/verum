@@ -1,0 +1,14 @@
+// Test 1: Simple variant matching
+type Maybe is Some(Int) | None;
+
+fn test() -> Text {
+    let x = Some(42);
+    match x {
+        Some(n) => "PASS",
+        None => "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

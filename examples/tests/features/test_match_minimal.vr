@@ -1,0 +1,40 @@
+// Minimal match test
+
+type Color is Red | Green | Blue;
+
+type Maybe<T> is Some(T) | None;
+
+fn describe_color(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+fn unwrap_or(opt: Maybe<Float>, default: Float) -> Float {
+    match opt {
+        Some(x) => x,
+        None => default
+    }
+}
+
+fn is_warm_color(c: Color) -> Bool {
+    match c {
+        Red => true,
+        Green | Blue => false
+    }
+}
+
+fn main() {
+    let _ = print(f"Red = {describe_color(Red)}");
+    let _ = print(f"Blue = {describe_color(Blue)}");
+
+    let some_val: Maybe<Float> = Some(42.0);
+    let none_val: Maybe<Float> = None;
+    let _ = print(f"Some(42) = {unwrap_or(some_val, 0.0)}");
+    let _ = print(f"None = {unwrap_or(none_val, 0.0)}");
+
+    let _ = print(f"Red is warm = {is_warm_color(Red)}");
+    let _ = print(f"Blue is warm = {is_warm_color(Blue)}");
+}

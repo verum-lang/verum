@@ -1,0 +1,369 @@
+// Working Match Expression Tests
+// Only includes features that are known to work
+
+// ========================================
+// TYPE DEFINITIONS
+// ========================================
+type Color is Red | Green | Blue | Yellow;
+
+type Maybe<T> is Some(T) | None;
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float)
+    | Triangle(Float, Float, Float);
+
+// ========================================
+// TEST 1: Basic Integer Match
+// ========================================
+fn classify_number(n: Float) -> Text {
+    match n {
+        0.0 => "zero",
+        1.0 => "one",
+        2.0 => "two",
+        3.0 => "three",
+        _ => "other"
+    }
+}
+
+// ========================================
+// TEST 2: Match on Simple Variants
+// ========================================
+fn describe_color(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Yellow => "yellow"
+    }
+}
+
+// ========================================
+// TEST 3: Match with Wildcard
+// ========================================
+fn is_primary_color(c: Color) -> Bool {
+    match c {
+        Red => true,
+        Green => true,
+        Blue => true,
+        _ => false
+    }
+}
+
+// ========================================
+// TEST 4: Match on Maybe
+// ========================================
+fn unwrap_or_default(opt: Maybe<Float>, default: Float) -> Float {
+    match opt {
+        Some(x) => x,
+        None => default
+    }
+}
+
+// ========================================
+// TEST 5: Match on Result
+// ========================================
+fn handle_result(r: Result<Float, Text>) -> Text {
+    match r {
+        Ok(val) => f"Success: {val}",
+        Err(msg) => f"Error: {msg}"
+    }
+}
+
+// ========================================
+// TEST 6: Match with Guards (if syntax)
+// ========================================
+fn classify_with_guard_if(n: Float) -> Text {
+    match n {
+        x if x < 0.0 => "negative",
+        x if x == 0.0 => "zero",
+        x if x > 0.0 => "positive",
+        _ => "unreachable"
+    }
+}
+
+// ========================================
+// TEST 7: Match with Guards (where syntax)
+// ========================================
+fn classify_with_guard_where(n: Float) -> Text {
+    match n {
+        x where x < 0.0 => "negative",
+        x where x == 0.0 => "zero",
+        x where x > 0.0 => "positive",
+        _ => "unreachable"
+    }
+}
+
+// ========================================
+// TEST 8: OR Patterns with Integers
+// ========================================
+fn is_weekday_number(n: Int) -> Bool {
+    match n {
+        1 | 2 | 3 | 4 | 5 => true,
+        _ => false
+    }
+}
+
+// ========================================
+// TEST 9: Nested Patterns on Maybe
+// ========================================
+fn unwrap_nested(opt: Maybe<Maybe<Float>>) -> Float {
+    match opt {
+        Some(Some(x)) => x,
+        Some(None) => 0.0,
+        None => -1.0
+    }
+}
+
+// ========================================
+// TEST 10: Record Patterns
+// ========================================
+fn point_origin_check(p: Point) -> Text {
+    match p {
+        Point { x: 0.0, y: 0.0 } => "origin",
+        Point { x: 0.0, y } => f"on y-axis at {y}",
+        Point { x, y: 0.0 } => f"on x-axis at {x}",
+        Point { x, y } => f"point at ({x}, {y})"
+    }
+}
+
+// ========================================
+// TEST 11: Tuple Patterns
+// ========================================
+fn tuple_matcher(t: (Float, Float, Float)) -> Text {
+    match t {
+        (0.0, 0.0, 0.0) => "all zeros",
+        (1.0, 1.0, 1.0) => "all ones",
+        (a, b, c) => f"tuple: ({a}, {b}, {c})"
+    }
+}
+
+// ========================================
+// TEST 12: Match on Tuple Variant Shapes
+// ========================================
+fn area(s: Shape) -> Float {
+    match s {
+        Circle(radius) => 3.14159 * radius * radius,
+        Rectangle(width, height) => width * height,
+        Triangle(a, b, c) => {
+            let semi = (a + b + c) / 2.0;
+            let sq = semi * (semi - a) * (semi - b) * (semi - c);
+            sq
+        }
+    }
+}
+
+fn describe_shape(s: Shape) -> Text {
+    match s {
+        Circle(radius) => f"Circle with radius {radius}",
+        Rectangle(width, height) => f"Rectangle {width}x{height}",
+        Triangle(a, b, c) => f"Triangle with sides {a}, {b}, {c}"
+    }
+}
+
+// ========================================
+// TEST 13: Match with Guards on Points
+// ========================================
+fn classify_point(p: Point) -> Text {
+    match p {
+        Point { x, y } if x > 0.0 && y > 0.0 => "quadrant I",
+        Point { x, y } if x < 0.0 && y > 0.0 => "quadrant II",
+        Point { x, y } if x < 0.0 && y < 0.0 => "quadrant III",
+        Point { x, y } if x > 0.0 && y < 0.0 => "quadrant IV",
+        _ => "on axis or origin"
+    }
+}
+
+// ========================================
+// TEST 14: OR Patterns on Variants
+// ========================================
+fn is_warm_color(c: Color) -> Bool {
+    match c {
+        Red | Yellow => true,
+        Green | Blue => false
+    }
+}
+
+// ========================================
+// TEST 15: Nested Result<Maybe<T>>
+// ========================================
+fn extract_nested_result(r: Result<Maybe<Float>, Text>) -> Text {
+    match r {
+        Ok(Some(x)) => f"Value: {x}",
+        Ok(None) => "Empty value",
+        Err(msg) => f"Error: {msg}"
+    }
+}
+
+// ========================================
+// TEST 16: Exhaustiveness Check
+// ========================================
+fn color_to_rgb(c: Color) -> (Float, Float, Float) {
+    match c {
+        Red => (1.0, 0.0, 0.0),
+        Green => (0.0, 1.0, 0.0),
+        Blue => (0.0, 0.0, 1.0),
+        Yellow => (1.0, 1.0, 0.0)
+    }
+}
+
+// ========================================
+// MAIN TEST RUNNER
+// ========================================
+fn main() {
+    let _ = print("╔═══════════════════════════════════════════════╗");
+    let _ = print("║  Verum Match Expression Test Suite           ║");
+    let _ = print("╚═══════════════════════════════════════════════╝");
+    let _ = print("");
+
+    // Test 1: Basic Integer Match
+    let _ = print("-- Test 1: Basic Integer Match --");
+    let _ = print(f"classify_number(0.0) = {classify_number(0.0)}");
+    let _ = print(f"classify_number(2.0) = {classify_number(2.0)}");
+    let _ = print(f"classify_number(99.0) = {classify_number(99.0)}");
+    let _ = print("");
+
+    // Test 2: Match on Simple Variants
+    let _ = print("-- Test 2: Match on Simple Variants --");
+    let _ = print(f"describe_color(Red) = {describe_color(Red)}");
+    let _ = print(f"describe_color(Blue) = {describe_color(Blue)}");
+    let _ = print("");
+
+    // Test 3: Match with Wildcard
+    let _ = print("-- Test 3: Match with Wildcard --");
+    let _ = print(f"is_primary_color(Red) = {is_primary_color(Red)}");
+    let _ = print(f"is_primary_color(Yellow) = {is_primary_color(Yellow)}");
+    let _ = print("");
+
+    // Test 4: Match on Maybe
+    let _ = print("-- Test 4: Match on Maybe --");
+    let some_val: Maybe<Float> = Some(42.0);
+    let none_val: Maybe<Float> = None;
+    let _ = print(f"unwrap_or_default(Some(42.0), 0.0) = {unwrap_or_default(some_val, 0.0)}");
+    let _ = print(f"unwrap_or_default(None, 0.0) = {unwrap_or_default(none_val, 0.0)}");
+    let _ = print("");
+
+    // Test 5: Match on Result
+    let _ = print("-- Test 5: Match on Result --");
+    let ok_result: Result<Float, Text> = Ok(123.0);
+    let err_result: Result<Float, Text> = Err("something went wrong");
+    let _ = print(f"{handle_result(ok_result)}");
+    let _ = print(f"{handle_result(err_result)}");
+    let _ = print("");
+
+    // Test 6: Match with Guards (if syntax)
+    let _ = print("-- Test 6: Match with Guards (if syntax) --");
+    let _ = print(f"classify_with_guard_if(-5.0) = {classify_with_guard_if(-5.0)}");
+    let _ = print(f"classify_with_guard_if(0.0) = {classify_with_guard_if(0.0)}");
+    let _ = print(f"classify_with_guard_if(10.0) = {classify_with_guard_if(10.0)}");
+    let _ = print("");
+
+    // Test 7: Match with Guards (where syntax)
+    let _ = print("-- Test 7: Match with Guards (where syntax) --");
+    let _ = print(f"classify_with_guard_where(-3.0) = {classify_with_guard_where(-3.0)}");
+    let _ = print(f"classify_with_guard_where(0.0) = {classify_with_guard_where(0.0)}");
+    let _ = print(f"classify_with_guard_where(7.0) = {classify_with_guard_where(7.0)}");
+    let _ = print("");
+
+    // Test 8: OR Patterns
+    let _ = print("-- Test 8: OR Patterns --");
+    let _ = print(f"is_weekday_number(3) = {is_weekday_number(3)}");
+    let _ = print(f"is_weekday_number(7) = {is_weekday_number(7)}");
+    let _ = print("");
+
+    // Test 9: Nested Patterns
+    let _ = print("-- Test 9: Nested Patterns on Maybe --");
+    let nested_some: Maybe<Maybe<Float>> = Some(Some(42.0));
+    let nested_some_none: Maybe<Maybe<Float>> = Some(None);
+    let nested_none: Maybe<Maybe<Float>> = None;
+    let _ = print(f"unwrap_nested(Some(Some(42.0))) = {unwrap_nested(nested_some)}");
+    let _ = print(f"unwrap_nested(Some(None)) = {unwrap_nested(nested_some_none)}");
+    let _ = print(f"unwrap_nested(None) = {unwrap_nested(nested_none)}");
+    let _ = print("");
+
+    // Test 10: Record Patterns
+    let _ = print("-- Test 10: Record Patterns --");
+    let origin = Point { x: 0.0, y: 0.0 };
+    let on_x = Point { x: 5.0, y: 0.0 };
+    let on_y = Point { x: 0.0, y: 3.0 };
+    let general = Point { x: 4.0, y: 5.0 };
+    let _ = print(f"point_origin_check(origin) = {point_origin_check(origin)}");
+    let _ = print(f"point_origin_check(on_x) = {point_origin_check(on_x)}");
+    let _ = print(f"point_origin_check(on_y) = {point_origin_check(on_y)}");
+    let _ = print(f"point_origin_check(general) = {point_origin_check(general)}");
+    let _ = print("");
+
+    // Test 11: Tuple Patterns
+    let _ = print("-- Test 11: Tuple Patterns --");
+    let tuple1 = (0.0, 0.0, 0.0);
+    let tuple2 = (1.0, 1.0, 1.0);
+    let tuple3 = (1.0, 2.0, 3.0);
+    let _ = print(f"tuple_matcher((0,0,0)) = {tuple_matcher(tuple1)}");
+    let _ = print(f"tuple_matcher((1,1,1)) = {tuple_matcher(tuple2)}");
+    let _ = print(f"tuple_matcher((1,2,3)) = {tuple_matcher(tuple3)}");
+    let _ = print("");
+
+    // Test 12: Match on Tuple Variant Shapes
+    let _ = print("-- Test 12: Match on Shapes --");
+    let circle = Circle(5.0);
+    let rectangle = Rectangle(4.0, 6.0);
+    let triangle = Triangle(3.0, 4.0, 5.0);
+    let _ = print(f"{describe_shape(circle)}");
+    let _ = print(f"  area = {area(circle)}");
+    let _ = print(f"{describe_shape(rectangle)}");
+    let _ = print(f"  area = {area(rectangle)}");
+    let _ = print(f"{describe_shape(triangle)}");
+    let _ = print("");
+
+    // Test 13: Match with Guards on Points
+    let _ = print("-- Test 13: Match with Guards on Points --");
+    let p1 = Point { x: 5.0, y: 3.0 };
+    let p2 = Point { x: -2.0, y: 4.0 };
+    let p3 = Point { x: -1.0, y: -2.0 };
+    let p4 = Point { x: 3.0, y: -1.0 };
+    let _ = print(f"classify_point((5,3)) = {classify_point(p1)}");
+    let _ = print(f"classify_point((-2,4)) = {classify_point(p2)}");
+    let _ = print(f"classify_point((-1,-2)) = {classify_point(p3)}");
+    let _ = print(f"classify_point((3,-1)) = {classify_point(p4)}");
+    let _ = print("");
+
+    // Test 14: OR Patterns on Variants
+    let _ = print("-- Test 14: OR Patterns on Variants --");
+    let _ = print(f"is_warm_color(Red) = {is_warm_color(Red)}");
+    let _ = print(f"is_warm_color(Yellow) = {is_warm_color(Yellow)}");
+    let _ = print(f"is_warm_color(Blue) = {is_warm_color(Blue)}");
+    let _ = print("");
+
+    // Test 15: Nested Result<Maybe<T>>
+    let _ = print("-- Test 15: Complex Nested Result<Maybe<T>> --");
+    let res1: Result<Maybe<Float>, Text> = Ok(Some(99.0));
+    let res2: Result<Maybe<Float>, Text> = Ok(None);
+    let res3: Result<Maybe<Float>, Text> = Err("failed");
+    let _ = print(f"{extract_nested_result(res1)}");
+    let _ = print(f"{extract_nested_result(res2)}");
+    let _ = print(f"{extract_nested_result(res3)}");
+    let _ = print("");
+
+    // Test 16: Exhaustiveness Check
+    let _ = print("-- Test 16: Exhaustiveness Check --");
+    let (r1, g1, b1) = color_to_rgb(Red);
+    let (r2, g2, b2) = color_to_rgb(Green);
+    let (r3, g3, b3) = color_to_rgb(Blue);
+    let (r4, g4, b4) = color_to_rgb(Yellow);
+    let _ = print(f"color_to_rgb(Red) = ({r1}, {g1}, {b1})");
+    let _ = print(f"color_to_rgb(Green) = ({r2}, {g2}, {b2})");
+    let _ = print(f"color_to_rgb(Blue) = ({r3}, {g3}, {b3})");
+    let _ = print(f"color_to_rgb(Yellow) = ({r4}, {g4}, {b4})");
+    let _ = print("");
+
+    let _ = print("╔═══════════════════════════════════════════════╗");
+    let _ = print("║  All Match Expression Tests COMPLETED! ✓      ║");
+    let _ = print("╚═══════════════════════════════════════════════╝");
+}

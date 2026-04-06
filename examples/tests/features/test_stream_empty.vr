@@ -1,0 +1,5 @@
+fn main() {
+    let empty = [];
+    let result = stream [x * 2 for x in empty];
+    println("Empty stream comprehension");
+}

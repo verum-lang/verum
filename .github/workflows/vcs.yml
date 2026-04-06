@@ -1,0 +1,111 @@
+name: VCS - Verum Compliance Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'  # Nightly at 2 AM UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # L0 Critical Tests - Must pass 100%
+  l0-critical:
+    name: L0 Critical Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run L0 tests
+        run: cargo run -p verum_vtest -- run --level L0 --parallel 8
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: l0-results
+          path: target/vcs-reports/l0-*.xml
+
+  # L1 Core Tests - Must pass 100%
+  l1-core:
+    name: L1 Core Tests
+    needs: l0-critical
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Z3
+        run: sudo apt-get install -y z3 libz3-dev
+      - name: Run L1 tests
+        run: cargo run -p verum_vtest -- run --level L1 --parallel 8
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: l1-results
+          path: target/vcs-reports/l1-*.xml
+
+  # L2 Standard Tests - 95%+ pass required
+  l2-standard:
+    name: L2 Standard Tests
+    needs: l1-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get install -y z3 libz3-dev
+      - name: Run L2 tests
+        run: cargo run -p verum_vtest -- run --level L2 --parallel 8 --min-pass-rate 0.95
+
+  # Differential Tests - Tier 0 ≡ Tier 3
+  differential:
+    name: Differential Tests
+    needs: l1-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run differential tests
+        run: cargo run -p verum_vtest -- run --tier 0,3 --differential
+
+  # Nightly: L3 Extended + Fuzz + Benchmarks
+  nightly:
+    name: Nightly Extended Tests
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install LLVM and Z3
+        run: |
+          sudo apt-get install -y llvm-17 libllvm17 llvm-17-dev
+          sudo apt-get install -y z3 libz3-dev
+      - name: Run L3 tests
+        run: cargo run -p verum_vtest -- run --level L3 --parallel 4
+      - name: Fuzz testing (30 min)
+        run: cargo run -p verum_vtest -- fuzz --duration 30m
+      - name: Benchmarks
+        run: cargo run -p verum_vtest -- bench --baseline main
+
+  # Generate reports
+  report:
+    name: Generate Reports
+    needs: [l0-critical, l1-core, l2-standard, differential]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+      - name: Generate HTML report
+        run: cargo run -p verum_vtest -- report --format html --output vcs-report.html
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-report
+          path: vcs-report.html

@@ -1,0 +1,20 @@
+// Direct context method call test
+// The context declaration itself should create a value with method stubs
+
+context Logger {
+    fn log(msg: Text)
+}
+
+fn test_logger() {
+    print("Calling Logger.log method...");
+    // This should work if:
+    // 1. Logger is stored as a Record with a "log" field containing a Function
+    // 2. Our eval_method_call fix looks up methods in Record fields
+    Logger.log("Hello from context!");
+}
+
+fn main() {
+    print("=== Direct Context Method Test ===");
+    test_logger();
+    print("✓ Test passed!");
+}

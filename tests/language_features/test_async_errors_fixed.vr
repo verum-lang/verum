@@ -1,0 +1,56 @@
+// Test async with error handling
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+async fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("Division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+async fn safe_compute(x: Int, y: Int) -> Result<Int, Text> {
+    let result = divide(x, y).await;
+    match result {
+        Result.Ok(v) => Result.Ok(v * 2),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+fn main() {
+    // Test success case
+    print("Test 1: Success case");
+    let result1 = safe_compute(10, 2).await;
+    match result1 {
+        Result.Ok(v) => print(f"Success: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Test error case
+    print("\nTest 2: Error case");
+    let result2 = safe_compute(10, 0).await;
+    match result2 {
+        Result.Ok(v) => print(f"Success: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Test with spawn
+    print("\nTest 3: Spawn with error");
+    let h1 = spawn safe_compute(20, 4);
+    let h2 = spawn safe_compute(20, 0);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+
+    match r1 {
+        Result.Ok(v) => print(f"Spawn 1 Success: {v}"),
+        Result.Err(e) => print(f"Spawn 1 Error: {e}"),
+    }
+
+    match r2 {
+        Result.Ok(v) => print(f"Spawn 2 Success: {v}"),
+        Result.Err(e) => print(f"Spawn 2 Error: {e}"),
+    }
+}

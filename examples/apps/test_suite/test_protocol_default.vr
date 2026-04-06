@@ -1,0 +1,25 @@
+// Test 4: Default Method Implementations
+// Tests: protocol with default method implementation
+
+type Counter is protocol {
+    fn count(&self) -> Int;
+
+    fn double(&self) -> Int {
+        self.count() + self.count()
+    }
+}
+
+type SimpleCounter is {
+    value: Int
+}
+
+implement Counter for SimpleCounter {
+    fn count(&self) -> Int {
+        self.value
+    }
+}
+
+fn main() -> Int {
+    let c = SimpleCounter { value: 21 };
+    c.double()  // Should return 42 using default implementation
+}

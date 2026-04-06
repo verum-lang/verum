@@ -1,0 +1,224 @@
+// Webhook Domain Types
+//
+// Core domain types for webhook management in the Verum Registry.
+// Follows industry standards from GitHub, npm, and Docker Hub.
+
+mount core.base.{Text, Int, Bool, List};
+mount core.base.Maybe;
+
+// ============================================================================
+// Webhook Event Types
+// ============================================================================
+
+/// Events that can trigger webhooks
+pub type WebhookEvent is
+    | Test
+    | PackagePublished
+    | PackageYanked
+    | PackageUpdated
+    | PackageDeleted
+    | OwnerAdded
+    | OwnerRemoved;
+
+implement WebhookEvent {
+    /// Convert event to string representation
+    pub fn to_string(self) -> Text {
+        match self {
+            WebhookEvent.Test => "webhook.test",
+            WebhookEvent.PackagePublished => "package.published",
+            WebhookEvent.PackageYanked => "package.yanked",
+            WebhookEvent.PackageUpdated => "package.updated",
+            WebhookEvent.PackageDeleted => "package.deleted",
+            WebhookEvent.OwnerAdded => "owner.added",
+            WebhookEvent.OwnerRemoved => "owner.removed",
+        }
+    }
+
+    /// Parse event from string
+    pub fn from_string(s: Text) -> Maybe<WebhookEvent> {
+        match s {
+            "webhook.test" => Maybe.Some(WebhookEvent.Test),
+            "package.published" => Maybe.Some(WebhookEvent.PackagePublished),
+            "package.yanked" => Maybe.Some(WebhookEvent.PackageYanked),
+            "package.updated" => Maybe.Some(WebhookEvent.PackageUpdated),
+            "package.deleted" => Maybe.Some(WebhookEvent.PackageDeleted),
+            "owner.added" => Maybe.Some(WebhookEvent.OwnerAdded),
+            "owner.removed" => Maybe.Some(WebhookEvent.OwnerRemoved),
+            _ => Maybe.None,
+        }
+    }
+}
+
+// ============================================================================
+// Webhook Types
+// ============================================================================
+
+/// Webhook configuration
+pub type Webhook is {
+    /// Unique webhook identifier
+    id: Int,
+    /// User ID who owns this webhook
+    user_id: Text,
+    /// Human-readable name for the webhook
+    name: Text,
+    /// Target URL to POST webhook payloads
+    url: Text,
+    /// List of events that trigger this webhook
+    events: List<Text>,
+    /// Secret used for HMAC signature verification
+    secret: Text,
+    /// Whether the webhook is active
+    is_active: Bool,
+    /// Timestamp when webhook was created
+    created_at: Int,
+    /// Timestamp of last trigger (0 if never triggered)
+    last_triggered_at: Int,
+};
+
+implement Webhook {
+    /// Check if webhook should be triggered for a given event
+    pub fn should_trigger(self, event: &WebhookEvent) -> Bool {
+        if !self.is_active {
+            return false;
+        }
+
+        let event_str = event.to_string();
+        for subscribed_event in self.events {
+            if subscribed_event == event_str {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Webhook delivery attempt result
+pub type WebhookDelivery is {
+    /// Unique delivery identifier
+    id: Text,
+    /// Webhook ID
+    webhook_id: Int,
+    /// Event that triggered this delivery
+    event: Text,
+    /// JSON payload that was sent
+    payload: Text,
+    /// Whether delivery was successful (2xx status)
+    success: Bool,
+    /// HTTP status code received
+    status_code: Int,
+    /// Response time in milliseconds
+    response_time_ms: Int,
+    /// Error message if delivery failed
+    error_message: Maybe<Text>,
+    /// Timestamp when delivery was attempted
+    delivered_at: Int,
+};
+
+implement WebhookDelivery {
+    /// Create a successful delivery record
+    pub fn success(
+        id: Text,
+        webhook_id: Int,
+        event: Text,
+        payload: Text,
+        status_code: Int,
+        response_time_ms: Int,
+        delivered_at: Int
+    ) -> WebhookDelivery {
+        WebhookDelivery {
+            id: id,
+            webhook_id: webhook_id,
+            event: event,
+            payload: payload,
+            success: true,
+            status_code: status_code,
+            response_time_ms: response_time_ms,
+            error_message: Maybe.None,
+            delivered_at: delivered_at,
+        }
+    }
+
+    /// Create a failed delivery record
+    pub fn failure(
+        id: Text,
+        webhook_id: Int,
+        event: Text,
+        payload: Text,
+        status_code: Int,
+        response_time_ms: Int,
+        error_message: Text,
+        delivered_at: Int
+    ) -> WebhookDelivery {
+        WebhookDelivery {
+            id: id,
+            webhook_id: webhook_id,
+            event: event,
+            payload: payload,
+            success: false,
+            status_code: status_code,
+            response_time_ms: response_time_ms,
+            error_message: Maybe.Some(error_message),
+            delivered_at: delivered_at,
+        }
+    }
+}
+
+// ============================================================================
+// Webhook Payload Types
+// ============================================================================
+
+/// Base webhook payload structure
+pub type WebhookPayload is {
+    /// Event type
+    event: Text,
+    /// Timestamp when event occurred
+    timestamp: Int,
+    /// Event-specific data
+    data: WebhookData,
+};
+
+/// Event-specific data
+pub type WebhookData is
+    | Test { message: Text }
+    | PackageData {
+        package_name: Text,
+        version: Text,
+        author: Text,
+    }
+    | OwnerData {
+        package_name: Text,
+        owner: Text,
+        added_by: Text,
+    };
+
+implement WebhookPayload {
+    /// Create a test webhook payload
+    pub fn test(timestamp: Int) -> WebhookPayload {
+        WebhookPayload {
+            event: "webhook.test",
+            timestamp: timestamp,
+            data: WebhookData.Test {
+                message: "This is a test webhook delivery",
+            },
+        }
+    }
+
+    /// Create a package published payload
+    pub fn package_published(
+        package_name: Text,
+        version: Text,
+        author: Text,
+        timestamp: Int
+    ) -> WebhookPayload {
+        WebhookPayload {
+            event: "package.published",
+            timestamp: timestamp,
+            data: WebhookData.PackageData {
+                package_name: package_name,
+                version: version,
+                author: author,
+            },
+        }
+    }
+}

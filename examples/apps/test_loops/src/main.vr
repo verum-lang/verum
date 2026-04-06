@@ -1,0 +1,30 @@
+fn main() {
+    print("=== Loop Constructs Test ===");
+
+    // Test 1: While loop
+    print("Test 1: While loop");
+    let mut i = 0;
+    while i < 5 {
+        print(f"while i = {i}");
+        i = i + 1;
+    }
+
+    // Test 2: Loop with break
+    print("Test 2: Loop with break");
+    let mut j = 0;
+    loop {
+        if j >= 3 {
+            break;
+        }
+        print(f"loop j = {j}");
+        j = j + 1;
+    }
+
+    // Test 3: For loop (if supported)
+    print("Test 3: For loop");
+    for k in [1, 2, 3] {
+        print(f"for k = {k}");
+    }
+
+    print("=== Test Complete ===");
+}

@@ -1,0 +1,385 @@
+module sys.windows.ntstatus;
+
+// =============================================================================
+// sys/windows/ntstatus.vr - NT Status Codes
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module defines NT status codes used by ntdll.dll functions.
+// Status codes follow the NTSTATUS format:
+// - Bits 31-30: Severity (0=Success, 1=Info, 2=Warning, 3=Error)
+// - Bit 29: Customer bit
+// - Bit 28: Reserved
+// - Bits 27-16: Facility
+// - Bits 15-0: Code
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+// =============================================================================
+// NTSTATUS Type
+// =============================================================================
+
+/// NT Status code (NTSTATUS)
+public type NtStatus is (Int32);
+
+implement NtStatus {
+    /// Check if status indicates success (severity = 0)
+    @inline
+    public fn is_success(&self) -> Bool {
+        self.0 >= 0
+    }
+
+    /// Check if status indicates information (severity = 1)
+    @inline
+    public fn is_information(&self) -> Bool {
+        (self.0 as UInt32 >> 30) == 1
+    }
+
+    /// Check if status indicates warning (severity = 2)
+    @inline
+    public fn is_warning(&self) -> Bool {
+        (self.0 as UInt32 >> 30) == 2
+    }
+
+    /// Check if status indicates error (severity = 3)
+    @inline
+    public fn is_error(&self) -> Bool {
+        (self.0 as UInt32 >> 30) == 3
+    }
+
+    /// Get the raw status code
+    @inline
+    public fn code(&self) -> Int32 {
+        self.0
+    }
+
+    /// Get the facility code
+    @inline
+    public fn facility(&self) -> UInt16 {
+        ((self.0 as UInt32 >> 16) & 0x0FFF) as UInt16
+    }
+
+    /// Get the status code within facility
+    @inline
+    public fn status_code(&self) -> UInt16 {
+        (self.0 as UInt32 & 0xFFFF) as UInt16
+    }
+
+    /// Convert to Win32 error code (for compatibility)
+    public fn to_win32_error(&self) -> UInt32 {
+        if self.is_success() {
+            0  // ERROR_SUCCESS
+        } else {
+            // NT to Win32 conversion
+            // This is a simplified conversion; full conversion requires RtlNtStatusToDosError
+            self.0 as UInt32 & 0xFFFF
+        }
+    }
+
+    /// Get human-readable name for status
+    public fn name(&self) -> Text {
+        match self.0 {
+            0x00000000 => "STATUS_SUCCESS",
+            0x00000103 => "STATUS_PENDING",
+            0x00000104 => "STATUS_REPARSE",
+            0x00000105 => "STATUS_MORE_ENTRIES",
+            0x80000005 => "STATUS_BUFFER_OVERFLOW",
+            0x80000006 => "STATUS_NO_MORE_FILES",
+            0xC0000001 => "STATUS_UNSUCCESSFUL",
+            0xC0000002 => "STATUS_NOT_IMPLEMENTED",
+            0xC0000003 => "STATUS_INVALID_INFO_CLASS",
+            0xC0000004 => "STATUS_INFO_LENGTH_MISMATCH",
+            0xC0000005 => "STATUS_ACCESS_VIOLATION",
+            0xC0000008 => "STATUS_INVALID_HANDLE",
+            0xC000000D => "STATUS_INVALID_PARAMETER",
+            0xC000000E => "STATUS_NO_SUCH_DEVICE",
+            0xC000000F => "STATUS_NO_SUCH_FILE",
+            0xC0000010 => "STATUS_INVALID_DEVICE_REQUEST",
+            0xC0000011 => "STATUS_END_OF_FILE",
+            0xC0000017 => "STATUS_NO_MEMORY",
+            0xC0000022 => "STATUS_ACCESS_DENIED",
+            0xC0000023 => "STATUS_BUFFER_TOO_SMALL",
+            0xC0000024 => "STATUS_OBJECT_TYPE_MISMATCH",
+            0xC0000033 => "STATUS_OBJECT_NAME_INVALID",
+            0xC0000034 => "STATUS_OBJECT_NAME_NOT_FOUND",
+            0xC0000035 => "STATUS_OBJECT_NAME_COLLISION",
+            0xC000003A => "STATUS_OBJECT_PATH_NOT_FOUND",
+            0xC000003B => "STATUS_OBJECT_PATH_SYNTAX_BAD",
+            0xC0000043 => "STATUS_SHARING_VIOLATION",
+            0xC000007A => "STATUS_PROCEDURE_NOT_FOUND",
+            0xC0000095 => "STATUS_INTEGER_OVERFLOW",
+            0xC00000A2 => "STATUS_MEDIA_WRITE_PROTECTED",
+            0xC00000A3 => "STATUS_DISK_FULL",
+            0xC00000BA => "STATUS_FILE_IS_A_DIRECTORY",
+            0xC00000BB => "STATUS_NOT_SUPPORTED",
+            0xC00000D4 => "STATUS_NOT_SAME_DEVICE",
+            0xC00000E5 => "STATUS_INTERNAL_ERROR",
+            0xC0000101 => "STATUS_DIRECTORY_NOT_EMPTY",
+            0xC0000120 => "STATUS_CANCELLED",
+            0xC0000121 => "STATUS_CANNOT_DELETE",
+            0xC0000128 => "STATUS_FILE_CLOSED",
+            0xC0000135 => "STATUS_DLL_NOT_FOUND",
+            0xC000013A => "STATUS_CONTROL_C_EXIT",
+            0xC000020C => "STATUS_CONNECTION_DISCONNECTED",
+            0xC000020D => "STATUS_CONNECTION_RESET",
+            0xC0000225 => "STATUS_NOT_FOUND",
+            0xC0000257 => "STATUS_PORT_NOT_SET",
+            _ => "STATUS_UNKNOWN",
+        }
+    }
+}
+
+// =============================================================================
+// Success Status Codes
+// =============================================================================
+
+/// The operation completed successfully.
+public const STATUS_SUCCESS: NtStatus = NtStatus(0x00000000);
+
+/// The operation is pending completion.
+public const STATUS_PENDING: NtStatus = NtStatus(0x00000103);
+
+/// A reparse should be performed by the Object Manager.
+public const STATUS_REPARSE: NtStatus = NtStatus(0x00000104);
+
+/// More entries exist in the enumeration.
+public const STATUS_MORE_ENTRIES: NtStatus = NtStatus(0x00000105);
+
+/// Used for ALPC callback.
+public const STATUS_ALERTED: NtStatus = NtStatus(0x00000101);
+
+/// Thread was resumed.
+public const STATUS_TIMEOUT: NtStatus = NtStatus(0x00000102);
+
+// =============================================================================
+// Informational Status Codes (0x40000000)
+// =============================================================================
+
+/// Object name already exists.
+public const STATUS_OBJECT_NAME_EXISTS: NtStatus = NtStatus(0x40000000);
+
+/// Thread was suspended.
+public const STATUS_THREAD_WAS_SUSPENDED: NtStatus = NtStatus(0x40000001);
+
+// =============================================================================
+// Warning Status Codes (0x80000000)
+// =============================================================================
+
+/// The specified buffer was too small for the data.
+public const STATUS_BUFFER_OVERFLOW: NtStatus = NtStatus(0x80000005 as Int32);
+
+/// No more files were found.
+public const STATUS_NO_MORE_FILES: NtStatus = NtStatus(0x80000006 as Int32);
+
+/// No more entries in the enumeration.
+public const STATUS_NO_MORE_ENTRIES: NtStatus = NtStatus(0x8000001A as Int32);
+
+// =============================================================================
+// Error Status Codes (0xC0000000)
+// =============================================================================
+
+/// The requested operation was unsuccessful.
+public const STATUS_UNSUCCESSFUL: NtStatus = NtStatus(0xC0000001 as Int32);
+
+/// The requested operation is not implemented.
+public const STATUS_NOT_IMPLEMENTED: NtStatus = NtStatus(0xC0000002 as Int32);
+
+/// The specified information class is not valid.
+public const STATUS_INVALID_INFO_CLASS: NtStatus = NtStatus(0xC0000003 as Int32);
+
+/// The specified info length is not valid.
+public const STATUS_INFO_LENGTH_MISMATCH: NtStatus = NtStatus(0xC0000004 as Int32);
+
+/// Invalid memory access.
+public const STATUS_ACCESS_VIOLATION: NtStatus = NtStatus(0xC0000005 as Int32);
+
+/// An invalid status code was passed.
+public const STATUS_IN_PAGE_ERROR: NtStatus = NtStatus(0xC0000006 as Int32);
+
+/// The page file quota for the process has been exhausted.
+public const STATUS_PAGEFILE_QUOTA: NtStatus = NtStatus(0xC0000007 as Int32);
+
+/// An invalid HANDLE was specified.
+public const STATUS_INVALID_HANDLE: NtStatus = NtStatus(0xC0000008 as Int32);
+
+/// An invalid initial stack was specified.
+public const STATUS_BAD_INITIAL_STACK: NtStatus = NtStatus(0xC0000009 as Int32);
+
+/// An invalid parameter was passed.
+public const STATUS_INVALID_PARAMETER: NtStatus = NtStatus(0xC000000D as Int32);
+
+/// A device which does not exist was specified.
+public const STATUS_NO_SUCH_DEVICE: NtStatus = NtStatus(0xC000000E as Int32);
+
+/// The specified file does not exist.
+public const STATUS_NO_SUCH_FILE: NtStatus = NtStatus(0xC000000F as Int32);
+
+/// The request is not valid for this device.
+public const STATUS_INVALID_DEVICE_REQUEST: NtStatus = NtStatus(0xC0000010 as Int32);
+
+/// The end of the file was reached.
+public const STATUS_END_OF_FILE: NtStatus = NtStatus(0xC0000011 as Int32);
+
+/// Insufficient system memory.
+public const STATUS_NO_MEMORY: NtStatus = NtStatus(0xC0000017 as Int32);
+
+/// Insufficient resources.
+public const STATUS_INSUFFICIENT_RESOURCES: NtStatus = NtStatus(0xC000009A as Int32);
+
+/// Access was denied.
+public const STATUS_ACCESS_DENIED: NtStatus = NtStatus(0xC0000022 as Int32);
+
+/// The buffer was too small.
+public const STATUS_BUFFER_TOO_SMALL: NtStatus = NtStatus(0xC0000023 as Int32);
+
+/// Object type mismatch.
+public const STATUS_OBJECT_TYPE_MISMATCH: NtStatus = NtStatus(0xC0000024 as Int32);
+
+/// Invalid object name.
+public const STATUS_OBJECT_NAME_INVALID: NtStatus = NtStatus(0xC0000033 as Int32);
+
+/// Object name not found.
+public const STATUS_OBJECT_NAME_NOT_FOUND: NtStatus = NtStatus(0xC0000034 as Int32);
+
+/// Object name already exists.
+public const STATUS_OBJECT_NAME_COLLISION: NtStatus = NtStatus(0xC0000035 as Int32);
+
+/// Object path not found.
+public const STATUS_OBJECT_PATH_NOT_FOUND: NtStatus = NtStatus(0xC000003A as Int32);
+
+/// Invalid object path syntax.
+public const STATUS_OBJECT_PATH_SYNTAX_BAD: NtStatus = NtStatus(0xC000003B as Int32);
+
+/// Sharing violation.
+public const STATUS_SHARING_VIOLATION: NtStatus = NtStatus(0xC0000043 as Int32);
+
+/// Data was too large for the buffer.
+public const STATUS_DATA_OVERRUN: NtStatus = NtStatus(0xC000003C as Int32);
+
+/// Data was incomplete.
+public const STATUS_DATA_LATE_ERROR: NtStatus = NtStatus(0xC000003D as Int32);
+
+/// Integer overflow.
+public const STATUS_INTEGER_OVERFLOW: NtStatus = NtStatus(0xC0000095 as Int32);
+
+/// Media is write protected.
+public const STATUS_MEDIA_WRITE_PROTECTED: NtStatus = NtStatus(0xC00000A2 as Int32);
+
+/// Disk is full.
+public const STATUS_DISK_FULL: NtStatus = NtStatus(0xC00000A3 as Int32);
+
+/// File is a directory.
+public const STATUS_FILE_IS_A_DIRECTORY: NtStatus = NtStatus(0xC00000BA as Int32);
+
+/// Operation not supported.
+public const STATUS_NOT_SUPPORTED: NtStatus = NtStatus(0xC00000BB as Int32);
+
+/// Not the same device.
+public const STATUS_NOT_SAME_DEVICE: NtStatus = NtStatus(0xC00000D4 as Int32);
+
+/// Internal error.
+public const STATUS_INTERNAL_ERROR: NtStatus = NtStatus(0xC00000E5 as Int32);
+
+/// Directory not empty.
+public const STATUS_DIRECTORY_NOT_EMPTY: NtStatus = NtStatus(0xC0000101 as Int32);
+
+/// Operation cancelled.
+public const STATUS_CANCELLED: NtStatus = NtStatus(0xC0000120 as Int32);
+
+/// Cannot delete object.
+public const STATUS_CANNOT_DELETE: NtStatus = NtStatus(0xC0000121 as Int32);
+
+/// File has been closed.
+public const STATUS_FILE_CLOSED: NtStatus = NtStatus(0xC0000128 as Int32);
+
+/// DLL not found.
+public const STATUS_DLL_NOT_FOUND: NtStatus = NtStatus(0xC0000135 as Int32);
+
+/// Process terminated by Ctrl+C.
+public const STATUS_CONTROL_C_EXIT: NtStatus = NtStatus(0xC000013A as Int32);
+
+/// Connection disconnected.
+public const STATUS_CONNECTION_DISCONNECTED: NtStatus = NtStatus(0xC000020C as Int32);
+
+/// Connection reset.
+public const STATUS_CONNECTION_RESET: NtStatus = NtStatus(0xC000020D as Int32);
+
+/// Not found.
+public const STATUS_NOT_FOUND: NtStatus = NtStatus(0xC0000225 as Int32);
+
+/// Port not set.
+public const STATUS_PORT_NOT_SET: NtStatus = NtStatus(0xC0000257 as Int32);
+
+/// Thread is terminating.
+public const STATUS_THREAD_IS_TERMINATING: NtStatus = NtStatus(0xC000004B as Int32);
+
+/// Process is terminating.
+public const STATUS_PROCESS_IS_TERMINATING: NtStatus = NtStatus(0xC000004C as Int32);
+
+/// Invalid page protection.
+public const STATUS_INVALID_PAGE_PROTECTION: NtStatus = NtStatus(0xC0000045 as Int32);
+
+/// Section too big.
+public const STATUS_SECTION_TOO_BIG: NtStatus = NtStatus(0xC0000040 as Int32);
+
+/// Section not extended.
+public const STATUS_SECTION_NOT_EXTENDED: NtStatus = NtStatus(0xC0000087 as Int32);
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Check if status indicates success
+@inline
+public fn nt_success(status: NtStatus) -> Bool {
+    status.is_success()
+}
+
+/// Check if status indicates an error
+@inline
+public fn nt_error(status: NtStatus) -> Bool {
+    status.is_error()
+}
+
+/// Check if status indicates a warning
+@inline
+public fn nt_warning(status: NtStatus) -> Bool {
+    status.is_warning()
+}
+
+/// Check if status indicates information
+@inline
+public fn nt_information(status: NtStatus) -> Bool {
+    status.is_information()
+}
+
+/// Check if the error is retriable (e.g., would block)
+public fn is_retryable(status: NtStatus) -> Bool {
+    match status.0 {
+        0x00000103 => true,  // STATUS_PENDING
+        _ => false,
+    }
+}
+
+/// Check if the error indicates resource not found
+public fn is_not_found(status: NtStatus) -> Bool {
+    match status.0 {
+        0xC000000F => true,  // STATUS_NO_SUCH_FILE
+        0xC0000034 => true,  // STATUS_OBJECT_NAME_NOT_FOUND
+        0xC000003A => true,  // STATUS_OBJECT_PATH_NOT_FOUND
+        0xC0000225 => true,  // STATUS_NOT_FOUND
+        _ => false,
+    }
+}
+
+/// Check if the error indicates permission denied
+public fn is_access_denied(status: NtStatus) -> Bool {
+    match status.0 {
+        0xC0000022 => true,  // STATUS_ACCESS_DENIED
+        _ => false,
+    }
+}

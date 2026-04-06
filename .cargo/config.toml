@@ -1,0 +1,83 @@
+# Cargo build configuration for Verum Language Platform
+# Optimized for faster build times and better developer experience
+
+[env]
+# =============================================================================
+# Stack Size Configuration for Tests
+# =============================================================================
+# The Verum compiler's type inference and MIR lowering require significant stack space
+# for complex programs (recursive functions, deeply nested expressions).
+# 16MB ensures tests don't overflow even on complex codebases.
+RUST_MIN_STACK = "16777216"
+
+# =============================================================================
+# Z3 Configuration
+# =============================================================================
+# By default, Z3 uses dynamic linking (requires system Z3 installation)
+# For development on macOS with homebrew:
+# Z3_SYS_Z3_HEADER = "/opt/homebrew/include/z3.h"
+# Z3_SYS_Z3_LIB_DIR = "/opt/homebrew/lib"
+
+# For static linking (portable executables):
+# 1. Update workspace Cargo.toml: z3 = { version = "0.19.2", default-features = false, features = ["static-link-z3"] }
+# 2. Uncomment below if you have system Z3 libraries:
+# Z3_SYS_Z3_HEADER = "/opt/homebrew/include/z3.h"
+# Z3_SYS_Z3_LIB_DIR = "/opt/homebrew/lib"
+
+# =============================================================================
+# LLVM Configuration
+# =============================================================================
+# By default, LLVM uses dynamic linking (requires system LLVM installation)
+# For development on macOS with homebrew LLVM 18:
+# LLVM_SYS_181_PREFIX = "/opt/homebrew/opt/llvm@18"
+
+# For static linking (portable executables):
+# 1. Update workspace Cargo.toml: inkwell = { version = "0.6.0", features = ["llvm18-1", "llvm18-1-force-static"] }
+# 2. Set LLVM prefix (macOS):
+# LLVM_SYS_181_PREFIX = "/opt/homebrew/opt/llvm@18"
+# 3. For Linux, set to your LLVM installation:
+# LLVM_SYS_181_PREFIX = "/usr/lib/llvm-18"
+
+# =============================================================================
+# Static Linking Configuration
+# =============================================================================
+# To enable full static linking (no external dependencies):
+# 1. Use the build-static.sh or build-static-linux.sh scripts
+# 2. These scripts set RUSTFLAGS for static linking and enable required features
+
+# =============================================================================
+# Build Optimization Configuration
+# =============================================================================
+# Parallel compilation with optimized settings for faster builds
+[build]
+# Use all available CPU cores for maximum parallelism
+# For macOS with 8+ cores, use auto-detection (jobs not set = use all cores)
+# Explicitly set to 16 for most development systems
+jobs = 16
+# Note: pipelined-compilation was removed in newer Cargo versions and is no longer needed
+
+# =============================================================================
+# Performance Tuning
+# =============================================================================
+[net]
+# Use git CLI instead of internal Git library for better parallelism
+git-fetch-with-cli = true
+# Retry failed downloads
+retry = 3
+
+[target.aarch64-apple-darwin]
+# macOS ARM64 specific configuration optimized for M3 Max
+# - threads=12: Parallel LLVM codegen using all 12 performance cores
+rustflags = ["-Z", "threads=12"]
+# Uncomment for static linking:
+# rustflags = ["-C", "target-feature=+crt-static", "-Z", "threads=12"]
+
+[target.x86_64-unknown-linux-gnu]
+# Linux x86_64 specific configuration
+# Uncomment for static linking:
+# rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-unknown-linux-gnu]
+# Linux ARM64 specific configuration
+# Uncomment for static linking:
+# rustflags = ["-C", "target-feature=+crt-static"]

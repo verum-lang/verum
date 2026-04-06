@@ -1,0 +1,30 @@
+// Test: Basic async function
+// Tests async keyword, async function calls, and await expressions
+
+async fn fetch_data() -> Text {
+    "data"
+}
+
+async fn fetch_number() -> Int {
+    42
+}
+
+async fn fetch_with_computation() -> Int {
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+async fn main() {
+    // Test basic async call
+    let result = fetch_data().await;
+    println(result);
+
+    // Test async with numeric return
+    let num = fetch_number().await;
+    println(num);
+
+    // Test async with computation
+    let computed = fetch_with_computation().await;
+    println(computed);
+}

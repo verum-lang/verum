@@ -1,0 +1,674 @@
+// =============================================================================
+// io/buffer.vr - Buffered I/O Operations
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, collections, io/protocols
+// =============================================================================
+//
+// This module provides buffered wrappers for Read and Write operations:
+//
+// - BufReader<R>: Buffered reader wrapper
+// - BufWriter<W>: Buffered writer wrapper
+// - LineWriter<W>: Line-buffered writer
+// - Cursor<T>: In-memory buffer with Read/Write/Seek
+//
+// Buffering significantly improves performance by reducing system calls.
+//
+// Performance characteristics:
+// - Default buffer: 8KB (optimal for most file systems)
+// - Reduces syscalls by ~100x for byte-by-byte operations
+// - Automatic flushing on Drop for writers
+//
+// =============================================================================
+
+module buffer;
+
+mount core.{Maybe, Result, List, Byte};
+mount io.protocols.{Read, Write, Seek, BufRead, StreamError as IoError, IoResult, SeekFrom, IoErrorKind};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default buffer capacity (8KB - optimal for most systems)
+public const DEFAULT_BUF_CAPACITY: Int = 8192;
+
+/// Minimum buffer capacity
+public const MIN_BUF_CAPACITY: Int = 64;
+
+// =============================================================================
+// BufReader - Buffered Reader
+// =============================================================================
+
+/// Buffered wrapper for Read types.
+///
+/// BufReader wraps any type implementing Read and provides buffering,
+/// significantly reducing the number of system calls for small reads.
+///
+/// # Example
+///
+/// ```verum
+/// let file = File.open("data.txt")?;
+/// let reader = BufReader.new(file);
+///
+/// // Read line by line efficiently
+/// for line in reader.lines() {
+///     println(line?);
+/// }
+/// ```
+public type BufReader<R: Read> is {
+    inner: R,
+    buf: List<Byte>,
+    pos: Int,      // Current read position in buffer
+    filled: Int,   // Number of valid bytes in buffer
+};
+
+implement<R: Read> BufReader<R> {
+    /// Create a new BufReader with default buffer capacity (8KB).
+    public fn new(inner: R) -> BufReader<R> {
+        BufReader.with_capacity(DEFAULT_BUF_CAPACITY, inner)
+    }
+
+    /// Create a new BufReader with specified buffer capacity.
+    public fn with_capacity(capacity: Int, inner: R) -> BufReader<R> {
+        let cap = if capacity < MIN_BUF_CAPACITY { MIN_BUF_CAPACITY } else { capacity };
+        let mut buf = List.with_capacity(cap);
+        // Initialize buffer with zeros
+        for _ in 0..cap {
+            buf.push(0);
+        }
+        BufReader {
+            inner: inner,
+            buf: buf,
+            pos: 0,
+            filled: 0,
+        }
+    }
+
+    /// Get a reference to the underlying reader.
+    public fn get_ref(&self) -> &R {
+        &self.inner
+    }
+
+    /// Get a mutable reference to the underlying reader.
+    public fn get_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
+
+    /// Consume the BufReader && return the underlying reader.
+    ///
+    /// Note: Any data remaining in the buffer will be lost.
+    public fn into_inner(self) -> R {
+        self.inner
+    }
+
+    /// Returns the number of bytes the internal buffer can hold.
+    public fn capacity(&self) -> Int {
+        self.buf.len()
+    }
+
+    /// Returns the current position within the buffer.
+    fn buffer_position(&self) -> Int {
+        self.pos
+    }
+
+    /// Returns the number of bytes available in the buffer.
+    fn buffer_len(&self) -> Int {
+        self.filled - self.pos
+    }
+
+    /// Fill the internal buffer from the underlying reader.
+    fn fill_buf_internal(&mut self) -> IoResult<Int> {
+        if self.pos >= self.filled {
+            // Buffer exhausted, refill
+            self.pos = 0;
+            self.filled = 0;
+
+            // Read into buffer
+            let bytes_read = self.inner.read(&mut self.buf)?;
+            self.filled = bytes_read;
+            Ok(bytes_read)
+        } else {
+            Ok(self.filled - self.pos)
+        }
+    }
+}
+
+implement<R: Read> Read for BufReader<R> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        // If request is larger than buffer, read directly
+        if buf.len() >= self.buf.len() && self.buffer_len() == 0 {
+            return self.inner.read(buf);
+        }
+
+        // Ensure buffer has data
+        if self.buffer_len() == 0 {
+            let _ = self.fill_buf_internal()?;
+        }
+
+        // Copy from buffer
+        let available = self.buffer_len();
+        let to_copy = if buf.len() < available { buf.len() } else { available };
+
+        for i in 0..to_copy {
+            buf[i] = self.buf[self.pos + i];
+        }
+        self.pos = self.pos + to_copy;
+
+        Ok(to_copy)
+    }
+}
+
+implement<R: Read> BufRead for BufReader<R> {
+    fn fill_buf(&mut self) -> IoResult<&[Byte]> {
+        if self.pos >= self.filled {
+            let _ = self.fill_buf_internal()?;
+        }
+        Ok(&self.buf[self.pos..self.filled])
+    }
+
+    fn consume(&mut self, amt: Int) {
+        self.pos = if self.pos + amt > self.filled {
+            self.filled
+        } else {
+            self.pos + amt
+        };
+    }
+}
+
+// =============================================================================
+// BufWriter - Buffered Writer
+// =============================================================================
+
+/// Buffered wrapper for Write types.
+///
+/// BufWriter wraps any type implementing Write && provides buffering,
+/// significantly reducing the number of system calls for small writes.
+///
+/// The buffer is automatically flushed when it becomes full && when
+/// the BufWriter is dropped.
+///
+/// # Example
+///
+/// ```verum
+/// let file = File.create("output.txt")?;
+/// let mut writer = BufWriter.new(file);
+///
+/// // Many small writes are buffered
+/// for i in 0..1000 {
+///     writer.write(f"{i}\n".as_bytes())?;
+/// }
+/// // Explicit flush (also happens on drop)
+/// writer.flush()?;
+/// ```
+public type BufWriter<W: Write> is {
+    inner: W,
+    buf: List<Byte>,
+    // Note: we use buf.len() as the current fill level
+};
+
+implement<W: Write> BufWriter<W> {
+    /// Create a new BufWriter with default buffer capacity (8KB).
+    public fn new(inner: W) -> BufWriter<W> {
+        BufWriter.with_capacity(DEFAULT_BUF_CAPACITY, inner)
+    }
+
+    /// Create a new BufWriter with specified buffer capacity.
+    public fn with_capacity(capacity: Int, inner: W) -> BufWriter<W> {
+        let cap = if capacity < MIN_BUF_CAPACITY { MIN_BUF_CAPACITY } else { capacity };
+        BufWriter {
+            inner: inner,
+            buf: List.with_capacity(cap),
+        }
+    }
+
+    /// Get a reference to the underlying writer.
+    public fn get_ref(&self) -> &W {
+        &self.inner
+    }
+
+    /// Get a mutable reference to the underlying writer.
+    public fn get_mut(&mut self) -> &mut W {
+        &mut self.inner
+    }
+
+    /// Consume the BufWriter && return the underlying writer.
+    ///
+    /// The buffer is flushed before returning. If flushing fails,
+    /// the data may be lost.
+    public fn into_inner(mut self) -> Result<W, IntoInnerError<W>> {
+        match self.flush_buf() {
+            Ok(()) => Ok(self.inner),
+            Err(e) => Err(IntoInnerError { error: e, writer: self }),
+        }
+    }
+
+    /// Returns the buffer capacity.
+    public fn capacity(&self) -> Int {
+        self.buf.capacity()
+    }
+
+    /// Returns the number of bytes currently in the buffer.
+    public fn buffer_len(&self) -> Int {
+        self.buf.len()
+    }
+
+    /// Internal buffer flush.
+    fn flush_buf(&mut self) -> IoResult<()> {
+        if self.buf.len() == 0 {
+            return Ok(());
+        }
+
+        // Write all buffered data
+        let mut written = 0;
+        while written < self.buf.len() {
+            let n = self.inner.write(&self.buf[written..])?;
+            if n == 0 {
+                return Err(IoError.new(IoErrorKind.WriteZero));
+            }
+            written = written + n;
+        }
+
+        self.buf.clear();
+        Ok(())
+    }
+}
+
+implement<W: Write> Write for BufWriter<W> {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        // If write is larger than buffer capacity, flush && write directly
+        if buf.len() >= self.capacity() {
+            self.flush_buf()?;
+            return self.inner.write(buf);
+        }
+
+        // If buffer would overflow, flush first
+        if self.buf.len() + buf.len() > self.capacity() {
+            self.flush_buf()?;
+        }
+
+        // Append to buffer
+        for byte in buf {
+            self.buf.push(*byte);
+        }
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        self.flush_buf()?;
+        self.inner.flush()
+    }
+}
+
+implement<W: Write> Drop for BufWriter<W> {
+    fn drop(&mut self) {
+        // Best effort flush on drop
+        let _ = self.flush_buf();
+    }
+}
+
+/// Error returned by BufWriter.into_inner.
+public type IntoInnerError<W: Write> is {
+    error: IoError,
+    writer: BufWriter<W>,
+};
+
+implement<W: Write> IntoInnerError<W> {
+    /// Get the error that occurred during flush.
+    public fn error(&self) -> &IoError {
+        &self.error
+    }
+
+    /// Recover the BufWriter (data may be partially written).
+    public fn into_inner(self) -> BufWriter<W> {
+        self.writer
+    }
+}
+
+implement<W: Write> Debug for IntoInnerError<W> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("IntoInnerError { error: ")?;
+        self.error.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement<W: Write> Display for IntoInnerError<W> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.error.fmt(f)
+    }
+}
+
+// =============================================================================
+// LineWriter - Line-Buffered Writer
+// =============================================================================
+
+/// Line-buffered wrapper for Write types.
+///
+/// LineWriter wraps a writer && flushes the buffer whenever a newline
+/// is written. This is useful for interactive output where lines should
+/// appear immediately.
+///
+/// # Example
+///
+/// ```verum
+/// let stdout = LineWriter.new(stdout());
+/// // Each line is flushed immediately
+/// stdout.write("Line 1\n".as_bytes())?;
+/// stdout.write("Line 2\n".as_bytes())?;
+/// ```
+public type LineWriter<W: Write> is {
+    inner: BufWriter<W>,
+};
+
+implement<W: Write> LineWriter<W> {
+    /// Create a new LineWriter with default buffer capacity.
+    public fn new(inner: W) -> LineWriter<W> {
+        LineWriter {
+            inner: BufWriter.new(inner),
+        }
+    }
+
+    /// Create a new LineWriter with specified buffer capacity.
+    public fn with_capacity(capacity: Int, inner: W) -> LineWriter<W> {
+        LineWriter {
+            inner: BufWriter.with_capacity(capacity, inner),
+        }
+    }
+
+    /// Get a reference to the underlying writer.
+    public fn get_ref(&self) -> &W {
+        self.inner.get_ref()
+    }
+
+    /// Get a mutable reference to the underlying writer.
+    public fn get_mut(&mut self) -> &mut W {
+        self.inner.get_mut()
+    }
+
+    /// Consume && return the underlying writer.
+    public fn into_inner(self) -> Result<W, IntoInnerError<W>> {
+        self.inner.into_inner()
+    }
+}
+
+implement<W: Write> Write for LineWriter<W> {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        // Find last newline in buffer
+        let mut last_newline: Maybe<Int> = None;
+        for i in (0..buf.len()).rev() {
+            if buf[i] == 10 {  // '\n'
+                last_newline = Some(i);
+                break;
+            }
+        }
+
+        match last_newline {
+            Some(pos) => {
+                // Write everything up to && including the newline
+                let n = self.inner.write(&buf[0..pos + 1])?;
+                self.inner.flush()?;
+
+                // Write the rest (after newline)
+                if pos + 1 < buf.len() {
+                    let m = self.inner.write(&buf[pos + 1..])?;
+                    Ok(n + m)
+                } else {
+                    Ok(n)
+                }
+            }
+            None => {
+                // No newline, just buffer
+                self.inner.write(buf)
+            }
+        }
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        self.inner.flush()
+    }
+}
+
+// =============================================================================
+// Cursor - In-Memory Buffer
+// =============================================================================
+
+/// In-memory buffer with Read, Write, && Seek capabilities.
+///
+/// Cursor wraps an in-memory buffer (typically List<Byte>) && provides
+/// file-like semantics for reading && writing.
+///
+/// # Example
+///
+/// ```verum
+/// let mut cursor = Cursor.new(List.new());
+///
+/// // Write data
+/// cursor.write("Hello, World!".as_bytes())?;
+///
+/// // Seek to beginning
+/// cursor.seek(SeekFrom.Start(0))?;
+///
+/// // Read it back
+/// let mut buf = List.from_elem(0, 13);
+/// cursor.read(&mut buf)?;
+/// ```
+public type Cursor<T> is {
+    inner: T,
+    pos: Int,
+};
+
+implement<T> Cursor<T> {
+    /// Create a new Cursor wrapping the given buffer.
+    public fn new(inner: T) -> Cursor<T> {
+        Cursor {
+            inner: inner,
+            pos: 0,
+        }
+    }
+
+    /// Get a reference to the underlying buffer.
+    public fn get_ref(&self) -> &T {
+        &self.inner
+    }
+
+    /// Get a mutable reference to the underlying buffer.
+    public fn get_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+
+    /// Consume the Cursor && return the underlying buffer.
+    public fn into_inner(self) -> T {
+        self.inner
+    }
+
+    /// Get the current position.
+    public fn position(&self) -> Int {
+        self.pos
+    }
+
+    /// Set the current position.
+    public fn set_position(&mut self, pos: Int) {
+        self.pos = pos;
+    }
+}
+
+implement Cursor<List<Byte>> {
+    /// Get remaining slice from current position.
+    fn remaining(&self) -> &[Byte] {
+        if self.pos >= self.inner.len() {
+            &[]
+        } else {
+            &self.inner[self.pos..]
+        }
+    }
+}
+
+implement Read for Cursor<List<Byte>> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let remaining = self.inner.len() - self.pos;
+        if remaining == 0 {
+            return Ok(0);
+        }
+
+        let to_read = if buf.len() < remaining { buf.len() } else { remaining };
+        for i in 0..to_read {
+            buf[i] = self.inner[self.pos + i];
+        }
+        self.pos = self.pos + to_read;
+
+        Ok(to_read)
+    }
+}
+
+implement Write for Cursor<List<Byte>> {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        // Extend if writing past end
+        while self.pos + buf.len() > self.inner.len() {
+            self.inner.push(0);
+        }
+
+        // Write data
+        for i in 0..buf.len() {
+            self.inner[self.pos + i] = buf[i];
+        }
+        self.pos = self.pos + buf.len();
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())  // Nothing to flush for in-memory buffer
+    }
+}
+
+implement Seek for Cursor<List<Byte>> {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        let new_pos = match pos {
+            SeekFrom.Start(n) => n,
+            SeekFrom.End(n) => self.inner.len() + n,
+            SeekFrom.Current(n) => self.pos + n,
+        };
+
+        if new_pos < 0 {
+            return Err(IoError.with_message(IoErrorKind.InvalidInput, "seek to negative position"));
+        }
+
+        self.pos = new_pos;
+        Ok(self.pos)
+    }
+}
+
+implement BufRead for Cursor<List<Byte>> {
+    fn fill_buf(&mut self) -> IoResult<&[Byte]> {
+        Ok(self.remaining())
+    }
+
+    fn consume(&mut self, amt: Int) {
+        self.pos = if self.pos + amt > self.inner.len() {
+            self.inner.len()
+        } else {
+            self.pos + amt
+        };
+    }
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Copy all data from a reader to a writer.
+///
+/// Returns the total number of bytes copied.
+///
+/// # Example
+///
+/// ```verum
+/// let mut source = File.open("input.txt")?;
+/// let mut dest = File.create("output.txt")?;
+/// let bytes_copied = copy(&mut source, &mut dest)?;
+/// ```
+public fn copy<R: Read, W: Write>(reader: &mut R, writer: &mut W) -> IoResult<Int> {
+    let mut buf = List.from_elem(0, DEFAULT_BUF_CAPACITY);
+    let mut total = 0;
+
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buf[0..n])?;
+        total = total + n;
+    }
+
+    Ok(total)
+}
+
+/// Read all data from a reader into a List<Byte>.
+///
+/// # Example
+///
+/// ```verum
+/// let mut file = File.open("data.bin")?;
+/// let data = read_all(&mut file)?;
+/// ```
+public fn read_all<R: Read>(reader: &mut R) -> IoResult<List<Byte>> {
+    let mut res = List.new();
+    let mut buf = List.from_elem(0, DEFAULT_BUF_CAPACITY);
+
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        for i in 0..n {
+            res.push(buf[i]);
+        }
+    }
+
+    Ok(res)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_buf_reader_basic() {
+    let data = List.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    let cursor = Cursor.new(data);
+    let mut reader = BufReader.new(cursor);
+
+    let mut buf = List.from_elem(0, 4);
+    let n = reader.read(&mut buf).unwrap();
+    assert_eq(n, 4);
+    assert_eq(buf, [1, 2, 3, 4]);
+}
+
+@test
+fn test_buf_writer_basic() {
+    let cursor = Cursor.new(List.new());
+    let mut writer = BufWriter.new(cursor);
+
+    writer.write(&[1, 2, 3, 4]).unwrap();
+    writer.flush().unwrap();
+
+    let inner = writer.into_inner().unwrap();
+    assert_eq(inner.into_inner(), List.from([1, 2, 3, 4]));
+}
+
+@test
+fn test_cursor_seek() {
+    let data = List.from([1, 2, 3, 4, 5]);
+    let mut cursor = Cursor.new(data);
+
+    cursor.seek(SeekFrom.Start(2)).unwrap();
+    assert_eq(cursor.position(), 2);
+
+    cursor.seek(SeekFrom.Current(1)).unwrap();
+    assert_eq(cursor.position(), 3);
+
+    cursor.seek(SeekFrom.End(-1)).unwrap();
+    assert_eq(cursor.position(), 4);
+}

@@ -1,0 +1,18 @@
+// Test 6: Context with multiple methods
+context Calculator {
+    fn add(self, a: Int, b: Int) -> Int
+    fn multiply(self, a: Int, b: Int) -> Int
+}
+
+fn compute(x: Int, y: Int) using Calculator -> Int {
+    let sum = Calculator.add(x, y);
+    let product = Calculator.multiply(x, y);
+    Calculator.add(sum, product)
+}
+
+type SimpleCalc is { precision: Int };
+
+fn main() {
+    provide Calculator = SimpleCalc { precision: 10 };
+    let result = compute(5, 3);
+}

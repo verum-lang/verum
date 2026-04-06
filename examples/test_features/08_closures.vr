@@ -1,0 +1,28 @@
+// Test closures and higher-order functions
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() {
+    // Simple closure
+    let double = |x: Int| x * 2
+    let result = double(21)
+    print(f"Double 21 = {result}")
+    
+    // Closure with captured variable
+    let multiplier = 3
+    let triple = |x| x * multiplier
+    print(f"Triple 10 = {triple(10)}")
+    
+    // Higher-order function
+    let quad = apply_twice(double, 5)
+    print(f"Quadruple 5 = {quad}")
+    
+    // Function returning closure
+    let add5 = make_adder(5)
+    print(f"10 + 5 = {add5(10)}")
+}

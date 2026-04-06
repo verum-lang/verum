@@ -1,0 +1,14 @@
+// Minimal postcondition test
+
+fn abs(x: Int) -> Int where ensures result >= 0 {
+    if x < 0 {
+        0 - x
+    } else {
+        x
+    }
+}
+
+fn main() {
+    let a = abs(-5);
+    let _ = print(f"abs(-5) = {a}");
+}

@@ -1,0 +1,24 @@
+// Minimal error handling test
+
+// Define Result type
+type Result<T, E> is
+  | Ok(T)
+  | Err(E)
+
+// Simple function returning Result
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Test with match
+fn main() -> Int {
+    let result = divide(10, 2);
+    match result {
+        Ok(value) => value,
+        Err(msg) => -1
+    }
+}

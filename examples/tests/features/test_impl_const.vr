@@ -1,0 +1,15 @@
+// Test implementing const
+
+type Sized is protocol {
+    const SIZE: Int;
+};
+
+type Rectangle is { width: Int, height: Int };
+
+implement Sized for Rectangle {
+    const SIZE: Int = 2;
+}
+
+fn main() {
+    print("Impl const test");
+}

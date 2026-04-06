@@ -1,0 +1,36 @@
+// Test higher-order functions and closures
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn compose<T, U, V>(f: fn(U) -> V, g: fn(T) -> U) -> fn(T) -> V {
+    |x| f(g(x))
+}
+
+fn add_n(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() {
+    let _ = print("Testing higher-order functions...");
+
+    // Test apply
+    let double = |x: Int| x * 2;
+    let result = apply(double, 5);
+    let _ = print(f"apply(double, 5) = {result}");
+
+    // Test returning functions
+    let add5 = add_n(5);
+    let _ = print(f"add5(10) = {add5(10)}");
+
+    let add10 = add_n(10);
+    let _ = print(f"add10(7) = {add10(7)}");
+
+    // Test closures capturing variables
+    let multiplier = 3;
+    let times_three = |x: Int| x * multiplier;
+    let _ = print(f"times_three(4) = {times_three(4)}");
+
+    let _ = print("Done!");
+}

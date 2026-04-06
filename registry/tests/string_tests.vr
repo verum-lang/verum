@@ -1,0 +1,161 @@
+// String handling tests for verum-registry
+//
+// These tests verify that string literals, f-strings, and string operations
+// work correctly in the Verum registry codebase.
+//
+// Note: Tests use only built-in functions (no stdlib imports required).
+
+// ============================================================================
+// Basic String Literal Tests
+// ============================================================================
+
+/// Test: Plain string literals
+@test
+fn test_plain_string_literals() {
+    let s = "hello";
+    assert(s == "hello", "String should equal itself");
+
+    let empty = "";
+    assert(empty == "", "Empty string should equal itself");
+}
+
+/// Test: Empty string
+@test
+fn test_empty_string() {
+    let s = "";
+    assert(len(s) == 0, "Empty string should have length 0");
+}
+
+/// Test: String length
+@test
+fn test_string_length() {
+    let s = "hello";
+    assert(len(s) == 5, "hello should have length 5");
+
+    let longer = "hello world";
+    assert(len(longer) == 11, "hello world should have length 11");
+}
+
+/// Test: String comparison
+@test
+fn test_string_comparison() {
+    let a = "apple";
+    let b = "apple";
+    let c = "banana";
+
+    assert(a == b, "Same strings should be equal");
+    assert(a != c, "Different strings should not be equal");
+}
+
+/// Test: String concatenation
+@test
+fn test_string_concatenation() {
+    let a = "hello";
+    let b = " world";
+    let result = f"{a}{b}";
+    assert(result == "hello world", "Concatenation should work");
+}
+
+/// Test: F-string interpolation
+@test
+fn test_fstring_interpolation() {
+    let name = "Alice";
+    let greeting = f"Hello, {name}!";
+    assert(greeting == "Hello, Alice!", "F-string should interpolate");
+}
+
+/// Test: F-string with integers
+@test
+fn test_fstring_with_integers() {
+    let x = 42;
+    let msg = f"The answer is {x}";
+    assert(msg == "The answer is 42", "F-string should format integers");
+}
+
+/// Test: Multiple f-string interpolations
+@test
+fn test_fstring_multiple_interpolations() {
+    let first = "John";
+    let last = "Doe";
+    let age = 30;
+    let result = f"{first} {last} is {age}";
+    assert(result == "John Doe is 30", "Multiple interpolations should work");
+}
+
+/// Test: F-string without interpolation
+@test
+fn test_fstring_no_interpolation() {
+    let s = f"plain text";
+    assert(s == "plain text", "F-string without interpolation should work");
+}
+
+/// Test: String contains
+@test
+fn test_string_contains() {
+    let text = "hello world";
+    assert(contains(text, "world"), "Should contain 'world'");
+    assert(contains(text, "hello"), "Should contain 'hello'");
+    assert(!contains(text, "xyz"), "Should not contain 'xyz'");
+}
+
+/// Test: String starts_with and ends_with
+@test
+fn test_string_starts_ends_with() {
+    let text = "hello world";
+    assert(starts_with(text, "hello"), "Should start with 'hello'");
+    assert(ends_with(text, "world"), "Should end with 'world'");
+    assert(!starts_with(text, "world"), "Should not start with 'world'");
+}
+
+/// Test: Package name strings
+@test
+fn test_package_name_strings() {
+    let name = "my-package";
+    assert(len(name) == 10, "Package name should have correct length");
+    assert(contains(name, "-"), "Package name should contain hyphen");
+}
+
+/// Test: Version strings
+@test
+fn test_version_strings() {
+    let version = "1.2.3";
+    assert(len(version) == 5, "Version should have correct length");
+    assert(contains(version, "."), "Version should contain dot");
+}
+
+/// Test: URL strings
+@test
+fn test_url_strings() {
+    let url = "https://registry.verum.dev/packages";
+    assert(starts_with(url, "https://"), "URL should start with https://");
+    assert(contains(url, "registry"), "URL should contain registry");
+}
+
+/// Test: Email format strings
+@test
+fn test_email_string_format() {
+    let email = "user@example.com";
+    assert(contains(email, "@"), "Email should contain @");
+    assert(contains(email, "."), "Email should contain dot");
+}
+
+/// Test: Username strings
+@test
+fn test_username_strings() {
+    let username = "john_doe123";
+    assert(len(username) == 11, "Username should have correct length");
+}
+
+/// Test: Token strings
+@test
+fn test_token_strings() {
+    let token = "abc123def456";
+    assert(len(token) == 12, "Token should have correct length");
+}
+
+/// Test: Success message strings
+@test
+fn test_success_message_strings() {
+    let msg = "Operation completed successfully";
+    assert(contains(msg, "success"), "Message should contain success");
+}

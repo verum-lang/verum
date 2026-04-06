@@ -1,0 +1,34 @@
+// Test record types
+
+type Point is { x: Float, y: Float };
+type Person is { name: Text, age: Float };
+
+fn distance(p1: Point, p2: Point) -> Float {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    // Simplified - just return manhattan distance since sqrt not imported
+    if dx < 0.0 { dx = 0.0 - dx; };
+    if dy < 0.0 { dy = 0.0 - dy; };
+    dx + dy
+}
+
+fn main() {
+    let _ = print("=== Record Tests ===");
+
+    // Create records
+    let p1 = Point { x: 0.0, y: 0.0 };
+    let p2 = Point { x: 3.0, y: 4.0 };
+
+    let _ = print(f"p1: ({p1.x}, {p1.y})");
+    let _ = print(f"p2: ({p2.x}, {p2.y})");
+
+    // Record as function parameter
+    let d = distance(p1, p2);
+    let _ = print(f"Manhattan distance: {d}");
+
+    // Nested field access
+    let person = Person { name: "Alice", age: 30.0 };
+    let _ = print(f"Person: {person.name}, age {person.age}");
+
+    let _ = print("=== Done ===");
+}

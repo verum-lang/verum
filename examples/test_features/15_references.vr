@@ -1,0 +1,94 @@
+// Test three-tier reference system (CBGR)
+// Tests &T, &checked T, &unsafe T reference types
+
+type Data is {
+    value: Int,
+    name: Text
+};
+
+// Function taking default reference (&T with CBGR checks)
+fn read_value(data: &Data) -> Int {
+    data.value
+}
+
+// Function taking mutable reference
+fn increment(data: &mut Data) {
+    data.value = data.value + 1
+}
+
+// Function demonstrating checked reference (compiler-verified safe)
+fn read_checked(data: &checked Data) -> Int {
+    // Zero-cost reference, compiler proves safety
+    data.value
+}
+
+// Function demonstrating unsafe reference (manual safety proof)
+fn read_unsafe(data: &unsafe Data) -> Int {
+    // SAFETY: Caller guarantees data is valid for the call duration
+    data.value
+}
+
+// Function with reference to primitive
+fn double_ref(x: &Int) -> Int {
+    x * 2
+}
+
+// Returning references (with lifetime rules)
+fn get_first(items: &List<Int>) -> Maybe<&Int> {
+    if items.len() > 0 {
+        Some(&items[0])
+    } else {
+        None
+    }
+}
+
+fn main() {
+    print("=== Reference System Tests ===")
+
+    // Test 1: Basic reference
+    print("\nTest 1: Immutable reference")
+    let data = Data { value: 42, name: "test" }
+    let val = read_value(&data)
+    print(f"Value via ref: {val}")
+
+    // Test 2: Mutable reference
+    print("\nTest 2: Mutable reference")
+    let mut mutable_data = Data { value: 10, name: "counter" }
+    print(f"Before: {mutable_data.value}")
+    increment(&mut mutable_data)
+    print(f"After increment: {mutable_data.value}")
+
+    // Test 3: Multiple immutable references allowed
+    print("\nTest 3: Multiple immutable references")
+    let v1 = read_value(&data)
+    let v2 = read_value(&data)
+    print(f"v1={v1}, v2={v2}")
+
+    // Test 4: Reference to primitive
+    print("\nTest 4: Reference to primitive")
+    let x = 21
+    let doubled = double_ref(&x)
+    print(f"Doubled: {doubled}")
+
+    // Test 5: Checked reference (syntax test)
+    print("\nTest 5: Checked reference")
+    let checked_val = read_checked(&checked data)
+    print(f"Checked read: {checked_val}")
+
+    // Test 6: Unsafe reference (syntax test)
+    print("\nTest 6: Unsafe reference")
+    // SAFETY: data is valid for this call
+    let unsafe_val = read_unsafe(&unsafe data)
+    print(f"Unsafe read: {unsafe_val}")
+
+    // Test 7: Reference in collection
+    print("\nTest 7: Reference from collection")
+    let numbers = [1, 2, 3, 4, 5]
+    match get_first(&numbers) {
+        Some(first) => print(f"First element ref: {first}"),
+        None => print("Empty list")
+    }
+
+    print("\nReference tests complete")
+    print("Three-tier system: &T (CBGR), &checked T (zero-cost), &unsafe T (manual)")
+}

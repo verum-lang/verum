@@ -1,0 +1,1043 @@
+// =============================================================================
+// Verum Math Stack - L9.6: Retrieval-Augmented Generation (RAG)
+// =============================================================================
+//
+// Knowledge retrieval and augmented generation pipeline for LLM applications.
+// Provides document chunking, vector storage, and retrieval-augmented generation.
+//
+// Architecture:
+//   - Document: Chunked content with embeddings
+//   - VectorStore: Protocol for vector similarity search
+//   - HNSWVectorStore: HNSW-based approximate nearest neighbor search
+//   - TextChunker: Document splitting with configurable overlap
+//   - RAGPipeline: End-to-end retrieval-augmented generation
+//   - HybridRetriever: Combined dense + sparse retrieval (RRF)
+//
+// Spec: math-spec.md Section 52 - Retrieval-Augmented Generation (RAG)
+// =============================================================================
+
+module core.math.rag;
+mount core.math.tensor;
+mount core.math.nn;
+mount core.math.agent;
+
+// =============================================================================
+// Document Types
+// =============================================================================
+
+// Document chunk for retrieval
+//
+// Represents a chunk of text with optional embedding and metadata.
+// Documents are the unit of retrieval in vector stores.
+public type Document is {
+    // Unique identifier
+    id: Text,
+    // Text content
+    content: Text,
+    // Arbitrary metadata (source, page, etc.)
+    metadata: Map<Text, Value>,
+    // Optional pre-computed embedding vector
+    embedding: Maybe<DynTensor<Float>>,
+};
+
+implement Document {
+    // Create document without embedding
+    public fn new(id: Text, content: Text) -> Self {
+        Document {
+            id,
+            content,
+            metadata: Map.new(),
+            embedding: Maybe.None,
+        }
+    }
+
+    // Create document with metadata
+    public fn with_metadata(id: Text, content: Text, metadata: Map<Text, Value>) -> Self {
+        Document {
+            id,
+            content,
+            metadata,
+            embedding: Maybe.None,
+        }
+    }
+
+    // Create document with embedding
+    public fn with_embedding(id: Text, content: Text, embedding: DynTensor<Float>) -> Self {
+        Document {
+            id,
+            content,
+            metadata: Map.new(),
+            embedding: Maybe.Some(embedding),
+        }
+    }
+
+    // Add metadata field
+    public fn add_metadata(&mut self, key: Text, value: Value) {
+        self.metadata.insert(key, value);
+    }
+
+    // Set embedding
+    public fn set_embedding(&mut self, embedding: DynTensor<Float>) {
+        self.embedding = Maybe.Some(embedding);
+    }
+
+    // Check if document has embedding
+    public fn has_embedding(&self) -> Bool {
+        self.embedding.is_some()
+    }
+}
+
+// =============================================================================
+// Vector Store Protocol
+// =============================================================================
+
+// Protocol for vector similarity search
+//
+// Vector stores index document embeddings and provide efficient
+// nearest neighbor search.
+public type VectorStore is protocol {
+    // Add documents to the store
+    fn add(&mut self, docs: &[Document]);
+
+    // Search for k nearest documents to query embedding
+    // Returns (document, similarity_score) pairs sorted by score descending
+    fn search(&self, query_embedding: &DynTensor<Float>, k: USize) -> List<(Document, Float)>;
+
+    // Delete documents by ID
+    fn delete(&mut self, ids: &[Text]);
+
+    // Get total document count
+    fn count(&self) -> USize;
+};
+
+// =============================================================================
+// HNSW Index
+// =============================================================================
+
+// HNSW (Hierarchical Navigable Small World) index parameters
+public type HNSWConfig is {
+    // Number of connections per node
+    m: USize,
+    // Size of dynamic candidate list during construction
+    ef_construction: USize,
+    // Size of dynamic candidate list during search
+    ef_search: USize,
+    // Maximum layer (computed from m)
+    max_level: USize,
+};
+
+implement HNSWConfig {
+    // Create default config
+    public fn default() -> Self {
+        HNSWConfig {
+            m: 16,
+            ef_construction: 200,
+            ef_search: 50,
+            max_level: 16,
+        }
+    }
+
+    // Create config with custom m
+    public fn with_m(m: USize) -> Self {
+        HNSWConfig {
+            m,
+            ef_construction: 200,
+            ef_search: 50,
+            max_level: 16,
+        }
+    }
+}
+
+// HNSW index node
+type HNSWNode is {
+    // Node ID (maps to document ID)
+    id: Text,
+    // Embedding vector
+    embedding: DynTensor<Float>,
+    // Connections per layer
+    connections: List<List<USize>>,
+    // Node's layer assignment
+    level: USize,
+};
+
+// HNSW index for approximate nearest neighbor search
+//
+// Implements the HNSW algorithm for efficient vector similarity search
+// with sub-linear query time complexity.
+public type HNSWIndex is {
+    // Index nodes
+    nodes: List<HNSWNode>,
+    // ID to node index mapping
+    id_to_idx: Map<Text, USize>,
+    // Embedding dimension
+    dim: USize,
+    // Configuration
+    config: HNSWConfig,
+    // Entry point (top level node)
+    entry_point: Maybe<USize>,
+};
+
+implement HNSWIndex {
+    // Create new HNSW index
+    public fn new(dim: USize, m: USize, ef_construction: USize) -> Self {
+        HNSWIndex {
+            nodes: List.new(),
+            id_to_idx: Map.new(),
+            dim,
+            config: HNSWConfig {
+                m,
+                ef_construction,
+                ef_search: 50,
+                max_level: 16,
+            },
+            entry_point: Maybe.None,
+        }
+    }
+
+    // Add vector to index
+    public fn add(&mut self, id: &Text, embedding: &DynTensor<Float>) -> USize {
+        assert(embedding.numel() == self.dim, "embedding dimension mismatch");
+
+        let idx = self.nodes.len();
+        let level = self.random_level();
+
+        // Create node
+        let mut connections = List.new();
+        for _ in 0..=level {
+            connections.push(List.new());
+        }
+
+        let node = HNSWNode {
+            id: id.clone(),
+            embedding: embedding.clone(),
+            connections,
+            level,
+        };
+
+        self.nodes.push(node);
+        self.id_to_idx.insert(id.clone(), idx);
+
+        // Connect to graph
+        if let Maybe.Some(ep) = self.entry_point {
+            self.connect_node(idx, ep, level);
+        } else {
+            self.entry_point = Maybe.Some(idx);
+        }
+
+        // Update entry point if new node is higher level
+        if let Maybe.Some(ep) = self.entry_point {
+            if level > self.nodes[ep].level {
+                self.entry_point = Maybe.Some(idx);
+            }
+        }
+
+        idx
+    }
+
+    // Search for k nearest neighbors
+    public fn search(&self, query: &DynTensor<Float>, k: USize) -> List<(Text, Float)> {
+        if self.nodes.is_empty() {
+            return List.new();
+        }
+
+        let ep = self.entry_point.unwrap_or(0);
+        let top_level = self.nodes[ep].level;
+
+        // Greedy search from top to level 1
+        let mut current = ep;
+        for level in (1..=top_level).rev() {
+            current = self.greedy_search(query, current, level);
+        }
+
+        // Search at level 0 with ef candidates
+        let candidates = self.search_level(query, current, 0, self.config.ef_search);
+
+        // Return top k
+        candidates.into_iter()
+            .take(k)
+            .map(|(idx, dist)| (self.nodes[idx].id.clone(), 1.0 / (1.0 + dist)))
+            .collect()
+    }
+
+    // Remove node by ID
+    public fn remove(&mut self, id: &Text) {
+        if let Maybe.Some(idx) = self.id_to_idx.remove(id) {
+            // Note: Full removal requires graph repair
+            // For simplicity, we just mark as removed
+            // A production implementation would need proper graph maintenance
+            self.nodes[idx].connections.clear();
+        }
+    }
+
+    // Get index size
+    public fn len(&self) -> USize {
+        self.nodes.len()
+    }
+
+    // Internal methods
+
+    fn random_level(&self) -> USize {
+        let mut level = 0;
+        let ml = 1.0 / (self.config.m as Float).ln();
+
+        while random_float() < ml && level < self.config.max_level {
+            level += 1;
+        }
+        level
+    }
+
+    fn connect_node(&mut self, new_idx: USize, entry_point: USize, max_level: USize) {
+        let mut current = entry_point;
+
+        // Search from top level down
+        for level in (0..=max_level).rev() {
+            if level <= self.nodes[new_idx].level {
+                // Find neighbors at this level
+                let neighbors = self.search_level(
+                    &self.nodes[new_idx].embedding,
+                    current,
+                    level,
+                    self.config.ef_construction,
+                );
+
+                // Select M best neighbors
+                let m = if level == 0 { self.config.m * 2 } else { self.config.m };
+                let selected: List<USize> = neighbors.iter()
+                    .take(m)
+                    .map(|(idx, _)| *idx)
+                    .collect();
+
+                // Add bidirectional connections
+                for &neighbor_idx in &selected {
+                    self.nodes[new_idx].connections[level].push(neighbor_idx);
+                    self.nodes[neighbor_idx].connections[level].push(new_idx);
+
+                    // Prune if too many connections
+                    if self.nodes[neighbor_idx].connections[level].len() > m {
+                        self.prune_connections(neighbor_idx, level, m);
+                    }
+                }
+            }
+
+            // Update current for next level
+            if !neighbors.is_empty() {
+                current = neighbors[0].0;
+            }
+        }
+    }
+
+    fn greedy_search(&self, query: &DynTensor<Float>, start: USize, level: USize) -> USize {
+        let mut current = start;
+        let mut current_dist = self.distance(query, &self.nodes[current].embedding);
+
+        loop {
+            let mut improved = false;
+
+            for &neighbor in &self.nodes[current].connections[level] {
+                let dist = self.distance(query, &self.nodes[neighbor].embedding);
+                if dist < current_dist {
+                    current = neighbor;
+                    current_dist = dist;
+                    improved = true;
+                }
+            }
+
+            if !improved {
+                break;
+            }
+        }
+
+        current
+    }
+
+    fn search_level(
+        &self,
+        query: &DynTensor<Float>,
+        entry: USize,
+        level: USize,
+        ef: USize,
+    ) -> List<(USize, Float)> {
+        let mut visited = Set.new();
+        let mut candidates = BinaryHeap.new();  // Min-heap
+        let mut results = BinaryHeap.new();     // Max-heap for top-k
+
+        let dist = self.distance(query, &self.nodes[entry].embedding);
+        candidates.push((dist, entry));
+        results.push((-dist, entry));
+        visited.insert(entry);
+
+        while !candidates.is_empty() {
+            let (c_dist, current) = candidates.pop().unwrap();
+
+            // Check if worst result is better than best candidate
+            if let Maybe.Some(&(worst_dist, _)) = results.peek() {
+                if c_dist > -worst_dist {
+                    break;
+                }
+            }
+
+            // Explore neighbors
+            for &neighbor in &self.nodes[current].connections[level] {
+                if !visited.contains(&neighbor) {
+                    visited.insert(neighbor);
+
+                    let neighbor_dist = self.distance(query, &self.nodes[neighbor].embedding);
+
+                    if results.len() < ef {
+                        candidates.push((neighbor_dist, neighbor));
+                        results.push((-neighbor_dist, neighbor));
+                    } else if let Maybe.Some(&(worst_dist, _)) = results.peek() {
+                        if neighbor_dist < -worst_dist {
+                            candidates.push((neighbor_dist, neighbor));
+                            results.push((-neighbor_dist, neighbor));
+                            results.pop();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted list
+        let mut result_list: List<(USize, Float)> = results.into_iter()
+            .map(|(neg_dist, idx)| (idx, -neg_dist))
+            .collect();
+        result_list.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering.Equal));
+        result_list
+    }
+
+    fn prune_connections(&mut self, node_idx: USize, level: USize, max_m: USize) {
+        let node_embedding = &self.nodes[node_idx].embedding;
+        let mut connections_with_dist: List<(USize, Float)> = self.nodes[node_idx]
+            .connections[level]
+            .iter()
+            .map(|&idx| (idx, self.distance(node_embedding, &self.nodes[idx].embedding)))
+            .collect();
+
+        connections_with_dist.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering.Equal));
+
+        self.nodes[node_idx].connections[level] = connections_with_dist
+            .into_iter()
+            .take(max_m)
+            .map(|(idx, _)| idx)
+            .collect();
+    }
+
+    fn distance(&self, a: &DynTensor<Float>, b: &DynTensor<Float>) -> Float {
+        // L2 distance
+        let diff = sub(a, b);
+        sum(&mul(&diff, &diff)).item().sqrt()
+    }
+}
+
+// =============================================================================
+// HNSW Vector Store
+// =============================================================================
+
+// In-memory vector store using HNSW index
+public type HNSWVectorStore is {
+    // Documents by ID
+    documents: Map<Text, Document>,
+    // HNSW index
+    index: HNSWIndex,
+    // Embedding dimension
+    embed_dim: USize,
+};
+
+implement HNSWVectorStore {
+    // Create new HNSW vector store
+    public fn new(embed_dim: USize, m: USize, ef_construction: USize) -> Self {
+        HNSWVectorStore {
+            documents: Map.new(),
+            index: HNSWIndex.new(embed_dim, m, ef_construction),
+            embed_dim,
+        }
+    }
+
+    // Create with default parameters
+    public fn with_defaults(embed_dim: USize) -> Self {
+        Self.new(embed_dim, 16, 200)
+    }
+}
+
+implement VectorStore for HNSWVectorStore {
+    fn add(&mut self, docs: &[Document]) {
+        for doc in docs {
+            if let Maybe.Some(embedding) = &doc.embedding {
+                self.index.add(&doc.id, embedding);
+                self.documents.insert(doc.id.clone(), doc.clone());
+            }
+        }
+    }
+
+    fn search(&self, query_embedding: &DynTensor<Float>, k: USize) -> List<(Document, Float)> {
+        let results = self.index.search(query_embedding, k);
+        results.iter().filter_map(|(id, score)| {
+            self.documents.get(id).map(|doc| (doc.clone(), *score))
+        }).collect()
+    }
+
+    fn delete(&mut self, ids: &[Text]) {
+        for id in ids {
+            self.documents.remove(id);
+            self.index.remove(id);
+        }
+    }
+
+    fn count(&self) -> USize {
+        self.documents.len()
+    }
+}
+
+// =============================================================================
+// Text Chunker
+// =============================================================================
+
+// Text chunking strategy
+public type ChunkStrategy is
+    // Fixed character count
+    | FixedSize { size: USize, overlap: USize }
+    // Split by separator (e.g., paragraphs)
+    | Separator { separator: Text, max_size: USize }
+    // Recursive splitting by multiple separators
+    | Recursive { separators: List<Text>, max_size: USize }
+    // Sentence-based splitting
+    | Sentence { max_sentences: USize };
+
+// Text chunker for document splitting
+//
+// Splits documents into smaller chunks suitable for embedding and retrieval.
+public type TextChunker is {
+    // Chunk size in characters
+    chunk_size: USize,
+    // Overlap between chunks
+    chunk_overlap: USize,
+    // Primary separator
+    separator: Text,
+};
+
+implement TextChunker {
+    // Create chunker with specified parameters
+    public fn new(chunk_size: USize, chunk_overlap: USize) -> Self {
+        assert(chunk_overlap < chunk_size, "overlap must be less than chunk size");
+        TextChunker {
+            chunk_size,
+            chunk_overlap,
+            separator: "\n\n".to_text(),
+        }
+    }
+
+    // Create chunker with custom separator
+    public fn with_separator(chunk_size: USize, chunk_overlap: USize, separator: Text) -> Self {
+        TextChunker {
+            chunk_size,
+            chunk_overlap,
+            separator,
+        }
+    }
+
+    // Split text into chunks
+    public fn chunk(&self, text: &Text) -> List<Text> {
+        let mut chunks = List.new();
+        let paragraphs: List<_> = text.split(&self.separator).collect();
+
+        let mut current_chunk = "".to_text();
+
+        for para in &paragraphs {
+            // If adding this paragraph exceeds chunk size
+            if current_chunk.len() + para.len() > self.chunk_size && !current_chunk.is_empty() {
+                chunks.push(current_chunk.trim().to_text());
+
+                // Keep overlap from end of current chunk
+                if self.chunk_overlap > 0 {
+                    let overlap_start = current_chunk.len().saturating_sub(self.chunk_overlap);
+                    current_chunk = current_chunk.chars().skip(overlap_start).collect<Text>();
+                } else {
+                    current_chunk = "".to_text();
+                }
+            }
+
+            if !current_chunk.is_empty() {
+                current_chunk.push_str(&self.separator);
+            }
+            current_chunk.push_str(para);
+        }
+
+        if !current_chunk.trim().is_empty() {
+            chunks.push(current_chunk.trim().to_text());
+        }
+
+        chunks
+    }
+
+    // Chunk with metadata propagation
+    public fn chunk_with_metadata(
+        &self,
+        text: &Text,
+        base_metadata: &Map<Text, Value>,
+    ) -> List<Document> {
+        let chunks = self.chunk(text);
+
+        chunks.iter().enumerate().map(|(i, chunk)| {
+            let mut metadata = base_metadata.clone();
+            metadata.insert("chunk_index".to_text(), Value.Int(i as Int));
+            metadata.insert("total_chunks".to_text(), Value.Int(chunks.len() as Int));
+
+            Document {
+                id: f"{base_metadata.get(&\"source\".to_text()).map(|v| v.as_text()).unwrap_or(\"doc\".to_text())}_{i}",
+                content: chunk.clone(),
+                metadata,
+                embedding: Maybe.None,
+            }
+        }).collect()
+    }
+}
+
+// =============================================================================
+// RAG Pipeline
+// =============================================================================
+
+// RAG (Retrieval-Augmented Generation) pipeline
+//
+// Combines embedding, retrieval, and generation for knowledge-augmented responses.
+public type RAGPipeline<E, G, V> is {
+    // Embedding model (Text -> Vector)
+    embedder: E,
+    // Generation model (Messages -> Text)
+    generator: G,
+    // Vector store for document retrieval
+    vector_store: V,
+    // Text chunker for document processing
+    chunker: TextChunker,
+    // Number of documents to retrieve
+    retrieval_k: USize,
+    // System prompt template
+    system_prompt: Text,
+};
+
+implement<E, G, V> RAGPipeline<E, G, V>
+where
+    E: Module<Text, DynTensor<Float>>,
+    G: Module<List<ChatMessage>, Text>,
+    V: VectorStore,
+{
+    // Create new RAG pipeline
+    public fn new(embedder: E, generator: G, vector_store: V) -> Self {
+        RAGPipeline {
+            embedder,
+            generator,
+            vector_store,
+            chunker: TextChunker.new(512, 50),
+            retrieval_k: 5,
+            system_prompt: "You are a helpful assistant. Use the following context to answer questions. If the context doesn't contain relevant information, say so.".to_text(),
+        }
+    }
+
+    // Set number of documents to retrieve
+    public fn with_k(mut self, k: USize) -> Self {
+        self.retrieval_k = k;
+        self
+    }
+
+    // Set chunk size
+    public fn with_chunk_size(mut self, size: USize, overlap: USize) -> Self {
+        self.chunker = TextChunker.new(size, overlap);
+        self
+    }
+
+    // Set custom system prompt
+    public fn with_system_prompt(mut self, prompt: Text) -> Self {
+        self.system_prompt = prompt;
+        self
+    }
+
+    // Add documents to knowledge base
+    public fn add_documents(&mut self, texts: &[Text], metadata: &[Map<Text, Value>]) {
+        let documents: List<Document> = texts.iter()
+            .zip(metadata.iter())
+            .enumerate()
+            .flat_map(|(i, (text, meta))| {
+                let chunks = self.chunker.chunk(text);
+                chunks.iter().enumerate().map(|(j, chunk)| {
+                    let embedding = self.embedder.forward(chunk.clone());
+                    Document {
+                        id: f"doc_{i}_chunk_{j}",
+                        content: chunk.clone(),
+                        metadata: meta.clone(),
+                        embedding: Maybe.Some(embedding),
+                    }
+                }).collect<List<_>>()
+            })
+            .collect();
+
+        self.vector_store.add(&documents);
+    }
+
+    // Add single document
+    public fn add_document(&mut self, text: &Text, metadata: Map<Text, Value>) {
+        self.add_documents(&[text.clone()], &[metadata]);
+    }
+
+    // Query with retrieval augmentation
+    public fn query(&self, question: &Text) -> Text {
+        // 1. Embed query
+        let query_embedding = self.embedder.forward(question.clone());
+
+        // 2. Retrieve relevant documents
+        let retrieved = self.vector_store.search(&query_embedding, self.retrieval_k);
+
+        // 3. Build context from retrieved documents
+        let context = retrieved.iter()
+            .map(|(doc, score)| f"[Relevance: {score:.2}] {doc.content}")
+            .collect<List<_>>()
+            .join("\n\n");
+
+        // 4. Create chat messages
+        let messages = [
+            ChatMessage {
+                role: Role.System,
+                content: MessageContent.TextContent(self.system_prompt.clone()),
+                name: Maybe.None,
+            },
+            ChatMessage {
+                role: Role.User,
+                content: MessageContent.TextContent(f"Context:\n{context}\n\nQuestion: {question}"),
+                name: Maybe.None,
+            },
+        ].to_list();
+
+        // 5. Generate response
+        self.generator.forward(messages)
+    }
+
+    // Query with source citations
+    public fn query_with_sources(&self, question: &Text) -> (Text, List<Document>) {
+        let query_embedding = self.embedder.forward(question.clone());
+        let retrieved = self.vector_store.search(&query_embedding, self.retrieval_k);
+
+        let sources: List<Document> = retrieved.iter()
+            .map(|(doc, _)| doc.clone())
+            .collect();
+
+        let context = sources.iter()
+            .enumerate()
+            .map(|(i, doc)| f"[{i + 1}] {doc.content}")
+            .collect<List<_>>()
+            .join("\n\n");
+
+        let messages = [
+            ChatMessage {
+                role: Role.System,
+                content: MessageContent.TextContent(
+                    "You are a helpful assistant. Use the numbered sources below to answer questions. Cite sources using [N] notation.".to_text()
+                ),
+                name: Maybe.None,
+            },
+            ChatMessage {
+                role: Role.User,
+                content: MessageContent.TextContent(f"Sources:\n{context}\n\nQuestion: {question}"),
+                name: Maybe.None,
+            },
+        ].to_list();
+
+        let response = self.generator.forward(messages);
+        (response, sources)
+    }
+
+    // Get number of documents in knowledge base
+    public fn document_count(&self) -> USize {
+        self.vector_store.count()
+    }
+}
+
+// =============================================================================
+// Sparse Index Protocol
+// =============================================================================
+
+// Protocol for sparse text search (e.g., BM25)
+public type SparseIndex is protocol {
+    // Add document to index
+    fn add(&mut self, doc: &Document);
+
+    // Search using keyword matching
+    fn search(&self, query: &Text, k: USize) -> List<(Document, Float)>;
+
+    // Get document count
+    fn count(&self) -> USize;
+};
+
+// =============================================================================
+// BM25 Index
+// =============================================================================
+
+// BM25 parameters
+public type BM25Config is {
+    // Term frequency saturation
+    k1: Float,
+    // Length normalization
+    b: Float,
+};
+
+implement BM25Config {
+    public fn default() -> Self {
+        BM25Config { k1: 1.5, b: 0.75 }
+    }
+}
+
+// BM25 sparse index for keyword search
+public type BM25Index is {
+    // Documents
+    documents: Map<Text, Document>,
+    // Inverted index: term -> [(doc_id, term_freq)]
+    inverted_index: Map<Text, List<(Text, USize)>>,
+    // Document lengths
+    doc_lengths: Map<Text, USize>,
+    // Average document length
+    avg_doc_length: Float,
+    // BM25 parameters
+    config: BM25Config,
+};
+
+implement BM25Index {
+    // Create new BM25 index
+    public fn new() -> Self {
+        BM25Index {
+            documents: Map.new(),
+            inverted_index: Map.new(),
+            doc_lengths: Map.new(),
+            avg_doc_length: 0.0,
+            config: BM25Config.default(),
+        }
+    }
+
+    // Tokenize text into terms
+    fn tokenize(&self, text: &Text) -> List<Text> {
+        text.to_lowercase()
+            .split_whitespace()
+            .map(|s| s.chars().filter(|c| c.is_alphanumeric()).collect<Text>())
+            .filter(|s| s.len() > 1)
+            .collect()
+    }
+
+    // Calculate IDF for a term
+    fn idf(&self, term: &Text) -> Float {
+        let n = self.documents.len() as Float;
+        let df = self.inverted_index.get(term).map(|v| v.len()).unwrap_or(0) as Float;
+
+        if df == 0.0 {
+            return 0.0;
+        }
+
+        ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
+    }
+
+    // Calculate BM25 score for a document
+    fn score(&self, doc_id: &Text, query_terms: &[Text]) -> Float {
+        let doc_len = self.doc_lengths.get(doc_id).copied().unwrap_or(0) as Float;
+
+        let mut score = 0.0;
+
+        for term in query_terms {
+            let idf = self.idf(term);
+
+            let tf = self.inverted_index.get(term)
+                .and_then(|postings| {
+                    postings.iter().find(|(id, _)| id == doc_id).map(|(_, freq)| *freq)
+                })
+                .unwrap_or(0) as Float;
+
+            if tf > 0.0 {
+                let numerator = tf * (self.config.k1 + 1.0);
+                let denominator = tf + self.config.k1 * (
+                    1.0 - self.config.b + self.config.b * doc_len / self.avg_doc_length
+                );
+                score += idf * numerator / denominator;
+            }
+        }
+
+        score
+    }
+}
+
+implement SparseIndex for BM25Index {
+    fn add(&mut self, doc: &Document) {
+        let terms = self.tokenize(&doc.content);
+        let doc_len = terms.len();
+
+        // Update document length tracking
+        self.doc_lengths.insert(doc.id.clone(), doc_len);
+        let total_len: USize = self.doc_lengths.values().sum();
+        self.avg_doc_length = total_len as Float / self.doc_lengths.len() as Float;
+
+        // Count term frequencies
+        let mut term_freqs: Map<Text, USize> = Map.new();
+        for term in terms {
+            *term_freqs.entry(term).or_insert(0) += 1;
+        }
+
+        // Update inverted index
+        for (term, freq) in term_freqs {
+            self.inverted_index
+                .entry(term)
+                .or_insert_with(|| List.new())
+                .push((doc.id.clone(), freq));
+        }
+
+        self.documents.insert(doc.id.clone(), doc.clone());
+    }
+
+    fn search(&self, query: &Text, k: USize) -> List<(Document, Float)> {
+        let query_terms = self.tokenize(query);
+
+        if query_terms.is_empty() {
+            return List.new();
+        }
+
+        // Score all documents
+        let mut scores: List<(Text, Float)> = self.documents.keys()
+            .map(|id| (id.clone(), self.score(id, &query_terms)))
+            .filter(|(_, score)| *score > 0.0)
+            .collect();
+
+        // Sort by score descending
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering.Equal));
+
+        // Return top k
+        scores.into_iter()
+            .take(k)
+            .filter_map(|(id, score)| {
+                self.documents.get(&id).map(|doc| (doc.clone(), score))
+            })
+            .collect()
+    }
+
+    fn count(&self) -> USize {
+        self.documents.len()
+    }
+}
+
+// =============================================================================
+// Hybrid Retriever
+// =============================================================================
+
+// Hybrid retrieval combining dense and sparse search
+//
+// Uses Reciprocal Rank Fusion (RRF) to combine results from
+// vector similarity and keyword search.
+public type HybridRetriever<D: VectorStore, S: SparseIndex> is {
+    // Dense vector store
+    dense_store: D,
+    // Sparse keyword index
+    sparse_index: S,
+    // Weight for dense results (0.0 to 1.0)
+    dense_weight: Float,
+    // RRF constant (typically 60)
+    rrf_k: Float,
+};
+
+implement<D: VectorStore, S: SparseIndex> HybridRetriever<D, S> {
+    // Create hybrid retriever with equal weighting
+    public fn new(dense_store: D, sparse_index: S) -> Self {
+        HybridRetriever {
+            dense_store,
+            sparse_index,
+            dense_weight: 0.5,
+            rrf_k: 60.0,
+        }
+    }
+
+    // Set dense weight (0.0 = sparse only, 1.0 = dense only)
+    public fn with_dense_weight(mut self, weight: Float) -> Self {
+        assert(weight >= 0.0 && weight <= 1.0, "weight must be in [0, 1]");
+        self.dense_weight = weight;
+        self
+    }
+
+    // Hybrid search with RRF fusion
+    public fn search(
+        &self,
+        query: &Text,
+        query_embedding: &DynTensor<Float>,
+        k: USize,
+    ) -> List<(Document, Float)> {
+        // Get results from both retrievers (more than k for fusion)
+        let dense_results = self.dense_store.search(query_embedding, k * 2);
+        let sparse_results = self.sparse_index.search(query, k * 2);
+
+        // Calculate RRF scores
+        let mut scores: Map<Text, (Float, Document)> = Map.new();
+
+        // Dense results contribution
+        for (i, (doc, _)) in dense_results.iter().enumerate() {
+            let rrf_score = self.dense_weight / (self.rrf_k + i as Float + 1.0);
+            let entry = scores.entry(doc.id.clone()).or_insert((0.0, doc.clone()));
+            entry.0 += rrf_score;
+        }
+
+        // Sparse results contribution
+        for (i, (doc, _)) in sparse_results.iter().enumerate() {
+            let rrf_score = (1.0 - self.dense_weight) / (self.rrf_k + i as Float + 1.0);
+            let entry = scores.entry(doc.id.clone()).or_insert((0.0, doc.clone()));
+            entry.0 += rrf_score;
+        }
+
+        // Sort by combined score
+        let mut results: List<(Document, Float)> = scores.values()
+            .map(|(score, doc)| (doc.clone(), *score))
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering.Equal));
+
+        results.into_iter().take(k).collect()
+    }
+
+    // Add document to both indices
+    public fn add(&mut self, doc: &Document) {
+        // Add to dense store (requires embedding)
+        if doc.embedding.is_some() {
+            self.dense_store.add(&[doc.clone()]);
+        }
+
+        // Add to sparse index
+        self.sparse_index.add(doc);
+    }
+
+    // Get total document count
+    public fn count(&self) -> USize {
+        self.sparse_index.count()
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Generate random float in [0, 1)
+fn random_float() -> Float {
+    @vbc(RANDOM_FLOAT_01)
+}
+
+// =============================================================================
+// Example Usage (Documentation)
+// =============================================================================
+//
+// // Create RAG pipeline
+// let embedder = load_embedding_model("sentence-transformers/all-mpnet-base-v2");
+// let generator = load_llm("meta-llama/Llama-2-7b-chat");
+// let vector_store = HNSWVectorStore.with_defaults(768);
+//
+// let rag = RAGPipeline.new(embedder, generator, vector_store)
+//     .with_k(5)
+//     .with_chunk_size(512, 50);
+//
+// // Add documents
+// rag.add_document(
+//     &"Verum is a programming language designed for verified computing...".to_text(),
+//     Map.from([("source".to_text(), Value.Text("docs/intro.md".to_text()))]),
+// );
+//
+// // Query
+// let answer = rag.query(&"What is Verum?".to_text());
+//
+// // Query with sources
+// let (answer, sources) = rag.query_with_sources(&"How does memory safety work?".to_text());
+// =============================================================================

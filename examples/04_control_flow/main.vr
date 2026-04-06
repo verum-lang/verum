@@ -1,0 +1,81 @@
+// 04 — Control Flow
+// if/else, match, while, for-in, ranges, break, continue.
+
+fn classify_number(n: Int) -> Text {
+    if n > 0 {
+        "positive"
+    } else if n < 0 {
+        "negative"
+    } else {
+        "zero"
+    }
+}
+
+fn day_name(day: Int) -> Text {
+    match day {
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        7 => "Sunday",
+        _ => "unknown"
+    }
+}
+
+fn main() {
+    // --- if / else as an expression ---
+    let age = 25
+    let status = if age >= 18 { "adult" } else { "minor" }
+    print(f"Age {age}: {status}")
+
+    // --- match expression ---
+    print(f"Day 3 is {day_name(3)}")
+    print(f"classify(-5) = {classify_number(-5)}")
+
+    // --- match with pattern bindings ---
+    let value = 42
+    let description = match value {
+        0 => "nothing",
+        1 => "one",
+        n if n < 0 => f"negative ({n})",
+        n if n > 100 => f"large ({n})",
+        n => f"moderate ({n})"
+    }
+    print(f"value {value}: {description}")
+
+    // --- while loop ---
+    let mut count = 0
+    while count < 5 {
+        print(f"  count = {count}")
+        count = count + 1
+    }
+
+    // --- for-in with range (exclusive upper bound) ---
+    print("Range 0..5:")
+    for i in 0..5 {
+        print(f"  i = {i}")
+    }
+
+    // --- for-in with inclusive range ---
+    print("Inclusive range 1..=3:")
+    for i in 1..=3 {
+        print(f"  i = {i}")
+    }
+
+    // --- for-in over a list ---
+    let fruits = ["apple", "banana", "cherry"]
+    for fruit in fruits {
+        print(f"  fruit: {fruit}")
+    }
+
+    // --- break and continue ---
+    let mut sum = 0
+    for i in 0..100 {
+        if i % 2 != 0 { continue; }
+        if sum > 50 { break; }
+        sum = sum + i
+    }
+    print(f"Sum of evens until > 50: {sum}")
+}

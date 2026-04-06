@@ -1,0 +1,72 @@
+// Test: CBGR (Capability-Based Garbage References)
+// Tests Verum's three-tier reference system
+
+// Tier 0: Default CBGR with ~15ns overhead
+fn use_default_ref(data: &List<Int>) -> Int {
+    data[0]
+}
+
+// Tier 1: Compiler-proven safe (0ns overhead)
+fn use_checked_ref(data: &checked List<Int>) -> Int {
+    data[0]
+}
+
+// Tier 2: Unsafe manual safety proof (0ns overhead)
+fn use_unsafe_ref(data: &unsafe List<Int>) -> Int {
+    data[0]
+}
+
+// Test borrowing and lifetime
+fn borrow_test() {
+    let numbers = [1, 2, 3, 4, 5]
+
+    // Default reference
+    let result1 = use_default_ref(&numbers)
+    println(f"Default ref result: {result1}")
+
+    // Checked reference (if escape analysis proves safe)
+    let result2 = use_checked_ref(&checked numbers)
+    println(f"Checked ref result: {result2}")
+
+    // Unsafe reference (manual safety proof required)
+    // SAFETY: numbers is local and doesn't escape
+    let result3 = use_unsafe_ref(&unsafe numbers)
+    println(f"Unsafe ref result: {result3}")
+}
+
+// Test mutable references
+fn mutate_data(data: &mut List<Int>) {
+    data.push(42)
+}
+
+fn mut_ref_test() {
+    let mut numbers = [1, 2, 3]
+    println(f"Before: {numbers}")
+
+    mutate_data(&mut numbers)
+    println(f"After: {numbers}")
+}
+
+// Test reference invalidation (should be caught by CBGR)
+fn generation_check_test() {
+    let mut container = [10, 20, 30]
+    let ref1 = &container[0]
+
+    // This should invalidate ref1's generation
+    container.push(40)
+
+    // Accessing ref1 here would fail CBGR check at runtime
+    // println(f"Value: {ref1}")  // Would panic!
+
+    println("Generation check test passed")
+}
+
+fn main() {
+    println("=== CBGR Reference System Tests ===")
+
+    borrow_test()
+    mut_ref_test()
+    generation_check_test()
+
+    println("\nCBGR tests completed")
+}

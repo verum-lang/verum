@@ -1,0 +1,8 @@
+// Test 1: Simple inline refinement
+fn test_positive() -> Int{> 0} {
+    42
+}
+
+fn main() -> Int {
+    test_positive()
+}

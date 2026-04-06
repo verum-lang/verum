@@ -1,0 +1,344 @@
+module sys.linux;
+
+// =============================================================================
+// sys/linux/mod.vr - Linux system interface module
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: Linux x86_64
+// =============================================================================
+@cfg(target_os = "linux")
+//
+// This module provides the complete Linux V-LLSI (Verum Low-Level System
+// Interface) implementation for the bootstrap kernel.
+//
+// Architecture:
+// - syscall.vr: Raw syscall intrinsic + basic wrappers (read/write/mmap/futex)
+// - errno.vr: Error constants and categorization
+// - tls.vr: TLS bootstrap (ThreadControlBlock, arch_prctl)
+// - io.vr: Completion-based IO (io_uring primary, epoll fallback)
+// - thread.vr: Thread creation (clone/clone3) and synchronization
+// - mem.vr: Memory management (mprotect, madvise, mremap)
+// - time.vr: Time operations (clock_gettime, monotonic time, RDTSC)
+//
+// Linux uses direct syscalls for maximum performance. No libc dependency.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+// =============================================================================
+// Module Declarations
+// =============================================================================
+
+/// Raw syscall intrinsic and basic wrappers
+public module syscall;
+
+/// Error number constants
+public module errno;
+
+/// Thread-Local Storage bootstrap
+public module tls;
+
+/// Asynchronous I/O (io_uring + epoll)
+public module io;
+
+/// Thread creation and synchronization
+public module thread;
+
+/// Memory management operations
+public module mem;
+
+/// Time and clock operations
+public module time;
+
+/// Auxiliary vector access (no libc getauxval)
+public module auxv;
+
+// =============================================================================
+// Core Syscall Re-exports
+// =============================================================================
+
+public mount .syscall.{
+    // Intrinsic
+    syscall_raw,
+
+    // Basic I/O
+    read,
+    write,
+    close,
+
+    // Memory mapping
+    mmap,
+    munmap,
+
+    // Process/thread info
+    getpid,
+    gettid,
+    exit,
+    exit_group,
+
+    // Sleep and random
+    nanosleep,
+    getrandom,
+
+    // Basic futex
+    futex_wait,
+    futex_wake,
+
+    // Syscall numbers (for advanced use)
+    SYS_READ, SYS_WRITE, SYS_CLOSE,
+    SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
+    SYS_CLONE, SYS_CLONE3,
+    SYS_FUTEX,
+    SYS_IO_URING_SETUP, SYS_IO_URING_ENTER, SYS_IO_URING_REGISTER,
+    SYS_EPOLL_CREATE1, SYS_EPOLL_CTL, SYS_EPOLL_WAIT,
+
+    // Terminal ioctl
+    ioctl,
+    isatty,
+    TCGETS, TCSETS, TCSETSW, TCSETSF,
+    TIOCGWINSZ, TIOCSWINSZ,
+};
+
+// =============================================================================
+// Errno Re-exports
+// =============================================================================
+
+public mount .errno.{
+    // Common errors
+    EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO,
+    EAGAIN, EWOULDBLOCK, ENOMEM, EACCES, EFAULT,
+    EBUSY, EEXIST, EINVAL, ENOSYS,
+
+    // Socket errors
+    ECONNREFUSED, ECONNRESET, ETIMEDOUT,
+    EADDRINUSE, EADDRNOTAVAIL,
+
+    // Helper functions
+    is_retryable,
+    is_connection_error,
+    is_permission_error,
+    is_not_found,
+    errno_name,
+};
+
+// =============================================================================
+// TLS Re-exports
+// =============================================================================
+
+public mount .tls.{
+    // Types
+    ThreadControlBlock,
+    ContextSlots,
+    TlsError,
+
+    // Initialization
+    init_main_thread_tls,
+    init_thread_tls_with_size,
+    create_thread_tls,
+    cleanup_thread_tls,
+
+    // Access functions
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    get_errno,
+    set_errno,
+    get_tid_fast,
+    check_stack_guard,
+
+    // Context slot operations
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+
+    // Constants
+    ARCH_SET_FS, ARCH_GET_FS,
+    TLS_CTX_OFFSET,
+};
+
+// =============================================================================
+// IO Re-exports
+// =============================================================================
+
+public mount .io.{
+    // io_uring driver
+    IoUringDriver,
+    IoUringSqe,
+    IoUringCqe,
+    IoUringParams,
+    IoError,
+
+    // Epoll driver (fallback)
+    EpollDriver,
+    EpollEvent,
+
+    // Unified driver
+    IoDriver,
+    create_io_driver,
+    is_io_uring_available,
+
+    // io_uring constants
+    IORING_OP_READ, IORING_OP_WRITE, IORING_OP_ACCEPT, IORING_OP_CONNECT,
+    IORING_ENTER_GETEVENTS,
+
+    // Epoll constants
+    EPOLLIN, EPOLLOUT, EPOLLERR, EPOLLHUP, EPOLLET,
+    EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD,
+};
+
+// =============================================================================
+// Thread Re-exports
+// =============================================================================
+
+public mount .thread.{
+    // Types
+    Thread,
+    ThreadFn,
+    ThreadError,
+
+    // Thread creation
+    spawn,
+
+    // Clone flags
+    CLONE_VM, CLONE_FS, CLONE_FILES, CLONE_SIGHAND,
+    CLONE_THREAD, CLONE_SETTLS, CLONE_THREAD_FLAGS,
+
+    // Extended futex operations
+    futex_requeue,
+    futex_cmp_requeue,
+    futex_wait_bitset,
+    futex_wake_bitset,
+    FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE,
+    FUTEX_PRIVATE_FLAG, FUTEX_BITSET_MATCH_ANY,
+
+    // Synchronization primitives
+    SpinLock,
+    Mutex,
+    Condvar,
+};
+
+// =============================================================================
+// Memory Re-exports
+// =============================================================================
+
+public mount .mem.{
+    // Core memory operations (from syscall)
+    mmap,
+    munmap,
+
+    // Operations
+    mprotect,
+    madvise,
+    mremap,
+    msync,
+    mincore,
+    memfd_create,
+
+    // Convenience functions
+    make_readonly,
+    make_readwrite,
+    make_executable,
+    make_guard,
+    prefetch,
+    release,
+    free_pages,
+    enable_huge_pages,
+    grow_mapping,
+    shrink_mapping,
+
+    // Protection constants
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+
+    // Map constants
+    MAP_SHARED, MAP_PRIVATE, MAP_ANONYMOUS, MAP_ANON,
+    MAP_FIXED, MAP_HUGETLB, MAP_STACK,
+
+    // Madvise constants
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL,
+    MADV_WILLNEED, MADV_DONTNEED, MADV_FREE,
+    MADV_HUGEPAGE, MADV_NOHUGEPAGE,
+
+    // Mremap constants
+    MREMAP_MAYMOVE, MREMAP_FIXED,
+
+    // Page utilities
+    PAGE_SIZE, HUGE_PAGE_SIZE,
+    page_align_up, page_align_down, is_page_aligned,
+    pages_for,
+};
+
+// =============================================================================
+// Time Re-exports
+// =============================================================================
+
+public mount .time.{
+    // Types
+    Timespec,
+    Timeval,
+    Duration,
+    Instant,
+    Stopwatch,
+
+    // Clock operations
+    clock_gettime,
+    monotonic_nanos,
+    monotonic_micros,
+    monotonic_millis,
+    monotonic_raw_nanos,
+    monotonic_coarse_nanos,
+    realtime_nanos,
+    unix_timestamp,
+    boottime_nanos,
+    thread_cputime_nanos,
+    process_cputime_nanos,
+
+    // Sleep operations
+    sleep,
+    sleep_ms,
+    sleep_us,
+    sleep_until,
+    clock_nanosleep,
+
+    // High-resolution timer
+    rdtsc,
+    rdtscp,
+    rdtsc_serialized,
+
+    // Utilities
+    time_it,
+
+    // Clock IDs
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
+    CLOCK_BOOTTIME, CLOCK_THREAD_CPUTIME_ID,
+    TIMER_ABSTIME,
+};
+
+// =============================================================================
+// Auxiliary Vector Re-exports
+// =============================================================================
+
+public mount .auxv.{
+    // Initialization
+    init_auxv,
+    is_auxv_initialized,
+
+    // Core access
+    getauxval,
+
+    // Convenience functions
+    page_size,
+    hwcap,
+    hwcap2,
+    is_secure,
+    vdso_base,
+    random_bytes,
+
+    // AT_* constants
+    AT_NULL, AT_ENTRY, AT_UID, AT_EUID, AT_GID, AT_EGID,
+    AT_HWCAP, AT_HWCAP2, AT_PAGESZ, AT_CLKTCK, AT_SECURE,
+    AT_PLATFORM, AT_RANDOM, AT_EXECFN, AT_SYSINFO_EHDR,
+};

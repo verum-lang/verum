@@ -1,0 +1,11 @@
+// Test f-string with function call
+
+fn get_text() -> Text {
+    "hello"
+}
+
+fn main() {
+    let _ = print("=== F-String Call Test ===");
+    let _ = print(f"Result: {get_text()}");
+    let _ = print("=== Done ===");
+}

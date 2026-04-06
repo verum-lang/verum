@@ -1,0 +1,392 @@
+// =============================================================================
+// process.vr - Child process management
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, io/protocols, sys/{darwin,linux}/syscall
+// =============================================================================
+//
+// Provides high-level API for spawning child processes, capturing output,
+// and waiting for completion. Critical for self-hosting compiler (invoking
+// linker, assembler, and the compiler itself).
+//
+// =============================================================================
+
+module core.io.process;
+mount core.*;
+
+// =============================================================================
+// Stdio Configuration
+// =============================================================================
+
+/// How to handle a standard I/O stream for a child process.
+type Stdio is
+    /// Inherit parent's stream (default).
+    | Inherit
+    /// Capture the stream into a pipe.
+    | Piped
+    /// Discard output (redirect to /dev/null).
+    | Null;
+
+// =============================================================================
+// ExitStatus
+// =============================================================================
+
+/// Exit status of a child process.
+type ExitStatus is {
+    /// Raw status value from waitpid.
+    raw: Int,
+};
+
+implement ExitStatus {
+    /// Returns true if the process exited successfully (code 0).
+    fn success(&self) -> Bool {
+        self.code() == 0
+    }
+
+    /// Returns the exit code (0-255).
+    fn code(&self) -> Int {
+        // WEXITSTATUS: (status >> 8) & 0xFF
+        (self.raw >> 8) & 255
+    }
+}
+
+implement Display for ExitStatus {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Text> {
+        if self.success() {
+            f.write_str("exit status: 0")
+        } else {
+            f.write_str(f"exit status: {self.code()}")
+        }
+    }
+}
+
+// =============================================================================
+// Output
+// =============================================================================
+
+/// Captured output from a child process.
+type Output is {
+    /// Exit status.
+    status: ExitStatus,
+    /// Captured stdout bytes.
+    stdout_bytes: List<Byte>,
+    /// Captured stderr bytes.
+    stderr_bytes: List<Byte>,
+};
+
+implement Output {
+    /// Returns stdout as a Text string.
+    fn stdout(&self) -> Text {
+        Text.from_utf8_lossy(&self.stdout_bytes)
+    }
+
+    /// Returns stderr as a Text string.
+    fn stderr(&self) -> Text {
+        Text.from_utf8_lossy(&self.stderr_bytes)
+    }
+}
+
+// =============================================================================
+// Command Builder
+// =============================================================================
+
+/// A process builder, providing fine-grained control over how a new process
+/// should be spawned.
+type Command is {
+    /// Program to execute.
+    program: Text,
+    /// Arguments to pass to the program.
+    args: List<Text>,
+    /// Environment variable overrides (key, value).
+    env_vars: List<(Text, Text)>,
+    /// Working directory (None = inherit parent's).
+    working_dir: Maybe<Text>,
+    /// Stdin handling.
+    stdin_cfg: Stdio,
+    /// Stdout handling.
+    stdout_cfg: Stdio,
+    /// Stderr handling.
+    stderr_cfg: Stdio,
+};
+
+implement Command {
+    /// Creates a new Command for the given program.
+    fn new(program: Text) -> Command {
+        Command {
+            program: program,
+            args: [],
+            env_vars: [],
+            working_dir: None,
+            stdin_cfg: Stdio.Inherit,
+            stdout_cfg: Stdio.Inherit,
+            stderr_cfg: Stdio.Inherit,
+        }
+    }
+
+    /// Adds an argument.
+    fn arg(&mut self, arg: Text) -> &mut Command {
+        self.args.push(arg);
+        self
+    }
+
+    /// Adds multiple arguments.
+    fn args(&mut self, new_args: &[Text]) -> &mut Command {
+        let mut i = 0;
+        while i < new_args.len() {
+            self.args.push(new_args[i]);
+            i = i + 1;
+        }
+        self
+    }
+
+    /// Sets an environment variable.
+    fn env(&mut self, key: Text, val: Text) -> &mut Command {
+        self.env_vars.push((key, val));
+        self
+    }
+
+    /// Sets the working directory.
+    fn current_dir(&mut self, dir: Text) -> &mut Command {
+        self.working_dir = Some(dir);
+        self
+    }
+
+    /// Configures stdout handling.
+    fn stdout(&mut self, cfg: Stdio) -> &mut Command {
+        self.stdout_cfg = cfg;
+        self
+    }
+
+    /// Configures stderr handling.
+    fn stderr(&mut self, cfg: Stdio) -> &mut Command {
+        self.stderr_cfg = cfg;
+        self
+    }
+
+    /// Configures stdin handling.
+    fn stdin(&mut self, cfg: Stdio) -> &mut Command {
+        self.stdin_cfg = cfg;
+        self
+    }
+
+    /// Executes the command, waits for it to finish, and collects output.
+    /// Stdout and stderr are captured (overrides any previous stdio config).
+    fn output(&mut self) -> Result<Output, Text> {
+        self.stdout_cfg = Stdio.Piped;
+        self.stderr_cfg = Stdio.Piped;
+        self.spawn_and_wait_with_output()
+    }
+
+    /// Executes the command and returns just the exit status.
+    fn status(&mut self) -> Result<ExitStatus, Text> {
+        let child = self.spawn()?;
+        child.wait()
+    }
+
+    /// Spawns the command as a child process.
+    fn spawn(&self) -> Result<Child, Text> {
+        spawn_child(self)
+    }
+
+    /// Internal: spawn and wait, capturing stdout/stderr.
+    fn spawn_and_wait_with_output(&self) -> Result<Output, Text> {
+        spawn_child_with_output(self)
+    }
+}
+
+// =============================================================================
+// Child Process
+// =============================================================================
+
+/// A handle to a running child process.
+type Child is {
+    /// Process ID.
+    pid: Int,
+    /// Pipe fd for reading child's stdout (if piped).
+    stdout_fd: Maybe<Int>,
+    /// Pipe fd for reading child's stderr (if piped).
+    stderr_fd: Maybe<Int>,
+    /// Pipe fd for writing to child's stdin (if piped).
+    stdin_fd: Maybe<Int>,
+};
+
+implement Child {
+    /// Waits for the child to finish and returns its exit status.
+    fn wait(&self) -> Result<ExitStatus, Text> {
+        wait_for_child(self.pid)
+    }
+
+    /// Waits and collects all output.
+    fn wait_with_output(&self) -> Result<Output, Text> {
+        // Read stdout and stderr before waiting
+        let mut out_bytes: List<Byte> = [];
+        let mut err_bytes: List<Byte> = [];
+
+        match self.stdout_fd {
+            Some(fd) => {
+                out_bytes = read_all_from_fd(fd);
+                close_fd(fd);
+            }
+            None => {}
+        }
+
+        match self.stderr_fd {
+            Some(fd) => {
+                err_bytes = read_all_from_fd(fd);
+                close_fd(fd);
+            }
+            None => {}
+        }
+
+        let exit_status = wait_for_child(self.pid)?;
+        Ok(Output {
+            status: exit_status,
+            stdout_bytes: out_bytes,
+            stderr_bytes: err_bytes,
+        })
+    }
+}
+
+// =============================================================================
+// Platform Implementation — Low-level C runtime bridge
+// =============================================================================
+// These __*_raw functions map directly to C runtime functions via LLVM Call
+// intercept in instruction.rs. Their Verum bodies are fallbacks for the
+// interpreter path. In AOT, the LLVM lowering replaces the Call with a
+// direct call to the C runtime function.
+
+/// Low-level exec: run program with args, wait, return exit code.
+/// In AOT: calls verum_process_exec(program, args_list_ptr).
+/// Returns exit code (0-255), or -1 on error.
+fn __process_exec_raw(program: Text, args: List<Text>) -> Int {
+    -1
+}
+
+/// Low-level wait: returns raw waitpid status, or -1 on error.
+/// In AOT: calls verum_process_wait(pid).
+fn __process_wait_raw(pid: Int) -> Int {
+    -1
+}
+
+/// Low-level fd read: returns bytes read from fd until EOF.
+/// In AOT: calls verum_fd_read_all(fd).
+fn __fd_read_all_raw(fd: Int) -> List<Byte> {
+    []
+}
+
+/// Low-level fd close.
+/// In AOT: calls verum_fd_close(fd).
+fn __fd_close_raw(fd: Int) {
+}
+
+/// Low-level spawn (no wait): fork+exec.
+/// Returns pointer to [pid, stdout_fd, stderr_fd] (3 x Int), or 0 on error.
+/// In AOT: calls verum_process_spawn_cmd in C runtime.
+fn __process_spawn_raw(program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int {
+    -1
+}
+
+/// Read an Int from a raw pointer at a given index (i64 array indexing).
+/// In AOT: emits GEP + load. Used to extract fields from C-allocated structs.
+fn __ptr_read_i64(ptr: Int, index: Int) -> Int {
+    0
+}
+
+/// Free a raw pointer allocated by C runtime.
+fn __ptr_free(ptr: Int) -> Int {
+    0
+}
+
+/// Spawn a child process (fork + exec).
+fn spawn_child(cmd: &Command) -> Result<Child, Text> {
+    let stdout_val: Stdio = cmd.stdout_cfg;
+    let stderr_val: Stdio = cmd.stderr_cfg;
+    let cap_stdout = if stdout_val is Piped { 1 } else { 0 };
+    let cap_stderr = if stderr_val is Piped { 1 } else { 0 };
+
+    let result_ptr = __process_spawn_raw(cmd.program, cmd.args, cap_stdout, cap_stderr);
+
+    if (result_ptr == 0) {
+        return Err("failed to spawn child process");
+    }
+
+    let pid = __ptr_read_i64(result_ptr, 0);
+    let stdout_fd_raw = __ptr_read_i64(result_ptr, 1);
+    let stderr_fd_raw = __ptr_read_i64(result_ptr, 2);
+    __ptr_free(result_ptr);
+
+    let stdout_fd = if (stdout_fd_raw >= 0) { Some(stdout_fd_raw) } else { None };
+    let stderr_fd = if (stderr_fd_raw >= 0) { Some(stderr_fd_raw) } else { None };
+
+    Ok(Child {
+        pid: pid,
+        stdout_fd: stdout_fd,
+        stderr_fd: stderr_fd,
+        stdin_fd: None,
+    })
+}
+
+/// Spawn a child process, wait, and collect output.
+fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
+    // Spawn with piped stdout/stderr to capture output
+    let result_ptr = __process_spawn_raw(cmd.program, cmd.args, 1, 1);
+
+    if (result_ptr == 0) {
+        return Err("failed to spawn child process");
+    }
+
+    let pid = __ptr_read_i64(result_ptr, 0);
+    let stdout_fd = __ptr_read_i64(result_ptr, 1);
+    let stderr_fd = __ptr_read_i64(result_ptr, 2);
+    __ptr_free(result_ptr);
+
+    // Read output from pipes before waiting (avoids deadlock if child fills buffer)
+    let stdout_bytes = if (stdout_fd >= 0) { read_all_from_fd(stdout_fd) } else { [] };
+    let stderr_bytes = if (stderr_fd >= 0) { read_all_from_fd(stderr_fd) } else { [] };
+
+    if (stdout_fd >= 0) { close_fd(stdout_fd); }
+    if (stderr_fd >= 0) { close_fd(stderr_fd); }
+
+    // Wait for child to exit
+    let raw_status = __process_wait_raw(pid);
+    if (raw_status < 0) {
+        return Err("failed to wait for child process");
+    }
+
+    Ok(Output {
+        status: ExitStatus { raw: raw_status },
+        stdout_bytes: stdout_bytes,
+        stderr_bytes: stderr_bytes,
+    })
+}
+
+/// Wait for a child process to finish.
+fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
+    let raw_status = __process_wait_raw(pid);
+    if (raw_status < 0) {
+        return Err("failed to wait for child process");
+    }
+    Ok(ExitStatus { raw: raw_status })
+}
+
+/// Read all bytes from a file descriptor until EOF.
+fn read_all_from_fd(fd: Int) -> List<Byte> {
+    __fd_read_all_raw(fd)
+}
+
+/// Close a file descriptor.
+fn close_fd(fd: Int) {
+    __fd_close_raw(fd);
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Runs a command string and returns its output.
+/// Example: `let out = run("ls", ["-la", "/tmp"])?;`
+fn run(program: Text, args: List<Text>) -> Result<Output, Text> {
+    let mut cmd = Command.new(program);
+    cmd.args(&args);
+    cmd.output()
+}

@@ -1,0 +1,19 @@
+// Simple match test to debug variant matching
+
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float);
+
+fn describe_shape(s: Shape) -> Text {
+    match s {
+        Circle(radius) => f"Circle with radius {radius}",
+        Rectangle(width, height) => f"Rectangle {width}x{height}"
+    }
+}
+
+fn main() {
+    let c = Circle(5.0);
+    let r = Rectangle(4.0, 6.0);
+    let _ = print(describe_shape(c));
+    let _ = print(describe_shape(r));
+}

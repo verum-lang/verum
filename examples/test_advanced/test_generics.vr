@@ -1,0 +1,102 @@
+// Test: Generic Programming
+// Tests generic types and functions
+
+// Generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Generic function with multiple type parameters
+fn pair<A, B>(first: A, second: B) -> (A, B) {
+    (first, second)
+}
+
+// Generic function with constraints
+fn first_element<T>(list: List<T>) -> Maybe<T> {
+    if list.len() > 0 {
+        Some(list[0])
+    } else {
+        None
+    }
+}
+
+// Generic type alias
+type Box<T> is { value: T }
+
+fn box_value<T>(val: T) -> Box<T> {
+    Box { value: val }
+}
+
+fn unbox<T>(boxed: Box<T>) -> T {
+    boxed.value
+}
+
+// Generic with multiple parameters
+type Pair<A, B> is { first: A, second: B }
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+// Nested generics
+fn nested_boxes() {
+    let inner = box_value(42)
+    let outer = box_value(inner)
+
+    println(f"Nested value: {unbox(unbox(outer))}")
+}
+
+// Generic with collections
+fn map_list<A, B>(list: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result = []
+    for item in list {
+        result.push(f(item))
+    }
+    result
+}
+
+fn main() {
+    println("=== Generic Programming Tests ===")
+
+    // Test identity
+    let x = identity(42)
+    let s = identity("hello")
+    println(f"Identity int: {x}, Identity text: {s}")
+
+    // Test pair
+    let p = pair(10, "twenty")
+    println(f"Pair: ({p.0}, {p.1})")
+
+    // Test first_element
+    let numbers = [1, 2, 3, 4, 5]
+    match first_element(numbers) {
+        Some(first) => println(f"First element: {first}"),
+        None => println("Empty list")
+    }
+
+    // Test Box
+    let boxed_int = box_value(100)
+    let boxed_text = box_value("boxed")
+    println(f"Unboxed int: {unbox(boxed_int)}")
+    println(f"Unboxed text: {unbox(boxed_text)}")
+
+    // Test Pair
+    let pair1 = make_pair(1, "one")
+    let pair2 = swap(pair1)
+    println(f"Original: ({pair1.first}, {pair1.second})")
+    println(f"Swapped: ({pair2.first}, {pair2.second})")
+
+    // Test nested
+    nested_boxes()
+
+    // Test map
+    let nums = [1, 2, 3, 4, 5]
+    let doubled = map_list(nums, fn(x) { x * 2 })
+    println(f"Doubled: {doubled}")
+
+    println("\nGeneric tests completed")
+}

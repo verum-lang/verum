@@ -1,0 +1,36 @@
+// Test list comprehensions with let bindings: [y for x in list let y = expr]
+
+fn main() -> Int {
+    // Test 1: Single let binding
+    let numbers = [1, 2, 3];
+    let doubled = [y for x in numbers let y = x * 2];
+    // Expected: [2, 4, 6]
+
+    // Test 2: Multiple let bindings in sequence
+    let chained = [z for x in numbers let y = x * 2 let z = y + 1];
+    // Expected: [3, 5, 7]
+
+    // Test 3: Let binding with complex expression
+    let squares = [sq for x in numbers let sq = x * x];
+    // Expected: [1, 4, 9]
+
+    // Test 4: Let binding with conditional
+    let conditional_let = [y for x in [1, 2, 3, 4, 5] let y = x * 2 if y > 4];
+    // y values: [2, 4, 6, 8, 10], filter > 4 -> [6, 8, 10]
+
+    // Test 5: Let with type annotation
+    let typed_let = [y for x in numbers let y: Int = x + 1];
+    // Expected: [2, 3, 4]
+
+    // Test 6: Nested let bindings
+    let nested = [result for x in numbers
+                  let a = x * 2
+                  let b = a + 1
+                  let c = b * 2
+                  let result = c + 1];
+    // x=1: a=2, b=3, c=6, result=7
+    // x=2: a=4, b=5, c=10, result=11
+    // x=3: a=6, b=7, c=14, result=15
+
+    0
+}

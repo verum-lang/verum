@@ -1,0 +1,93 @@
+// Test: Match expressions with range patterns
+
+fn test_range_basic() {
+    let x = 5;
+    let result = match x {
+        1..10 => "one to nine",
+        10..20 => "ten to nineteen",
+        _ => "other"
+    };
+    result
+}
+
+fn test_range_inclusive() {
+    let x = 10;
+    let result = match x {
+        1..=10 => "one to ten inclusive",
+        11..=20 => "eleven to twenty inclusive",
+        _ => "other"
+    };
+    result
+}
+
+fn test_range_unbounded_start() {
+    let x = 5;
+    let result = match x {
+        ..10 => "less than ten",
+        10..20 => "ten to nineteen",
+        _ => "twenty or more"
+    };
+    result
+}
+
+fn test_range_unbounded_end() {
+    let x = 50;
+    let result = match x {
+        0..10 => "zero to nine",
+        10.. => "ten or more"
+    };
+    result
+}
+
+fn test_range_with_guards() {
+    let x = 15;
+    let result = match x {
+        1..10 if x % 2 == 0 => "small even",
+        1..10 => "small",
+        10..100 if x % 2 == 0 => "medium even",
+        10..100 => "medium",
+        _ => "large"
+    };
+    result
+}
+
+fn test_range_chars() {
+    let c = 'g';
+    let result = match c {
+        'a'..'f' => "early alphabet",
+        'f'..'z' => "late alphabet",
+        _ => "other"
+    };
+    result
+}
+
+fn test_range_overlapping() {
+    let x = 5;
+    let result = match x {
+        0..10 => "first range",
+        5..15 => "second range",
+        _ => "other"
+    };
+    result
+}
+
+fn test_range_negative() {
+    let x = -5;
+    let result = match x {
+        -10..-1 => "negative",
+        0..10 => "positive",
+        _ => "other"
+    };
+    result
+}
+
+fn main() {
+    println(test_range_basic());
+    println(test_range_inclusive());
+    println(test_range_unbounded_start());
+    println(test_range_unbounded_end());
+    println(test_range_with_guards());
+    println(test_range_chars());
+    println(test_range_overlapping());
+    println(test_range_negative());
+}

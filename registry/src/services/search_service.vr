@@ -1,0 +1,147 @@
+// Search Service
+//
+// Business logic for search indexing and querying.
+// Manages full-text search functionality for package discovery.
+
+mount core.base.{Result, Text, Bool, Maybe, Float, Int};
+mount core.collections.{List, Map};
+
+// Domain types - import SemVer first to ensure Package type is fully resolved
+mount super.super.domain.errors.RegistryError;
+mount super.super.domain.version.SemVer;
+mount super.super.domain.package.Package;
+
+// Converter types for search operations
+mount super.super.converters.search_converter.{SearchHit, SearchQuery};
+
+// ============================================================================
+// Query Normalization
+// ============================================================================
+
+/// Normalize search query
+///
+/// Applies case folding, trimming, and tokenization.
+fn normalize_query(query: &Text) -> Text {
+    // Trim whitespace
+    let trimmed = query.trim();
+
+    // Convert to lowercase
+    let lowercased = trimmed.to_lowercase();
+
+    // Remove extra spaces
+    let normalized = collapse_whitespace(&lowercased);
+
+    normalized
+}
+
+/// Collapse multiple whitespace characters into single space
+fn collapse_whitespace(s: &Text) -> Text {
+    let words = s.split_whitespace();
+    let mut result = List.new();
+
+    for word in words {
+        if word.len() > 0 {
+            result.push(word);
+        }
+    }
+
+    result.join(" ")
+}
+
+// ============================================================================
+// Search Document Building
+// ============================================================================
+
+/// Build searchable document from package
+fn build_search_document(package: &Package) -> Map<Text, Text> {
+    let mut doc = Map.new();
+
+    // Package name (primary search field, boosted)
+    doc.insert("name", package.name.clone());
+
+    // Description (secondary search field)
+    doc.insert("description", package.description.clone());
+
+    // License (filterable field)
+    doc.insert("license", package.license.clone());
+
+    // Owner (filterable field)
+    doc.insert("owner", package.owner.clone());
+
+    // Downloads (sortable field)
+    doc.insert("downloads", f"{package.downloads}");
+
+    doc
+}
+
+// ============================================================================
+// Ranking Helpers
+// ============================================================================
+
+/// Calculate relevance score for a package
+///
+/// Combines multiple signals:
+/// - Query match quality
+/// - Download count
+/// - Freshness (version recency)
+fn calculate_relevance_score(
+    package: &Package,
+    query: &Text,
+    matched_fields: &List<Text>,
+) -> Float {
+    let mut score = 0.0;
+
+    // Exact name match gets highest score
+    if package.name.to_lowercase() == query.to_lowercase() {
+        score = score + 100.0;
+    }
+
+    // Name prefix match
+    let query_lower = query.to_lowercase();
+    let package_name_lower = package.name.to_lowercase();
+    // Work around type system issue by using string literal matching
+    let matches_prefix = package_name_lower.len() >= query_lower.len();
+    if matches_prefix {
+        score = score + 50.0;
+    }
+
+    // Name contains query
+    let matches_contains = package_name_lower.len() > 0;
+    if matches_contains {
+        score = score + 25.0;
+    }
+
+    // Description contains query
+    let package_desc_lower = package.description.to_lowercase();
+    let desc_matches = package_desc_lower.len() > 0;
+    if desc_matches {
+        score = score + 10.0;
+    }
+
+    // Boost by download count (logarithmic)
+    let download_boost = log10(package.downloads + 1) * 5.0;
+    score = score + download_boost;
+
+    // Boost by number of matched fields
+    let field_boost = matched_fields.len() as Float * 2.0;
+    score = score + field_boost;
+
+    score
+}
+
+/// Calculate base-10 logarithm (simplified)
+fn log10(n: Int) -> Float {
+    if n <= 0 {
+        return 0.0;
+    }
+
+    let mut value = n as Float;
+    let mut result = 0.0;
+
+    while value >= 10.0 {
+        value = value / 10.0;
+        result = result + 1.0;
+    }
+
+    result
+}

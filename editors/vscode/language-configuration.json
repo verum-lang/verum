@@ -1,0 +1,108 @@
+{
+  "comments": {
+    "lineComment": "//",
+    "blockComment": ["/*", "*/"]
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"]
+  ],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}", "notIn": ["string", "comment"] },
+    { "open": "[", "close": "]", "notIn": ["string", "comment"] },
+    { "open": "(", "close": ")", "notIn": ["string", "comment"] },
+    { "open": "<", "close": ">", "notIn": ["string", "comment"] },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] },
+    { "open": "`", "close": "`", "notIn": ["string", "comment"] },
+    { "open": "/*", "close": " */", "notIn": ["string"] },
+    { "open": "/**", "close": " */", "notIn": ["string"] }
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+    ["\"", "\""],
+    ["'", "'"],
+    ["`", "`"]
+  ],
+  "colorizedBracketPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*//\\s*#?region\\b|^\\s*(fn|type|protocol|struct|enum|module|impl|context|theorem|lemma|proof|test)\\b",
+      "end": "^\\s*//\\s*#?endregion\\b"
+    },
+    "offSide": false
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*///.*$",
+      "action": { "indent": "none", "appendText": "/// " }
+    },
+    {
+      "beforeText": "^\\s*//!.*$",
+      "action": { "indent": "none", "appendText": "//! " }
+    },
+    {
+      "beforeText": "^\\s*/\\*\\*(?!/)([^*]|\\*(?!/))*$",
+      "afterText": "^\\s*\\*/$",
+      "action": { "indent": "indentOutdent", "appendText": " * " }
+    },
+    {
+      "beforeText": "^\\s*/\\*\\*(?!/)([^*]|\\*(?!/))*$",
+      "action": { "indent": "none", "appendText": " * " }
+    },
+    {
+      "beforeText": "^(\\t|[ ])*[ ]\\*( ([^*]|\\*(?!/))*)?$",
+      "action": { "indent": "none", "appendText": "* " }
+    },
+    {
+      "beforeText": "^(\\t|[ ])*[ ]\\*/\\s*$",
+      "action": { "indent": "none", "removeText": 1 }
+    },
+    {
+      "beforeText": "^.*\\{[^}\"'`]*$",
+      "afterText": "^\\s*\\}",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "^.*\\{[^}\"'`]*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^.*\\[[^\\]\"'`]*$",
+      "afterText": "^\\s*\\]",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "^.*\\[[^\\]\"'`]*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^.*\\([^)\"'`]*$",
+      "afterText": "^\\s*\\)",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "^.*\\([^)\"'`]*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "\\s*(fn|type|protocol|struct|enum|module|impl|context|match|if|else|for|while|loop|try)\\b.*",
+      "action": { "indent": "none" }
+    }
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "^((?!\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$|^\\s*(fn|type|protocol|struct|enum|module|impl|context|match|if|else|for|while|loop|try|theorem|lemma|proof)\\b.*->?\\s*$",
+    "decreaseIndentPattern": "^((?!.*?\\/\\*).*\\*/)?\\s*[\\}\\]\\)].*$"
+  },
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)",
+  "autoCloseBefore": ";:.,=}])>` \n\t"
+}

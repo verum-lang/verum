@@ -1,0 +1,19 @@
+// Test swap function
+
+type Pair<A, B> is { first: A, second: B };
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn main() {
+    let _ = print("=== Swap Function Test ===");
+
+    let p: Pair<Float, Float> = Pair { first: 1.0, second: 2.0 };
+    let _ = print(f"Original: ({p.first}, {p.second})");
+
+    let s = swap(p);
+    let _ = print(f"Swapped: ({s.first}, {s.second})");
+
+    let _ = print("=== Done ===");
+}

@@ -1,0 +1,11 @@
+// Test where clause refinements
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+type Positive is Int where is_positive;
+
+fn main() {
+    print("Where refinement test");
+}

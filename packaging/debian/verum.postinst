@@ -1,0 +1,15 @@
+#!/bin/sh
+# Post-installation script for Verum
+set -e
+
+# Create symlinks if needed
+if [ ! -L /usr/local/bin/verum ]; then
+    ln -sf /usr/bin/verum /usr/local/bin/verum 2>/dev/null || true
+fi
+
+# Print success message
+echo "Verum v1.0.0 installed successfully!"
+echo "Run 'verum --version' to verify installation"
+echo "Run 'verum --help' to see available commands"
+
+exit 0

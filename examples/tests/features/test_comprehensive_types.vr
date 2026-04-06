@@ -1,0 +1,427 @@
+// Comprehensive Type System Test Suite
+// Tests all type system features in Verum
+
+// ========================================
+// 1. BASIC TYPE DEFINITIONS
+// ========================================
+
+// Simple type aliases
+type UserId is Int;
+type UserName is Text;
+type Score is Float;
+
+// ========================================
+// 2. RECORD TYPES
+// ========================================
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    id: UserId,
+    name: UserName,
+    age: Int
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point
+};
+
+// ========================================
+// 3. VARIANT TYPES (ENUMS)
+// ========================================
+
+// Simple variants
+type Color is | Red | Green | Blue | Yellow;
+
+type Direction is | North | South | East | West;
+
+// Variants with data
+type Maybe<T> is | Some(T) | None;
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+// Variant with record fields
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { base: Float, height: Float };
+
+// ========================================
+// 4. REFINEMENT TYPES
+// ========================================
+
+// Inline refinement types using curly braces
+type Positive is Int{> 0};
+type Negative is Int{< 0};
+type NonZero is Int{!= 0};
+
+// Text refinements
+type NonEmptyText is Text{len(it) > 0};
+type Email is Text{len(it) > 5};
+type ShortText is Text{len(it) < 100};
+
+// Numeric ranges
+type Percentage is Int{>= 0 && it <= 100};
+type Port is Int{> 0 && it < 65536};
+type BoundedFloat is Float{0.0 <= it && it <= 1.0};
+
+// ========================================
+// 5. GENERIC TYPES
+// ========================================
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C
+};
+
+type Box<T> is {
+    value: T
+};
+
+type Either<L, R> is | Left(L) | Right(R);
+
+// ========================================
+// 6. NESTED GENERIC TYPES
+// ========================================
+
+type NestedMaybe<T> is Maybe<Maybe<T>>;
+
+type ResultPair<T, E> is Result<Pair<T, T>, E>;
+
+// ========================================
+// 7. TEST FUNCTIONS FOR BASIC TYPES
+// ========================================
+
+fn test_basic_types() {
+    let _ = print("=== Test 1: Basic Type Definitions ===");
+
+    let user_id: UserId = 42;
+    let user_name: UserName = "Alice";
+    let score: Score = 95.5;
+
+    let _ = print(f"UserId: {user_id}");
+    let _ = print(f"UserName: {user_name}");
+    let _ = print(f"Score: {score}");
+}
+
+// ========================================
+// 8. TEST FUNCTIONS FOR RECORD TYPES
+// ========================================
+
+fn create_point(x: Float, y: Float) -> Point {
+    Point { x: x, y: y }
+}
+
+fn point_distance_squared(p: Point) -> Float {
+    p.x * p.x + p.y * p.y
+}
+
+fn create_person(id: UserId, name: UserName, age: Int) -> Person {
+    Person { id: id, name: name, age: age }
+}
+
+fn person_info(p: Person) -> Text {
+    f"{p.name} (ID: {p.id}, Age: {p.age})"
+}
+
+fn test_record_types() {
+    let _ = print("\n=== Test 2: Record Types ===");
+
+    let p1 = create_point(3.0, 4.0);
+    let _ = print(f"Point: ({p1.x}, {p1.y})");
+    let _ = print(f"Distance squared: {point_distance_squared(p1)}");
+
+    let person = create_person(1, "Bob", 30);
+    let _ = print(person_info(person));
+
+    let rect = Rectangle {
+        top_left: Point { x: 0.0, y: 10.0 },
+        bottom_right: Point { x: 10.0, y: 0.0 }
+    };
+    let _ = print(f"Rectangle: TL({rect.top_left.x}, {rect.top_left.y}), BR({rect.bottom_right.x}, {rect.bottom_right.y})");
+}
+
+// ========================================
+// 9. TEST FUNCTIONS FOR VARIANT TYPES
+// ========================================
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "Red",
+        Green => "Green",
+        Blue => "Blue",
+        Yellow => "Yellow"
+    }
+}
+
+fn opposite_direction(d: Direction) -> Direction {
+    match d {
+        North => South,
+        South => North,
+        East => West,
+        West => East
+    }
+}
+
+fn unwrap_maybe<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(value) => value,
+        None => default
+    }
+}
+
+fn map_result<T, E>(r: Result<T, E>) -> Text {
+    match r {
+        Ok(val) => f"Success",
+        Err(err) => f"Failure"
+    }
+}
+
+fn test_variant_types() {
+    let _ = print("\n=== Test 3: Variant Types ===");
+
+    let c = Green;
+    let _ = print(f"Color: {color_name(c)}");
+
+    let d = North;
+    let opposite = opposite_direction(d);
+    let _ = print(f"Opposite of North: {color_name(opposite)}");
+
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    let _ = print(f"unwrap_maybe(Some(42), 0) = {unwrap_maybe(some_val, 0)}");
+    let _ = print(f"unwrap_maybe(None, 0) = {unwrap_maybe(none_val, 0)}");
+
+    let ok: Result<Int, Text> = Ok(100);
+    let err: Result<Int, Text> = Err("error");
+    let _ = print(f"Result Ok: {map_result(ok)}");
+    let _ = print(f"Result Err: {map_result(err)}");
+}
+
+// ========================================
+// 10. TEST FUNCTIONS FOR SHAPES
+// ========================================
+
+fn shape_area(s: Shape) -> Float {
+    match s {
+        Circle { radius } => 3.14159 * radius * radius,
+        Rectangle { width, height } => width * height,
+        Triangle { base, height } => 0.5 * base * height
+    }
+}
+
+fn shape_description(s: Shape) -> Text {
+    match s {
+        Circle { radius } => f"Circle with radius {radius}",
+        Rectangle { width, height } => f"Rectangle {width}x{height}",
+        Triangle { base, height } => f"Triangle base={base}, height={height}"
+    }
+}
+
+fn test_shape_variants() {
+    let _ = print("\n=== Test 4: Shape Variant Types ===");
+
+    let circle = Circle { radius: 5.0 };
+    let _ = print(shape_description(circle));
+    let _ = print(f"Area: {shape_area(circle)}");
+
+    let rect = Rectangle { width: 4.0, height: 6.0 };
+    let _ = print(shape_description(rect));
+    let _ = print(f"Area: {shape_area(rect)}");
+
+    let triangle = Triangle { base: 3.0, height: 4.0 };
+    let _ = print(shape_description(triangle));
+    let _ = print(f"Area: {shape_area(triangle)}");
+}
+
+// ========================================
+// 11. TEST FUNCTIONS FOR REFINEMENT TYPES
+// ========================================
+
+fn increment_positive(x: Positive) -> Positive {
+    x + 1
+}
+
+fn validate_percentage(x: Percentage) -> Text {
+    f"Valid percentage: {x}%"
+}
+
+fn validate_port(p: Port) -> Text {
+    f"Valid port: {p}"
+}
+
+fn normalize_bounded(x: BoundedFloat) -> BoundedFloat {
+    x * 0.5
+}
+
+fn test_refinement_types() {
+    let _ = print("\n=== Test 5: Refinement Types ===");
+
+    let pos: Positive = 10;
+    let _ = print(f"Positive: {pos}, incremented: {increment_positive(pos)}");
+
+    let pct: Percentage = 75;
+    let _ = print(validate_percentage(pct));
+
+    let port: Port = 8080;
+    let _ = print(validate_port(port));
+
+    let bounded: BoundedFloat = 0.8;
+    let normalized = normalize_bounded(bounded);
+    let _ = print(f"BoundedFloat: {bounded}, normalized: {normalized}");
+
+    let non_empty: NonEmptyText = "Hello";
+    let _ = print(f"NonEmptyText: {non_empty}");
+}
+
+// ========================================
+// 12. TEST FUNCTIONS FOR GENERIC TYPES
+// ========================================
+
+fn swap_pair<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn first<A, B>(p: Pair<A, B>) -> A {
+    p.first
+}
+
+fn second<A, B>(p: Pair<A, B>) -> B {
+    p.second
+}
+
+fn box_value<T>(val: T) -> Box<T> {
+    Box { value: val }
+}
+
+fn unbox<T>(b: Box<T>) -> T {
+    b.value
+}
+
+fn either_to_text<L, R>(e: Either<L, R>) -> Text {
+    match e {
+        Left(l) => "Left variant",
+        Right(r) => "Right variant"
+    }
+}
+
+fn test_generic_types() {
+    let _ = print("\n=== Test 6: Generic Types ===");
+
+    let pair1: Pair<Int, Text> = Pair { first: 42, second: "answer" };
+    let _ = print(f"Pair: ({pair1.first}, {pair1.second})");
+
+    let pair2 = swap_pair(pair1);
+    let _ = print(f"Swapped: ({pair2.first}, {pair2.second})");
+
+    let triple: Triple<Int, Float, Text> = Triple {
+        first: 1,
+        second: 2.5,
+        third: "three"
+    };
+    let _ = print(f"Triple: ({triple.first}, {triple.second}, {triple.third})");
+
+    let boxed = box_value(100);
+    let unboxed = unbox(boxed);
+    let _ = print(f"Boxed and unboxed: {unboxed}");
+
+    let left: Either<Int, Text> = Left(42);
+    let right: Either<Int, Text> = Right("text");
+    let _ = print(either_to_text(left));
+    let _ = print(either_to_text(right));
+}
+
+// ========================================
+// 13. TEST FUNCTIONS FOR NESTED TYPES
+// ========================================
+
+fn flatten_nested_maybe<T>(nm: NestedMaybe<T>) -> Maybe<T> {
+    match nm {
+        Some(inner) => match inner {
+            Some(val) => Some(val),
+            None => None
+        },
+        None => None
+    }
+}
+
+fn test_nested_types() {
+    let _ = print("\n=== Test 7: Nested Generic Types ===");
+
+    let nested_some: NestedMaybe<Int> = Some(Some(42));
+    let nested_none: NestedMaybe<Int> = Some(None);
+    let nested_outer_none: NestedMaybe<Int> = None;
+
+    let flat1 = flatten_nested_maybe(nested_some);
+    let flat2 = flatten_nested_maybe(nested_none);
+    let flat3 = flatten_nested_maybe(nested_outer_none);
+
+    let result1 = unwrap_maybe(flat1, 0);
+    let result2 = unwrap_maybe(flat2, 0);
+    let result3 = unwrap_maybe(flat3, 0);
+
+    let _ = print(f"Flatten Some(Some(42)): {result1}");
+    let _ = print(f"Flatten Some(None): {result2}");
+    let _ = print(f"Flatten None: {result3}");
+}
+
+// ========================================
+// 14. TEST EDGE CASES
+// ========================================
+
+fn test_edge_cases() {
+    let _ = print("\n=== Test 8: Edge Cases ===");
+
+    // Unit type
+    let unit_val = ();
+    let _ = print("Unit type: ()");
+
+    // Nested records
+    let nested_rect = Rectangle {
+        top_left: Point { x: 0.0, y: 0.0 },
+        bottom_right: Point { x: 1.0, y: 1.0 }
+    };
+    let _ = print(f"Nested rectangle created successfully");
+
+    // Multiple type parameters
+    let complex_pair: Pair<Maybe<Int>, Result<Text, Int>> = Pair {
+        first: Some(5),
+        second: Ok("success")
+    };
+    let _ = print("Complex nested generics created successfully");
+}
+
+// ========================================
+// 15. MAIN ENTRY POINT
+// ========================================
+
+fn main() {
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  COMPREHENSIVE TYPE SYSTEM TEST SUITE                ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    test_basic_types();
+    test_record_types();
+    test_variant_types();
+    test_shape_variants();
+    test_refinement_types();
+    test_generic_types();
+    test_nested_types();
+    test_edge_cases();
+
+    let _ = print("");
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  ALL TYPE SYSTEM TESTS COMPLETED                     ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+}

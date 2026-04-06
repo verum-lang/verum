@@ -1,0 +1,17 @@
+// Test Self in implementation
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Point is { x: Int, y: Int };
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        true
+    }
+}
+
+fn main() {
+    print("Self in impl test");
+}

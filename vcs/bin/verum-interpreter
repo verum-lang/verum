@@ -1,0 +1,20 @@
+#!/bin/bash
+# Wrapper script for running Verum programs in interpreter mode (Tier 0)
+# Used by vtest for VCS testing
+#
+# Tier 0: Interpreter mode - instant start, slower execution, full CBGR checks (~100ns)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERUM_CLI="${VERUM_CLI:-$SCRIPT_DIR/../../target/release/verum}"
+
+if [ ! -x "$VERUM_CLI" ]; then
+    VERUM_CLI="$SCRIPT_DIR/../../target/debug/verum"
+fi
+
+if [ ! -x "$VERUM_CLI" ]; then
+    echo "Error: verum CLI not found. Run 'cargo build --release -p verum_cli'" >&2
+    exit 1
+fi
+
+# Tier 0: Run in interpreted mode
+exec "$VERUM_CLI" run --interp "$@"

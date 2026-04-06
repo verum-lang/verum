@@ -1,0 +1,94 @@
+// Test basic protocol definitions (traits/interfaces)
+// Protocols define abstract behavior that types can implement
+
+type Display is protocol {
+    fn display(self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(self) -> Text;
+};
+
+type Comparable is protocol {
+    fn compare(self, other: Self) -> Int;
+};
+
+type Stringify is protocol {
+    fn to_string(self) -> Text;
+    fn from_string(s: Text) -> Self;
+};
+
+// Record type that will implement protocols
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type User is {
+    id: Int,
+    name: Text
+};
+
+// Implementation of Display for Point
+impl Display for Point {
+    fn display(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Implementation of Debug for Point
+impl Debug for Point {
+    fn debug(self) -> Text {
+        f"Point {{ x: {self.x}, y: {self.y} }}"
+    }
+}
+
+// Implementation of Display for User
+impl Display for User {
+    fn display(self) -> Text {
+        f"{self.name} (ID: {self.id})"
+    }
+}
+
+// Generic function that works with any Display type
+fn show<T>(value: T) -> Text where type T: Display {
+    value.display()
+}
+
+// Generic function that works with any Debug type
+fn debug_print<T>(value: T) -> Text where type T: Debug {
+    value.debug()
+}
+
+fn main() {
+    let _ = print("=== Protocol Definition Tests ===");
+
+    // Test 1: Display protocol
+    let _ = print("\nTest 1: Display protocol");
+    let p1 = Point { x: 3.0, y: 4.0 };
+    let p2 = Point { x: 1.5, y: 2.5 };
+    let _ = print(show(p1));
+    let _ = print(show(p2));
+
+    // Test 2: Debug protocol
+    let _ = print("\nTest 2: Debug protocol");
+    let p3 = Point { x: 10.0, y: 20.0 };
+    let _ = print(debug_print(p3));
+
+    // Test 3: User with Display
+    let _ = print("\nTest 3: User type with Display");
+    let user1 = User { id: 1, name: "Alice" };
+    let user2 = User { id: 2, name: "Bob" };
+    let _ = print(show(user1));
+    let _ = print(show(user2));
+
+    // Test 4: Direct protocol method calls
+    let _ = print("\nTest 4: Direct protocol method calls");
+    let p4 = Point { x: 5.0, y: 6.0 };
+    let display_text = p4.display();
+    let debug_text = p4.debug();
+    let _ = print(f"Display: {display_text}");
+    let _ = print(f"Debug: {debug_text}");
+
+    let _ = print("\n=== All protocol tests passed ===");
+}

@@ -1,0 +1,12 @@
+type Box<T> is { value: T };
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() {
+    // This should trigger the occurs check: x = Box<x>
+    // This creates an infinite type
+    let x = identity(Box { value: x });
+    let _ = println(f"Value: {x}");
+}

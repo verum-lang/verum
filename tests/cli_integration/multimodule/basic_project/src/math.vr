@@ -1,0 +1,26 @@
+// Math module
+// Provides basic arithmetic operations
+
+pub fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+pub fn subtract(a: Int, b: Int) -> Int {
+    a - b
+}
+
+pub fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+pub fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("Division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+pub fn power(base: Int, exp: Int) -> Int {
+    base ** exp
+}

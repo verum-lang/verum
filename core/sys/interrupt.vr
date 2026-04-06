@@ -1,0 +1,487 @@
+module sys.interrupt;
+
+/// Verum Standard Library: Interrupt Handling Infrastructure
+///
+/// This module provides safe interrupt handling primitives for systems programming.
+/// Unlike C (which uses compiler extensions) or Rust (which requires `#[naked]` + unsafe),
+/// Verum provides:
+/// - Safe `@interrupt` attribute with automatic prologue/epilogue generation
+/// - Interrupt-safe data structures (InterruptCell)
+/// - Critical section primitives with automatic restoration
+/// - Platform-specific exception frame types
+///
+/// # Core Concepts
+///
+/// ## @interrupt Attribute
+/// The `@interrupt(vector = N)` attribute marks a function as an interrupt handler:
+/// - Compiler generates proper calling convention (X86_INTR on x86_64)
+/// - Automatic save/restore of callee-saved registers
+/// - Proper return instruction (IRET on x86_64)
+///
+/// ## @naked Attribute
+/// The `@naked` attribute generates a function with no prologue/epilogue:
+/// - For context switching and low-level assembly
+/// - Must use inline assembly for the entire function body
+/// - Calling convention must be specified manually
+///
+/// ## Critical Sections
+/// Critical sections disable interrupts for atomic operations:
+/// - RAII pattern with CriticalSection guard
+/// - Automatic interrupt restoration on drop
+/// - Nesting-safe (restores previous interrupt state)
+///
+/// # Examples
+///
+/// ```verum
+/// // Simple interrupt handler
+/// @interrupt(vector = 0x20)
+/// fn timer_handler(frame: &mut ExceptionFrame) {
+///     TIMER_COUNT.fetch_add(1, MemoryOrdering.Relaxed);
+///     // Acknowledge interrupt
+///     TIMER_STATUS.clear(TIMER_PENDING);
+/// }
+///
+/// // Critical section for atomic operations
+/// fn update_shared_data() {
+///     let _guard = CriticalSection.enter();
+///     // Interrupts disabled in this block
+///     SHARED_DATA.value += 1;
+///     // Interrupts restored when guard is dropped
+/// }
+/// ```
+///
+/// Implementation Reference: docs/architecture/low-level-features.md Section 4
+
+// =============================================================================
+// EXCEPTION FRAME TYPES
+// =============================================================================
+
+/// x86_64 Exception Frame - passed to interrupt handlers.
+///
+/// This structure matches the hardware-pushed exception frame layout.
+/// The compiler passes a mutable reference to allow modifying return state.
+@repr(C)
+@cfg(target_arch = "x86_64")
+public type ExceptionFrame is {
+    // Error code (only for some exceptions, otherwise padding)
+    error_code: UInt64,
+
+    // Hardware-saved state (pushed by CPU)
+    rip: UInt64,        // Instruction pointer
+    cs: UInt64,         // Code segment
+    rflags: UInt64,     // CPU flags
+    rsp: UInt64,        // Stack pointer
+    ss: UInt64,         // Stack segment
+};
+
+/// AArch64 Exception Frame.
+@repr(C)
+@cfg(target_arch = "aarch64")
+public type ExceptionFrame is {
+    // Exception syndrome register
+    esr: UInt64,
+
+    // Exception link register (return address)
+    elr: UInt64,
+
+    // Saved program status register
+    spsr: UInt64,
+
+    // Stack pointer at exception time
+    sp: UInt64,
+
+    // General purpose registers (x0-x30)
+    x: [UInt64; 31],
+};
+
+implement ExceptionFrame {
+    /// Get the instruction pointer at the time of the exception.
+    @inline(always)
+    @cfg(target_arch = "x86_64")
+    public fn instruction_pointer(&self) -> USize {
+        self.rip as USize
+    }
+
+    @inline(always)
+    @cfg(target_arch = "aarch64")
+    public fn instruction_pointer(&self) -> USize {
+        self.elr as USize
+    }
+
+    /// Get the stack pointer at the time of the exception.
+    @inline(always)
+    @cfg(target_arch = "x86_64")
+    public fn stack_pointer(&self) -> USize {
+        self.rsp as USize
+    }
+
+    @inline(always)
+    @cfg(target_arch = "aarch64")
+    public fn stack_pointer(&self) -> USize {
+        self.sp as USize
+    }
+}
+
+// =============================================================================
+// INTERRUPT CONTROL PRIMITIVES
+// =============================================================================
+
+/// Disable interrupts and return previous state.
+///
+/// Returns the previous interrupt enable state, which should be passed
+/// to `restore_interrupts` to restore the previous state.
+@inline(always)
+@intrinsic("disable_interrupts")
+public fn disable_interrupts() -> USize;
+
+/// Restore interrupts to a previous state.
+///
+/// Pass the value returned by `disable_interrupts` to restore
+/// the previous interrupt state (enabled or disabled).
+@inline(always)
+@intrinsic("restore_interrupts")
+public fn restore_interrupts(previous: USize);
+
+/// Enable interrupts unconditionally.
+@inline(always)
+@intrinsic("enable_interrupts")
+public fn enable_interrupts();
+
+/// Check if interrupts are currently enabled.
+@inline(always)
+@intrinsic("interrupts_enabled")
+public fn interrupts_enabled() -> Bool;
+
+/// Save interrupt state and disable (combined operation).
+///
+/// More efficient than separate read + disable on some platforms.
+@inline(always)
+@intrinsic("save_and_disable_interrupts")
+public fn save_and_disable_interrupts() -> USize;
+
+// =============================================================================
+// CRITICAL SECTION
+// =============================================================================
+
+/// RAII guard for critical sections.
+///
+/// Disables interrupts when created, restores previous state when dropped.
+/// This is the safe way to perform atomic operations with respect to interrupts.
+///
+/// # Example
+///
+/// ```verum
+/// fn atomic_increment(counter: &mut USize) {
+///     let _guard = CriticalSection.enter();
+///     *counter += 1;
+///     // Interrupts restored here when _guard goes out of scope
+/// }
+/// ```
+public type CriticalSection is {
+    previous_state: USize,
+};
+
+implement CriticalSection {
+    /// Enter a critical section, disabling interrupts.
+    ///
+    /// Returns a guard that restores the previous interrupt state when dropped.
+    @inline(always)
+    public fn enter() -> CriticalSection {
+        let state = save_and_disable_interrupts();
+        CriticalSection { previous_state: state }
+    }
+
+    /// Check if we're currently in a critical section.
+    @inline(always)
+    public fn is_active() -> Bool {
+        !interrupts_enabled()
+    }
+}
+
+implement Drop for CriticalSection {
+    /// Restore previous interrupt state on drop.
+    @inline(always)
+    fn drop(&mut self) {
+        restore_interrupts(self.previous_state);
+    }
+}
+
+/// Execute a closure with interrupts disabled.
+///
+/// Convenience function that creates a critical section, executes
+/// the closure, and restores interrupt state.
+@inline(always)
+public fn with_interrupts_disabled<R, F: Fn() -> R>(f: F) -> R {
+    let _guard = CriticalSection.enter();
+    f()
+}
+
+// =============================================================================
+// INTERRUPT-SAFE DATA STRUCTURES
+// =============================================================================
+
+/// Interrupt-safe cell for shared data between interrupts and main code.
+///
+/// Unlike RefCell which is not interrupt-safe, InterruptCell ensures
+/// atomic access by disabling interrupts during access.
+///
+/// # Example
+///
+/// ```verum
+/// static SHARED: InterruptCell<Counter> = InterruptCell.new(Counter.zero());
+///
+/// @interrupt(vector = 0x20)
+/// fn timer_handler(frame: &mut ExceptionFrame) {
+///     SHARED.with_disabled(|counter| {
+///         counter.increment();
+///     });
+/// }
+///
+/// fn main_loop() {
+///     loop {
+///         let count = SHARED.with_disabled(|counter| counter.value());
+///         process(count);
+///     }
+/// }
+/// ```
+public type InterruptCell<T> is {
+    value: UnsafeCell<T>,
+};
+
+implement<T> InterruptCell<T> {
+    /// Create a new InterruptCell with the given value.
+    @const
+    public fn new(value: T) -> InterruptCell<T> {
+        InterruptCell { value: UnsafeCell.new(value) }
+    }
+
+    /// Access the value with interrupts disabled.
+    ///
+    /// The closure receives a mutable reference to the inner value.
+    /// Interrupts are disabled for the duration of the closure.
+    @inline(always)
+    public fn with_disabled<R, F: Fn(&mut T) -> R>(&self, f: F) -> R {
+        let _guard = CriticalSection.enter();
+        let ptr = self.value.get();
+        // SAFETY: Interrupts are disabled, so no concurrent access
+        f(unsafe { &mut *ptr })
+    }
+
+    /// Get a raw pointer to the inner value.
+    ///
+    /// # Safety
+    /// Caller must ensure no concurrent access (e.g., via critical section).
+    @inline(always)
+    public fn get_ptr(&self) -> *mut T {
+        self.value.get()
+    }
+}
+
+// InterruptCell is Send if T is Send (can be accessed from interrupts)
+unsafe implement<T: Send> Send for InterruptCell<T> {}
+
+// InterruptCell is Sync because access is serialized via interrupts disabled
+unsafe implement<T: Send> Sync for InterruptCell<T> {}
+
+// =============================================================================
+// CONTEXT SWITCHING
+// =============================================================================
+
+/// Saved CPU context for context switching.
+///
+/// Contains all callee-saved registers that must be preserved
+/// across context switches.
+@repr(C)
+@cfg(target_arch = "x86_64")
+public type CpuContext is {
+    rbx: UInt64,
+    rbp: UInt64,
+    r12: UInt64,
+    r13: UInt64,
+    r14: UInt64,
+    r15: UInt64,
+    rsp: UInt64,
+    rip: UInt64,     // Return address (stored at [rsp] on switch)
+};
+
+@repr(C)
+@cfg(target_arch = "aarch64")
+public type CpuContext is {
+    // Callee-saved registers x19-x29, x30 (link register), sp
+    x19: UInt64,
+    x20: UInt64,
+    x21: UInt64,
+    x22: UInt64,
+    x23: UInt64,
+    x24: UInt64,
+    x25: UInt64,
+    x26: UInt64,
+    x27: UInt64,
+    x28: UInt64,
+    x29: UInt64,  // Frame pointer
+    x30: UInt64,  // Link register (return address)
+    sp: UInt64,
+};
+
+implement CpuContext {
+    /// Create a zero-initialized context.
+    @const
+    public fn zero() -> CpuContext {
+        @cfg(target_arch = "x86_64") {
+            return CpuContext { rbx: 0, rbp: 0, r12: 0, r13: 0, r14: 0, r15: 0, rsp: 0, rip: 0 };
+        }
+        @cfg(target_arch = "aarch64") {
+            return CpuContext { x19: 0, x20: 0, x21: 0, x22: 0, x23: 0, x24: 0, x25: 0,
+                                x26: 0, x27: 0, x28: 0, x29: 0, x30: 0, sp: 0 };
+        }
+        unreachable()
+    }
+
+    /// Initialize context to start at a function with a given stack.
+    public fn init(&mut self, entry: fn(), stack_top: *mut ()) {
+        @cfg(target_arch = "x86_64") {
+            self.rip = entry as UInt64;
+            self.rsp = stack_top as UInt64;
+        }
+        @cfg(target_arch = "aarch64") {
+            self.x30 = entry as UInt64;  // Link register = entry point
+            self.sp = stack_top as UInt64;
+        }
+    }
+}
+
+/// Switch from current context to next context.
+///
+/// Saves current context to `from`, loads context from `to`.
+/// This is a naked function using inline assembly.
+@naked
+@cfg(target_arch = "x86_64")
+public fn context_switch(from: &mut CpuContext, to: &CpuContext) {
+    @asm {
+        // Save callee-saved registers to `from` (rdi)
+        "mov [rdi + 0x00], rbx",
+        "mov [rdi + 0x08], rbp",
+        "mov [rdi + 0x10], r12",
+        "mov [rdi + 0x18], r13",
+        "mov [rdi + 0x20], r14",
+        "mov [rdi + 0x28], r15",
+        "mov [rdi + 0x30], rsp",
+
+        // Load callee-saved registers from `to` (rsi)
+        "mov rbx, [rsi + 0x00]",
+        "mov rbp, [rsi + 0x08]",
+        "mov r12, [rsi + 0x10]",
+        "mov r13, [rsi + 0x18]",
+        "mov r14, [rsi + 0x20]",
+        "mov r15, [rsi + 0x28]",
+        "mov rsp, [rsi + 0x30]",
+
+        "ret",
+        // noreturn
+    }
+}
+
+@naked
+@cfg(target_arch = "aarch64")
+public fn context_switch(from: &mut CpuContext, to: &CpuContext) {
+    @asm {
+        // Save callee-saved registers to `from` (x0)
+        "stp x19, x20, [x0, #0x00]",
+        "stp x21, x22, [x0, #0x10]",
+        "stp x23, x24, [x0, #0x20]",
+        "stp x25, x26, [x0, #0x30]",
+        "stp x27, x28, [x0, #0x40]",
+        "stp x29, x30, [x0, #0x50]",
+        "mov x9, sp",
+        "str x9, [x0, #0x60]",
+
+        // Load callee-saved registers from `to` (x1)
+        "ldp x19, x20, [x1, #0x00]",
+        "ldp x21, x22, [x1, #0x10]",
+        "ldp x23, x24, [x1, #0x20]",
+        "ldp x25, x26, [x1, #0x30]",
+        "ldp x27, x28, [x1, #0x40]",
+        "ldp x29, x30, [x1, #0x50]",
+        "ldr x9, [x1, #0x60]",
+        "mov sp, x9",
+
+        "ret",
+        // noreturn
+    }
+}
+
+// =============================================================================
+// INTERRUPT VECTOR TABLE
+// =============================================================================
+
+/// Interrupt vector table entry.
+///
+/// Platform-specific format for interrupt descriptor table entries.
+@repr(C, packed)
+@cfg(target_arch = "x86_64")
+public type IdtEntry is {
+    offset_low: UInt16,
+    selector: UInt16,
+    ist: UInt8,
+    type_attr: UInt8,
+    offset_mid: UInt16,
+    offset_high: UInt32,
+    reserved: UInt32,
+};
+
+implement IdtEntry {
+    /// Create an IDT entry for an interrupt handler.
+    @cfg(target_arch = "x86_64")
+    public fn new(handler: fn(&mut ExceptionFrame), selector: UInt16, ist: UInt8) -> IdtEntry {
+        let addr = handler as USize;
+        IdtEntry {
+            offset_low: (addr & 0xFFFF) as UInt16,
+            selector: selector,
+            ist: ist,
+            type_attr: 0x8E,  // Present, DPL=0, Interrupt Gate
+            offset_mid: ((addr >> 16) & 0xFFFF) as UInt16,
+            offset_high: (addr >> 32) as UInt32,
+            reserved: 0,
+        }
+    }
+
+    /// Create a trap gate entry (interrupts stay enabled).
+    @cfg(target_arch = "x86_64")
+    public fn trap_gate(handler: fn(&mut ExceptionFrame), selector: UInt16) -> IdtEntry {
+        let addr = handler as USize;
+        IdtEntry {
+            offset_low: (addr & 0xFFFF) as UInt16,
+            selector: selector,
+            ist: 0,
+            type_attr: 0x8F,  // Present, DPL=0, Trap Gate
+            offset_mid: ((addr >> 16) & 0xFFFF) as UInt16,
+            offset_high: (addr >> 32) as UInt32,
+            reserved: 0,
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION SUPPORT
+// =============================================================================
+
+/// Ghost predicates for formal verification of interrupt handlers.
+
+/// Ghost predicate: interrupts are currently disabled.
+@ghost
+public fn interrupts_disabled_ghost() -> Bool;
+
+/// Ghost predicate: we're inside an interrupt handler.
+@ghost
+public fn in_interrupt_context() -> Bool;
+
+// Verification example (ghost code - not compiled):
+//
+// @interrupt(vector = 0x20)
+// @verify(formal)
+// @requires(interrupts_disabled_ghost())
+// @ensures(timer_acknowledged())
+// fn verified_timer_handler(frame: &mut ExceptionFrame) {
+//     TIMER_STATUS.clear_bits(TIMER_PENDING);
+//     TIMER_COUNT.write(TIMER_RELOAD);
+// }

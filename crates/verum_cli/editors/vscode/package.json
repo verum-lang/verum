@@ -1,0 +1,133 @@
+{
+  "name": "verum",
+  "displayName": "Verum Language Support",
+  "description": "Language support for Verum with LSP integration, cost hints, and verification status",
+  "version": "0.1.0",
+  "publisher": "verum-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "verum",
+    "systems programming",
+    "refinement types",
+    "verification"
+  ],
+  "activationEvents": [
+    "onLanguage:verum"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "verum",
+        "aliases": [
+          "Verum",
+          "verum"
+        ],
+        "extensions": [
+          ".vr"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "verum",
+        "scopeName": "source.verum",
+        "path": "./syntaxes/verum.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Verum",
+      "properties": {
+        "verum.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Verum Language Server"
+        },
+        "verum.lsp.showCostHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show CBGR cost hints inline (~15ns overhead)"
+        },
+        "verum.validation.mode": {
+          "type": "string",
+          "enum": [
+            "incremental",
+            "on-save",
+            "on-demand"
+          ],
+          "default": "incremental",
+          "description": "When to run type checking and validation"
+        },
+        "verum.format.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format files automatically on save"
+        },
+        "verum.verify.showStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show verification status badges"
+        },
+        "verum.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces communication between VS Code and language server"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "verum.restartServer",
+        "title": "Restart Verum Language Server"
+      },
+      {
+        "command": "verum.showCosts",
+        "title": "Show CBGR Costs"
+      },
+      {
+        "command": "verum.verify",
+        "title": "Run Verification"
+      },
+      {
+        "command": "verum.profile",
+        "title": "Profile Performance"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "verum.verify",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorLangId == verum"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

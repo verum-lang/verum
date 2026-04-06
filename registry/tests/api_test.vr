@@ -1,0 +1,18 @@
+// API tests
+//
+// Note: These tests use only built-in functions.
+// HTTP testing will be available when std.network.http2 is implemented.
+
+@test
+fn test_index_route() {
+    // Placeholder: HTTP testing requires std.network.http2 module
+    let route = "/";
+    assert(len(route) == 1, "Route path should have length 1");
+}
+
+@test
+fn test_hello_route() {
+    // Placeholder: HTTP testing requires std.network.http2 module
+    let route = "/api/hello";
+    assert(contains(route, "hello"), "Route should contain 'hello'");
+}

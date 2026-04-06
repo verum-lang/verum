@@ -1,0 +1,759 @@
+# Verum Compliance Suite - Differential Testing
+#
+# Verifies semantic equivalence between execution tiers:
+# - Tier 0 (Interpreter) must produce identical results to Tier 3 (AOT)
+# - Detects optimization bugs and semantic drift
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+
+name: VCS Differential Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'crates/verum_interpreter/**'
+      - 'crates/verum_codegen/**'
+      - 'crates/verum_runtime/**'
+      - 'vcs/differential/**'
+      - '.github/workflows/vcs-differential.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/verum_interpreter/**'
+      - 'crates/verum_codegen/**'
+      - 'crates/verum_runtime/**'
+      - 'vcs/differential/**'
+  schedule:
+    # Run comprehensive differential tests daily at 5 AM UTC
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs:
+      tiers:
+        description: 'Tiers to compare (comma-separated)'
+        required: false
+        default: '0,3'
+        type: string
+      test_set:
+        description: 'Test set to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - basic
+          - arithmetic
+          - control_flow
+          - memory
+          - concurrency
+          - edge_cases
+      tolerance:
+        description: 'Float tolerance (epsilon)'
+        required: false
+        default: '1e-10'
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VCS_PARALLEL: 8
+  VCS_DIFFERENTIAL_TIMEOUT: 60000
+
+# Cancel previous runs for same PR
+concurrency:
+  group: vcs-diff-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # Setup - Determine test configuration
+  # ==========================================================================
+  setup:
+    name: Setup Differential Tests
+    runs-on: ubuntu-latest
+    outputs:
+      tiers: ${{ steps.config.outputs.tiers }}
+      test_set: ${{ steps.config.outputs.test_set }}
+      tolerance: ${{ steps.config.outputs.tolerance }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Configuration
+        id: config
+        run: |
+          TIERS="${{ github.event.inputs.tiers || '0,3' }}"
+          TEST_SET="${{ github.event.inputs.test_set || 'all' }}"
+          TOLERANCE="${{ github.event.inputs.tolerance || '1e-10' }}"
+
+          echo "tiers=$TIERS" >> $GITHUB_OUTPUT
+          echo "test_set=$TEST_SET" >> $GITHUB_OUTPUT
+          echo "tolerance=$TOLERANCE" >> $GITHUB_OUTPUT
+
+      - name: Build Test Matrix
+        id: matrix
+        run: |
+          # Determine test sets to run
+          TEST_SET="${{ github.event.inputs.test_set || 'all' }}"
+
+          if [ "$TEST_SET" == "all" ]; then
+            echo 'matrix={"test_set":["basic","arithmetic","control_flow","memory","concurrency","edge_cases","randomized"]}' >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"test_set\":[\"$TEST_SET\"]}" >> $GITHUB_OUTPUT
+          fi
+
+  # ==========================================================================
+  # Tier 0 vs Tier 3 - Core Semantic Equivalence
+  # ==========================================================================
+  diff-tier0-tier3:
+    name: Differential (Tier 0 vs Tier 3) - ${{ matrix.test_set }}
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 bc jq
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-diff-v1"
+          shared-key: tier0-tier3
+
+      - name: Build VCS tools
+        run: |
+          cd vcs/runner/vtest && cargo build --release
+          cd ../../../vcs/differential/runner && cargo build --release
+
+      - name: Run Differential Tests (${{ matrix.test_set }})
+        id: diff
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          # Run differential runner
+          differential/runner/target/release/vcs-diff \
+            --tier1 0 \
+            --tier2 3 \
+            --test-set ${{ matrix.test_set }} \
+            --tolerance ${{ needs.setup.outputs.tolerance }} \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_DIFFERENTIAL_TIMEOUT \
+            --format json \
+            --output reports/diff-tier0-tier3-${{ matrix.test_set }}.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/diff-tier0-tier3-${{ matrix.test_set }}.log
+
+          # Analyze results
+          if [ -f "reports/diff-tier0-tier3-${{ matrix.test_set }}.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/diff-tier0-tier3-${{ matrix.test_set }}.json)
+            EQUIVALENT=$(jq -r '.summary.equivalent // 0' reports/diff-tier0-tier3-${{ matrix.test_set }}.json)
+            DIVERGENT=$(jq -r '.summary.divergent // 0' reports/diff-tier0-tier3-${{ matrix.test_set }}.json)
+
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "equivalent=$EQUIVALENT" >> $GITHUB_OUTPUT
+            echo "divergent=$DIVERGENT" >> $GITHUB_OUTPUT
+
+            echo "## Differential Test Results: ${{ matrix.test_set }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Tests | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Equivalent | $EQUIVALENT |" >> $GITHUB_STEP_SUMMARY
+            echo "| Divergent | $DIVERGENT |" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$DIVERGENT" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Divergent Tests" >> $GITHUB_STEP_SUMMARY
+              jq -r '.divergences[] | "- \(.test): \(.reason)"' \
+                reports/diff-tier0-tier3-${{ matrix.test_set }}.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+              echo "::error::Found $DIVERGENT divergent test(s) in ${{ matrix.test_set }}"
+              exit 1
+            fi
+          fi
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-results-tier0-tier3-${{ matrix.test_set }}
+          path: vcs/reports/diff-tier0-tier3-${{ matrix.test_set }}.*
+          retention-days: 30
+
+  # ==========================================================================
+  # Cross-Tier Matrix - All tier combinations
+  # ==========================================================================
+  diff-cross-tier:
+    name: Cross-Tier Differential (Tier ${{ matrix.tier1 }} vs Tier ${{ matrix.tier2 }})
+    needs: [setup, diff-tier0-tier3]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier1: 0
+            tier2: 1
+            name: "Interpreter vs JIT Baseline"
+          - tier1: 1
+            tier2: 2
+            name: "JIT Baseline vs JIT Optimized"
+          - tier1: 2
+            tier2: 3
+            name: "JIT Optimized vs AOT"
+          - tier1: 0
+            tier2: 2
+            name: "Interpreter vs JIT Optimized"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 bc jq
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-diff-v1"
+          shared-key: cross-tier
+
+      - name: Build VCS differential runner
+        run: cd vcs/differential/runner && cargo build --release
+
+      - name: Run Cross-Tier Differential (${{ matrix.name }})
+        id: diff
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          differential/runner/target/release/vcs-diff \
+            --tier1 ${{ matrix.tier1 }} \
+            --tier2 ${{ matrix.tier2 }} \
+            --test-set all \
+            --tolerance ${{ needs.setup.outputs.tolerance }} \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_DIFFERENTIAL_TIMEOUT \
+            --format json \
+            --output reports/diff-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}.json \
+            --config config/vcs.toml
+
+          if [ -f "reports/diff-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}.json" ]; then
+            DIVERGENT=$(jq -r '.summary.divergent // 0' reports/diff-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}.json)
+            echo "divergent=$DIVERGENT" >> $GITHUB_OUTPUT
+
+            if [ "$DIVERGENT" -gt 0 ]; then
+              echo "::warning::Found $DIVERGENT divergence(s) between Tier ${{ matrix.tier1 }} and Tier ${{ matrix.tier2 }}"
+            fi
+          fi
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-results-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}
+          path: vcs/reports/diff-tier${{ matrix.tier1 }}-tier${{ matrix.tier2 }}.*
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzzer Corpus Integration - Test programs from fuzzer corpus
+  # ==========================================================================
+  diff-fuzzer-corpus:
+    name: Differential with Fuzzer Corpus
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 bc jq
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-diff-v1"
+          shared-key: fuzzer-corpus
+
+      - name: Build VCS differential runner
+        run: cd vcs/differential/runner && cargo build --release
+
+      - name: Download Fuzzer Corpus
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-fuzz.yml
+          name: fuzz-corpus-*
+          path: fuzzer-corpus/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Download Crash Seeds
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-fuzz.yml
+          name: fuzz-crashes-*
+          path: crash-seeds/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Prepare Fuzzer-Derived Test Cases
+        run: |
+          cd vcs
+          mkdir -p differential/fuzzer-inputs
+
+          # Copy valid programs from fuzzer corpus (*.vr files)
+          if [ -d "../fuzzer-corpus" ]; then
+            find ../fuzzer-corpus -name "*.vr" -exec cp {} differential/fuzzer-inputs/ \; 2>/dev/null || true
+            CORPUS_COUNT=$(find differential/fuzzer-inputs -name "*.vr" | wc -l)
+            echo "Found $CORPUS_COUNT programs from fuzzer corpus"
+          fi
+
+          # Copy crash seeds for analysis (may expose differential bugs)
+          if [ -d "../crash-seeds" ]; then
+            find ../crash-seeds -type f -exec cp {} differential/fuzzer-inputs/crash_ \; 2>/dev/null || true
+          fi
+
+      - name: Run Differential on Fuzzer Corpus
+        id: diff
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          CORPUS_COUNT=$(find differential/fuzzer-inputs -type f | wc -l)
+
+          if [ "$CORPUS_COUNT" -gt 0 ]; then
+            differential/runner/target/release/vcs-diff \
+              --tier1 0 \
+              --tier2 3 \
+              --input differential/fuzzer-inputs/ \
+              --tolerance ${{ needs.setup.outputs.tolerance }} \
+              --parallel $VCS_PARALLEL \
+              --timeout $VCS_DIFFERENTIAL_TIMEOUT \
+              --skip-crashes \
+              --format json \
+              --output reports/diff-fuzzer-corpus.json \
+              --config config/vcs.toml \
+              2>&1 | tee reports/diff-fuzzer-corpus.log || true
+
+            if [ -f "reports/diff-fuzzer-corpus.json" ]; then
+              TOTAL=$(jq -r '.summary.total // 0' reports/diff-fuzzer-corpus.json)
+              DIVERGENT=$(jq -r '.summary.divergent // 0' reports/diff-fuzzer-corpus.json)
+
+              echo "total=$TOTAL" >> $GITHUB_OUTPUT
+              echo "divergent=$DIVERGENT" >> $GITHUB_OUTPUT
+
+              echo "## Fuzzer Corpus Differential Testing" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "- Corpus programs tested: $TOTAL" >> $GITHUB_STEP_SUMMARY
+              echo "- Divergences found: $DIVERGENT" >> $GITHUB_STEP_SUMMARY
+
+              if [ "$DIVERGENT" -gt 0 ]; then
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "### Divergent Fuzzer Cases" >> $GITHUB_STEP_SUMMARY
+                jq -r '.divergences[:10] | .[] | "- \(.test): \(.reason)"' reports/diff-fuzzer-corpus.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+                echo "::warning::Found $DIVERGENT divergence(s) in fuzzer-generated programs"
+              fi
+            fi
+          else
+            echo "No fuzzer corpus available - skipping"
+            echo "total=0" >> $GITHUB_OUTPUT
+            echo "divergent=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-results-fuzzer-corpus
+          path: |
+            vcs/reports/diff-fuzzer-corpus.*
+          retention-days: 30
+
+  # ==========================================================================
+  # Randomized Differential Testing
+  # ==========================================================================
+  diff-randomized:
+    name: Randomized Differential Testing
+    needs: setup
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 bc jq
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-diff-v1"
+          shared-key: randomized
+
+      - name: Build VCS tools
+        run: |
+          cd vcs/differential/runner && cargo build --release
+          cd ../../runner/vfuzz && cargo build --release
+
+      - name: Download Previous Fuzzer Corpus
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-fuzz.yml
+          name: fuzz-corpus-*
+          path: seed-corpus/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Generate Random Test Cases
+        run: |
+          cd vcs
+          mkdir -p differential/generated
+
+          # Seed from fuzzer corpus if available
+          SEED_DIR=""
+          if [ -d "../seed-corpus" ]; then
+            SEED_DIR="--seed-dir ../seed-corpus"
+          fi
+
+          # Generate random valid programs using vfuzz with optional seeding
+          runner/vfuzz/target/release/vfuzz generate \
+            --count 1000 \
+            --max-depth 8 \
+            --seed $(date +%s) \
+            $SEED_DIR \
+            --output differential/generated/ \
+            --config config/vcs.toml
+
+      - name: Run Randomized Differential Tests
+        id: diff
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          differential/runner/target/release/vcs-diff \
+            --tier1 0 \
+            --tier2 3 \
+            --input differential/generated/ \
+            --tolerance ${{ needs.setup.outputs.tolerance }} \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_DIFFERENTIAL_TIMEOUT \
+            --format json \
+            --output reports/diff-randomized.json \
+            --config config/vcs.toml
+
+          if [ -f "reports/diff-randomized.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/diff-randomized.json)
+            DIVERGENT=$(jq -r '.summary.divergent // 0' reports/diff-randomized.json)
+
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "divergent=$DIVERGENT" >> $GITHUB_OUTPUT
+
+            echo "## Randomized Differential Testing" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Total random programs tested: $TOTAL" >> $GITHUB_STEP_SUMMARY
+            echo "- Divergences found: $DIVERGENT" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$DIVERGENT" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Minimized Divergent Cases" >> $GITHUB_STEP_SUMMARY
+              # Save divergent cases for debugging
+              jq -r '.divergences[:10]' reports/diff-randomized.json >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-results-randomized
+          path: |
+            vcs/reports/diff-randomized.*
+            vcs/differential/generated/*.vr
+          retention-days: 30
+
+      - name: Upload Divergent Cases
+        uses: actions/upload-artifact@v4
+        if: steps.diff.outputs.divergent > 0
+        with:
+          name: divergent-cases
+          path: vcs/differential/divergent/
+          retention-days: 90
+
+  # ==========================================================================
+  # Memory Behavior Differential
+  # ==========================================================================
+  diff-memory:
+    name: Memory Behavior Differential
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 bc jq valgrind
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-diff-v1"
+          shared-key: memory
+
+      - name: Build VCS differential runner
+        run: cd vcs/differential/runner && cargo build --release
+
+      - name: Run Memory Differential Tests
+        id: diff
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          # Compare memory allocation patterns between tiers
+          differential/runner/target/release/vcs-diff \
+            --tier1 0 \
+            --tier2 3 \
+            --test-set memory \
+            --mode memory-profile \
+            --tolerance-memory 10.0 \
+            --parallel 4 \
+            --timeout 120000 \
+            --format json \
+            --output reports/diff-memory.json \
+            --config config/vcs.toml
+
+          if [ -f "reports/diff-memory.json" ]; then
+            MEM_DIVERGENT=$(jq -r '.summary.memory_divergent // 0' reports/diff-memory.json)
+            ALLOC_DIFF=$(jq -r '.summary.allocation_difference_percent // 0' reports/diff-memory.json)
+
+            echo "mem_divergent=$MEM_DIVERGENT" >> $GITHUB_OUTPUT
+            echo "alloc_diff=$ALLOC_DIFF" >> $GITHUB_OUTPUT
+
+            echo "## Memory Behavior Differential" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Memory divergences: $MEM_DIVERGENT" >> $GITHUB_STEP_SUMMARY
+            echo "- Allocation difference: ${ALLOC_DIFF}%" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$MEM_DIVERGENT" -gt 0 ]; then
+              echo "::warning::Memory behavior divergence detected between tiers"
+            fi
+          fi
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-results-memory
+          path: vcs/reports/diff-memory.*
+          retention-days: 30
+
+  # ==========================================================================
+  # Differential Report - Aggregate all results
+  # ==========================================================================
+  diff-report:
+    name: Differential Test Report
+    needs: [diff-tier0-tier3, diff-memory, diff-fuzzer-corpus]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all differential results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: diff-results-*
+          path: all-diff/
+          merge-multiple: false
+
+      - name: Generate Differential Report
+        run: |
+          echo "# VCS Differential Testing Report" > diff-report.md
+          echo "" >> diff-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> diff-report.md
+          echo "**Commit:** ${{ github.sha }}" >> diff-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> diff-report.md
+          echo "" >> diff-report.md
+
+          echo "## Semantic Equivalence Results" >> diff-report.md
+          echo "" >> diff-report.md
+          echo "| Tier Comparison | Total | Equivalent | Divergent | Status |" >> diff-report.md
+          echo "|-----------------|-------|------------|-----------|--------|" >> diff-report.md
+
+          TOTAL_DIVERGENT=0
+
+          for dir in all-diff/*/; do
+            for file in "$dir"*.json; do
+              if [ -f "$file" ]; then
+                TOTAL=$(jq -r '.summary.total // 0' "$file")
+                EQUIV=$(jq -r '.summary.equivalent // 0' "$file")
+                DIVG=$(jq -r '.summary.divergent // 0' "$file")
+                TOTAL_DIVERGENT=$((TOTAL_DIVERGENT + DIVG))
+
+                NAME=$(basename "$file" .json | sed 's/diff-//')
+                if [ "$DIVG" -eq 0 ]; then
+                  STATUS="PASS"
+                else
+                  STATUS="FAIL"
+                fi
+
+                echo "| $NAME | $TOTAL | $EQUIV | $DIVG | $STATUS |" >> diff-report.md
+              fi
+            done
+          done
+
+          echo "" >> diff-report.md
+          echo "## Summary" >> diff-report.md
+          echo "" >> diff-report.md
+
+          if [ $TOTAL_DIVERGENT -eq 0 ]; then
+            echo "All tiers produce semantically equivalent results." >> diff-report.md
+            echo "" >> diff-report.md
+            echo "**Status: PASSED**" >> diff-report.md
+          else
+            echo "**Warning:** Found $TOTAL_DIVERGENT divergence(s) between execution tiers." >> diff-report.md
+            echo "" >> diff-report.md
+            echo "This indicates potential semantic inconsistency that must be investigated." >> diff-report.md
+            echo "" >> diff-report.md
+            echo "**Status: FAILED**" >> diff-report.md
+          fi
+
+      - name: Upload Differential Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-differential-report
+          path: diff-report.md
+          retention-days: 90
+
+      - name: Post Summary
+        run: cat diff-report.md >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Differential Gate - Block merge on divergence
+  # ==========================================================================
+  diff-gate:
+    name: Differential Test Gate
+    needs: [diff-tier0-tier3]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Differential Results
+        run: |
+          if [ "${{ needs.diff-tier0-tier3.result }}" != "success" ]; then
+            echo "::error::Differential tests failed - Tier 0 and Tier 3 produce different results"
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Differential Test Gate: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The interpreter (Tier 0) and AOT compiler (Tier 3) produced different" >> $GITHUB_STEP_SUMMARY
+            echo "results for one or more test cases. This indicates a potential semantic" >> $GITHUB_STEP_SUMMARY
+            echo "bug in either the interpreter or the compiler optimization passes." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**This must be fixed before merging.**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "## Differential Test Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All execution tiers produce semantically equivalent results." >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Notify on Divergence
+  # ==========================================================================
+  notify-divergence:
+    name: Notify on Divergence
+    needs: [diff-gate]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,workflow
+          text: 'CRITICAL: Semantic divergence detected between execution tiers'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Critical Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `[CRITICAL] Tier Semantic Divergence - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Critical: Semantic Divergence Detected
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Commit:** ${context.sha}
+            **Date:** ${new Date().toISOString()}
+
+            The differential testing suite has detected that the interpreter (Tier 0) and
+            AOT compiler (Tier 3) produce different results for one or more test cases.
+
+            ### This is a critical issue because:
+            1. It violates the semantic equivalence guarantee
+            2. Programs may behave differently depending on execution tier
+            3. May indicate a compiler optimization bug or interpreter error
+
+            ### Action Required:
+            - [ ] Download differential test artifacts
+            - [ ] Identify the specific divergent test cases
+            - [ ] Bisect to find the offending commit
+            - [ ] Fix the root cause (interpreter or compiler)
+            - [ ] Add regression test
+
+            **Priority: P0 - Blocks all releases**
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['critical', 'semantic-bug', 'differential-testing', 'P0']
+            });

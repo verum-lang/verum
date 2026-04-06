@@ -1,0 +1,10 @@
+// Test: Multiple defer statements
+// Tests if multiple defers execute in LIFO order
+
+fn main() {
+    print("Start");
+    defer print("Defer 1");
+    defer print("Defer 2");
+    defer print("Defer 3");
+    print("End");
+}

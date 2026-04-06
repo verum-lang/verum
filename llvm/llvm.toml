@@ -1,0 +1,62 @@
+# LLVM Build Configuration for Verum Compiler
+#
+# This file specifies which LLVM version and components to build/download.
+# The build system will:
+# 1. Check for llvm/install/ directory
+# 2. Try to download prebuilt release from GitHub
+# 3. Fall back to building from source if needed
+
+[llvm]
+# Git tag to use (e.g., "llvmorg-21.0.0", "llvmorg-21.1.8", or "main")
+tag = "llvmorg-21.1.8"
+
+# Repository URL
+repo = "https://github.com/llvm/llvm-project.git"
+
+# LLVM sub-projects to enable
+# Required: lld (linker), mlir (code generation)
+# Optional: clang (C/C++ frontend, useful for debugging)
+projects = ["clang", "lld", "mlir"]
+
+# CPU targets to build
+# Fewer targets = faster build, smaller binaries
+# Common: X86, AArch64, WebAssembly, RISCV, ARM
+targets = ["X86", "AArch64", "WebAssembly"]
+
+# Build type: MinSizeRel, Release, RelWithDebInfo, Debug
+# MinSizeRel is recommended for production (smallest binary size)
+# Release provides best performance but larger binaries
+build_type = "MinSizeRel"
+
+# Use shallow clone to save disk space and time
+shallow = true
+
+# Additional CMake options (optional)
+[cmake]
+# Disable building shared libraries (we want static)
+LLVM_BUILD_LLVM_DYLIB = "OFF"
+LLVM_LINK_LLVM_DYLIB = "OFF"
+
+# Static link C++ stdlib for portability
+LLVM_STATIC_LINK_CXX_STDLIB = "ON"
+
+# Disable assertions for release builds
+LLVM_ENABLE_ASSERTIONS = "OFF"
+
+# Disable Python bindings (not needed)
+MLIR_ENABLE_BINDINGS_PYTHON = "OFF"
+
+# Enable LLD as the linker for faster builds
+LLVM_ENABLE_LLD = "ON"
+
+# Prebuilt release configuration
+[prebuilt]
+# GitHub repository for prebuilt releases
+repo = "luxquant/axiom"
+
+# Release tag pattern (will be formatted with llvm.tag)
+tag_pattern = "llvm-{tag}"
+
+# Archive naming pattern
+# Supported variables: {tag}, {os}, {arch}
+archive_pattern = "llvm-{tag}-{os}-{arch}.tar.xz"

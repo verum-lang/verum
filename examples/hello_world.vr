@@ -1,0 +1,67 @@
+// hello_world.vr
+// Basic "Hello World" example demonstrating Verum syntax
+
+// Function with parameters
+fn greet(name: Text) {
+    print(f"Hello, {name}!")
+}
+
+// Function with return value
+fn add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Expression-based function
+fn double(x: Int) -> Int = x * 2;
+
+// Type inference in return type (parameters require explicit types)
+fn inferred_add(x: Int, y: Int) = x + y;
+
+// Main entry with examples
+fn main() {
+    // Basic output
+    print("Hello, Verum!")
+
+    // Variables
+    let name = "Alice"
+    let age = 30
+    let pi = 3.14159
+
+    // Function calls
+    greet(name)
+
+    let sum = add(5, 3)
+    print(f"5 + 3 = {sum}")
+
+    let doubled = double(21)
+    print(f"Double of 21 is {doubled}")
+
+    // Collections
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Numbers: {numbers}")
+
+    // Map and filter
+    let squared = numbers.map(|x| x * x)
+    print(f"Squared: {squared}")
+
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"Evens: {evens}")
+
+    // Control flow
+    let status = if age >= 18 {
+        "adult"
+    } else {
+        "minor"
+    }
+    print(f"{name} is an {status}")
+
+    // Pattern matching
+    let color = "red"
+    let description = match color {
+        "red" => "The color of fire",
+        "blue" => "The color of sky",
+        "green" => "The color of grass",
+        _ => "Some other color"
+    }
+    print(description)
+}

@@ -1,0 +1,405 @@
+// =============================================================================
+// future.vr - Future protocol and combinators
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/poll, async/waker
+// =============================================================================
+//
+// Future represents an asynchronous computation that may not have completed.
+// This is the core abstraction for async/await.
+//
+// =============================================================================
+
+module core.async.future;
+mount core.*;
+mount .poll.*;
+mount .waker.*;
+
+// =============================================================================
+// Future Protocol
+// =============================================================================
+
+// Protocol for asynchronous computations.
+public type Future is protocol {
+    type Output;
+
+    // Attempt to resolve the future.
+    // Returns Ready(value) if complete, Pending if not.
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output>;
+};
+
+// Protocol for types that can be converted to futures.
+public type IntoFuture is protocol {
+    type Output;
+    type Future: Future<Output = Self.Output>;
+
+    fn into_future(self) -> Self.Future;
+};
+
+// Every Future implements IntoFuture (identity conversion)
+implement<F: Future> IntoFuture for F {
+    type Output = F.Output;
+    type Future = F;
+
+    fn into_future(self) -> F {
+        self
+    }
+}
+
+// =============================================================================
+// Ready<T> - Immediately complete future
+// =============================================================================
+
+// A future that is immediately ready with a value.
+public type ReadyFuture<T> is {
+    value: Maybe<T>,
+};
+
+implement<T> Future for ReadyFuture<T> {
+    type Output = T;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
+        match self.value.take() {
+            Some(v) => Poll.Ready(v),
+            None => panic("ReadyFuture polled after completion"),
+        }
+    }
+}
+
+// Create a future that is immediately ready.
+public fn ready<T>(value: T) -> ReadyFuture<T> {
+    ReadyFuture { value: Some(value) }
+}
+
+// =============================================================================
+// Pending - Never completes
+// =============================================================================
+
+// A future that never completes.
+public type PendingFuture<T> is ();
+
+implement<T> Future for PendingFuture<T> {
+    type Output = T;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
+        Poll.Pending
+    }
+}
+
+// Create a future that is always pending.
+public fn pending<T>() -> PendingFuture<T> {
+    let result: PendingFuture<T> = PendingFuture;
+    result
+}
+
+// =============================================================================
+// Lazy<F> - Deferred computation
+// =============================================================================
+
+// A future created from a closure, called on first poll.
+public type Lazy<F, T> is {
+    f: Maybe<F>,
+};
+
+implement<F: fn() -> T, T> Future for Lazy<F, T> {
+    type Output = T;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
+        match self.f.take() {
+            Some(f) => Poll.Ready(f()),
+            None => panic("Lazy future polled after completion"),
+        }
+    }
+}
+
+// Create a lazy future from a closure.
+public fn lazy<F: fn() -> T, T>(f: F) -> Lazy<F, T> {
+    Lazy { f: Some(f) }
+}
+
+// =============================================================================
+// Map<F, Fut> - Transform output
+// =============================================================================
+
+// A future that maps the output of another future.
+public type MapFuture<Fut, F> is {
+    future: Fut,
+    f: Maybe<F>,
+};
+
+implement<Fut: Future, F: fn(Fut.Output) -> T, T> Future for MapFuture<Fut, F> {
+    type Output = T;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<T> {
+        match self.future.poll(cx) {
+            Poll.Ready(v) => {
+                let f = self.f.take().expect("MapFuture polled after completion");
+                Poll.Ready(f(v))
+            }
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+// =============================================================================
+// AndThen<Fut, F> - Chain futures
+// =============================================================================
+
+// State for AndThen combinator.
+type AndThenState<Fut1, Fut2> is
+    | First(Fut1)
+    | Second(Fut2);
+
+// A future that chains another future after completion.
+public type AndThenFuture<Fut1, F, Fut2> is {
+    state: AndThenState<Fut1, Fut2>,
+    f: Maybe<F>,
+};
+
+implement<Fut1: Future, F: fn(Fut1.Output) -> Fut2, Fut2: Future> Future for AndThenFuture<Fut1, F, Fut2> {
+    type Output = Fut2.Output;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Fut2.Output> {
+        loop {
+            match &mut self.state {
+                First(fut1) => {
+                    match fut1.poll(cx) {
+                        Poll.Ready(v) => {
+                            let f = self.f.take().expect("AndThen polled after completion");
+                            self.state = Second(f(v));
+                        }
+                        Poll.Pending => return Poll.Pending,
+                    }
+                }
+                Second(fut2) => {
+                    return fut2.poll(cx);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Future Extension Methods
+// =============================================================================
+
+// Extension trait for Future combinators.
+public type FutureExt is protocol extends Future {
+    // Map the output.
+    fn map<T, F: fn(Self.Output) -> T>(self, f: F) -> MapFuture<Self, F> {
+        MapFuture { future: self, f: Some(f) }
+    }
+
+    // Chain with another future.
+    fn and_then<Fut2: Future, F: fn(Self.Output) -> Fut2>(self, f: F) -> AndThenFuture<Self, F, Fut2> {
+        AndThenFuture {
+            state: First(self),
+            f: Some(f),
+        }
+    }
+
+    // Run this future to completion synchronously.
+    fn block(mut self) -> Self.Output {
+        let waker = noop_waker();
+        let mut cx = Context.from_waker(&waker);
+
+        loop {
+            match self.poll(&mut cx) {
+                Poll.Ready(v) => return v,
+                Poll.Pending => {
+                    // In a real implementation, this would yield/park
+                    continue;
+                }
+            }
+        }
+    }
+};
+
+// All Futures implement FutureExt
+implement<F: Future> FutureExt for F {}
+
+// =============================================================================
+// Join - Wait for multiple futures
+// =============================================================================
+
+// State for Join2.
+type Join2State<A, B> is {
+    a: Maybe<A>,
+    b: Maybe<B>,
+};
+
+// Join two futures, returning when both complete.
+public type Join2<Fut1: Future, Fut2: Future> is {
+    fut1: Maybe<Fut1>,
+    fut2: Maybe<Fut2>,
+    result1: Maybe<Fut1.Output>,
+    result2: Maybe<Fut2.Output>,
+};
+
+implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2> {
+    type Output = (Fut1.Output, Fut2.Output);
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<(Fut1.Output, Fut2.Output)> {
+        // Poll first future if !done
+        if self.result1.is_none() {
+            if let Some(ref mut fut) = self.fut1 {
+                if let Poll.Ready(v) = fut.poll(cx) {
+                    self.result1 = Some(v);
+                    self.fut1 = None;
+                }
+            }
+        }
+
+        // Poll second future if !done
+        if self.result2.is_none() {
+            if let Some(ref mut fut) = self.fut2 {
+                if let Poll.Ready(v) = fut.poll(cx) {
+                    self.result2 = Some(v);
+                    self.fut2 = None;
+                }
+            }
+        }
+
+        // Check if both complete
+        if self.result1.is_some() && self.result2.is_some() {
+            Poll.Ready((self.result1.take().unwrap(), self.result2.take().unwrap()))
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+// Join two futures.
+public fn join<Fut1: Future, Fut2: Future>(fut1: Fut1, fut2: Fut2) -> Join2<Fut1, Fut2> {
+    Join2 {
+        fut1: Some(fut1),
+        fut2: Some(fut2),
+        result1: None,
+        result2: None,
+    }
+}
+
+// =============================================================================
+// Select - Race multiple futures
+// =============================================================================
+
+// Result of select - which future completed first.
+public type SelectResult<A, B> is
+    | Left(A)
+    | Right(B);
+
+// Select between two futures, returning the first to complete.
+public type Select2<Fut1: Future, Fut2: Future> is {
+    fut1: Maybe<Fut1>,
+    fut2: Maybe<Fut2>,
+};
+
+implement<Fut1: Future, Fut2: Future> Future for Select2<Fut1, Fut2> {
+    type Output = SelectResult<Fut1.Output, Fut2.Output>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<SelectResult<Fut1.Output, Fut2.Output>> {
+        // Poll first future
+        if let Some(ref mut fut) = self.fut1 {
+            if let Poll.Ready(v) = fut.poll(cx) {
+                self.fut1 = None;
+                self.fut2 = None;
+                return Poll.Ready(Left(v));
+            }
+        }
+
+        // Poll second future
+        if let Some(ref mut fut) = self.fut2 {
+            if let Poll.Ready(v) = fut.poll(cx) {
+                self.fut1 = None;
+                self.fut2 = None;
+                return Poll.Ready(Right(v));
+            }
+        }
+
+        Poll.Pending
+    }
+}
+
+// Select between two futures.
+public fn select<Fut1: Future, Fut2: Future>(fut1: Fut1, fut2: Fut2) -> Select2<Fut1, Fut2> {
+    Select2 {
+        fut1: Some(fut1),
+        fut2: Some(fut2),
+    }
+}
+
+// =============================================================================
+// Join3 - Join three futures
+// =============================================================================
+
+// Join three futures, returning when all complete.
+public type Join3<Fut1: Future, Fut2: Future, Fut3: Future> is {
+    fut1: Maybe<Fut1>,
+    fut2: Maybe<Fut2>,
+    fut3: Maybe<Fut3>,
+    result1: Maybe<Fut1.Output>,
+    result2: Maybe<Fut2.Output>,
+    result3: Maybe<Fut3.Output>,
+};
+
+implement<Fut1: Future, Fut2: Future, Fut3: Future> Future for Join3<Fut1, Fut2, Fut3> {
+    type Output = (Fut1.Output, Fut2.Output, Fut3.Output);
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<(Fut1.Output, Fut2.Output, Fut3.Output)> {
+        // Poll first future if !done
+        if self.result1.is_none() {
+            if let Some(ref mut fut) = self.fut1 {
+                if let Poll.Ready(v) = fut.poll(cx) {
+                    self.result1 = Some(v);
+                    self.fut1 = None;
+                }
+            }
+        }
+
+        // Poll second future if !done
+        if self.result2.is_none() {
+            if let Some(ref mut fut) = self.fut2 {
+                if let Poll.Ready(v) = fut.poll(cx) {
+                    self.result2 = Some(v);
+                    self.fut2 = None;
+                }
+            }
+        }
+
+        // Poll third future if !done
+        if self.result3.is_none() {
+            if let Some(ref mut fut) = self.fut3 {
+                if let Poll.Ready(v) = fut.poll(cx) {
+                    self.result3 = Some(v);
+                    self.fut3 = None;
+                }
+            }
+        }
+
+        // Check if all done
+        if self.result1.is_some() && self.result2.is_some() && self.result3.is_some() {
+            let r1 = self.result1.take().unwrap();
+            let r2 = self.result2.take().unwrap();
+            let r3 = self.result3.take().unwrap();
+            Poll.Ready((r1, r2, r3))
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+// Join three futures.
+public fn join3<Fut1: Future, Fut2: Future, Fut3: Future>(
+    fut1: Fut1,
+    fut2: Fut2,
+    fut3: Fut3
+) -> Join3<Fut1, Fut2, Fut3> {
+    Join3 {
+        fut1: Some(fut1),
+        fut2: Some(fut2),
+        fut3: Some(fut3),
+        result1: None,
+        result2: None,
+        result3: None,
+    }
+}

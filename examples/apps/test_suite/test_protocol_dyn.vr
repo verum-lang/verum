@@ -1,0 +1,41 @@
+// Test 6: Dynamic Dispatch with Protocol Objects
+// Tests: dyn Protocol for runtime polymorphism
+
+type Drawable is protocol {
+    fn draw(&self) -> Int;
+}
+
+type Circle is {
+    radius: Int
+}
+
+type Square is {
+    side: Int
+}
+
+implement Drawable for Circle {
+    fn draw(&self) -> Int {
+        self.radius
+    }
+}
+
+implement Drawable for Square {
+    fn draw(&self) -> Int {
+        self.side
+    }
+}
+
+fn draw_all(shapes: List<dyn Drawable>) -> Int {
+    let mut total = 0;
+    for shape in shapes {
+        total = total + shape.draw();
+    }
+    total
+}
+
+fn main() -> Int {
+    let c = Circle { radius: 10 };
+    let s = Square { side: 32 };
+    let shapes = [c, s];
+    draw_all(shapes)  // Should return 42
+}

@@ -1,0 +1,392 @@
+// Comprehensive test for the Context System (using keyword)
+// This file tests all aspects of Verum's context system as defined in the grammar
+// Spec: grammar/verum.ebnf - Context System
+// Spec: docs/detailed/16-context-system.md - Context System Design
+
+// ============================================================================
+// Test 1: Basic Context Definition
+// Spec: context_def = visibility "context" IDENT [ generics ] "{" context_item* "}"
+// ============================================================================
+
+context Database {
+    fn query(sql: Text) -> Text;
+    fn execute(sql: Text);
+    fn transaction();
+}
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+    fn warn(message: Text);
+}
+
+context Cache {
+    fn get(key: Text) -> Text;
+    fn set(key: Text, value: Text);
+    fn delete(key: Text);
+}
+
+context FileSystem {
+    fn read_file(path: Text) -> Text;
+    fn write_file(path: Text, content: Text);
+    fn delete_file(path: Text);
+}
+
+context Http {
+    fn get(url: Text) -> Text;
+    fn post(url: Text, body: Text) -> Text;
+    fn put(url: Text, body: Text) -> Text;
+}
+
+context Auth {
+    fn verify_token(token: Text) -> Bool;
+    fn get_user_id(token: Text) -> Int;
+}
+
+// ============================================================================
+// Test 2: Context Usage in Functions - Single Context (without brackets)
+// Spec: context_clause = "using" context_spec
+// Spec: context_spec = single_context | context_list
+// Spec: single_context = context_path
+// ============================================================================
+
+fn simple_logging(msg: Text) using Logger {
+    Logger.log(msg);
+    Logger.debug("Debug message");
+}
+
+fn database_query(sql: Text) using Database {
+    let result = Database.query(sql);
+    Database.execute("INSERT INTO logs VALUES (1)");
+}
+
+fn cache_lookup(key: Text) using Cache {
+    let value = Cache.get(key);
+    Cache.set("new_key", "new_value");
+}
+
+// ============================================================================
+// Test 3: Multiple Contexts with Brackets
+// Spec: context_list = "[" context_path ("," context_path)* "]"
+// ============================================================================
+
+fn two_contexts(sql: Text, msg: Text) using [Database, Logger] {
+    Logger.log(msg);
+    let result = Database.query(sql);
+    Logger.debug("Query completed");
+}
+
+fn three_contexts(url: Text, key: Text) using [Http, Cache, Logger] {
+    Logger.log("Starting request");
+    let cached = Cache.get(key);
+    let response = Http.get(url);
+    Cache.set(key, response);
+    Logger.log("Request completed");
+}
+
+fn four_contexts(path: Text, sql: Text) using [Database, Logger, FileSystem, Cache] {
+    Logger.log("Complex operation starting");
+    let file_data = FileSystem.read_file(path);
+    Cache.set("file_cache", file_data);
+    Database.execute(sql);
+    Logger.log("Complex operation completed");
+}
+
+fn five_contexts(url: Text, token: Text) using [Http, Database, Logger, Cache, Auth] {
+    Logger.log("Authenticated operation");
+    let is_valid = Auth.verify_token(token);
+    let user_id = Auth.get_user_id(token);
+    let data = Http.get(url);
+    Cache.set("user_data", data);
+    Database.execute("UPDATE users SET last_seen = NOW()");
+}
+
+// ============================================================================
+// Test 4: Context Groups (using keyword for groups)
+// Spec: context_group_def = "using" IDENT "=" context_list_def ";"
+// Spec: context_list_def = "[" IDENT ("," IDENT)* "]" | IDENT
+// ============================================================================
+
+// Basic context group with two contexts
+using BasicGroup = [Database, Logger];
+
+// Web application context group
+using WebContext = [Database, Logger, Http];
+
+// Full service context group
+using ServiceContext = [Database, Logger, Cache, Http];
+
+// Complete application context group
+using AppContext = [Database, Logger, Cache, Http, FileSystem, Auth];
+
+// Minimal group with single context (testing single context in group)
+using SingleContextGroup = Database;
+
+// ============================================================================
+// Test 5: Using Context Groups in Functions
+// ============================================================================
+
+fn basic_group_function(msg: Text) using BasicGroup {
+    Logger.log(msg);
+    Database.execute("INSERT INTO logs VALUES (1)");
+}
+
+fn web_function(url: Text, sql: Text) using WebContext {
+    Logger.log("Web operation");
+    let response = Http.get(url);
+    Database.execute(sql);
+    Logger.log("Operation completed");
+}
+
+fn service_function(key: Text) using ServiceContext {
+    Logger.log("Service operation");
+    let cached = Cache.get(key);
+    let api_data = Http.get("http://api.example.com");
+    Cache.set(key, api_data);
+    Database.query("SELECT * FROM data");
+}
+
+fn app_function(path: Text, token: Text) using AppContext {
+    Logger.log("Full application operation");
+    let is_valid = Auth.verify_token(token);
+    let file_data = FileSystem.read_file(path);
+    Cache.set("file", file_data);
+    Http.post("http://api.example.com", file_data);
+    Database.execute("INSERT INTO files VALUES (1)");
+    Logger.log("Complete");
+}
+
+fn single_group_function(sql: Text) using SingleContextGroup {
+    Database.query(sql);
+    Database.execute("COMMIT");
+}
+
+// ============================================================================
+// Test 6: Provide Statements
+// Spec: provide_stmt = "provide" IDENT "=" expression ";"
+// ============================================================================
+
+// Mock implementation types
+type ConsoleLogger = {
+    prefix: Text,
+    level: Int
+}
+
+type PostgresDatabase = {
+    connection_string: Text,
+    pool_size: Int
+}
+
+type RedisCache = {
+    host: Text,
+    port: Int
+}
+
+type LocalFileSystem = {
+    root_path: Text
+}
+
+type HttpClient = {
+    base_url: Text,
+    timeout: Int
+}
+
+type JwtAuth = {
+    secret: Text,
+    expiry: Int
+}
+
+// ============================================================================
+// Test 7: Provide Statements in Blocks
+// ============================================================================
+
+fn test_provide_basic() {
+    // Single provide
+    provide Logger = ConsoleLogger {
+        prefix: "APP",
+        level: 1
+    };
+
+    simple_logging("Testing basic provide");
+}
+
+fn test_provide_multiple() {
+    // Multiple provides
+    provide Logger = ConsoleLogger {
+        prefix: "APP",
+        level: 2
+    };
+
+    provide Database = PostgresDatabase {
+        connection_string: "postgres://localhost",
+        pool_size: 10
+    };
+
+    two_contexts("SELECT * FROM users", "Query executed");
+}
+
+fn test_provide_nested() {
+    // Outer scope
+    provide Logger = ConsoleLogger {
+        prefix: "OUTER",
+        level: 1
+    };
+
+    simple_logging("Outer context");
+
+    // Nested scope
+    {
+        provide Logger = ConsoleLogger {
+            prefix: "INNER",
+            level: 2
+        };
+
+        simple_logging("Inner context");
+    }
+
+    simple_logging("Back to outer");
+}
+
+fn test_provide_all_contexts() {
+    provide Logger = ConsoleLogger {
+        prefix: "FULL",
+        level: 3
+    };
+
+    provide Database = PostgresDatabase {
+        connection_string: "postgres://db",
+        pool_size: 20
+    };
+
+    provide Cache = RedisCache {
+        host: "localhost",
+        port: 6379
+    };
+
+    provide FileSystem = LocalFileSystem {
+        root_path: "/var/data"
+    };
+
+    provide Http = HttpClient {
+        base_url: "http://api.example.com",
+        timeout: 30
+    };
+
+    provide Auth = JwtAuth {
+        secret: "secret_key",
+        expiry: 3600
+    };
+
+    app_function("/data/test.txt", "token123");
+}
+
+// ============================================================================
+// Test 8: Functions Without Contexts (control test)
+// ============================================================================
+
+fn no_context_function(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn pure_computation(data: Text) -> Int {
+    42
+}
+
+// ============================================================================
+// Test 9: Mixing Context and Non-Context Functions
+// ============================================================================
+
+fn mixed_flow(x: Int, msg: Text) using Logger {
+    Logger.log(msg);
+    let result = no_context_function(x, 10);
+    Logger.log("Result computed");
+}
+
+fn mixed_complex(path: Text, x: Int) using [FileSystem, Logger] {
+    Logger.log("Starting mixed operation");
+    let data = FileSystem.read_file(path);
+    let computed = no_context_function(x, 20);
+    Logger.debug("Computation done");
+    FileSystem.write_file("/output.txt", data);
+}
+
+// ============================================================================
+// Test 10: Context Groups with Different Combinations
+// ============================================================================
+
+// Overlapping context groups
+using DbLogger = [Database, Logger];
+using CacheLogger = [Cache, Logger];
+using HttpLogger = [Http, Logger];
+
+fn test_overlapping_groups_1(sql: Text) using DbLogger {
+    Logger.log("DB operation");
+    Database.query(sql);
+}
+
+fn test_overlapping_groups_2(key: Text) using CacheLogger {
+    Logger.log("Cache operation");
+    Cache.get(key);
+}
+
+fn test_overlapping_groups_3(url: Text) using HttpLogger {
+    Logger.log("HTTP operation");
+    Http.get(url);
+}
+
+// ============================================================================
+// Test 11: Edge Cases
+// ============================================================================
+
+// Empty function body with context
+fn empty_with_context() using Logger {
+    // Just declares dependency, does nothing
+}
+
+// Single statement with context
+fn single_statement_context(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+// Context with no actual usage (semantic check, not runtime)
+fn unused_context_declaration(x: Int) using Logger {
+    let result = x + 1;
+}
+
+// ============================================================================
+// Test 12: Main Entry Point - Run All Tests
+// ============================================================================
+
+fn main() {
+    // Test basic context usage
+    test_provide_basic();
+
+    // Test multiple contexts
+    test_provide_multiple();
+
+    // Test nested provides
+    test_provide_nested();
+
+    // Test all contexts together
+    test_provide_all_contexts();
+
+    // Test non-context functions
+    let result = no_context_function(5, 10);
+    let pure_result = pure_computation("test");
+
+    // Test overlapping groups
+    provide Logger = ConsoleLogger { prefix: "TEST", level: 1 };
+    provide Database = PostgresDatabase { connection_string: "test", pool_size: 5 };
+    provide Cache = RedisCache { host: "localhost", port: 6379 };
+    provide Http = HttpClient { base_url: "http://test", timeout: 10 };
+
+    test_overlapping_groups_1("SELECT 1");
+    test_overlapping_groups_2("test_key");
+    test_overlapping_groups_3("http://example.com");
+
+    // Test edge cases
+    empty_with_context();
+    single_statement_context("edge case test");
+    unused_context_declaration(42);
+}

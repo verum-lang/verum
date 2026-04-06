@@ -1,0 +1,47 @@
+// Test nested list comprehensions
+
+fn main() -> Int {
+    // Test 1: Nested comprehension for matrix transformation
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let doubled_matrix = [[x * 2 for x in row] for row in matrix];
+    // Expected: [[2, 4, 6], [8, 10, 12], [14, 16, 18]]
+
+    // Test 2: Flatten a matrix using multiple for clauses
+    let flattened = [x for row in matrix for x in row];
+    // Expected: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    // Test 3: Cartesian product
+    let xs = [1, 2, 3];
+    let ys = [10, 20];
+    let pairs = [(x, y) for x in xs for y in ys];
+    // Expected: [(1,10), (1,20), (2,10), (2,20), (3,10), (3,20)]
+
+    // Test 4: Cartesian product with transformation
+    let sums = [x + y for x in xs for y in ys];
+    // Expected: [11, 21, 12, 22, 13, 23]
+
+    // Test 5: Three-level nesting
+    let cube = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    let flat = [x for layer in cube for row in layer for x in row];
+    // Expected: [1, 2, 3, 4, 5, 6, 7, 8]
+
+    // Test 6: Nested comprehension with filter
+    let filtered_pairs = [(x, y) for x in xs for y in ys if x + y > 15];
+    // x=1: y=10(11), y=20(21✓)
+    // x=2: y=10(12), y=20(22✓)
+    // x=3: y=10(13), y=20(23✓)
+    // Expected: [(1,20), (2,20), (3,20)]
+
+    // Test 7: Deeply nested with let
+    let complex = [z for x in [1, 2]
+                   for y in [10, 20]
+                   let sum = x + y
+                   let z = sum * 2
+                   if z > 20];
+    // (1,10): sum=11, z=22 > 20 ✓
+    // (1,20): sum=21, z=42 > 20 ✓
+    // (2,10): sum=12, z=24 > 20 ✓
+    // (2,20): sum=22, z=44 > 20 ✓
+
+    0
+}

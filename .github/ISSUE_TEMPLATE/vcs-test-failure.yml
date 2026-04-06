@@ -1,0 +1,159 @@
+name: VCS Test Failure
+description: Report a failing VCS compliance test
+title: "[VCS] Test Failure: "
+labels: ["vcs", "bug", "test-failure"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## VCS Test Failure Report
+        Thank you for reporting this VCS test failure. Please provide as much detail as possible.
+
+  - type: dropdown
+    id: test-level
+    attributes:
+      label: Test Level
+      description: Which VCS test level is affected?
+      options:
+        - L0 - Critical (Lexer/Parser)
+        - L1 - Core (Type System)
+        - L2 - Standard (Standard Library)
+        - L3 - Extended (GPU/Dependent Types)
+        - L4 - Performance
+    validations:
+      required: true
+
+  - type: input
+    id: test-name
+    attributes:
+      label: Test Name
+      description: Full test name or path (e.g., L0-critical/lexer/identifiers/basic_identifiers)
+      placeholder: "L0-critical/lexer/identifiers/basic_identifiers"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure-type
+    attributes:
+      label: Failure Type
+      description: What type of failure occurred?
+      options:
+        - Unexpected output/result
+        - Parse error where none expected
+        - Type error where none expected
+        - Panic/crash
+        - Timeout
+        - Compilation failure
+        - Runtime error
+        - Semantic divergence
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What should the test produce?
+      placeholder: "The test should pass, producing output X"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: "The test failed with error Y"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error Output
+      description: Paste any error messages or logs
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: The commit where this failure was observed
+      placeholder: "abc123..."
+    validations:
+      required: false
+
+  - type: input
+    id: workflow-run
+    attributes:
+      label: Workflow Run URL
+      description: Link to the failing GitHub Actions run (if applicable)
+      placeholder: "https://github.com/.../actions/runs/..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: On which platform(s) does this occur?
+      multiple: true
+      options:
+        - Linux (Ubuntu 22.04)
+        - Linux (Ubuntu 24.04)
+        - macOS (x86_64)
+        - macOS (ARM64)
+        - Windows
+        - All platforms
+    validations:
+      required: true
+
+  - type: dropdown
+    id: rust-version
+    attributes:
+      label: Rust Version
+      description: Which Rust version(s) are affected?
+      multiple: true
+      options:
+        - stable
+        - beta
+        - nightly
+        - All versions
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction Steps
+      description: Steps to reproduce the failure locally
+      value: |
+        1. Build the VCS test runner: `cd vcs/runner/vtest && cargo build --release`
+        2. Run the specific test: `./target/release/vtest run --filter <test-name>`
+        3. Observe the failure
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched for existing issues describing this failure
+          required: true
+        - label: I have verified this failure is reproducible locally
+          required: false
+        - label: I have checked if this is a regression from a recent commit
+          required: false

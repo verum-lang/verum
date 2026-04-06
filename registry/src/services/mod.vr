@@ -1,0 +1,141 @@
+// Services Module
+//
+// Business logic layer coordinating domain types with contexts.
+// Services orchestrate operations across Database, Storage, and Search contexts.
+
+module package_service;
+module user_service;
+module search_service;
+module checksum_service;
+module validation_service;
+module concurrency_service;
+module timing_service;
+module webhook_service;
+module sumdb_service;
+module artifact_service;
+module security_service;
+
+pub import .package_service.{
+    publish_package,
+    get_package,
+    list_packages,
+    delete_package,
+    update_downloads,
+};
+
+pub import .user_service.{
+    create_user,
+    authenticate_user,
+    get_user_profile,
+    revoke_token,
+};
+
+pub import .search_service.{
+    index_package,
+    search_packages,
+    update_package_index,
+    remove_from_index,
+};
+
+pub import .checksum_service.{
+    compute_checksum,
+    verify_checksum,
+    validate_tarball,
+};
+
+pub import .validation_service.{
+    // Pagination validation
+    validate_pagination,
+    validate_page_number,
+    validate_page_size,
+    // Field validation
+    validate_not_empty,
+    validate_max_length,
+    validate_min_length,
+    validate_length_range,
+    // Domain validation
+    validate_package_name,
+    validate_version,
+    validate_email,
+    validate_url,
+    validate_username,
+    validate_password,
+    validate_password_match,
+    validate_token_value,
+    // Request validation
+    validate_publish_request,
+    validate_register_request,
+    validate_login_request,
+    validate_token_request,
+    validate_search_request,
+};
+
+pub import .concurrency_service.{
+    // Parallel operations
+    parallel_map,
+    parallel_map_limited,
+    // Task combinators
+    join2,
+    join3,
+    join4,
+    join5,
+    // Timeout operations
+    with_timeout,
+    with_timeout_optional,
+    // Filtering and collection
+    parallel_filter,
+    collect_ok,
+    // Retry logic
+    retry,
+};
+
+pub import .timing_service.{
+    // Server uptime
+    init_server_timing,
+    get_uptime_seconds,
+    // Timer
+    Timer,
+    // Utilities
+    measure,
+    measure_async,
+};
+
+pub import .webhook_service.{
+    deliver_webhook,
+    deliver_webhook_with_retry,
+    deliver_to_all_webhooks,
+    serialize_webhook_payload,
+    create_test_payload,
+    DeliveryResult,
+};
+
+pub import .sumdb_service.{
+    SumdbService,
+    SumdbEntry,
+    TreeHead,
+    InclusionProof,
+    LookupResult,
+    VerifyResult,
+};
+
+pub import .artifact_service.{
+    ArtifactService,
+    VerificationPortfolio,
+    CbgrProfile,
+    TierArtifact,
+    ProofArtifact,
+    ContextGraph,
+};
+
+pub import .security_service.{
+    check_typosquatting,
+    scan_for_malware,
+    check_license_compatibility,
+    audit_dependencies,
+    validate_semver_bump,
+    TyposquatResult,
+    ScanResult,
+    LicenseResult,
+    AuditResult,
+    SemverDiffResult,
+};

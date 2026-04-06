@@ -1,0 +1,40 @@
+// Minimal generics test to isolate issues
+
+type Box<T> is { value: T };
+type Maybe<T> is Some(T) | None;
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn box_value<T>(val: T) -> Box<T> {
+    Box { value: val }
+}
+
+fn unbox<T>(b: Box<T>) -> T {
+    b.value
+}
+
+fn main() {
+    print("=== Minimal Generics Test ===");
+
+    // Test 1: Identity with different types
+    let int_id = identity(42);
+    let text_id = identity("hello");
+    print("identity(42) = " + int_id.to_string());
+    print("identity(\"hello\") = " + text_id);
+
+    // Test 2: Box and unbox
+    let boxed = box_value(100);
+    let unboxed = unbox(boxed);
+    print("boxed 100, unboxed = " + unboxed.to_string());
+
+    // Test 3: Maybe
+    let some_val: Maybe<Int> = Some(42);
+    match some_val {
+        Some(v) => print("Some(" + v.to_string() + ")"),
+        None => print("None")
+    }
+
+    print("=== Test Complete ===");
+}

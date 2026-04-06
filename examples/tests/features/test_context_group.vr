@@ -1,0 +1,56 @@
+// Test context group definition
+// According to grammar: using_decl = "using" IDENT "=" "[" IDENT ("," IDENT)* "]" ";"
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Http {
+    fn get(url: Text) -> Text;
+    fn post(url: Text, body: Text) -> Text;
+}
+
+context Cache {
+    fn get(key: Text) -> Text;
+    fn set(key: Text, value: Text);
+}
+
+// Test context group definition
+using WebContext = [Database, Logger, Http];
+
+// Test using context group in function
+fn handle_request(url: Text) using WebContext {
+    Logger.log("Handling request");
+    let data = Http.get(url);
+    Database.query("INSERT INTO logs VALUES (1)");
+}
+
+// Test another context group
+using ServiceContext = [Database, Logger, Cache];
+
+// Test using second context group
+fn service_operation(key: Text) using ServiceContext {
+    Logger.log("Service operation");
+    let cached = Cache.get(key);
+    Database.query("SELECT * FROM data");
+}
+
+// Test context group with all four contexts
+using FullContext = [Database, Logger, Http, Cache];
+
+fn full_operation() using FullContext {
+    Logger.log("Full operation");
+    Cache.set("key", "value");
+    Http.post("http://api.example.com", "data");
+    Database.query("UPDATE table SET x = 1");
+}
+
+fn main() {
+    handle_request("http://example.com");
+    service_operation("cache_key");
+    full_operation();
+}

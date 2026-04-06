@@ -1,0 +1,41 @@
+// Higher-Order Functions Test
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn triple(x: Int) -> Int { x * 3 }
+fn square(x: Int) -> Int { x * x }
+
+fn main() {
+    print("=== Higher-Order Functions Test ===");
+
+    // Apply function
+    let r1 = apply(double, 5);
+    print(f"apply(double, 5) = {r1}");
+
+    let r2 = apply(square, 4);
+    print(f"apply(square, 4) = {r2}");
+
+    // Compose functions
+    let r3 = compose(double, triple, 2);
+    print(f"compose(double, triple, 2) = {r3}");
+
+    let r4 = compose(square, double, 3);
+    print(f"compose(square, double, 3) = {r4}");
+
+    // Returning functions via closure
+    let adder = |n: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { x + n }
+    };
+    let add10 = adder(10);
+    let r5 = add10(5);
+    print(f"adder(10)(5) = {r5}");
+
+    print("=== Done ===");
+}

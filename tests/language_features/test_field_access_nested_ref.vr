@@ -1,0 +1,38 @@
+// Test: Field access on reference types
+// This test verifies that field access works on all reference types
+
+type Point is { x: Int, y: Int };
+type Rect is { top_left: Point, width: Int, height: Int };
+
+// Test with regular reference
+fn get_x(p: &Point) -> Int {
+    p.x
+}
+
+// Test with mutable reference
+fn get_y_mut(p: &mut Point) -> Int {
+    p.y
+}
+
+// Test nested record field access via reference
+fn get_rect_x(r: &Rect) -> Int {
+    r.top_left.x
+}
+
+fn main() {
+    let p = Point { x: 42, y: 58 };
+
+    // Direct field access
+    print(f"Direct: x={p.x}, y={p.y}");
+
+    // Field access via reference
+    print(f"Via ref: x={get_x(&p)}");
+
+    // Field access via mutable reference
+    let mut p2 = Point { x: 10, y: 20 };
+    print(f"Via mut ref: y={get_y_mut(&mut p2)}");
+
+    // Nested field access via reference
+    let r = Rect { top_left: Point { x: 5, y: 15 }, width: 100, height: 50 };
+    print(f"Nested via ref: x={get_rect_x(&r)}");
+}

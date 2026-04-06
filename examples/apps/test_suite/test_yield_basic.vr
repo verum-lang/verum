@@ -1,0 +1,15 @@
+// Test: Basic yield expression
+// Tests if yield can be used to create generators
+
+fn generator() -> Stream<Int> {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn main() {
+    let gen = generator();
+    for value in gen {
+        print(value);
+    }
+}

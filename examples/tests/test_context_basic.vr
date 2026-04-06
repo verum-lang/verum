@@ -1,0 +1,15 @@
+// Test 1: Basic context definition and usage
+context Logger {
+    fn log(self, msg: Text)
+}
+
+fn log_message(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+type SimpleLogger is { prefix: Text };
+
+fn main() {
+    provide Logger = SimpleLogger { prefix: "[INFO]" };
+    log_message("Hello from context!");
+}

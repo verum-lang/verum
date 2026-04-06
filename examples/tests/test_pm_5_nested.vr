@@ -1,0 +1,23 @@
+// Test 5: Nested patterns
+
+type Result is Ok(Int) | Err(Text);
+type Maybe is Some(Result) | None;
+
+fn test() -> Text {
+    let x = Some(Ok(42));
+    let result = match x {
+        Some(Ok(n)) => n,
+        Some(Err(_)) => -1,
+        None => 0
+    };
+
+    if result == 42 {
+        "PASS"
+    } else {
+        "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

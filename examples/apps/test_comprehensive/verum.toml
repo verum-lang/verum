@@ -1,0 +1,9 @@
+[package]
+name = "test_comprehensive"
+version = "1.0.0"
+description = "Comprehensive test of Verum language features"
+license = "MIT"
+authors = ["Verum Team"]
+
+[profile]
+type = "application"

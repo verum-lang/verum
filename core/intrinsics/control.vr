@@ -1,0 +1,126 @@
+// =============================================================================
+// core/intrinsics/control.vr - Control Flow Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides control flow intrinsics that map directly to
+// LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Termination: trap, unreachable
+// - Debug: debugtrap, nop
+// - Branch hints: assume, likely, unlikely, expect
+// - Prefetch: prefetch_read, prefetch_write
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.control;
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// SECTION 1: Termination
+// =============================================================================
+
+/// Trap (abort execution immediately)
+public fn trap() -> Never { @intrinsic("trap") }
+
+/// Unreachable (undefined behavior if reached, optimization hint)
+public fn unreachable() -> Never { @intrinsic("unreachable") }
+
+// =============================================================================
+// SECTION 2: Debug
+// =============================================================================
+
+/// Debug trap (breakpoint)
+public fn debugtrap() { @intrinsic("debugtrap") }
+
+/// No operation (may be optimized away)
+public fn nop() { @intrinsic("nop") }
+
+// =============================================================================
+// SECTION 3: Branch Hints
+// =============================================================================
+
+/// Assume condition is true (optimization hint, UB if false)
+public fn assume(condition: Bool) { @intrinsic("assume", condition) }
+
+/// Likely branch hint
+public fn likely(condition: Bool) -> Bool { @intrinsic("expect", condition, true) }
+
+/// Unlikely branch hint
+public fn unlikely(condition: Bool) -> Bool { @intrinsic("expect", condition, false) }
+
+/// Expect value (optimization hint)
+public fn expect<T>(val: T, expected: T) -> T { @intrinsic("expect", val, expected) }
+
+// =============================================================================
+// SECTION 4: Prefetch
+// =============================================================================
+
+/// Prefetch memory for read
+/// locality: 0 = no locality, 1 = low, 2 = moderate, 3 = high
+public fn prefetch_read<T>(ptr: *const T, locality: UInt32) { @intrinsic("prefetch_read", ptr, locality) }
+
+/// Prefetch memory for write
+/// locality: 0 = no locality, 1 = low, 2 = moderate, 3 = high
+public fn prefetch_write<T>(ptr: *mut T, locality: UInt32) { @intrinsic("prefetch_write", ptr, locality) }
+
+// =============================================================================
+// SECTION 5: Panic and Abort
+// =============================================================================
+
+/// Panic with a message (begins unwinding)
+public fn panic(message: Text) -> Never { @intrinsic("panic", message) }
+
+/// Abort immediately without unwinding
+public fn abort() -> Never { @intrinsic("abort") }
+
+/// Debug-only assertion (no-op in release mode)
+public fn debug_assert(condition: Bool, message: Text = "debug assertion failed") { @intrinsic("debug_assert", condition, message) }
+
+/// Unreachable (unsafe, UB if reached — optimization hint only)
+public unsafe fn unreachable_unchecked() -> Never { @intrinsic("unreachable") }
+
+/// Low-level panic implementation hook
+public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> Never {
+    @intrinsic("panic_impl", message, file, line, column)
+}
+
+// =============================================================================
+// SECTION 6: Exception Handling
+// =============================================================================
+
+/// Source location information for panic origin
+public type SourceLocation is {
+    file: Text,
+    line: Int,
+    column: Int,
+    offset: Int,
+};
+
+/// Panic information structure
+public type PanicInfo is {
+    message: Text,
+    location: Maybe<SourceLocation>,
+};
+
+/// Execute a closure and catch any panics
+/// Returns Ok(result) if no panic, Err(PanicInfo) if panic occurred
+public fn catch_unwind<T>(f: fn() -> T) -> Result<T, PanicInfo> {
+    @intrinsic("catch_unwind", f)
+}
+
+// =============================================================================
+// SECTION 7: Random Number Generation
+// =============================================================================
+
+/// Generate a random Float64 in [0.0, 1.0)
+public fn random_float() -> Float { @intrinsic("random_float") }
+
+/// Generate a random 64-bit unsigned integer
+public fn random_u64() -> UInt64 { @intrinsic("random_u64") }

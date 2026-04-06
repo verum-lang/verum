@@ -1,0 +1,17 @@
+// Simple test for split function
+
+fn main() {
+    print("Testing split function...");
+
+    // Test 1: Using split as a standalone function
+    let text = "hello/world/test";
+    let parts = split(text, "/");
+    print(f"Parts length: {len(parts)}");
+
+    // Test 2: Check first part
+    if len(parts) > 0 {
+        print("First part exists");
+    }
+
+    print("Split test completed");
+}

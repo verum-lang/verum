@@ -1,0 +1,360 @@
+// context_system.vr
+// Demonstrates the context system (dependency injection)
+
+link std.time.*;
+
+// Define contexts (interfaces)
+context Logger {
+    fn log(level: Level, message: Text)
+    fn debug(message: Text)
+    fn info(message: Text)
+    fn warn(message: Text)
+    fn error(message: Text)
+}
+
+context Database {
+    async fn query(sql: Text) -> Result<Rows, DbError>
+    async fn execute(sql: Text) -> Result<(), DbError>
+}
+
+context Cache {
+    async fn get(key: Text) -> Maybe<Text>
+    async fn set(key: Text, value: Text, ttl: Duration) -> Result<(), CacheError>
+    async fn delete(key: Text) -> Result<(), CacheError>
+}
+
+context Auth {
+    fn current_user() -> User
+    fn has_permission(perm: Permission) -> Bool
+}
+
+context Metrics {
+    fn increment(metric: Text)
+    fn gauge(metric: Text, value: Float)
+    fn histogram(metric: Text, value: Float)
+}
+
+// Context groups
+using WebContext = [Database, Logger, Cache, Metrics]
+using AdminContext = [Database, Logger, Auth, Metrics]
+
+// Business logic using contexts
+async fn get_user_profile(user_id: Int) -> Maybe<UserProfile>
+    using [Database, Logger, Cache]
+{
+    Logger.info(f"Fetching profile for user {user_id}")
+
+    // Check cache first
+    let cache_key = f"user_profile:{user_id}"
+    if let Some(cached) = Cache.get(cache_key).await {
+        Logger.debug("Cache hit")
+        return Some(parse_profile(cached))
+    }
+
+    Logger.debug("Cache miss, querying database")
+
+    // Query database
+    let result = Database.query(
+        f"SELECT * FROM profiles WHERE user_id = {user_id}"
+    ).await
+
+    match result {
+        Ok(rows) => {
+            if rows.is_empty() {
+                Logger.warn(f"No profile found for user {user_id}")
+                None
+            } else {
+                let profile = UserProfile.from_row(rows[0])
+
+                // Cache the result
+                Cache.set(cache_key, profile.to_json(), ttl: 5.minutes).await
+
+                Logger.info(f"Successfully fetched profile for user {user_id}")
+                Some(profile)
+            }
+        },
+        Err(e) => {
+            Logger.error(f"Database error: {e}")
+            None
+        }
+    }
+}
+
+// Using context group
+async fn handle_api_request(req: Request) -> Response
+    using WebContext
+{
+    Metrics.increment("api.requests.total")
+
+    let start = Time.now()
+
+    Logger.info(f"Handling request: {req.path}")
+
+    let response = match req.path {
+        "/profile" => {
+            let user_id = req.query.get("user_id").parse_int()?
+            match get_user_profile(user_id).await {
+                Some(profile) => Response.json(profile),
+                None => Response.not_found("Profile not found")
+            }
+        },
+        _ => Response.not_found("Unknown endpoint")
+    }
+
+    let duration = Time.now() - start
+    Metrics.histogram("api.request.duration", duration.as_seconds())
+
+    response
+}
+
+// Admin function with different contexts
+async fn delete_user(user_id: Int) -> Result<(), Text>
+    using AdminContext
+{
+    // Check permission
+    if !Auth.has_permission(Permission.DeleteUser) {
+        Logger.warn(f"Unauthorized delete attempt by {Auth.current_user().name}")
+        return Err("Insufficient permissions")
+    }
+
+    Logger.info(f"Deleting user {user_id}")
+    Metrics.increment("admin.user.deleted")
+
+    Database.execute(f"DELETE FROM users WHERE id = {user_id}").await
+        .map_err(|e| f"Database error: {e}")?
+
+    Ok(())
+}
+
+// Nested contexts
+async fn process_order(order: Order) -> Result<(), Text>
+    using [Database, Logger]
+{
+    Logger.info(f"Processing order {order.id}")
+
+    // Each async function can have its own contexts
+    validate_order(order).await?
+    charge_payment(order).await?
+    update_inventory(order).await?
+
+    Logger.info(f"Order {order.id} processed successfully")
+    Ok(())
+}
+
+async fn validate_order(order: Order) -> Result<(), Text>
+    using [Database, Logger]
+{
+    Logger.debug(f"Validating order {order.id}")
+
+    let items = Database.query(
+        f"SELECT * FROM items WHERE id IN ({order.item_ids.join(',')})"
+    ).await?
+
+    if items.len() != order.item_ids.len() {
+        return Err("Some items not found")
+    }
+
+    Ok(())
+}
+
+async fn charge_payment(order: Order) -> Result<(), Text>
+    using Logger  // Single context, no brackets needed
+{
+    Logger.debug(f"Charging payment for order {order.id}")
+
+    // Payment logic here
+
+    Ok(())
+}
+
+async fn update_inventory(order: Order) -> Result<(), Text>
+    using [Database, Logger]
+{
+    Logger.debug(f"Updating inventory for order {order.id}")
+
+    for item_id in order.item_ids {
+        Database.execute(
+            f"UPDATE inventory SET quantity = quantity - 1 WHERE item_id = {item_id}"
+        ).await?
+    }
+
+    Ok(())
+}
+
+// Context implementations
+
+// Console logger
+type ConsoleLogger is {}
+
+implement Logger for ConsoleLogger {
+    fn log(self, level: Level, message: Text) {
+        let timestamp = Time.now().format("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp}] [{level}] {message}")
+    }
+
+    fn debug(self, message: Text) {
+        self.log(Level.Debug, message)
+    }
+
+    fn info(self, message: Text) {
+        self.log(Level.Info, message)
+    }
+
+    fn warn(self, message: Text) {
+        self.log(Level.Warn, message)
+    }
+
+    fn error(self, message: Text) {
+        self.log(Level.Error, message)
+    }
+}
+
+// File logger
+type FileLogger is {
+    path: Text
+}
+
+implement Logger for FileLogger {
+    fn log(self, level: Level, message: Text) {
+        let timestamp = Time.now().format("%Y-%m-%d %H:%M:%S")
+        let line = f"[{timestamp}] [{level}] {message}\n"
+
+        write_file(self.path, line, append: true)
+    }
+
+    fn debug(self, message: Text) {
+        self.log(Level.Debug, message)
+    }
+
+    fn info(self, message: Text) {
+        self.log(Level.Info, message)
+    }
+
+    fn warn(self, message: Text) {
+        self.log(Level.Warn, message)
+    }
+
+    fn error(self, message: Text) {
+        self.log(Level.Error, message)
+    }
+}
+
+// Mock database for testing
+type MockDatabase is {
+    data: Map<Text, List<Row>>
+}
+
+implement Database for MockDatabase {
+    async fn query(self, sql: Text) -> Result<Rows, DbError> {
+        // Simplified mock implementation
+        Logger.debug(f"Mock query: {sql}")
+        Ok([])
+    }
+
+    async fn execute(self, sql: Text) -> Result<(), DbError> {
+        Logger.debug(f"Mock execute: {sql}")
+        Ok(())
+    }
+}
+
+// Main function demonstrating context provision
+async fn main() {
+    print("=== Context System Demo ===\n")
+
+    // Create context providers
+    let logger = ConsoleLogger {}
+    let file_logger = FileLogger { path: "/tmp/app.log" }
+    let db = MockDatabase { data: #{} }
+    let cache = InMemoryCache.new()
+    let metrics = PrometheusMetrics.new()
+
+    // Provide single context
+    provide Logger = logger {
+        Logger.info("Application starting")
+
+        // Nested context provision
+        provide Database = db {
+            provide Cache = cache {
+                provide Metrics = metrics {
+                    // All contexts available here
+
+                    let request = Request {
+                        path: "/profile",
+                        query: #{ "user_id": "123" }
+                    }
+
+                    let response = handle_api_request(request).await
+
+                    Logger.info(f"Response: {response.status}")
+                }
+            }
+        }
+
+        Logger.info("Application shutting down")
+    }
+
+    // Switch to file logger
+    provide Logger = file_logger {
+        Logger.info("Now logging to file")
+    }
+
+    // Testing with different providers
+    print("\n=== Testing with Mock Providers ===\n")
+
+    let mock_logger = ConsoleLogger {}
+    let mock_db = MockDatabase { data: #{} }
+    let mock_cache = MockCache.new()
+
+    provide Logger = mock_logger {
+        provide Database = mock_db {
+            provide Cache = mock_cache {
+                // Test business logic with mocks
+                let profile = get_user_profile(123).await
+
+                match profile {
+                    Some(p) => print(f"Got profile: {p.name}"),
+                    None => print("No profile found")
+                }
+            }
+        }
+    }
+}
+
+// Module-level contexts
+@using([Logger, Database])
+module user_service {
+    // Logger and Database automatically available in all functions
+
+    async fn create_user(name: Text, email: Text) -> Result<User, Text> {
+        Logger.info(f"Creating user: {name}")
+
+        let result = Database.execute(
+            f"INSERT INTO users (name, email) VALUES ('{name}', '{email}')"
+        ).await
+
+        match result {
+            Ok(_) => {
+                Logger.info(f"User {name} created successfully")
+                Ok(User { name, email })
+            },
+            Err(e) => {
+                Logger.error(f"Failed to create user: {e}")
+                Err(f"Database error: {e}")
+            }
+        }
+    }
+
+    async fn get_user_by_email(email: Text) -> Maybe<User> {
+        Logger.debug(f"Looking up user by email: {email}")
+
+        let rows = Database.query(
+            f"SELECT * FROM users WHERE email = '{email}'"
+        ).await?
+
+        if rows.is_empty() {
+            None
+        } else {
+            Some(User.from_row(rows[0]))
+        }
+    }
+}

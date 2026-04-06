@@ -1,0 +1,18 @@
+// Auth protocol for user authentication
+mount core.base.{Result, Text};
+
+pub type AuthError is
+    | InvalidToken(Text)
+    | ExpiredToken
+    | Unauthorized(Text);
+
+pub type AuthUser is {
+    id: Text,
+    username: Text,
+    role: Text,
+};
+
+pub context protocol Auth {
+    async fn verify_token(self, token: Text) -> Result<AuthUser, AuthError>;
+    fn is_admin(self, user: AuthUser) -> Result<Bool, AuthError>;
+}

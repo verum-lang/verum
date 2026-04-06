@@ -1,0 +1,156 @@
+name: VCS Semantic Divergence
+description: Report a semantic divergence between execution tiers (CRITICAL)
+title: "[CRITICAL] Tier Semantic Divergence: "
+labels: ["vcs", "critical", "semantic-bug", "differential-testing", "P0"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## CRITICAL: Semantic Divergence Report
+
+        **This is a P0 issue.** Semantic divergence between execution tiers indicates
+        a potential compiler or interpreter bug that causes programs to behave
+        differently depending on the execution tier.
+
+        This violates Verum's core semantic equivalence guarantee and blocks releases.
+
+  - type: dropdown
+    id: tiers
+    attributes:
+      label: Diverging Tiers
+      description: Which tiers produce different results?
+      options:
+        - Tier 0 (Interpreter) vs Tier 3 (AOT)
+        - Tier 0 (Interpreter) vs Tier 1 (JIT Baseline)
+        - Tier 1 (JIT Baseline) vs Tier 2 (JIT Optimized)
+        - Tier 2 (JIT Optimized) vs Tier 3 (AOT)
+        - Other combination
+    validations:
+      required: true
+
+  - type: input
+    id: test-case
+    attributes:
+      label: Test Case
+      description: Name or path of the diverging test case
+      placeholder: "differential/edge_cases/arithmetic_overflow"
+    validations:
+      required: true
+
+  - type: textarea
+    id: minimal-reproduction
+    attributes:
+      label: Minimal Reproduction
+      description: Minimal Verum code that demonstrates the divergence
+      render: rust
+      placeholder: |
+        // Minimal Verum code that produces different results
+        fn main() -> Int {
+            // ...
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: tier0-result
+    attributes:
+      label: Tier 0 Result
+      description: What does the interpreter produce?
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: tier3-result
+    attributes:
+      label: Tier 3 Result
+      description: What does the AOT compiler produce?
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: divergence-type
+    attributes:
+      label: Divergence Type
+      description: What kind of divergence is this?
+      options:
+        - Different numeric result
+        - Different return value
+        - One panics, one doesn't
+        - Different exception type
+        - Different memory behavior
+        - Different evaluation order
+        - Optimization changes semantics
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: Commit where divergence was detected
+      placeholder: "abc123..."
+    validations:
+      required: true
+
+  - type: input
+    id: workflow-run
+    attributes:
+      label: Workflow Run URL
+      description: Link to the differential testing workflow run
+      placeholder: "https://github.com/.../actions/runs/..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Detection Source
+      description: How was this divergence detected?
+      options:
+        - Differential testing (Tier 0 vs Tier 3)
+        - Cross-tier differential matrix
+        - Randomized differential testing
+        - Fuzzer corpus differential
+        - Manual testing
+        - User report
+    validations:
+      required: true
+
+  - type: textarea
+    id: suspected-cause
+    attributes:
+      label: Suspected Cause
+      description: Initial investigation into the root cause
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information (related issues, recent changes, etc.)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Investigation Checklist
+      description: Track investigation progress
+      options:
+        - label: Downloaded differential test artifacts
+          required: false
+        - label: Reproduced locally
+          required: false
+        - label: Identified root cause
+          required: false
+        - label: Bisected to find regressing commit
+          required: false
+        - label: Created regression test
+          required: false
+        - label: Fix verified by differential tests
+          required: false

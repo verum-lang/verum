@@ -1,0 +1,51 @@
+[package]
+name = "verum_cbgr-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.verum_cbgr]
+path = ".."
+
+[dependencies.verum_common]
+path = "../../verum_common"
+
+# DEPRECATED: Superseded by stdlib/ and verum_common types
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_target_allocate_deallocate"
+path = "fuzz_targets/fuzz_target_allocate_deallocate.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_concurrent_access"
+path = "fuzz_targets/fuzz_target_concurrent_access.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_wraparound"
+path = "fuzz_targets/fuzz_target_wraparound.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_target_capabilities"
+path = "fuzz_targets/fuzz_target_capabilities.rs"
+test = false
+doc = false

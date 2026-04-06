@@ -1,0 +1,233 @@
+// =============================================================================
+// context/provider.vr — Context Provider Utilities
+// =============================================================================
+// Grammar: provide_stmt = 'provide' context_path ['as' identifier] '='
+//          expression (';' | 'in' block_expr)
+// Spec: docs/detailed/16-context-system.md Section 2
+// =============================================================================
+
+module provider;
+
+mount super.scope.Scope;
+mount super.super.runtime.ctx_bridge.{env_ctx_get, env_ctx_set, env_ctx_end};
+
+/// Provider<T> — a type that lazily provides context values.
+///
+/// This is the core type for the context system's runtime DI.
+/// A Provider wraps a factory function and caches the result
+/// after first invocation.
+///
+/// # Examples
+///
+/// ```verum
+/// let db = Provider.new(fn() -> Database {
+///     Database.connect("postgres://localhost/mydb")
+/// });
+///
+/// provide Database = db.get();
+/// ```
+public type Provider<T> is {
+    factory: fn() -> T,
+    cached: Maybe<T>,
+};
+
+implement Provider<T> {
+    /// Create a new provider with the given factory function.
+    public fn new(factory: fn() -> T) -> Self {
+        Provider { factory: factory, cached: None }
+    }
+
+    /// Create an already-resolved provider with a concrete value.
+    public fn of(value: T) -> Self {
+        Provider { factory: fn() -> T { panic("Provider.of: already resolved") }, cached: Some(value) }
+    }
+
+    /// Get the provided value, invoking the factory on first access.
+    public fn get(&mut self) -> T {
+        match self.cached {
+            Some(ref value) => value,
+            None => {
+                let value = (self.factory)();
+                self.cached = Some(value);
+                value
+            }
+        }
+    }
+
+    /// Returns true if the provider has already produced a value.
+    public fn is_resolved(&self) -> Bool {
+        match self.cached {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// Reset the provider, forcing re-evaluation on next access.
+    public fn reset(&mut self) {
+        self.cached = None;
+    }
+}
+
+/// Lazy context provider — alias for Provider<T> for backwards compatibility.
+public type LazyProvider<T> is Provider<T>;
+
+/// ScopedProvider — provides a context within a lexical scope using
+/// the runtime TLS-based context stack.
+///
+/// This type manages the push/pop of context values onto the
+/// task-local context stack, ensuring proper cleanup at scope exit.
+///
+/// # Architecture
+///
+/// ```
+/// provide Context = value in { body }
+///     ↓ compiles to ↓
+/// ScopedProvider.run(slot_id, value, fn() { body })
+/// ```
+///
+/// The compiler assigns each context type a unique slot ID at compile time.
+/// At runtime, ScopedProvider uses ctx_bridge functions to push/pop values.
+public type ScopedProvider<T> is {
+    slot_id: Int,
+    value: T,
+};
+
+implement ScopedProvider<T> {
+    /// Create a scoped provider for a given context slot.
+    public fn new(slot_id: Int, value: T) -> Self {
+        ScopedProvider { slot_id: slot_id, value: value }
+    }
+
+    /// Run a function with this context provided, then clean up.
+    ///
+    /// This is the runtime implementation of `provide Context = value in { body }`.
+    /// The context is pushed onto the TLS stack before the body executes
+    /// and popped after the body completes (even on error).
+    public fn run<R>(&self, body: fn() -> R) -> R {
+        // Push context onto the TLS stack
+        let raw_value: Int = @bitcast(self.value);
+        env_ctx_set(self.slot_id, raw_value);
+        // Execute the body
+        let result = body();
+        // Pop context from the TLS stack (restore to 0 / not-set)
+        env_ctx_end(self.slot_id);
+        result
+    }
+}
+
+/// Retrieve a context value from the current execution environment.
+///
+/// This is the runtime implementation of context access in `using [Context]` functions.
+/// The compiler generates calls to this when a function accesses a context value.
+///
+/// Returns None if the context is not currently provided.
+public fn get_context<T>(slot_id: Int) -> Maybe<T> {
+    let raw = env_ctx_get(slot_id);
+    if raw == 0 {
+        None
+    } else {
+        Some(@bitcast(raw))
+    }
+}
+
+/// Check if a context is currently provided in the execution environment.
+public fn has_context(slot_id: Int) -> Bool {
+    env_ctx_get(slot_id) != 0
+}
+
+/// Scoped context provider — provides a context only within a block.
+///
+/// This is the semantic backing for `provide Context = value in { block }`.
+/// The context is automatically cleaned up when the scope exits.
+///
+/// # Grammar
+///
+/// ```ebnf
+/// provide_stmt = 'provide' context_path ['as' identifier] '='
+///                expression (';' | 'in' block_expr)
+/// ```
+///
+/// # Examples
+///
+/// ```verum
+/// // Block-scoped provision
+/// provide Logger = ConsoleLogger.new() in {
+///     Logger.info("This works inside the block");
+/// }
+/// // Logger is no longer available here
+///
+/// // Function-scoped provision (default)
+/// provide Config = load_config();
+/// // Config available for rest of function
+/// ```
+
+/// Scoped context provider — RAII-style context management.
+///
+/// Provides a context within a block, automatically cleaning up at scope exit.
+/// The CBGR memory safety system ensures no dangling references.
+///
+/// # Examples
+///
+/// ```verum
+/// fn with_database<T>(url: Text, f: fn() -> T using [Database]) -> T {
+///     let pool = ConnectionPool.new(url);
+///     provide Database = pool in {
+///         f()
+///         // pool automatically cleaned up at scope exit
+///     }
+/// }
+/// ```
+///
+/// # Structured Concurrency
+///
+/// When used with nursery, contexts are inherited by child tasks and
+/// properly cleaned up when the nursery scope exits:
+///
+/// ```verum
+/// fn process_batch(items: List<Item>) using [Database, Logger] {
+///     nursery |scope| {
+///         for item in items {
+///             scope.spawn(fn() {
+///                 // Inherits Database + Logger from parent
+///                 Database.insert(item);
+///                 Logger.info(f"Processed {item.id}");
+///             });
+///         }
+///         // All child tasks complete before nursery exits
+///         // Parent contexts guaranteed live throughout
+///     }
+/// }
+/// ```
+
+/// Context group definition helper.
+///
+/// Groups are a compile-time feature defined via:
+///
+/// ```verum
+/// using WebContext = [Database, Logger, Auth];
+/// ```
+///
+/// At compile time, `using [WebContext]` expands to `using [Database, Logger, Auth]`.
+/// This module documents the semantics; actual expansion is in the compiler.
+///
+/// # Grammar
+///
+/// ```ebnf
+/// context_group_def = 'using' identifier '=' context_list_def ';'
+/// context_list_def  = '[' context_spec { ',' context_spec } ']'
+/// ```
+///
+/// # Advanced Patterns
+///
+/// Groups can include all context features:
+///
+/// ```verum
+/// // Group with negative constraints (purity guarantee)
+/// using Pure = [!IO, !State<_>, !Random];
+///
+/// // Group with transforms
+/// using TransactionalWeb = [Database.transactional(), Logger, Auth];
+///
+/// // Group with conditions
+/// using DevContext = [Logger, Analytics if cfg.debug];
+/// ```

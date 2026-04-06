@@ -1,0 +1,8 @@
+// Simple stdlib import test
+
+link std.math.sqrt;
+
+fn main() {
+    let x = sqrt(16.0);
+    print(f"sqrt(16.0) = {x}");
+}

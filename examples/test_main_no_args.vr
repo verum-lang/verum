@@ -1,0 +1,6 @@
+// Test main function without arguments
+
+fn main() -> Int {
+    print("Hello from main with no args!")
+    0
+}

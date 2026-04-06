@@ -1,0 +1,213 @@
+# VCS Toolchain Setup Action
+#
+# Sets up the VCS testing environment including:
+# - Rust toolchain with specified version
+# - Platform-specific dependencies (LLVM, Z3)
+# - VCS test runners (vtest, vbench, vfuzz)
+# - Cargo caching for faster builds
+#
+# Usage:
+#   - uses: ./.github/actions/setup-vcs
+#     with:
+#       rust-version: stable
+#       build-runners: 'vtest vbench'
+
+name: 'Setup VCS'
+description: 'Sets up the VCS testing environment'
+
+inputs:
+  rust-version:
+    description: 'Rust toolchain version (stable, beta, nightly, or specific version)'
+    required: false
+    default: 'stable'
+  rust-components:
+    description: 'Additional Rust components to install (space-separated)'
+    required: false
+    default: 'rustfmt clippy'
+  build-runners:
+    description: 'VCS runners to build (space-separated: vtest vbench vfuzz vcs-diff)'
+    required: false
+    default: 'vtest'
+  cache-key:
+    description: 'Cargo cache key suffix for isolation'
+    required: false
+    default: 'vcs'
+  working-directory:
+    description: 'Working directory for VCS operations'
+    required: false
+    default: 'vcs'
+
+outputs:
+  vtest-path:
+    description: 'Path to vtest binary'
+    value: ${{ steps.build.outputs.vtest-path }}
+  vbench-path:
+    description: 'Path to vbench binary'
+    value: ${{ steps.build.outputs.vbench-path }}
+  vfuzz-path:
+    description: 'Path to vfuzz binary'
+    value: ${{ steps.build.outputs.vfuzz-path }}
+  vcs-diff-path:
+    description: 'Path to vcs-diff binary'
+    value: ${{ steps.build.outputs.vcs-diff-path }}
+  platform:
+    description: 'Current platform identifier'
+    value: ${{ steps.platform.outputs.platform }}
+  cache-hit:
+    description: 'Whether the cache was hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect Platform
+      id: platform
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux)
+            if [ -f /etc/os-release ]; then
+              . /etc/os-release
+              echo "platform=linux-${ID}-${VERSION_ID}" >> $GITHUB_OUTPUT
+              echo "os-family=linux" >> $GITHUB_OUTPUT
+            else
+              echo "platform=linux-unknown" >> $GITHUB_OUTPUT
+              echo "os-family=linux" >> $GITHUB_OUTPUT
+            fi
+            ;;
+          macOS)
+            ARCH=$(uname -m)
+            echo "platform=macos-${ARCH}" >> $GITHUB_OUTPUT
+            echo "os-family=macos" >> $GITHUB_OUTPUT
+            ;;
+          Windows)
+            echo "platform=windows-x64" >> $GITHUB_OUTPUT
+            echo "os-family=windows" >> $GITHUB_OUTPUT
+            ;;
+        esac
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.rust-version }}
+        components: ${{ inputs.rust-components }}
+
+    - name: Install LLVM tools preview (for coverage)
+      if: contains(inputs.rust-components, 'llvm-tools')
+      shell: bash
+      run: rustup component add llvm-tools-preview
+
+    - name: Install dependencies (Ubuntu)
+      if: steps.platform.outputs.os-family == 'linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          llvm-14-dev \
+          libz3-dev \
+          clang-14 \
+          cmake \
+          pkg-config \
+          jq \
+          bc
+
+    - name: Install dependencies (macOS)
+      if: steps.platform.outputs.os-family == 'macos'
+      shell: bash
+      run: |
+        brew install llvm@21 z3 cmake jq
+        echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+    - name: Install dependencies (Windows)
+      if: steps.platform.outputs.os-family == 'windows'
+      shell: pwsh
+      run: |
+        choco install llvm z3 cmake jq -y
+        echo "LLVM_SYS_210_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
+
+    - name: Cache Cargo dependencies
+      id: cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: "vcs-v1"
+        shared-key: ${{ steps.platform.outputs.platform }}-${{ inputs.rust-version }}-${{ inputs.cache-key }}
+        cache-on-failure: true
+        workspaces: |
+          . -> target
+          ${{ inputs.working-directory }}/runner/vtest -> target
+          ${{ inputs.working-directory }}/runner/vbench -> target
+          ${{ inputs.working-directory }}/runner/vfuzz -> target
+          ${{ inputs.working-directory }}/differential/runner -> target
+
+    - name: Build VCS runners
+      id: build
+      shell: bash
+      run: |
+        RUNNERS="${{ inputs.build-runners }}"
+        WD="${{ inputs.working-directory }}"
+
+        for runner in $RUNNERS; do
+          case "$runner" in
+            vtest)
+              echo "Building vtest..."
+              cd "$WD/runner/vtest"
+              cargo build --release
+              echo "vtest-path=$(pwd)/target/release/vtest" >> $GITHUB_OUTPUT
+              cd -
+              ;;
+            vbench)
+              echo "Building vbench..."
+              cd "$WD/runner/vbench"
+              cargo build --release
+              echo "vbench-path=$(pwd)/target/release/vbench" >> $GITHUB_OUTPUT
+              cd -
+              ;;
+            vfuzz)
+              echo "Building vfuzz..."
+              cd "$WD/runner/vfuzz"
+              cargo build --release
+              echo "vfuzz-path=$(pwd)/target/release/vfuzz" >> $GITHUB_OUTPUT
+              cd -
+              ;;
+            vcs-diff)
+              echo "Building vcs-diff..."
+              cd "$WD/differential/runner"
+              cargo build --release
+              echo "vcs-diff-path=$(pwd)/target/release/vcs-diff" >> $GITHUB_OUTPUT
+              cd -
+              ;;
+            *)
+              echo "Unknown runner: $runner"
+              ;;
+          esac
+        done
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        echo "## VCS Setup Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- Platform: ${{ steps.platform.outputs.platform }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Rust Version: ${{ inputs.rust-version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Runners Built: ${{ inputs.build-runners }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Cache Hit: ${{ steps.cache.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
+
+        # Verify binaries
+        for runner in ${{ inputs.build-runners }}; do
+          case "$runner" in
+            vtest)
+              if [ -f "${{ inputs.working-directory }}/runner/vtest/target/release/vtest" ]; then
+                echo "- vtest: OK" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- vtest: MISSING" >> $GITHUB_STEP_SUMMARY
+              fi
+              ;;
+            vbench)
+              if [ -f "${{ inputs.working-directory }}/runner/vbench/target/release/vbench" ]; then
+                echo "- vbench: OK" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- vbench: MISSING" >> $GITHUB_STEP_SUMMARY
+              fi
+              ;;
+          esac
+        done

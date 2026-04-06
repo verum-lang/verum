@@ -1,0 +1,20 @@
+// Step 2: Test generic record types
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn main() -> Int {
+    let p1 = make_pair(42, true);
+    let p2 = swap(p1);
+    42
+}

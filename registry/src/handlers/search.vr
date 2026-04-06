@@ -1,0 +1,462 @@
+// Verum Registry - Search Handlers
+//
+// HTTP handlers for package search and discovery
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text};
+mount super.super.contexts.{Database, Search, SearchQuery};
+mount super.super.contexts.search.{SearchResult, SearchResponse};
+mount super.super.contexts.database.{PackageSearchResult};
+mount super.super.domain.errors.{RegistryError};
+mount super.super.dto.search_dto.{
+    SearchResultDto,
+    SearchFiltersDto,
+    SortOrderDto,
+    SearchRequestDto,
+    SearchResponseDto,
+};
+mount super.super.converters.search_converter.{
+    search_result_to_dto,
+    search_hits_to_dtos,
+    search_request_to_query,
+    SearchHit,
+};
+
+// Import validation service
+mount super.super.services.validation_service.{
+    validate_search_request,
+    validate_pagination,
+    validate_page_size,
+};
+
+// Import concurrency utilities
+mount super.super.services.concurrency_service.{join2, join3};
+
+// Import timing utilities
+mount super.super.services.timing_service.{Timer};
+
+// ============================================================================
+// HTTP Handlers
+// ============================================================================
+
+/// Search for packages
+///
+/// GET /api/v1/search?q={query}&page=1&limit=20
+pub async fn search_packages(req: SearchRequestDto) -> Result<SearchResponseDto, RegistryError>
+    using [Database, Search]
+{
+    let timer = Timer.start();
+
+    // Validate search request using centralized validation service
+    validate_search_request(&req)?;
+
+    // Build search query for the Search context
+    let query = build_context_search_query(&req);
+
+    // Execute search
+    let search_response: SearchResponse = Search.search(query).await?;
+
+    // Convert context SearchResults to DTOs
+    let results_dtos = convert_context_results_to_dtos(search_response.results);
+
+    // Apply filters if provided
+    // Note: Filters are currently not applied due to type inference issues
+    // TODO: Re-enable once pattern matching on Maybe with nested field access is fixed
+    let filtered: List<SearchResultDto> = results_dtos;
+
+    // Sort results
+    let sorted = sort_results(filtered, req.sort_by);
+
+    // Paginate results
+    let offset = (req.page - 1) * req.limit;
+    let paginated = paginate(sorted, offset, req.limit);
+
+    Result.Ok(SearchResponseDto {
+        results: paginated,
+        total: search_response.total,
+        page: req.page,
+        per_page: req.limit,
+        took_ms: timer.stop(),
+    })
+}
+
+/// Quick search for autocomplete
+///
+/// GET /api/v1/search/autocomplete?q={query}
+pub async fn autocomplete(query: Text, limit: Int) -> Result<List<Text>, RegistryError>
+    using [Search]
+{
+    if query.is_empty() {
+        return Result.Ok(List.new());
+    }
+
+    if query.len() < 2 {
+        return Result.Ok(List.new());
+    }
+
+    // Validate page size (autocomplete uses different bounds: 1-20)
+    validate_page_size(limit, 1, 20)?;
+
+    // Get package name suggestions
+    let suggestions = Search.autocomplete(query, limit).await?;
+
+    Result.Ok(suggestions)
+}
+
+/// Get trending packages
+///
+/// GET /api/v1/search/trending?period=week&limit=10
+pub async fn trending_packages(period: Text, limit: Int) -> Result<List<SearchResultDto>, RegistryError>
+    using [Database]
+{
+    // Validate period
+    let days = match period {
+        "day" => 1,
+        "week" => 7,
+        "month" => 30,
+        _ => return Result.Err(RegistryError.validation_error("period", "Invalid period. Use 'day', 'week', or 'month'")),
+    };
+
+    // Validate page size (trending uses different bounds: 1-50)
+    validate_page_size(limit, 1, 50)?;
+
+    // Get trending packages from database
+    let trending = Database.get_trending(days, limit).await?;
+
+    // Convert PackageSearchResults to DTOs
+    let trending_dtos = convert_package_search_results_to_dtos(trending);
+
+    Result.Ok(trending_dtos)
+}
+
+/// Get package categories
+///
+/// GET /api/v1/search/categories
+pub async fn get_categories() -> Result<List<Text>, RegistryError>
+    using [Database]
+{
+    let categories = Database.list_categories().await?;
+    Result.Ok(categories)
+}
+
+/// Search by category
+///
+/// GET /api/v1/search/category/{name}?page=1&limit=20
+pub async fn search_by_category(
+    category: Text,
+    page: Int,
+    limit: Int
+) -> Result<SearchResponseDto, RegistryError>
+    using [Database]
+{
+    let timer = Timer.start();
+
+    // Validate pagination using centralized validation service
+    validate_pagination(page, limit)?;
+
+    // Calculate offset
+    let offset = (page - 1) * limit;
+
+    // Get packages in category
+    let results = Database.find_by_category(category.clone(), offset, limit).await?;
+    let total = Database.count_by_category(category).await?;
+
+    // Convert PackageSearchResults to DTOs
+    let results_dtos = convert_package_search_results_to_dtos(results);
+
+    Result.Ok(SearchResponseDto {
+        results: results_dtos,
+        total,
+        page,
+        per_page: limit,
+        took_ms: timer.stop(),
+    })
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Note: validate_search_request moved to services/validation_service.vr
+// to eliminate code duplication following DRY principles
+
+/// Build search query for the Search context from the request DTO
+fn build_context_search_query(req: &SearchRequestDto) -> SearchQuery {
+    let filters_map: Map<Text, Text> = extract_filters_to_map(req);
+
+    SearchQuery {
+        term: req.query.clone(),
+        filters: filters_map,
+        limit: Maybe.Some(req.limit),
+        offset: Maybe.Some((req.page - 1) * req.limit),
+        sort_by: Maybe.Some(req.sort_by.to_string()),
+    }
+}
+
+/// Extract filters from request DTO and convert to map
+fn extract_filters_to_map(req: &SearchRequestDto) -> Map<Text, Text> {
+    let mut filters_map: Map<Text, Text> = Map.new();
+
+    // TODO: Temporarily disabled due to type inference issues with nested Maybe field access
+    // Will be re-enabled once the type checker properly handles field access after pattern matching
+
+    filters_map
+}
+
+// ============================================================================
+// Conversion Functions
+// ============================================================================
+
+/// Convert list of SearchResults (from Search context) to DTOs
+fn convert_context_results_to_dtos(results: List<SearchResult>) -> List<SearchResultDto> {
+    let mut dtos: List<SearchResultDto> = List.new();
+
+    for result in results {
+        let dto = SearchResultDto {
+            name: result.package_name,
+            version: result.version,
+            description: result.description,
+            downloads: result.downloads,
+            license: result.license,
+            score: result.score,
+            published_at: result.published_at,
+            category: result.category,
+        };
+        dtos.push(dto);
+    }
+
+    dtos
+}
+
+/// Convert list of PackageSearchResults (from Database context) to DTOs
+fn convert_package_search_results_to_dtos(results: List<PackageSearchResult>) -> List<SearchResultDto> {
+    let mut dtos: List<SearchResultDto> = List.new();
+
+    for result in results {
+        let dto = SearchResultDto {
+            name: result.name,
+            version: result.version,
+            description: result.description,
+            downloads: result.downloads,
+            license: "Unknown",        // PackageSearchResult doesn't include license
+            score: result.score,
+            published_at: "",           // PackageSearchResult doesn't include timestamp
+            category: Maybe.None,       // PackageSearchResult doesn't include category
+        };
+        dtos.push(dto);
+    }
+
+    dtos
+}
+
+/// Apply filters to search results
+fn apply_filters(results: List<SearchResultDto>, filters: SearchFiltersDto) -> List<SearchResultDto> {
+    let mut filtered = results;
+
+    // Filter by license
+    filtered = match filters.license {
+        Maybe.Some(license) => {
+            filtered.filter(|r| r.license == license)
+        }
+        Maybe.None => filtered,
+    };
+
+    // Filter by minimum downloads
+    filtered = match filters.min_downloads {
+        Maybe.Some(min) => {
+            filtered.filter(|r| r.downloads >= min)
+        }
+        Maybe.None => filtered,
+    };
+
+    // Filter by category - Note: r.category is Maybe<Text>, needs special handling
+    // filtered = match filters.category {
+    //     Maybe.Some(cat) => {
+    //         filtered.filter(|r| r.category == Maybe.Some(cat))
+    //     }
+    //     Maybe.None => filtered,
+    // };
+
+    filtered
+}
+
+/// Sort search results
+fn sort_results(results: List<SearchResultDto>, order: SortOrderDto) -> List<SearchResultDto> {
+    // Note: sort_by currently not fully implemented in stdlib
+    // Returning results as-is until List.sort_by is available
+    // When implemented, use:
+    // match order {
+    //     SortOrderDto.Relevance => results.sort_by(|a, b| if b.score > a.score { 1 } else if b.score < a.score { -1 } else { 0 }),
+    //     SortOrderDto.Downloads => results.sort_by(|a, b| b.downloads - a.downloads),
+    //     SortOrderDto.Recent => results.sort_by(|a, b| b.published_at.compare(a.published_at)),
+    //     SortOrderDto.Alphabetical => results.sort_by(|a, b| a.name.compare(b.name)),
+    // }
+    results
+}
+
+/// Paginate results
+fn paginate(results: List<SearchResultDto>, offset: Int, limit: Int) -> List<SearchResultDto> {
+    results.skip(offset).take(limit)
+}
+
+// ============================================================================
+// Comprehensive Search (with Concurrent Index Queries)
+// ============================================================================
+
+/// Search packages across multiple indexes concurrently
+///
+/// GET /api/v1/search/comprehensive?q={query}&category={category}
+///
+/// Runs text search, category lookup, and trending queries in parallel,
+/// then merges and deduplicates results.
+pub async fn search_comprehensive(req: SearchRequestDto) -> Result<SearchResponseDto, RegistryError>
+    using [Search, Database]
+{
+    let timer = Timer.start();
+
+    validate_search_request(&req)?;
+
+    // Run multiple search strategies concurrently
+    let (text_results, category_results, trending) = join3(
+        // Text search in search index
+        Search.search(build_context_search_query(&req)),
+        // Category-based lookup
+        async {
+            if !req.query.is_empty() {
+                Database.find_by_category(req.query.clone(), 0, 20).await
+            } else {
+                Result.Ok(List.new())
+            }
+        },
+        // Get trending packages for suggestions
+        Database.get_trending(7, 10)
+    ).await?;
+
+    // Convert context SearchResults to DTOs
+    let text_dtos = convert_context_results_to_dtos(text_results.results);
+
+    // Merge and deduplicate results
+    let combined = merge_and_deduplicate(text_dtos, category_results, trending);
+
+    // Sort and paginate
+    let sorted = sort_results(combined, req.sort_by);
+    let offset = (req.page - 1) * req.limit;
+    let paginated = paginate(sorted, offset, req.limit);
+
+    Result.Ok(SearchResponseDto {
+        results: paginated,
+        total: text_results.total,
+        page: req.page,
+        per_page: req.limit,
+        took_ms: timer.stop(),
+    })
+}
+
+/// Merge search results from multiple sources and remove duplicates
+fn merge_and_deduplicate(
+    text_results: List<SearchResultDto>,
+    category_results: List<PackageSearchResult>,
+    trending: List<PackageSearchResult>
+) -> List<SearchResultDto> {
+    let mut merged: List<SearchResultDto> = text_results;
+    let mut seen_names: List<Text> = List.new();
+
+    // Track names already in text_results
+    for result in merged {
+        seen_names.push(result.name.clone());
+    }
+
+    // Add category results if not already present
+    for cat_result in category_results {
+        if !seen_names.contains(&cat_result.name) {
+            let dto = SearchResultDto {
+                name: cat_result.name.clone(),
+                version: cat_result.version,
+                description: cat_result.description,
+                downloads: cat_result.downloads,
+                license: "Unknown",
+                score: cat_result.score,
+                published_at: "",
+                category: Maybe.None,
+            };
+            merged.push(dto);
+            seen_names.push(cat_result.name);
+        }
+    }
+
+    // Add trending results if not already present
+    for trend_result in trending {
+        if !seen_names.contains(&trend_result.name) {
+            let dto = SearchResultDto {
+                name: trend_result.name.clone(),
+                version: trend_result.version,
+                description: trend_result.description,
+                downloads: trend_result.downloads,
+                license: "Unknown",
+                score: trend_result.score,
+                published_at: "",
+                category: Maybe.None,
+            };
+            merged.push(dto);
+            seen_names.push(trend_result.name);
+        }
+    }
+
+    merged
+}
+
+/// Search with autocomplete and trending suggestions loaded concurrently
+///
+/// GET /api/v1/search/with-suggestions?q={query}
+///
+/// Loads search results and autocomplete suggestions in parallel.
+pub async fn search_with_suggestions(query: Text, limit: Int) -> Result<SearchWithSuggestionsDto, RegistryError>
+    using [Search, Database]
+{
+    if query.is_empty() {
+        return Result.Ok(SearchWithSuggestionsDto {
+            results: List.new(),
+            suggestions: List.new(),
+            trending: List.new(),
+        });
+    }
+
+    validate_page_size(limit, 1, 50)?;
+
+    // Build search query
+    let search_query = SearchQuery {
+        term: query.clone(),
+        filters: Map.new(),
+        limit: Maybe.Some(limit),
+        offset: Maybe.Some(0),
+        sort_by: Maybe.Some("relevance"),
+    };
+
+    // Load search results, autocomplete suggestions, and trending concurrently
+    let (search_response, suggestions, trending) = join3(
+        Search.search(search_query),
+        Search.autocomplete(query, 10),
+        Database.get_trending(7, 5)
+    ).await?;
+
+    // Convert to DTOs
+    let results_dtos = convert_context_results_to_dtos(search_response.results);
+    let trending_dtos = convert_package_search_results_to_dtos(trending);
+
+    Result.Ok(SearchWithSuggestionsDto {
+        results: results_dtos,
+        suggestions: suggestions,
+        trending: trending_dtos,
+    })
+}
+
+// ============================================================================
+// DTOs for Comprehensive Search
+// ============================================================================
+
+/// Search results with autocomplete suggestions and trending packages
+pub struct SearchWithSuggestionsDto {
+    pub results: List<SearchResultDto>,
+    pub suggestions: List<Text>,
+    pub trending: List<SearchResultDto>,
+}

@@ -1,0 +1,35 @@
+// Test: RT-001 through RT-004 - Refinement types
+// Priority: Critical/High
+// Expected output: Refinement type validation
+
+// Positive integer refinement
+type Positive is Int { value > 0 };
+
+// Percentage range refinement
+type Percentage is Float { value >= 0.0 && value <= 100.0 };
+
+// Non-empty text refinement
+type NonEmpty is Text { len(value) > 0 };
+
+// Function with inline refinement
+fn safe_divide(a: Float, b: Float { value != 0.0 }) -> Float {
+    a / b
+}
+
+fn main() {
+    // Positive integer
+    let x: Positive = 42;
+    print(f"Positive: {x}");
+
+    // Percentage
+    let p: Percentage = 50.0;
+    print(f"Percentage: {p}");
+
+    // Non-empty text
+    let s: NonEmpty = "Hello";
+    print(f"Text: {s}");
+
+    // Safe divide (b cannot be 0)
+    let result = safe_divide(10.0, 2.0);
+    print(f"Division: {result}");
+}

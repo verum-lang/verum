@@ -1,0 +1,172 @@
+name: VCS Fuzzer Crash
+description: Report a crash discovered by VCS fuzzing
+title: "[SECURITY] Fuzzer Crash: "
+labels: ["vcs", "security", "fuzzing", "bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## VCS Fuzzer Crash Report
+
+        **Security Notice:** Fuzzer crashes may indicate memory safety violations
+        or undefined behavior. Please handle with care and do not publicly
+        disclose exploitable details until fixed.
+
+  - type: dropdown
+    id: fuzz-target
+    attributes:
+      label: Fuzz Target
+      description: Which fuzzer target discovered this crash?
+      options:
+        - lexer_fuzz
+        - lexer_unicode_fuzz
+        - parser_fuzz
+        - parser_expr_fuzz
+        - parser_type_fuzz
+        - cbgr_allocate_deallocate
+        - cbgr_concurrent_access
+        - cbgr_generation_wraparound
+        - cbgr_capability_checks
+        - cbgr_stress
+        - types_inference_fuzz
+        - types_unify_fuzz
+        - smt_fuzz
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: crash-type
+    attributes:
+      label: Crash Type
+      description: What kind of crash occurred?
+      options:
+        - SEGFAULT
+        - Abort
+        - Stack overflow
+        - Heap corruption
+        - Use after free
+        - Double free
+        - Buffer overflow
+        - Integer overflow
+        - Assertion failure
+        - Panic
+        - Timeout
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: crash-input
+    attributes:
+      label: Crash Input
+      description: The input that caused the crash (base64 if binary)
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: artifact-name
+    attributes:
+      label: Crash Artifact Name
+      description: Name of the crash artifact from CI
+      placeholder: "fuzz-crashes-lexer/crash-abc123"
+    validations:
+      required: false
+
+  - type: textarea
+    id: stack-trace
+    attributes:
+      label: Stack Trace
+      description: Full stack trace at crash point
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: asan-output
+    attributes:
+      label: Sanitizer Output
+      description: AddressSanitizer, UBSan, or other sanitizer output
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: minimized-input
+    attributes:
+      label: Minimized Input
+      description: Result of `cargo fuzz tmin` if available
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: Commit where crash was detected
+      placeholder: "abc123..."
+    validations:
+      required: true
+
+  - type: input
+    id: workflow-run
+    attributes:
+      label: Fuzzing Workflow Run
+      description: Link to the fuzzing GitHub Actions run
+      placeholder: "https://github.com/.../actions/runs/..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity Assessment
+      description: Initial severity assessment
+      options:
+        - Critical (potential RCE, exploitable)
+        - High (memory corruption, security impact)
+        - Medium (denial of service, crash)
+        - Low (edge case, unlikely to occur naturally)
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction Steps
+      description: Steps to reproduce the crash
+      value: |
+        1. Install cargo-fuzz: `cargo install cargo-fuzz`
+        2. Navigate to fuzzer: `cd vcs/fuzz`
+        3. Run crash: `cargo +nightly fuzz run <target> <crash_file>`
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Investigation Checklist
+      options:
+        - label: Crash is reproducible locally
+          required: true
+        - label: Input has been minimized with `cargo fuzz tmin`
+          required: false
+        - label: Crash analyzed with sanitizers (ASan, UBSan)
+          required: false
+        - label: Root cause identified
+          required: false
+        - label: Fix verified by running crash input
+          required: false
+        - label: Minimized crash added to regression seeds
+          required: false

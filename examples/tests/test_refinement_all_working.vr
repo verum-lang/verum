@@ -1,0 +1,94 @@
+// Comprehensive refinement type test - all working features
+// Tests: inline refinements, type aliases with where clauses, sigma types
+
+// === Type Aliases with Inline Refinements ===
+type PositiveInt is Int{> 0};
+type Percentage is Int{>= 0, <= 100};
+type NonZero is Int{!= 0};
+
+// === Type Aliases with Where Clause ===
+type Age is Int where it >= 0 && it <= 150;
+type Temperature is Float where value >= -273.15;
+type EvenPositive is Int where it > 0 && it % 2 == 0;
+
+// === Sigma Types ===
+type BoundedValue is x: Int where x >= 10 && x <= 90;
+type ValidEmail is email: Text where email.contains("@");
+
+// === Functions with Inline Refinement Return Types ===
+fn get_positive() -> Int{> 0} {
+    42
+}
+
+fn get_percentage() -> Int{>= 0, <= 100} {
+    75
+}
+
+fn get_non_zero() -> Int{!= 0} {
+    -5
+}
+
+// === Functions using Type Aliases ===
+fn make_age() -> Age {
+    25
+}
+
+fn make_temperature() -> Temperature {
+    20.5
+}
+
+fn make_even_positive() -> EvenPositive {
+    42
+}
+
+fn make_bounded() -> BoundedValue {
+    50
+}
+
+// === Functions with Refined Parameters ===
+fn double_positive(x: Int{> 0}) -> Int {
+    x * 2
+}
+
+fn validate_percentage(pct: Int{>= 0, <= 100}) -> Bool {
+    pct >= 50
+}
+
+fn safe_divide(dividend: Int, divisor: NonZero) -> Int {
+    dividend / divisor
+}
+
+fn main() {
+    // Test inline refinements
+    let p1 = get_positive();
+    let p2 = get_percentage();
+    let p3 = get_non_zero();
+
+    // Test type aliases
+    let a1 = make_age();
+    let t1 = make_temperature();
+    let e1 = make_even_positive();
+    let b1 = make_bounded();
+
+    // Test refined parameters
+    let d1 = double_positive(p1);
+    let v1 = validate_percentage(p2);
+    let div = safe_divide(100, p3);
+
+    // Combine results
+    let int_sum = p1 + p2 + p3 + a1 + e1 + b1 + d1 + div;
+
+    let _ = println(f"Positive: {p1}");
+    let _ = println(f"Percentage: {p2}");
+    let _ = println(f"Non-zero: {p3}");
+    let _ = println(f"Age: {a1}");
+    let _ = println(f"Temperature: {t1}");
+    let _ = println(f"Even positive: {e1}");
+    let _ = println(f"Bounded: {b1}");
+    let _ = println(f"Doubled: {d1}");
+    let _ = println(f"Valid percentage: {v1}");
+    let _ = println(f"Division result: {div}");
+    let _ = println(f"Sum: {int_sum}");
+
+    int_sum
+}

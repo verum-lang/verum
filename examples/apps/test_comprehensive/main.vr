@@ -1,0 +1,17 @@
+// Test protocol method dispatch
+
+type Display is protocol {
+    fn display(self) -> Text
+}
+
+implement Display for Int {
+    fn display(self) -> Text {
+        "number"
+    }
+}
+
+fn main() {
+    let x = 42;
+    let s = x.display();
+    print(s);
+}

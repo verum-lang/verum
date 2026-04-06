@@ -1,0 +1,138 @@
+// =============================================================================
+// raw/mod.vr - Layer 0: Raw Terminal I/O
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.sys, core.io
+// =============================================================================
+//
+// Raw terminal control: termios (POSIX), Console API (Windows), ANSI escape
+// writer, capability detection, alternate screen, terminal size queries.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
+// =============================================================================
+
+module raw;
+
+mount core.sys.{FileDesc, OSError};
+mount core.io.{Read, Write, IoResult, StreamError, IoErrorKind};
+
+// =============================================================================
+// Sub-modules
+// =============================================================================
+
+/// POSIX termios manipulation
+public module termios;
+
+/// Windows Console API
+public module wincon;
+
+/// ANSI escape sequence writer
+public module escape;
+
+/// Terminal capability detection
+public module capabilities;
+
+/// Alternate screen and size queries
+public module screen;
+
+/// Cursor positioning and shape control
+public module cursor;
+
+/// OSC 52 clipboard access
+public module clipboard;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+public mount .termios.PosixTerminal;
+public mount .escape.{EscapeWriter, ClearMode};
+public mount .capabilities.{
+    TermCapabilities, ColorProfile, UnicodeSupport, MouseProtocol,
+    detect_capabilities, query_background_color,
+};
+public mount .screen.{enter_alternate_screen, leave_alternate_screen, get_terminal_size};
+public mount .cursor.{save_position, restore_position, move_to, move_up, move_down, move_right, move_left, set_shape, query_position};
+public mount .clipboard.{clipboard_set, clipboard_get};
+
+// =============================================================================
+// Terminal Mode — safe wrapper over termios / Console API
+// =============================================================================
+
+/// Terminal mode state. Stores original settings for RAII restoration.
+public type TerminalMode is {
+    original: TermiosState,
+    fd: FileDesc,
+    is_raw: Bool,
+    is_alternate: Bool,
+};
+
+/// Low-level termios state (platform-dependent).
+/// On POSIX: raw termios bytes (sizeof(struct termios) = 60 bytes).
+/// On Windows: saved console mode flags.
+type TermiosState is {
+    @cfg(not(target_os = "windows"))
+    data: [Byte; 60],
+    @cfg(target_os = "windows")
+    input_mode: UInt32,
+    @cfg(target_os = "windows")
+    output_mode: UInt32,
+};
+
+/// Terminal size in cells and (optionally) pixels.
+public type TerminalSize is {
+    columns: Int,
+    rows: Int,
+    pixel_width: Maybe<Int>,
+    pixel_height: Maybe<Int>,
+};
+
+/// Cursor shape (DECSCUSR values).
+public type CursorShape is
+    | BlinkingBlock
+    | SteadyBlock
+    | BlinkingUnderline
+    | SteadyUnderline
+    | BlinkingBar
+    | SteadyBar;
+
+// =============================================================================
+// RawTerminal Protocol
+// =============================================================================
+
+/// Main protocol for low-level terminal access.
+/// Abstracts platform differences (POSIX termios vs Windows Console).
+public type RawTerminal is protocol extends Read + Write {
+    /// Switch terminal to raw mode (disable buffering, echo, signals).
+    fn enable_raw_mode(&mut self) -> IoResult<()>;
+
+    /// Restore original terminal mode.
+    fn disable_raw_mode(&mut self) -> IoResult<()>;
+
+    /// Switch to alternate screen buffer.
+    fn enter_alternate_screen(&mut self) -> IoResult<()>;
+
+    /// Return to primary screen buffer.
+    fn leave_alternate_screen(&mut self) -> IoResult<()>;
+
+    /// Get current terminal size.
+    fn size(&self) -> IoResult<TerminalSize>;
+
+    /// Check if the stream is a terminal (isatty).
+    fn is_tty(&self) -> Bool;
+
+    /// Enable/disable mouse capture (SGR Extended).
+    fn set_mouse_capture(&mut self, enable: Bool) -> IoResult<()>;
+
+    /// Enable/disable focus events (Mode 1004).
+    fn set_focus_events(&mut self, enable: Bool) -> IoResult<()>;
+
+    /// Enable/disable bracketed paste (Mode 2004).
+    fn set_bracketed_paste(&mut self, enable: Bool) -> IoResult<()>;
+
+    /// Set cursor shape (DECSCUSR).
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> IoResult<()>;
+
+    /// Show/hide cursor (DECTCEM).
+    fn set_cursor_visible(&mut self, visible: Bool) -> IoResult<()>;
+};

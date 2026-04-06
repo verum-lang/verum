@@ -1,0 +1,684 @@
+// Comprehensive Pattern Matching Test for Verum
+// Tests all pattern types based on verum.ebnf grammar
+// Pattern types covered:
+// 1. Literal patterns (integers, strings, booleans)
+// 2. Identifier patterns (x, ref x, mut x)
+// 3. Wildcard pattern (_)
+// 4. Rest pattern (..)
+// 5. Tuple patterns
+// 6. Array patterns
+// 7. Slice patterns (with ..)
+// 8. Record patterns
+// 9. Variant patterns
+// 10. Reference patterns (&x, &mut x)
+// 11. Range patterns (x..y, x..=y)
+// 12. OR patterns (x | y | z)
+// 13. IF guards (x if condition => ...)
+// 14. WHERE guards (x where condition => ...)
+// 15. Nested patterns
+
+// ============================================================================
+// Type Definitions for Testing
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+type Color is Red | Green | Blue | Rgb(Int, Int, Int) | Rgba(Int, Int, Int, Int);
+
+type Shape is Circle { radius: Int } | Rectangle { width: Int, height: Int } | Triangle { base: Int, height: Int };
+
+type SimpleResult is Success(Int) | Failure(Text);
+
+type Wrapper is { value: Int };
+
+// ============================================================================
+// 1. LITERAL PATTERNS
+// ============================================================================
+
+fn test_literal_patterns() {
+    print("=== Test 1: Literal Patterns ===")
+
+    // Integer literals
+    let x = 42;
+    match x {
+        0 => print("Zero"),
+        1 => print("One"),
+        42 => print("✓ Integer literal: 42"),
+        _ => print("Other"),
+    }
+
+    // Boolean literals
+    let flag = true;
+    match flag {
+        true => print("✓ Boolean literal: true"),
+        false => print("False"),
+    }
+
+    // String literals
+    let msg = "hello";
+    match msg {
+        "hello" => print("✓ String literal: hello"),
+        "world" => print("World"),
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// 2. IDENTIFIER PATTERNS
+// ============================================================================
+
+fn test_identifier_patterns() {
+    print("=== Test 2: Identifier Patterns ===")
+
+    // Basic identifier binding
+    let x = 10;
+    match x {
+        value => print(f"✓ Identifier pattern: {value}"),
+    }
+
+    // Mutable identifier binding
+    let y = 20;
+    match y {
+        mut val => {
+            val = val + 5;
+            print(f"✓ Mut identifier pattern: {val}");
+        }
+    }
+
+    // Reference identifier binding
+    let z = 30;
+    match z {
+        ref r => print(f"✓ Ref identifier pattern: {r}"),
+    }
+}
+
+// ============================================================================
+// 3. WILDCARD PATTERN
+// ============================================================================
+
+fn test_wildcard_pattern() {
+    print("=== Test 3: Wildcard Pattern ===")
+
+    let x = 999;
+    match x {
+        100 => print("Hundred"),
+        _ => print("✓ Wildcard pattern: matched anything"),
+    }
+}
+
+// ============================================================================
+// 4. TUPLE PATTERNS
+// ============================================================================
+
+fn test_tuple_patterns() {
+    print("=== Test 4: Tuple Patterns ===")
+
+    // Basic tuple pattern
+    let pair = (1, 2);
+    match pair {
+        (a, b) => print(f"✓ Tuple pattern: ({a}, {b})"),
+    }
+
+    // Nested tuple pattern
+    let nested = (1, (2, 3));
+    match nested {
+        (x, (y, z)) => print(f"✓ Nested tuple: ({x}, ({y}, {z}))"),
+    }
+
+    // Tuple with wildcards
+    let triple = (1, 2, 3);
+    match triple {
+        (first, _, last) => print(f"✓ Tuple with wildcard: first={first}, last={last}"),
+    }
+}
+
+// ============================================================================
+// 5. ARRAY PATTERNS
+// ============================================================================
+
+fn test_array_patterns() {
+    print("=== Test 5: Array Patterns ===")
+
+    // Fixed-size array pattern
+    let arr = [1, 2, 3];
+    match arr {
+        [a, b, c] => print(f"✓ Array pattern: [{a}, {b}, {c}]"),
+        _ => print("No match"),
+    }
+
+    // Array with literal patterns
+    let nums = [10, 20, 30];
+    match nums {
+        [10, x, y] => print(f"✓ Array with literal: [10, {x}, {y}]"),
+        _ => print("No match"),
+    }
+}
+
+// ============================================================================
+// 6. SLICE PATTERNS (with rest ..)
+// ============================================================================
+
+fn test_slice_patterns() {
+    print("=== Test 6: Slice Patterns ===")
+
+    // First and rest
+    let nums = [1, 2, 3, 4, 5];
+    match nums {
+        [first, ..] => print(f"✓ Slice pattern (first, ..): first={first}"),
+        _ => print("No match"),
+    }
+
+    // First and last
+    match nums {
+        [first, .., last] => print(f"✓ Slice pattern [first, .., last]: first={first}, last={last}"),
+        _ => print("No match"),
+    }
+
+    // First, middle, and last
+    match nums {
+        [first, second, .., last] => print(f"✓ Slice [first, second, .., last]: {first}, {second}, ..., {last}"),
+        _ => print("No match"),
+    }
+
+    // Only rest in middle
+    match nums {
+        [a, b, .., y, z] => print(f"✓ Slice [a, b, .., y, z]: {a}, {b}, ..., {y}, {z}"),
+        _ => print("No match"),
+    }
+}
+
+// ============================================================================
+// 7. RECORD PATTERNS
+// ============================================================================
+
+fn test_record_patterns() {
+    print("=== Test 7: Record Patterns ===")
+
+    // Basic record pattern
+    let point = Point { x: 10, y: 20 };
+    match point {
+        Point { x, y } => print(f"✓ Record pattern: Point({{{x}, {y}}})"),
+    }
+
+    // Record with specific values
+    let origin = Point { x: 0, y: 0 };
+    match origin {
+        Point { x: 0, y: 0 } => print("✓ Record with literal fields: origin"),
+        Point { x, y } => print(f"Point({x}, {y})"),
+    }
+
+    // Record with partial matching (with ..)
+    let p = Point { x: 5, y: 10 };
+    match p {
+        Point { x, .. } => print(f"✓ Record with ..: x={x}"),
+    }
+}
+
+// ============================================================================
+// 8. VARIANT PATTERNS
+// ============================================================================
+
+fn test_variant_patterns() {
+    print("=== Test 8: Variant Patterns ===")
+
+    // Simple unit variant
+    let color = Red;
+    match color {
+        Red => print("✓ Unit variant: Red"),
+        Green => print("Green"),
+        Blue => print("Blue"),
+        _ => print("Other"),
+    }
+
+    // Tuple variant
+    let rgb = Rgb(255, 128, 0);
+    match rgb {
+        Rgb(r, g, b) => print(f"✓ Tuple variant: Rgb({r}, {g}, {b})"),
+        _ => print("Other"),
+    }
+
+    // Tuple variant with wildcard
+    let rgba = Rgba(255, 128, 0, 128);
+    match rgba {
+        Rgba(r, _, _, a) => print(f"✓ Tuple variant with wildcard: r={r}, a={a}"),
+        _ => print("Other"),
+    }
+
+    // Record variant
+    let circle = Circle { radius: 10 };
+    match circle {
+        Circle { radius } => print(f"✓ Record variant: Circle with radius={radius}"),
+        _ => print("Other"),
+    }
+
+    // Record variant with specific fields
+    let rect = Rectangle { width: 20, height: 10 };
+    match rect {
+        Rectangle { width: 20, height } => print(f"✓ Record variant with literal: width=20, height={height}"),
+        Rectangle { width, height } => print(f"Rectangle: {width}x{height}"),
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// 9. REFERENCE PATTERNS
+// ============================================================================
+
+fn test_reference_patterns() {
+    print("=== Test 9: Reference Patterns ===")
+
+    let value = 42;
+    let ref_val = &value;
+
+    match ref_val {
+        &x => print(f"✓ Reference pattern &x: {x}"),
+    }
+
+    // Mutable reference pattern
+    let mut mut_value = 100;
+    let mut_ref = &mut mut_value;
+
+    match mut_ref {
+        &mut x => print(f"✓ Mutable reference pattern &mut x: {x}"),
+    }
+}
+
+// ============================================================================
+// 10. RANGE PATTERNS
+// ============================================================================
+
+fn test_range_patterns() {
+    print("=== Test 10: Range Patterns ===")
+
+    // Inclusive range
+    let score = 85;
+    match score {
+        0..=59 => print("F"),
+        60..=69 => print("D"),
+        70..=79 => print("C"),
+        80..=89 => print("✓ Range pattern (inclusive): B"),
+        90..=100 => print("A"),
+        _ => print("Invalid"),
+    }
+
+    // Exclusive range
+    let value = 5;
+    match value {
+        0..5 => print("Below 5"),
+        5..10 => print("✓ Range pattern (exclusive): 5..10"),
+        _ => print("10 or above"),
+    }
+
+    // Open-ended range
+    let large = 1000;
+    match large {
+        0..=100 => print("Small"),
+        101..=500 => print("Medium"),
+        _ => print("✓ Range pattern (catch-all): Large"),
+    }
+}
+
+// ============================================================================
+// 11. OR PATTERNS
+// ============================================================================
+
+fn test_or_patterns() {
+    print("=== Test 11: OR Patterns ===")
+
+    // Simple OR pattern with literals
+    let digit = 3;
+    match digit {
+        1 | 2 | 3 => print("✓ OR pattern with literals: 1|2|3"),
+        4 | 5 | 6 => print("4-6"),
+        _ => print("Other"),
+    }
+
+    // OR pattern with variants
+    let color = Blue;
+    match color {
+        Red | Green | Blue => print("✓ OR pattern with variants: Primary color"),
+        _ => print("Other"),
+    }
+
+    // OR pattern with ranges
+    let age = 25;
+    match age {
+        0..=12 | 65..=120 => print("Dependent"),
+        13..=64 => print("✓ OR pattern with ranges: Working age"),
+        _ => print("Invalid"),
+    }
+}
+
+// ============================================================================
+// 12. IF GUARDS (traditional syntax)
+// ============================================================================
+
+fn test_if_guards() {
+    print("=== Test 12: IF Guards ===")
+
+    // Basic if guard
+    let number = 15;
+    match number {
+        n if n < 0 => print("Negative"),
+        n if n == 0 => print("Zero"),
+        n if n > 0 && n < 10 => print("Small positive"),
+        n if n >= 10 => print("✓ IF guard: Large positive"),
+        _ => print("Other"),
+    }
+
+    // If guard with pattern
+    let point = Point { x: 5, y: 10 };
+    match point {
+        Point { x, y } if x == y => print("On diagonal"),
+        Point { x, y } if x > y => print("Above diagonal"),
+        Point { x, y } if x < y => print("✓ IF guard with pattern: Below diagonal"),
+        _ => print("Other"),
+    }
+
+    // If guard with variant
+    let color = Rgb(255, 0, 0);
+    match color {
+        Rgb(r, g, b) if r > 200 => print("✓ IF guard with variant: Bright red"),
+        Rgb(r, g, b) => print(f"RGB: {r}, {g}, {b}"),
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// 13. WHERE GUARDS (Verum-style)
+// ============================================================================
+
+fn test_where_guards() {
+    print("=== Test 13: WHERE Guards ===")
+
+    // Basic where guard
+    let value = 42;
+    match value {
+        x where x < 0 => print("Negative"),
+        x where x == 0 => print("Zero"),
+        x where x > 0 && x < 50 => print("✓ WHERE guard: Positive and less than 50"),
+        x where x >= 50 => print("Large"),
+        _ => print("Other"),
+    }
+
+    // Where guard with pattern
+    let p = Point { x: 10, y: 5 };
+    match p {
+        Point { x, y } where x == y => print("Square"),
+        Point { x, y } where x > y => print("✓ WHERE guard with pattern: Wide rectangle"),
+        Point { x, y } where x < y => print("Tall rectangle"),
+        _ => print("Other"),
+    }
+
+    // Where guard with complex condition
+    let score = 95;
+    match score {
+        s where s >= 90 && s <= 100 => print("✓ WHERE guard (complex): Excellent"),
+        s where s >= 70 => print("Good"),
+        _ => print("Needs improvement"),
+    }
+}
+
+// ============================================================================
+// 14. NESTED PATTERNS (Complex combinations)
+// ============================================================================
+
+fn test_nested_patterns() {
+    print("=== Test 14: Nested Patterns ===")
+
+    // Nested tuple with record
+    let data = (Point { x: 5, y: 10 }, 100);
+    match data {
+        (Point { x, y }, value) => print(f"✓ Nested (record, int): Point({x}, {y}), value={value}"),
+    }
+
+    // Nested array with tuples
+    let pairs = [(1, 2), (3, 4), (5, 6)];
+    match pairs {
+        [(a, b), (c, d), (e, f)] =>
+            print(f"✓ Nested array of tuples: [({a},{b}), ({c},{d}), ({e},{f})]"),
+        _ => print("No match"),
+    }
+
+    // Deeply nested pattern
+    let complex = (Rgb(255, 0, 0), (Point { x: 1, y: 2 }, [10, 20, 30]));
+    match complex {
+        (Rgb(r, _, _), (Point { x, .. }, [first, .., last])) =>
+            print(f"✓ Deeply nested: r={r}, x={x}, first={first}, last={last}"),
+        _ => print("No match"),
+    }
+
+    // Nested variant in result
+    let result = Success(42);
+    match result {
+        Success(val) => print(f"✓ Nested variant: Success({val})"),
+        Failure(msg) => print(f"Failure: {msg}"),
+    }
+}
+
+// ============================================================================
+// 15. AT PATTERNS (@ binding)
+// ============================================================================
+
+fn test_at_patterns() {
+    print("=== Test 15: @ Patterns ===")
+
+    // Basic @ pattern
+    let value = 42;
+    match value {
+        x @ 42 => print(f"✓ @ pattern: matched {x} at 42"),
+        _ => print("Other"),
+    }
+
+    // @ pattern with range
+    let age = 25;
+    match age {
+        young @ 0..=17 => print(f"Minor: {young}"),
+        adult @ 18..=64 => print(f"✓ @ pattern with range: Adult: {adult}"),
+        senior @ 65..=120 => print(f"Senior: {senior}"),
+        _ => print("Invalid"),
+    }
+
+    // @ pattern with variant
+    let color = Rgb(200, 100, 50);
+    match color {
+        rgb @ Rgb(_, _, _) => print(f"✓ @ pattern with variant: matched RGB"),
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// 16. LET PATTERNS
+// ============================================================================
+
+fn test_let_patterns() {
+    print("=== Test 16: Let Patterns ===")
+
+    // Destructuring in let
+    let (a, b, c) = (1, 2, 3);
+    print(f"✓ Let tuple destructuring: a={a}, b={b}, c={c}")
+
+    // Record destructuring
+    let Point { x, y } = Point { x: 10, y: 20 };
+    print(f"✓ Let record destructuring: x={x}, y={y}")
+
+    // Array destructuring
+    let [first, second, third] = [100, 200, 300];
+    print(f"✓ Let array destructuring: {first}, {second}, {third}")
+
+    // Nested destructuring
+    let (Point { x: px, y: py }, value) = (Point { x: 5, y: 15 }, 42);
+    print(f"✓ Let nested destructuring: px={px}, py={py}, value={value}")
+}
+
+// ============================================================================
+// 17. FOR LOOP PATTERNS
+// ============================================================================
+
+fn test_for_loop_patterns() {
+    print("=== Test 17: For Loop Patterns ===")
+
+    // For loop with tuple destructuring
+    let pairs = [(1, "a"), (2, "b"), (3, "c")];
+    print("✓ For loop with tuples:");
+    for (num, letter) in pairs {
+        print(f"  {num}: {letter}");
+    }
+
+    // For loop with record destructuring
+    let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+    print("✓ For loop with records:");
+    for Point { x, y } in points {
+        print(f"  Point({x}, {y})");
+    }
+}
+
+// ============================================================================
+// 18. MATCH WITH MULTIPLE PATTERNS
+// ============================================================================
+
+fn test_complex_match() {
+    print("=== Test 18: Complex Match Expressions ===")
+
+    // Match with all pattern types combined
+    let data = (Rgb(255, 0, 0), Point { x: 10, y: 20 }, [1, 2, 3, 4, 5]);
+
+    match data {
+        // OR pattern with nested patterns
+        (Red | Green, _, _) => print("Primary color (unit variant)"),
+
+        // Complex nested pattern with guards
+        (Rgb(r, g, b), Point { x, y }, [first, .., last]) if r > 200 =>
+            print(f"✓ Complex match: Bright RGB({r},{g},{b}), Point({x},{y}), [{first}..{last}]"),
+
+        // Wildcard fallback
+        _ => print("Other"),
+    }
+}
+
+// ============================================================================
+// 19. EXHAUSTIVENESS CHECK
+// ============================================================================
+
+fn test_exhaustiveness() {
+    print("=== Test 19: Exhaustiveness ===")
+
+    // Exhaustive match on boolean
+    let flag = true;
+    let result = match flag {
+        true => "✓ Exhaustive boolean: true branch",
+        false => "false branch",
+    };
+    print(result)
+
+    // Exhaustive match on simple result
+    let res = Success(42);
+    let msg = match res {
+        Success(x) => f"✓ Exhaustive Result: Success({x})",
+        Failure(e) => f"Failure: {e}",
+    };
+    print(msg)
+}
+
+// ============================================================================
+// 20. SPECIAL PATTERNS
+// ============================================================================
+
+fn test_special_patterns() {
+    print("=== Test 20: Special Patterns ===")
+
+    // Multiple wildcards in tuple (rest not supported in tuples)
+    let long_tuple = (1, 2, 3, 4, 5);
+    match long_tuple {
+        (first, _, _, _, last) => print(f"✓ Tuple with wildcards: first={first}, last={last}"),
+    }
+
+    // Multiple wildcards
+    let triple = (100, 200, 300);
+    match triple {
+        (x, _, _) => print(f"✓ Multiple wildcards: x={x}"),
+    }
+
+    // Empty array match
+    let empty: [Int; 0] = [];
+    match empty {
+        [] => print("✓ Empty array pattern"),
+        _ => print("Not empty"),
+    }
+}
+
+// ============================================================================
+// MAIN FUNCTION - Run All Tests
+// ============================================================================
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗")
+    print("║  VERUM COMPREHENSIVE PATTERN MATCHING TEST SUITE          ║")
+    print("║  Testing all pattern types from verum.ebnf                ║")
+    print("╚════════════════════════════════════════════════════════════╝")
+    print("")
+
+    test_literal_patterns()
+    print("")
+
+    test_identifier_patterns()
+    print("")
+
+    test_wildcard_pattern()
+    print("")
+
+    test_tuple_patterns()
+    print("")
+
+    test_array_patterns()
+    print("")
+
+    test_slice_patterns()
+    print("")
+
+    test_record_patterns()
+    print("")
+
+    test_variant_patterns()
+    print("")
+
+    test_reference_patterns()
+    print("")
+
+    test_range_patterns()
+    print("")
+
+    test_or_patterns()
+    print("")
+
+    test_if_guards()
+    print("")
+
+    test_where_guards()
+    print("")
+
+    test_nested_patterns()
+    print("")
+
+    test_at_patterns()
+    print("")
+
+    test_let_patterns()
+    print("")
+
+    test_for_loop_patterns()
+    print("")
+
+    test_complex_match()
+    print("")
+
+    test_exhaustiveness()
+    print("")
+
+    test_special_patterns()
+    print("")
+
+    print("╔════════════════════════════════════════════════════════════╗")
+    print("║  ALL PATTERN TESTS COMPLETED                              ║")
+    print("╚════════════════════════════════════════════════════════════╝")
+}

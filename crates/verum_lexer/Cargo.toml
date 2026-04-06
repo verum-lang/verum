@@ -1,0 +1,19 @@
+[package]
+name = "verum_lexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+# DEPRECATED: Superseded by stdlib/ and verum_common types
+logos = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+

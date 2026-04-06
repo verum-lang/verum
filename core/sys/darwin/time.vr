@@ -1,0 +1,580 @@
+module sys.darwin.time;
+
+// =============================================================================
+// sys/darwin/time.vr - macOS Time and Clock Operations
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/darwin/libsystem
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+//
+// This module provides high-resolution time operations on macOS:
+// - mach_absolute_time: Highest precision monotonic time
+// - clock_gettime: POSIX-compatible clock access
+// - nanosleep: High-precision sleep
+//
+// Key differences from Linux:
+// - mach_absolute_time is the preferred monotonic source (sub-nanosecond)
+// - Must convert Mach time units using mach_timebase_info
+// - No CLOCK_BOOTTIME equivalent (use CLOCK_MONOTONIC)
+// - No direct TSC access (use mach_absolute_time instead)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.OSError;
+mount super.libsystem.{
+    mach_absolute_time, mach_timebase_info, MachTimebaseInfo,
+    clock_gettime, nanosleep, Timespec,
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
+    CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+    errno,
+};
+
+// =============================================================================
+// Clock IDs (macOS subset)
+// =============================================================================
+
+// Re-export clock IDs for convenience (literal values for VBC compatibility)
+public const CLOCK_REALTIME_ID: Int = 0;
+public const CLOCK_MONOTONIC_ID: Int = 6;
+public const CLOCK_MONOTONIC_RAW_ID: Int = 4;
+public const CLOCK_PROCESS_CPUTIME: Int = 12;
+public const CLOCK_THREAD_CPUTIME: Int = 16;
+
+// =============================================================================
+// Mach Time Conversion
+// =============================================================================
+
+/// Cached timebase info for Mach time conversion
+static mut TIMEBASE_NUMER: UInt32 = 0;
+static mut TIMEBASE_DENOM: UInt32 = 0;
+static mut TIMEBASE_INITIALIZED: Bool = false;
+
+/// Initialize the Mach timebase conversion factors.
+fn init_timebase() {
+    unsafe {
+        if TIMEBASE_INITIALIZED {
+            return;
+        }
+
+        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+        mach_timebase_info(&mut info);
+
+        TIMEBASE_NUMER = info.numer;
+        TIMEBASE_DENOM = info.denom;
+        TIMEBASE_INITIALIZED = true;
+    }
+}
+
+/// Convert Mach absolute time to nanoseconds.
+fn mach_to_nanos(mach_time: UInt64) -> UInt64 {
+    init_timebase();
+    unsafe {
+        // Common case: numer == denom (true on most modern Macs)
+        if TIMEBASE_NUMER == TIMEBASE_DENOM {
+            mach_time
+        } else {
+            // General case: scale by timebase ratio
+            (mach_time * (TIMEBASE_NUMER as UInt64)) / (TIMEBASE_DENOM as UInt64)
+        }
+    }
+}
+
+/// Convert nanoseconds to Mach absolute time.
+fn nanos_to_mach(nanos: UInt64) -> UInt64 {
+    init_timebase();
+    unsafe {
+        if TIMEBASE_NUMER == TIMEBASE_DENOM {
+            nanos
+        } else {
+            (nanos * (TIMEBASE_DENOM as UInt64)) / (TIMEBASE_NUMER as UInt64)
+        }
+    }
+}
+
+// =============================================================================
+// Time Structures
+// =============================================================================
+
+// Note: Timespec and Timeval are imported from libsystem
+
+/// Duration type (nanoseconds)
+public type Duration is (UInt64);
+
+implement Duration {
+    /// Create duration from nanoseconds.
+    public fn from_nanos(nanos: UInt64) -> Duration {
+        Duration(nanos)
+    }
+
+    /// Create duration from microseconds.
+    public fn from_micros(micros: UInt64) -> Duration {
+        Duration(micros * 1_000)
+    }
+
+    /// Create duration from milliseconds.
+    public fn from_millis(millis: UInt64) -> Duration {
+        Duration(millis * 1_000_000)
+    }
+
+    /// Create duration from seconds.
+    public fn from_secs(secs: UInt64) -> Duration {
+        Duration(secs * 1_000_000_000)
+    }
+
+    /// Get duration as nanoseconds.
+    public fn as_nanos(&self) -> UInt64 {
+        self.0
+    }
+
+    /// Get duration as microseconds.
+    public fn as_micros(&self) -> UInt64 {
+        self.0 / 1_000
+    }
+
+    /// Get duration as milliseconds.
+    public fn as_millis(&self) -> UInt64 {
+        self.0 / 1_000_000
+    }
+
+    /// Get duration as seconds.
+    public fn as_secs(&self) -> UInt64 {
+        self.0 / 1_000_000_000
+    }
+
+    /// Get fractional nanoseconds (subsecond part).
+    public fn subsec_nanos(&self) -> UInt32 {
+        (self.0 % 1_000_000_000) as UInt32
+    }
+
+    /// Convert to Timespec.
+    public fn to_timespec(&self) -> Timespec {
+        Timespec {
+            tv_sec: (self.0 / 1_000_000_000) as Int64,
+            tv_nsec: (self.0 % 1_000_000_000) as Int64,
+        }
+    }
+
+    /// Add two durations.
+    public fn add(&self, other: Duration) -> Duration {
+        Duration(self.0 + other.0)
+    }
+
+    /// Subtract duration (saturating at zero).
+    public fn saturating_sub(&self, other: Duration) -> Duration {
+        if self.0 > other.0 {
+            Duration(self.0 - other.0)
+        } else {
+            Duration(0)
+        }
+    }
+
+    /// Zero duration constant.
+    public const ZERO: Duration = Duration(0);
+
+    /// Check if this duration is zero.
+    public fn is_zero(&self) -> Bool {
+        self.0 == 0
+    }
+}
+
+/// Instant type (monotonic time point using Mach absolute time)
+public type Instant is (UInt64);  // Mach absolute time units
+
+implement Instant {
+    /// Get the current instant (monotonic time).
+    ///
+    /// Uses mach_absolute_time for highest precision.
+    public fn now() -> Instant {
+        Instant(unsafe { mach_absolute_time() })
+    }
+
+    /// Duration elapsed since this instant.
+    public fn elapsed(&self) -> Duration {
+        let now = unsafe { mach_absolute_time() };
+        let diff = now - self.0;
+        Duration(mach_to_nanos(diff))
+    }
+
+    /// Duration between two instants.
+    public fn duration_since(&self, earlier: &Instant) -> Duration {
+        let diff = self.0 - earlier.0;
+        Duration(mach_to_nanos(diff))
+    }
+
+    /// Add duration to instant.
+    public fn add(&self, duration: Duration) -> Instant {
+        Instant(self.0 + nanos_to_mach(duration.0))
+    }
+
+    /// Subtract duration from instant.
+    public fn sub(&self, duration: Duration) -> Instant {
+        Instant(self.0 - nanos_to_mach(duration.0))
+    }
+
+    /// Check if this instant is before another.
+    public fn is_before(&self, other: &Instant) -> Bool {
+        self.0 < other.0
+    }
+
+    /// Check if this instant is after another.
+    public fn is_after(&self, other: &Instant) -> Bool {
+        self.0 > other.0
+    }
+
+    /// Get the raw Mach absolute time value.
+    public fn as_raw(&self) -> UInt64 {
+        self.0
+    }
+
+    /// Create instant from raw Mach absolute time.
+    public fn from_raw(raw: UInt64) -> Instant {
+        Instant(raw)
+    }
+}
+
+// =============================================================================
+// Clock Operations
+// =============================================================================
+
+/// Get monotonic time in nanoseconds (using Mach time).
+///
+/// This is the highest precision monotonic time source on macOS.
+/// Not affected by system time changes or NTP adjustments.
+public fn monotonic_nanos() -> UInt64 {
+    let mach_time = unsafe { mach_absolute_time() };
+    mach_to_nanos(mach_time)
+}
+
+/// Get monotonic time in microseconds.
+public fn monotonic_micros() -> UInt64 {
+    monotonic_nanos() / 1_000
+}
+
+/// Get monotonic time in milliseconds.
+public fn monotonic_millis() -> UInt64 {
+    monotonic_nanos() / 1_000_000
+}
+
+/// Get monotonic raw time in nanoseconds.
+///
+/// Uses CLOCK_MONOTONIC_RAW which is not adjusted by NTP.
+public fn monotonic_raw_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { clock_gettime(CLOCK_MONOTONIC_RAW, &mut ts) };
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get real time (wall clock) in nanoseconds since Unix epoch.
+public fn realtime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) };
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get real time in seconds since Unix epoch.
+public fn unix_timestamp() -> Int64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) };
+    ts.tv_sec
+}
+
+/// Get current thread's CPU time in nanoseconds.
+public fn thread_cputime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { clock_gettime(CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+/// Get current process's CPU time in nanoseconds.
+public fn process_cputime_nanos() -> UInt64 {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut ts) };
+    (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64)
+}
+
+// =============================================================================
+// Sleep Operations
+// =============================================================================
+
+/// Sleep for a duration (relative time).
+///
+/// # Arguments
+/// * `duration` - Time to sleep
+///
+/// # Returns
+/// Remaining time if interrupted, None if completed.
+public fn sleep(duration: Duration) -> Maybe<Duration> {
+    let req = duration.to_timespec();
+    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+
+    let result = unsafe { nanosleep(&req, &mut rem) };
+
+    if result == 0 {
+        None
+    } else {
+        Some(Duration((rem.tv_sec as UInt64) * 1_000_000_000 + (rem.tv_nsec as UInt64)))
+    }
+}
+
+/// Sleep for milliseconds.
+public fn sleep_ms(ms: UInt64) {
+    let _ = sleep(Duration.from_millis(ms));
+}
+
+/// Sleep for microseconds.
+public fn sleep_us(us: UInt64) {
+    let _ = sleep(Duration.from_micros(us));
+}
+
+/// Sleep until a specific Mach absolute time deadline.
+///
+/// More precise than relative sleep for periodic wakeups.
+/// Uses mach_wait_until internally if available.
+public fn sleep_until_mach(deadline: UInt64) {
+    let now = unsafe { mach_absolute_time() };
+    if now >= deadline {
+        return;
+    }
+
+    let remaining_nanos = mach_to_nanos(deadline - now);
+    let _ = sleep(Duration(remaining_nanos));
+}
+
+/// Sleep until a specific instant.
+public fn sleep_until(deadline: Instant) {
+    sleep_until_mach(deadline.0);
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/// Measure elapsed time for a closure.
+///
+/// Returns (result, duration).
+public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
+    let start = Instant.now();
+    let result = f();
+    let elapsed = start.elapsed();
+    (result, elapsed)
+}
+
+/// Simple stopwatch for timing code sections.
+/// Uses VBC's monotonic_nanos() for compatibility with the interpreter.
+public type Stopwatch is {
+    start: UInt64,      // Nanoseconds timestamp
+    running: Bool,
+    accumulated: UInt64,  // Accumulated nanoseconds
+};
+
+implement Stopwatch {
+    /// Create and start a new stopwatch.
+    public fn new() -> Stopwatch {
+        let now = monotonic_nanos();
+        Stopwatch {
+            start: now,
+            running: true,
+            accumulated: 0,
+        }
+    }
+
+    /// Create and immediately start a stopwatch.
+    public fn started() -> Stopwatch {
+        let mut sw = Stopwatch.new();
+        sw.start();
+        sw
+    }
+
+    /// Start or resume the stopwatch.
+    public fn start(&mut self) {
+        if !self.running {
+            self.start = monotonic_nanos();
+            self.running = true;
+        }
+    }
+
+    /// Stop the stopwatch (pause timing).
+    public fn stop(&mut self) {
+        if self.running {
+            let now = monotonic_nanos();
+            self.accumulated += now - self.start;
+            self.running = false;
+        }
+    }
+
+    /// Reset the stopwatch to zero.
+    public fn reset(&mut self) {
+        self.start = 0;
+        self.running = false;
+        self.accumulated = 0;
+    }
+
+    /// Reset and immediately start.
+    public fn restart(&mut self) {
+        self.reset();
+        self.start();
+    }
+
+    /// Get elapsed time as Duration.
+    public fn elapsed(&self) -> Duration {
+        let total_nanos = if self.running {
+            let now = monotonic_nanos();
+            self.accumulated + (now - self.start)
+        } else {
+            self.accumulated
+        };
+        Duration(total_nanos)
+    }
+
+    /// Check if the stopwatch is currently running.
+    public fn is_running(&self) -> Bool {
+        self.running
+    }
+
+    /// Get a lap time (elapsed since last lap or start).
+    ///
+    /// Does not reset the stopwatch.
+    public fn lap(&mut self) -> Duration {
+        let elapsed = self.elapsed();
+        // Reset accumulated but keep running
+        if self.running {
+            self.start = monotonic_nanos();
+        }
+        self.accumulated = 0;
+        elapsed
+    }
+}
+
+// =============================================================================
+// Performance Counter (using Mach time)
+// =============================================================================
+
+/// High-resolution performance counter.
+///
+/// Uses Mach absolute time which is the fastest monotonic
+/// time source on macOS (typically just a register read).
+public type PerfCounter is (UInt64);
+
+implement PerfCounter {
+    /// Read the current performance counter.
+    @inline
+    public fn now() -> PerfCounter {
+        PerfCounter(unsafe { mach_absolute_time() })
+    }
+
+    /// Get elapsed time since this counter reading.
+    @inline
+    public fn elapsed(&self) -> Duration {
+        let now = unsafe { mach_absolute_time() };
+        Duration(mach_to_nanos(now - self.0))
+    }
+
+    /// Get elapsed ticks (raw Mach time units).
+    @inline
+    public fn elapsed_ticks(&self) -> UInt64 {
+        unsafe { mach_absolute_time() } - self.0
+    }
+
+    /// Difference between two counter readings.
+    @inline
+    public fn diff(&self, earlier: &PerfCounter) -> Duration {
+        Duration(mach_to_nanos(self.0 - earlier.0))
+    }
+
+    /// Get elapsed time since an earlier counter reading.
+    @inline
+    public fn elapsed_since(&self, earlier: PerfCounter) -> Duration {
+        Duration(mach_to_nanos(self.0 - earlier.0))
+    }
+
+    /// Get the counter value as nanoseconds.
+    @inline
+    public fn as_nanos(&self) -> UInt64 {
+        mach_to_nanos(self.0)
+    }
+}
+
+// =============================================================================
+// Deadline Timer
+// =============================================================================
+
+/// A deadline timer for timeout management.
+/// Uses VBC-compatible monotonic_nanos() for consistency with interpreter.
+public type DeadlineTimer is {
+    deadline: UInt64,  // Nanoseconds timestamp
+    has_deadline: Bool,
+};
+
+implement DeadlineTimer {
+    /// Create a timer with no deadline (infinite timeout).
+    public fn none() -> DeadlineTimer {
+        DeadlineTimer {
+            deadline: 0,
+            has_deadline: false,
+        }
+    }
+
+    /// Create a timer that expires after a duration.
+    public fn after(duration: Duration) -> DeadlineTimer {
+        let now = monotonic_nanos();
+        DeadlineTimer {
+            deadline: now + duration.0,
+            has_deadline: true,
+        }
+    }
+
+    /// Create a timer that expires after a duration (alias for `after`).
+    public fn from_duration(duration: Duration) -> DeadlineTimer {
+        DeadlineTimer.after(duration)
+    }
+
+    /// Create a timer that expires at a specific instant.
+    public fn at(instant: Instant) -> DeadlineTimer {
+        // Note: Instant uses mach_absolute_time internally, so convert to nanos
+        DeadlineTimer {
+            deadline: mach_to_nanos(instant.0),
+            has_deadline: true,
+        }
+    }
+
+    /// Check if the deadline has passed.
+    public fn is_expired(&self) -> Bool {
+        if !self.has_deadline {
+            false
+        } else {
+            monotonic_nanos() >= self.deadline
+        }
+    }
+
+    /// Get remaining time until deadline.
+    ///
+    /// Returns Duration(0) if no deadline or deadline has passed.
+    public fn remaining(&self) -> Duration {
+        if !self.has_deadline {
+            return Duration(0);
+        }
+
+        let now = monotonic_nanos();
+        if now >= self.deadline {
+            Duration(0)
+        } else {
+            Duration(self.deadline - now)
+        }
+    }
+
+    /// Check if this timer has a deadline set.
+    public fn has_deadline(&self) -> Bool {
+        self.has_deadline
+    }
+
+    /// Get the deadline as an Instant.
+    public fn deadline(&self) -> Maybe<Instant> {
+        if self.has_deadline {
+            Some(Instant(self.deadline))
+        } else {
+            None
+        }
+    }
+}

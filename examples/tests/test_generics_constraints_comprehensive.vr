@@ -1,0 +1,188 @@
+// Comprehensive Generics with Constraints Test
+// Tests: identity, generic types, constraints, multiple params, generic impls
+
+// ===== 1. Simple Generic Functions =====
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first<A, B>(a: A, b: B) -> A {
+    a
+}
+
+fn second<A, B>(a: A, b: B) -> B {
+    b
+}
+
+// ===== 2. Generic Types =====
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+type Triple<A, B, C> is {
+    x: A,
+    y: B,
+    z: C
+}
+
+type Box<T> is {
+    value: T
+}
+
+// ===== 3. Generic Variant Types =====
+
+type Maybe<T> is
+    | Just(T)
+    | Nothing
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E)
+
+// ===== 4. Functions with Generic Types =====
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn unwrap_box<T>(box: Box<T>) -> T {
+    box.value
+}
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Just(val) => Just(f(val)),
+        Nothing => Nothing
+    }
+}
+
+// ===== 5. Generic Functions with Multiple Constraints (if supported) =====
+
+// Note: Testing basic constraint syntax
+// fn show<T>(x: T) -> Text where T: Display {
+//     // Would require Display protocol implementation
+//     "placeholder"
+// }
+
+// ===== 6. Nested Generics =====
+
+fn nest_box<T>(value: T) -> Box<Box<T>> {
+    Box { value: Box { value: value } }
+}
+
+fn pair_of_boxes<A, B>(a: A, b: B) -> Pair<Box<A>, Box<B>> {
+    Pair {
+        first: Box { value: a },
+        second: Box { value: b }
+    }
+}
+
+// ===== 7. Generic Protocol Definition =====
+
+protocol Eq<Self> {
+    fn eq(self: Self, other: Self) -> Bool
+}
+
+// ===== 8. Generic Implementation =====
+
+implement<A, B> Eq<Pair<A, B>> where A: Eq<A>, B: Eq<B> {
+    fn eq(self: Pair<A, B>, other: Pair<A, B>) -> Bool {
+        self.first.eq(other.first) && self.second.eq(other.second)
+    }
+}
+
+// ===== 9. Test Functions =====
+
+fn test_identity() -> Bool {
+    let x = identity(42);
+    let y = identity(true);
+    let z = identity("hello");
+    x == 42 && y == true
+}
+
+fn test_first_second() -> Bool {
+    let a = first(10, 20);
+    let b = second(10, 20);
+    a == 10 && b == 20
+}
+
+fn test_pair() -> Bool {
+    let p = make_pair(1, 2);
+    p.first == 1 && p.second == 2
+}
+
+fn test_triple() -> Bool {
+    let t = Triple { x: 1, y: true, z: "test" };
+    t.x == 1 && t.y == true
+}
+
+fn test_box() -> Bool {
+    let b = Box { value: 99 };
+    let v = unwrap_box(b);
+    v == 99
+}
+
+fn test_maybe() -> Bool {
+    let j = Just(42);
+    let n = Nothing;
+
+    match j {
+        Just(val) => val == 42,
+        Nothing => false
+    }
+}
+
+fn test_map_maybe() -> Bool {
+    let double = fn(x: Int) -> Int { x * 2 };
+    let m1 = Just(21);
+    let m2 = map_maybe(m1, double);
+
+    match m2 {
+        Just(val) => val == 42,
+        Nothing => false
+    }
+}
+
+fn test_result() -> Bool {
+    let ok = Ok(100);
+    let err = Err("error");
+
+    match ok {
+        Ok(val) => val == 100,
+        Err(_) => false
+    }
+}
+
+fn test_nested_box() -> Bool {
+    let nb = nest_box(7);
+    nb.value.value == 7
+}
+
+fn test_pair_of_boxes() -> Bool {
+    let pob = pair_of_boxes(3, 4);
+    pob.first.value == 3 && pob.second.value == 4
+}
+
+// ===== Main Entry Point =====
+
+fn main() -> Int {
+    let t1 = test_identity();
+    let t2 = test_first_second();
+    let t3 = test_pair();
+    let t4 = test_triple();
+    let t5 = test_box();
+    let t6 = test_maybe();
+    let t7 = test_map_maybe();
+    let t8 = test_result();
+    let t9 = test_nested_box();
+    let t10 = test_pair_of_boxes();
+
+    if t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 {
+        0  // Success
+    } else {
+        1  // Failure
+    }
+}

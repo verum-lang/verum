@@ -1,0 +1,12 @@
+// Test: Dereferencing checked references
+
+fn test_checked_deref(x: &checked Int) -> Int {
+    *x
+}
+
+fn main() -> Int {
+    let value = 42;
+    let result = test_checked_deref(&checked value);
+    println(f"Result: {result}");
+    result
+}

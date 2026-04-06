@@ -1,0 +1,11 @@
+// Test 1: Basic protocol definition with a single method
+
+type Printable is protocol {
+    fn to_text(self) -> Text;
+}
+
+fn main() {
+    print("Test 1: Basic protocol definition");
+    print("Protocol 'Printable' defined with method 'to_text'");
+    print("SUCCESS: Protocol definition parsed");
+}

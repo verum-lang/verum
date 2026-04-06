@@ -1,0 +1,188 @@
+// Test Case 2: Function with Multiple Contexts
+// Tests: fn bar() using [IO, Database] { ... }
+
+context IO {
+    fn println(msg: Text)
+    fn readln() -> Text
+}
+
+context Logger {
+    fn log(msg: Text)
+    fn info(msg: Text)
+    fn debug(msg: Text)
+}
+
+context Database {
+    fn query(sql: Text) -> Int
+    fn execute(sql: Text) -> Bool
+}
+
+context Metrics {
+    fn increment(name: Text)
+    fn record(name: Text, value: Float)
+}
+
+context Config {
+    fn get(key: Text) -> Text
+}
+
+// Test 2a: Two contexts
+fn log_and_query(msg: Text) -> Int using [Logger, Database] {
+    Logger.info(f"Querying: {msg}");
+    let result = Database.query("SELECT * FROM data");
+    Logger.info(f"Result: {result}");
+    result
+}
+
+// Test 2b: Three contexts
+fn process_with_metrics(data: Text) using [Logger, Database, Metrics] {
+    Logger.debug("Starting processing");
+    Metrics.increment("process.started");
+
+    let count = Database.query(f"SELECT COUNT(*) WHERE data = '{data}'");
+    Logger.info(f"Found {count} records");
+
+    Metrics.record("records.found", count as Float);
+    Metrics.increment("process.completed");
+}
+
+// Test 2c: Four contexts
+fn full_operation(id: Int) using [IO, Logger, Database, Metrics] {
+    IO.println(f"Processing ID: {id}");
+    Logger.info(f"Operation started for ID {id}");
+
+    let result = Database.query(f"SELECT * FROM items WHERE id = {id}");
+    Metrics.increment("operations.total");
+
+    if result > 0 {
+        IO.println(f"Found {result} items");
+        Logger.info("Success");
+        Metrics.increment("operations.success");
+    } else {
+        IO.println("No items found");
+        Logger.info("No results");
+        Metrics.increment("operations.empty");
+    }
+}
+
+// Test 2d: Five contexts
+fn comprehensive_operation() using [IO, Logger, Database, Metrics, Config] {
+    let db_url = Config.get("database_url");
+    Logger.info(f"Connecting to: {db_url}");
+    IO.println("Starting comprehensive operation");
+
+    Metrics.increment("comprehensive.started");
+    let count = Database.query("SELECT COUNT(*) FROM all_tables");
+
+    IO.println(f"Total records: {count}");
+    Logger.debug(f"Query returned: {count}");
+    Metrics.record("total.records", count as Float);
+
+    IO.println("Operation complete");
+}
+
+// Test 2e: Multiple contexts with complex logic
+fn conditional_processing(should_process: Bool) -> Int using [Logger, Database, Metrics] {
+    Logger.info("Conditional processing started");
+
+    if should_process {
+        Logger.debug("Processing enabled");
+        Metrics.increment("processing.enabled");
+
+        let result = Database.query("SELECT * FROM active");
+        Metrics.record("active.count", result as Float);
+
+        Logger.info(f"Processed {result} items");
+        result
+    } else {
+        Logger.debug("Processing skipped");
+        Metrics.increment("processing.skipped");
+        0
+    }
+}
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║        Test Case 2: Multiple Contexts Usage               ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    // Provide all contexts
+    print("📦 Providing contexts...");
+
+    provide IO = IO {
+        println: fn(msg: Text) { print(f"[IO] {msg}"); },
+        readln: fn() -> Text { "input" }
+    };
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[LOG] {msg}"); },
+        info: fn(msg: Text) { print(f"[INFO] {msg}"); },
+        debug: fn(msg: Text) { print(f"[DEBUG] {msg}"); }
+    };
+
+    provide Database = Database {
+        query: fn(sql: Text) -> Int {
+            print(f"[DB QUERY] {sql}");
+            100
+        },
+        execute: fn(sql: Text) -> Bool {
+            print(f"[DB EXEC] {sql}");
+            true
+        }
+    };
+
+    provide Metrics = Metrics {
+        increment: fn(name: Text) {
+            print(f"[METRIC] {name} += 1");
+        },
+        record: fn(name: Text, value: Float) {
+            print(f"[METRIC] {name} = {value}");
+        }
+    };
+
+    provide Config = Config {
+        get: fn(key: Text) -> Text {
+            f"<{key}_value>"
+        }
+    };
+    print("");
+
+    // Test 2a: Two contexts
+    print("Test 2a: Two contexts [Logger, Database]");
+    print("─────────────────────────────────────────");
+    let result_a = log_and_query("test data");
+    print(f"Result: {result_a}");
+    print("");
+
+    // Test 2b: Three contexts
+    print("Test 2b: Three contexts [Logger, Database, Metrics]");
+    print("─────────────────────────────────────────");
+    process_with_metrics("sample");
+    print("");
+
+    // Test 2c: Four contexts
+    print("Test 2c: Four contexts [IO, Logger, Database, Metrics]");
+    print("─────────────────────────────────────────");
+    full_operation(42);
+    print("");
+
+    // Test 2d: Five contexts
+    print("Test 2d: Five contexts [IO, Logger, Database, Metrics, Config]");
+    print("─────────────────────────────────────────");
+    comprehensive_operation();
+    print("");
+
+    // Test 2e: Complex logic with multiple contexts
+    print("Test 2e: Complex logic with multiple contexts");
+    print("─────────────────────────────────────────");
+    let result_e1 = conditional_processing(true);
+    print(f"Result (true): {result_e1}");
+    let result_e2 = conditional_processing(false);
+    print(f"Result (false): {result_e2}");
+    print("");
+
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║            Multiple Contexts Tests Complete                ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

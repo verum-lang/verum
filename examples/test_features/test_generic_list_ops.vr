@@ -1,0 +1,22 @@
+fn first<T>(a: T, b: T, c: T) -> T {
+    a
+}
+
+fn second<T>(a: T, b: T, c: T) -> T {
+    b
+}
+
+fn third<T>(a: T, b: T, c: T) -> T {
+    c
+}
+
+fn main() {
+    let f1 = first(1, 2, 3)
+    let f2 = first("a", "b", "c")
+    let s1 = second(1, 2, 3)
+    let s2 = second("a", "b", "c")
+    let t1 = third(1, 2, 3)
+    let t2 = third("a", "b", "c")
+    println(f"First int: {f1}, Second int: {s1}, Third int: {t1}")
+    println(f"First str: {f2}, Second str: {s2}, Third str: {t2}")
+}

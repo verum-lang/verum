@@ -1,0 +1,520 @@
+// Comprehensive Async Features Test Suite
+// Tests async/await, spawn, try/recover/finally in Verum
+
+// ========================================
+// 1. TYPE DEFINITIONS FOR ASYNC TESTING
+// ========================================
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+type Maybe<T> is | Some(T) | None;
+
+type AsyncError is
+    | NetworkError(Text)
+    | TimeoutError
+    | ParseError(Text)
+    | GenericError(Text);
+
+type Task<T> is {
+    id: Int,
+    data: T
+};
+
+// ========================================
+// 2. BASIC ASYNC FUNCTIONS
+// ========================================
+
+async fn simple_async() -> Text {
+    "async result"
+}
+
+async fn async_computation(x: Int) -> Int {
+    x * 2
+}
+
+async fn async_with_local_vars(a: Int, b: Int) -> Int {
+    let sum = a + b;
+    let product = a * b;
+    sum + product
+}
+
+fn test_basic_async() {
+    let _ = print("=== Test 1: Basic Async Functions ===");
+
+    // Note: Without proper async runtime, we test async function definitions
+    // In a full implementation, these would use .await
+    let _ = print("async fn simple_async() defined");
+    let _ = print("async fn async_computation(x) defined");
+    let _ = print("async fn async_with_local_vars(a, b) defined");
+}
+
+// ========================================
+// 3. ASYNC WITH AWAIT
+// ========================================
+
+async fn fetch_user_id() -> Int {
+    42
+}
+
+async fn fetch_user_name() -> Text {
+    "Alice"
+}
+
+async fn fetch_user_data() -> Text {
+    let id = fetch_user_id().await;
+    let name = fetch_user_name().await;
+    f"User: {name} (ID: {id})"
+}
+
+async fn sequential_awaits() -> Int {
+    let a = async_computation(5).await;
+    let b = async_computation(a).await;
+    let c = async_computation(b).await;
+    c
+}
+
+fn test_async_await() {
+    let _ = print("\n=== Test 2: Async with Await ===");
+
+    let _ = print("async fn fetch_user_data() with sequential awaits defined");
+    let _ = print("async fn sequential_awaits() with chained awaits defined");
+}
+
+// ========================================
+// 4. SPAWN EXPRESSIONS
+// ========================================
+
+async fn background_task(id: Int) -> Int {
+    id * 10
+}
+
+async fn spawn_single_task() -> Text {
+    let task = spawn background_task(1);
+    "spawned single task"
+}
+
+async fn spawn_multiple_tasks() -> Text {
+    let task1 = spawn background_task(1);
+    let task2 = spawn background_task(2);
+    let task3 = spawn background_task(3);
+    "spawned multiple tasks"
+}
+
+async fn spawn_nested_tasks() -> Text {
+    let outer = spawn {
+        let inner = spawn background_task(5);
+        "inner task"
+    };
+    "spawned nested tasks"
+}
+
+async fn spawn_with_computation(n: Int) -> Int {
+    let task = spawn async_computation(n);
+    n + 1
+}
+
+fn test_spawn_expressions() {
+    let _ = print("\n=== Test 3: Spawn Expressions ===");
+
+    let _ = print("spawn single task defined");
+    let _ = print("spawn multiple tasks defined");
+    let _ = print("spawn nested tasks defined");
+    let _ = print("spawn with computation defined");
+}
+
+// ========================================
+// 5. TRY/RECOVER/FINALLY
+// ========================================
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn try_basic_operation(x: Int, y: Int) -> Int {
+    try {
+        let result = safe_divide(x, y);
+        match result {
+            Ok(val) => val,
+            Err(_) => 0
+        }
+    } finally {
+        let _ = print("finally block executed");
+    }
+}
+
+fn try_with_recovery(x: Int, y: Int) -> Int {
+    try {
+        let result = safe_divide(x, y);
+        match result {
+            Ok(val) => val,
+            Err(e) => 0  // Would trigger error handling
+        }
+    } recover {
+        NetworkError(msg) => {
+            let _ = print(f"Network error: {msg}");
+            -1
+        },
+        TimeoutError => {
+            let _ = print("Timeout occurred");
+            -2
+        },
+        _ => {
+            let _ = print("Unknown error");
+            -3
+        }
+    } finally {
+        let _ = print("Cleanup completed");
+    }
+}
+
+fn test_try_recover_finally() {
+    let _ = print("\n=== Test 4: Try/Recover/Finally ===");
+
+    let result1 = try_basic_operation(10, 2);
+    let _ = print(f"10 / 2 with try-finally: {result1}");
+
+    let result2 = try_basic_operation(10, 0);
+    let _ = print(f"10 / 0 with try-finally: {result2}");
+
+    let _ = print("try-recover-finally blocks defined");
+}
+
+// ========================================
+// 6. ASYNC CLOSURES
+// ========================================
+
+async fn async_with_closure() -> Int {
+    let double = |x| x * 2;
+    let result = double(5);
+    result
+}
+
+async fn async_with_async_closure() -> Int {
+    let async_op = async |x| x + 10;
+    let result = async_op(5).await;
+    result
+}
+
+async fn higher_order_async(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn test_async_closures() {
+    let _ = print("\n=== Test 5: Async Closures ===");
+
+    let _ = print("async function with closure defined");
+    let _ = print("async function with async closure defined");
+    let _ = print("higher-order async function defined");
+}
+
+// ========================================
+// 7. ASYNC WITH PATTERN MATCHING
+// ========================================
+
+async fn fetch_result(success: Bool) -> Result<Int, Text> {
+    if success {
+        Ok(100)
+    } else {
+        Err("failed to fetch")
+    }
+}
+
+async fn process_result(success: Bool) -> Int {
+    let result = fetch_result(success).await;
+    match result {
+        Ok(val) => val,
+        Err(_) => 0
+    }
+}
+
+async fn fetch_maybe(has_value: Bool) -> Maybe<Int> {
+    if has_value {
+        Some(42)
+    } else {
+        None
+    }
+}
+
+async fn process_maybe(has_value: Bool) -> Int {
+    let maybe_val = fetch_maybe(has_value).await;
+    match maybe_val {
+        Some(val) => val,
+        None => -1
+    }
+}
+
+fn test_async_pattern_matching() {
+    let _ = print("\n=== Test 6: Async with Pattern Matching ===");
+
+    let _ = print("async process_result with Result pattern matching defined");
+    let _ = print("async process_maybe with Maybe pattern matching defined");
+}
+
+// ========================================
+// 8. ASYNC WITH LOOPS
+// ========================================
+
+async fn async_loop_sum(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+async fn async_recursive_factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        let sub_result = async_recursive_factorial(n - 1).await;
+        n * sub_result
+    }
+}
+
+fn test_async_loops() {
+    let _ = print("\n=== Test 7: Async with Loops ===");
+
+    let _ = print("async_loop_sum with while loop defined");
+    let _ = print("async_recursive_factorial with recursion defined");
+}
+
+// ========================================
+// 9. ASYNC BLOCKS
+// ========================================
+
+async fn use_async_block() -> Int {
+    let result = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    }.await;
+    result
+}
+
+async fn nested_async_blocks() -> Int {
+    let outer = async {
+        let inner = async {
+            42
+        }.await;
+        inner * 2
+    }.await;
+    outer
+}
+
+fn test_async_blocks() {
+    let _ = print("\n=== Test 8: Async Blocks ===");
+
+    let _ = print("async block with local variables defined");
+    let _ = print("nested async blocks defined");
+}
+
+// ========================================
+// 10. SPAWN WITH AWAIT
+// ========================================
+
+async fn spawn_and_await_single() -> Int {
+    let task = spawn async_computation(10);
+    task.await
+}
+
+async fn spawn_and_await_multiple() -> Int {
+    let task1 = spawn async_computation(5);
+    let task2 = spawn async_computation(10);
+
+    let result1 = task1.await;
+    let result2 = task2.await;
+
+    result1 + result2
+}
+
+async fn spawn_conditional() -> Int {
+    let should_spawn = true;
+    if should_spawn {
+        let task = spawn async_computation(15);
+        task.await
+    } else {
+        0
+    }
+}
+
+fn test_spawn_with_await() {
+    let _ = print("\n=== Test 9: Spawn with Await ===");
+
+    let _ = print("spawn and await single task defined");
+    let _ = print("spawn and await multiple tasks defined");
+    let _ = print("spawn with conditional logic defined");
+}
+
+// ========================================
+// 11. ERROR HANDLING IN ASYNC
+// ========================================
+
+async fn async_may_fail(should_fail: Bool) -> Result<Int, AsyncError> {
+    if should_fail {
+        Err(GenericError("operation failed"))
+    } else {
+        Ok(100)
+    }
+}
+
+async fn handle_async_error(should_fail: Bool) -> Int {
+    let result = async_may_fail(should_fail).await;
+    match result {
+        Ok(val) => val,
+        Err(NetworkError(msg)) => -1,
+        Err(TimeoutError) => -2,
+        Err(ParseError(msg)) => -3,
+        Err(GenericError(msg)) => -4
+    }
+}
+
+fn test_async_error_handling() {
+    let _ = print("\n=== Test 10: Error Handling in Async ===");
+
+    let _ = print("async function with error types defined");
+    let _ = print("async error handler with pattern matching defined");
+}
+
+// ========================================
+// 12. DEFER WITH ASYNC
+// ========================================
+
+async fn async_with_defer() -> Int {
+    defer {
+        let _ = print("defer: cleanup executed");
+    };
+
+    let result = async_computation(5).await;
+    result
+}
+
+async fn multiple_defers() -> Int {
+    defer {
+        let _ = print("defer 1: first cleanup");
+    };
+
+    defer {
+        let _ = print("defer 2: second cleanup");
+    };
+
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+fn test_defer_with_async() {
+    let _ = print("\n=== Test 11: Defer with Async ===");
+
+    let _ = print("async function with defer statement defined");
+    let _ = print("async function with multiple defers defined");
+}
+
+// ========================================
+// 13. COMPLEX ASYNC PATTERNS
+// ========================================
+
+async fn complex_async_workflow() -> Int {
+    // Step 1: Spawn background tasks
+    let task1 = spawn async_computation(10);
+    let task2 = spawn async_computation(20);
+
+    // Step 2: Perform local computation
+    let local_result = 5;
+
+    // Step 3: Await tasks
+    let result1 = task1.await;
+    let result2 = task2.await;
+
+    // Step 4: Combine results
+    local_result + result1 + result2
+}
+
+async fn async_pipeline(x: Int) -> Int {
+    let step1 = async_computation(x).await;
+    let step2 = async_computation(step1).await;
+    let step3 = async_computation(step2).await;
+    step3
+}
+
+async fn conditional_async(condition: Bool) -> Int {
+    if condition {
+        let result = async_computation(10).await;
+        result
+    } else {
+        let task = spawn async_computation(20);
+        task.await
+    }
+}
+
+fn test_complex_async_patterns() {
+    let _ = print("\n=== Test 12: Complex Async Patterns ===");
+
+    let _ = print("complex async workflow with spawn and await defined");
+    let _ = print("async pipeline with sequential operations defined");
+    let _ = print("conditional async with branching defined");
+}
+
+// ========================================
+// 14. ASYNC TASK TYPES
+// ========================================
+
+async fn create_task<T>(id: Int, data: T) -> Task<T> {
+    Task { id: id, data: data }
+}
+
+async fn process_task<T>(task: Task<T>) -> Int {
+    task.id
+}
+
+async fn generic_async_workflow<T>(id: Int, data: T) -> Int {
+    let task = create_task(id, data).await;
+    let result = process_task(task).await;
+    result
+}
+
+fn test_async_generics() {
+    let _ = print("\n=== Test 13: Async with Generics ===");
+
+    let _ = print("generic async task creation defined");
+    let _ = print("generic async task processing defined");
+    let _ = print("generic async workflow defined");
+}
+
+// ========================================
+// 15. MAIN ENTRY POINT
+// ========================================
+
+fn main() {
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  COMPREHENSIVE ASYNC FEATURES TEST SUITE             ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    test_basic_async();
+    test_async_await();
+    test_spawn_expressions();
+    test_try_recover_finally();
+    test_async_closures();
+    test_async_pattern_matching();
+    test_async_loops();
+    test_async_blocks();
+    test_spawn_with_await();
+    test_async_error_handling();
+    test_defer_with_async();
+    test_complex_async_patterns();
+    test_async_generics();
+
+    let _ = print("");
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  ALL ASYNC FEATURES TESTS COMPLETED                  ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+    let _ = print("Note: Full async runtime testing requires execution environment.");
+    let _ = print("This test validates async syntax and type checking.");
+}

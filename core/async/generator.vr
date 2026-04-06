@@ -1,0 +1,568 @@
+// =============================================================================
+// generator.vr - Generator (Coroutine-based Iterators)
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/poll, async/waker, async/future, async/stream
+// =============================================================================
+//
+// Generators are functions that can yield multiple values lazily.
+// They are declared with `fn*` syntax and use `yield` to produce values.
+//
+// # Sync Generators
+//
+// A sync generator implements Iterator, producing values on demand:
+//
+// ```verum
+// fn* range(start: Int, end: Int) -> Int {
+//     let mut i = start;
+//     while i < end {
+//         yield i;
+//         i = i + 1;
+//     }
+// }
+//
+// for x in range(0, 5) {
+//     print(f"{x}");  // 0, 1, 2, 3, 4
+// }
+// ```
+//
+// # Async Generators
+//
+// An async generator implements Stream, producing values asynchronously:
+//
+// ```verum
+// async fn* fetch_pages(urls: List<Text>) -> Text {
+//     for url in urls {
+//         let page = fetch(url).await;
+//         yield page;
+//     }
+// }
+// ```
+//
+// # Generator Comprehensions
+//
+// Shorthand for simple generators:
+//
+// ```verum
+// let squares = gen { x * x for x in 0..10 };
+// ```
+//
+// =============================================================================
+
+module generator;
+
+mount core.*;
+mount collections.*;
+mount .poll.*;
+mount .waker.*;
+mount .future.*;
+mount .stream.*;
+
+// =============================================================================
+// Generator<T> - Sync Generator (Iterator)
+// =============================================================================
+
+/// A generator that lazily produces a sequence of values.
+///
+/// Created by calling a generator function (declared with `fn*`).
+/// The generator runs on a separate thread and communicates via
+/// futex-based synchronization.
+///
+/// Implements Iterator so it can be used in `for` loops and with
+/// all iterator combinators.
+///
+/// # Lifecycle
+///
+/// 1. Created: Generator function called, thread spawned but paused
+/// 2. Running: `next()` resumes the generator body
+/// 3. Yielded: `yield value` pauses and returns `Some(value)`
+/// 4. Completed: Generator body returns, `next()` returns `None`
+///
+/// # Memory Management
+///
+/// Generators are automatically closed when dropped. The underlying
+/// thread is joined and all resources freed.
+public type Generator<T> is {
+    /// Opaque handle to the C runtime VerumGenerator.
+    handle: Int,
+    /// Whether the generator has completed.
+    done: Bool,
+};
+
+implement<T> Generator<T> {
+    /// Check if the generator has more values.
+    ///
+    /// Returns `true` if calling `next()` may produce a value.
+    /// Returns `false` if the generator has completed.
+    public fn has_next(&self) -> Bool {
+        if self.done {
+            return false;
+        }
+        __gen_has_next_raw(self.handle) != 0
+    }
+
+    /// Close the generator early, releasing all resources.
+    ///
+    /// After closing, `next()` will always return `None`.
+    /// This is called automatically when the generator is dropped.
+    public fn close(&mut self) {
+        if self.handle != 0 && !self.done {
+            __gen_close_raw(self.handle);
+            self.done = true;
+        }
+    }
+}
+
+/// Iterator implementation for Generator<T>.
+///
+/// This allows generators to be used in `for` loops:
+///
+/// ```verum
+/// fn* fibonacci() -> Int {
+///     let mut a = 0;
+///     let mut b = 1;
+///     loop {
+///         yield a;
+///         let tmp = a + b;
+///         a = b;
+///         b = tmp;
+///     }
+/// }
+///
+/// for fib in fibonacci().take(10) {
+///     print(f"{fib}");
+/// }
+/// ```
+implement<T> Iterator for Generator<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.done {
+            return None;
+        }
+        if __gen_has_next_raw(self.handle) == 0 {
+            self.done = true;
+            return None;
+        }
+        let value = __gen_next_raw(self.handle);
+        // Check if generator completed during this call
+        if __gen_has_next_raw(self.handle) == 0 {
+            self.done = true;
+        }
+        Some(value as T)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        // Generators have unknown length
+        (0, None)
+    }
+}
+
+/// Drop implementation - automatically closes the generator.
+implement<T> Drop for Generator<T> {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+// =============================================================================
+// AsyncGenerator<T> - Async Generator (Stream)
+// =============================================================================
+
+/// An async generator that produces values asynchronously.
+///
+/// Created by calling an async generator function (`async fn*`).
+/// Implements Stream, so it works with all stream combinators.
+///
+/// # Example
+///
+/// ```verum
+/// async fn* ticker(interval_ms: Int) -> Int {
+///     let mut count = 0;
+///     loop {
+///         async_sleep_ms(interval_ms).await;
+///         count = count + 1;
+///         yield count;
+///     }
+/// }
+///
+/// let stream = ticker(100).take(5);
+/// for await tick in stream {
+///     print(f"tick {tick}");
+/// }
+/// ```
+public type AsyncGenerator<T> is {
+    /// Opaque handle to the C runtime VerumGenerator.
+    handle: Int,
+    /// Whether the generator has completed.
+    done: Bool,
+};
+
+implement<T> AsyncGenerator<T> {
+    /// Check if the async generator has more values.
+    public fn has_next(&self) -> Bool {
+        if self.done {
+            return false;
+        }
+        __gen_has_next_raw(self.handle) != 0
+    }
+
+    /// Close the async generator early.
+    public fn close(&mut self) {
+        if self.handle != 0 && !self.done {
+            __gen_close_raw(self.handle);
+            self.done = true;
+        }
+    }
+}
+
+/// Stream implementation for AsyncGenerator<T>.
+///
+/// Allows async generators to be used with `for await` and stream combinators.
+implement<T> Stream for AsyncGenerator<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        if self.done {
+            return Poll.Ready(None);
+        }
+        if __gen_has_next_raw(self.handle) == 0 {
+            self.done = true;
+            return Poll.Ready(None);
+        }
+        // For thread-based generators, next() is blocking so always Ready
+        let value = __gen_next_raw(self.handle);
+        if __gen_has_next_raw(self.handle) == 0 {
+            self.done = true;
+        }
+        Poll.Ready(Some(value as T))
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (0, None)
+    }
+}
+
+/// Drop implementation for async generators.
+implement<T> Drop for AsyncGenerator<T> {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+// =============================================================================
+// Generator Constructors
+// =============================================================================
+
+/// Create a generator from a function that produces Maybe<T>.
+///
+/// The function is called repeatedly. Each `Some(value)` becomes
+/// a yielded value. `None` terminates the generator.
+///
+/// # Example
+///
+/// ```verum
+/// let mut count = 0;
+/// let gen = generator_from_fn(|| {
+///     count = count + 1;
+///     if count <= 5 { Some(count) } else { None }
+/// });
+///
+/// for x in gen {
+///     print(f"{x}");  // 1, 2, 3, 4, 5
+/// }
+/// ```
+public fn generator_from_fn<T, F: fn() -> Maybe<T>>(f: F) -> FnGenerator<T, F> {
+    FnGenerator { f, done: false }
+}
+
+/// A generator backed by a function.
+public type FnGenerator<T, F> is {
+    f: F,
+    done: Bool,
+};
+
+implement<T, F: fn() -> Maybe<T>> Iterator for FnGenerator<T, F> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.done {
+            return None;
+        }
+        match (self.f)() {
+            Some(value) => Some(value),
+            None => {
+                self.done = true;
+                None
+            }
+        }
+    }
+}
+
+/// Create an infinite generator from a state transition function.
+///
+/// Starting from `initial`, repeatedly applies `f` to produce
+/// the next value and state.
+///
+/// # Example
+///
+/// ```verum
+/// // Fibonacci sequence
+/// let fibs = generator_unfold((0, 1), |state| {
+///     let (a, b) = state;
+///     (a, (b, a + b))  // (yielded_value, next_state)
+/// });
+///
+/// for fib in fibs.take(10) {
+///     print(f"{fib}");
+/// }
+/// ```
+public fn generator_unfold<T, St, F: fn(St) -> (T, St)>(
+    initial: St,
+    f: F
+) -> UnfoldGenerator<T, St, F> {
+    UnfoldGenerator {
+        state: Some(initial),
+        f,
+    }
+}
+
+/// A generator from state unfolding.
+public type UnfoldGenerator<T, St, F> is {
+    state: Maybe<St>,
+    f: F,
+};
+
+implement<T, St, F: fn(St) -> (T, St)> Iterator for UnfoldGenerator<T, St, F> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        match self.state.take() {
+            Some(state) => {
+                let (value, next_state) = (self.f)(state);
+                self.state = Some(next_state);
+                Some(value)
+            }
+            None => None,
+        }
+    }
+}
+
+/// Create a generator that yields values from a range.
+///
+/// # Example
+///
+/// ```verum
+/// for x in generator_range(0, 10) {
+///     print(f"{x}");  // 0, 1, 2, ..., 9
+/// }
+/// ```
+public fn generator_range(start: Int, end: Int) -> RangeGenerator {
+    RangeGenerator { current: start, end }
+}
+
+/// A generator over a range of integers.
+public type RangeGenerator is {
+    current: Int,
+    end: Int,
+};
+
+implement Iterator for RangeGenerator {
+    type Item = Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = if self.current < self.end {
+            self.end - self.current
+        } else {
+            0
+        };
+        (remaining, Some(remaining))
+    }
+}
+
+/// Create an infinite generator that yields the same value.
+///
+/// # Example
+///
+/// ```verum
+/// for x in generator_repeat(42).take(3) {
+///     print(f"{x}");  // 42, 42, 42
+/// }
+/// ```
+public fn generator_repeat<T: Clone>(value: T) -> RepeatGenerator<T> {
+    RepeatGenerator { value }
+}
+
+/// An infinite generator yielding the same value.
+public type RepeatGenerator<T: Clone> is {
+    value: T,
+};
+
+implement<T: Clone> Iterator for RepeatGenerator<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        Some(self.value.clone())
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (Int.MAX, None)
+    }
+}
+
+/// Create a generator that yields values from successive function calls.
+///
+/// # Example
+///
+/// ```verum
+/// let mut i = 0;
+/// let gen = generator_successors(0, |prev| prev + 1);
+/// assert_eq(gen.take(5).collect(), [0, 1, 2, 3, 4]);
+/// ```
+public fn generator_successors<T: Clone, F: fn(&T) -> T>(
+    first: T,
+    succ: F
+) -> SuccessorGenerator<T, F> {
+    SuccessorGenerator {
+        current: Some(first),
+        succ,
+    }
+}
+
+/// A generator from a successor function.
+public type SuccessorGenerator<T, F> is {
+    current: Maybe<T>,
+    succ: F,
+};
+
+implement<T: Clone, F: fn(&T) -> T> Iterator for SuccessorGenerator<T, F> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        match self.current.take() {
+            Some(val) => {
+                let next_val = (self.succ)(&val);
+                self.current = Some(next_val);
+                Some(val)
+            }
+            None => None,
+        }
+    }
+}
+
+// =============================================================================
+// Raw Runtime Intrinsics
+// =============================================================================
+
+// These functions are intercepted by the LLVM codegen and routed to
+// verum_gen_* functions in verum_runtime.c. They operate on opaque
+// generator handles (i64 pointers).
+
+@intrinsic("gen_next")
+fn __gen_next_raw(handle: Int) -> Int;
+
+@intrinsic("gen_has_next")
+fn __gen_has_next_raw(handle: Int) -> Int;
+
+@intrinsic("gen_close")
+fn __gen_close_raw(handle: Int) -> ();
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_fn_generator() {
+    let mut count = 0;
+    let mut gen = generator_from_fn(|| {
+        count = count + 1;
+        if count <= 3 { Some(count) } else { None }
+    });
+
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(3));
+    assert_eq(gen.next(), None);
+}
+
+@test
+fn test_range_generator() {
+    let mut gen = generator_range(0, 5);
+
+    assert_eq(gen.next(), Some(0));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(3));
+    assert_eq(gen.next(), Some(4));
+    assert_eq(gen.next(), None);
+}
+
+@test
+fn test_range_generator_size_hint() {
+    let gen = generator_range(0, 10);
+    let (lo, hi) = gen.size_hint();
+    assert_eq(lo, 10);
+    assert_eq(hi, Some(10));
+}
+
+@test
+fn test_unfold_generator() {
+    // Fibonacci via unfold
+    let mut gen = generator_unfold((0, 1), |state| {
+        let (a, b) = state;
+        (a, (b, a + b))
+    });
+
+    assert_eq(gen.next(), Some(0));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(3));
+    assert_eq(gen.next(), Some(5));
+}
+
+@test
+fn test_repeat_generator() {
+    let mut gen = generator_repeat(7);
+    assert_eq(gen.next(), Some(7));
+    assert_eq(gen.next(), Some(7));
+    assert_eq(gen.next(), Some(7));
+}
+
+@test
+fn test_successor_generator() {
+    let mut gen = generator_successors(1, |x| x * 2);
+    assert_eq(gen.next(), Some(1));
+    assert_eq(gen.next(), Some(2));
+    assert_eq(gen.next(), Some(4));
+    assert_eq(gen.next(), Some(8));
+}
+
+@test
+fn test_generator_with_iterator_combinators() {
+    // Generator + take + collect
+    let result = generator_range(0, 100)
+        .take(5)
+        .collect();
+    assert_eq(result, [0, 1, 2, 3, 4]);
+}
+
+@test
+fn test_generator_filter_map() {
+    // Generator + filter + map
+    let result = generator_range(0, 10)
+        .filter(|x| x % 2 == 0)
+        .map(|x| x * x)
+        .collect();
+    assert_eq(result, [0, 4, 16, 36, 64]);
+}

@@ -1,0 +1,13 @@
+// Test negative literal after while
+
+fn test(n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        i = i + 1;
+    }
+    -1
+}
+
+fn main() {
+    print(f"test(3) = {test(3)}");
+}

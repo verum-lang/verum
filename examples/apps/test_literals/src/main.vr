@@ -1,0 +1,225 @@
+// Test Tagged and Semantic Literals in Verum
+// Grammar reference: docs/detailed/05-syntax-grammar.md Section 1.4.2, 1.4.4
+//
+// tagged_literal  = identifier , '#' , ( plain_string | raw_string ) ;
+// semantic_literal = semantic_tag , '#' , ( plain_string | raw_string ) ;
+// semantic_tag    = 'gql' | 'rx' | 'sql' | 'url' | 'email' | 'json' | 'xml' | 'yaml' | 'contract' | 'sh' ;
+
+fn main() {
+    print("=== Tagged Literals Test ===");
+    print("");
+
+    // =========================================================================
+    // Test 1: Basic String Literals (baseline)
+    // =========================================================================
+    print("--- Test 1: Basic String Literals ---");
+    let s = "hello world";
+    print(f"Basic string: {s}");
+
+    let name = "Verum";
+    let greeting = f"Hello, {name}!";
+    print(greeting);
+    print("");
+
+    // =========================================================================
+    // Test 2: Semantic Literals - SQL
+    // =========================================================================
+    print("--- Test 2: SQL Tagged Literal ---");
+    let query = sql#"SELECT * FROM users WHERE id = 42";
+    print(f"SQL query: {query}");
+
+    let complex_sql = sql#"SELECT u.name, COUNT(o.id) FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.name";
+    print(f"Complex SQL: {complex_sql}");
+    print("");
+
+    // =========================================================================
+    // Test 3: Semantic Literals - Regular Expression
+    // =========================================================================
+    print("--- Test 3: Regex Tagged Literal ---");
+    let pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+    print(f"Email regex pattern: {pattern}");
+
+    let number_pattern = rx#"\d{3}-\d{3}-\d{4}";
+    print(f"Phone regex pattern: {number_pattern}");
+    print("");
+
+    // =========================================================================
+    // Test 4: Semantic Literals - GraphQL
+    // =========================================================================
+    print("--- Test 4: GraphQL Tagged Literal ---");
+    let gql_query = gql#"query GetUser { user(id: 123) { name email posts { title } } }";
+    print(f"GraphQL query: {gql_query}");
+
+    let gql_mutation = gql#"mutation CreatePost { createPost(title: \"New Post\", body: \"Content\") { id } }";
+    print(f"GraphQL mutation: {gql_mutation}");
+    print("");
+
+    // =========================================================================
+    // Test 5: Semantic Literals - JSON
+    // =========================================================================
+    print("--- Test 5: JSON Tagged Literal ---");
+    let json_data = json#"{\"name\": \"Alice\", \"age\": 30, \"active\": true}";
+    print(f"JSON data: {json_data}");
+
+    let json_array = json#"[1, 2, 3, {\"key\": \"value\"}]";
+    print(f"JSON array: {json_array}");
+    print("");
+
+    // =========================================================================
+    // Test 6: Semantic Literals - XML
+    // =========================================================================
+    print("--- Test 6: XML Tagged Literal ---");
+    let xml_doc = xml#"<user><name>Bob</name><email>bob@example.com</email></user>";
+    print(f"XML document: {xml_doc}");
+
+    let xml_nested = xml#"<root><items><item id=\"1\">First</item><item id=\"2\">Second</item></items></root>";
+    print(f"Nested XML: {xml_nested}");
+    print("");
+
+    // =========================================================================
+    // Test 7: Semantic Literals - YAML
+    // =========================================================================
+    print("--- Test 7: YAML Tagged Literal ---");
+    let yaml_config = yaml#"name: MyApp\nversion: 1.0.0\nfeatures:\n  - auth\n  - api";
+    print(f"YAML config: {yaml_config}");
+    print("");
+
+    // =========================================================================
+    // Test 8: Semantic Literals - URL
+    // =========================================================================
+    print("--- Test 8: URL Tagged Literal ---");
+    let api_url = url#"https://api.example.com/v1/users?limit=10&offset=0";
+    print(f"API URL: {api_url}");
+
+    let web_url = url#"https://example.com/path/to/resource#section";
+    print(f"Web URL: {web_url}");
+    print("");
+
+    // =========================================================================
+    // Test 9: Semantic Literals - Email
+    // =========================================================================
+    print("--- Test 9: Email Tagged Literal ---");
+    let email_addr = email#"user@example.com";
+    print(f"Email: {email_addr}");
+
+    let email_complex = email#"firstname.lastname+tag@subdomain.example.co.uk";
+    print(f"Complex email: {email_complex}");
+    print("");
+
+    // =========================================================================
+    // Test 10: Custom Tagged Literals - DateTime
+    // =========================================================================
+    print("--- Test 10: DateTime Tagged Literal ---");
+    let date = d#"2025-12-07";
+    print(f"Date: {date}");
+
+    let datetime = d#"2025-12-07T15:30:00Z";
+    print(f"DateTime: {datetime}");
+    print("");
+
+    // =========================================================================
+    // Test 11: Custom Tagged Literals - URI
+    // =========================================================================
+    print("--- Test 11: URI Tagged Literal ---");
+    let resource_uri = uri#"urn:isbn:978-3-16-148410-0";
+    print(f"URI: {resource_uri}");
+
+    let file_uri = uri#"file:///home/user/document.txt";
+    print(f"File URI: {file_uri}");
+    print("");
+
+    // =========================================================================
+    // Test 12: Composite Tagged Literals - Interval
+    // =========================================================================
+    print("--- Test 12: Interval Tagged Literal ---");
+    let time_interval = interval#"[0, 100]";
+    print(f"Time interval: {time_interval}");
+    print("");
+
+    // =========================================================================
+    // Test 13: Composite Tagged Literals - Matrix
+    // =========================================================================
+    print("--- Test 13: Matrix Tagged Literal ---");
+    let matrix_data = mat#"[[1, 2, 3], [4, 5, 6], [7, 8, 9]]";
+    print(f"Matrix: {matrix_data}");
+    print("");
+
+    // =========================================================================
+    // Test 14: Composite Tagged Literals - Vector
+    // =========================================================================
+    print("--- Test 14: Vector Tagged Literal ---");
+    let vector_data = vec#"[1.0, 2.0, 3.0, 4.0]";
+    print(f"Vector: {vector_data}");
+    print("");
+
+    // =========================================================================
+    // Test 15: Custom Tagged Literals - Chemistry
+    // =========================================================================
+    print("--- Test 15: Chemistry Tagged Literal ---");
+    let molecule = chem#"H2O";
+    print(f"Molecule: {molecule}");
+
+    let compound = chem#"C6H12O6";
+    print(f"Compound: {compound}");
+    print("");
+
+    // =========================================================================
+    // Test 16: Custom Tagged Literals - Music
+    // =========================================================================
+    print("--- Test 16: Music Tagged Literal ---");
+    let melody = music#"C D E F G A B C";
+    print(f"Melody: {melody}");
+    print("");
+
+    // =========================================================================
+    // Test 17: Raw String Tagged Literals
+    // =========================================================================
+    print("--- Test 17: Raw String Tagged Literals ---");
+    // Raw strings preserve backslashes and special characters
+    let raw_regex = rx#r#"C:\Users\path\to\file"#;
+    print(f"Raw regex: {raw_regex}");
+
+    let raw_json = json#r#"{"path": "C:\\Users\\Documents", "escaped": "value"}"#;
+    print(f"Raw JSON: {raw_json}");
+    print("");
+
+    // =========================================================================
+    // Test 18: Multiple Tagged Literals in Expressions
+    // =========================================================================
+    print("--- Test 18: Multiple Tagged Literals ---");
+    let db_query = sql#"SELECT email FROM users";
+    let email_check = rx#"^[^@]+@[^@]+$";
+    print(f"Query: {db_query}");
+    print(f"Validator: {email_check}");
+    print("");
+
+    // =========================================================================
+    // Test 19: Tagged Literals with Interpolation Context
+    // =========================================================================
+    print("--- Test 19: Tagged Literals in Context ---");
+    let table_name = "users";
+    // Note: This shows the literal, interpolation would be in safe_interpolated form
+    let dynamic_query = sql#"SELECT * FROM users";
+    print(f"Dynamic query template: {dynamic_query}");
+    print("");
+
+    // =========================================================================
+    // Test 20: Edge Cases
+    // =========================================================================
+    print("--- Test 20: Edge Cases ---");
+
+    // Empty tagged literal
+    let empty_sql = sql#"";
+    print(f"Empty SQL: '{empty_sql}'");
+
+    // Tagged literal with special characters
+    let special_json = json#"{\"special\": \"!@#$%^&*()_+-=[]{};':,.<>/?`~\"}";
+    print(f"Special JSON: {special_json}");
+
+    // Multi-line in tagged literal
+    let multiline_yaml = yaml#"config:\n  host: localhost\n  port: 8080\n  debug: true";
+    print(f"Multiline YAML: {multiline_yaml}");
+    print("");
+
+    print("=== All Tests Complete ===");
+}

@@ -1,0 +1,233 @@
+// =============================================================================
+// scrollbar.vr - Scrollbar as a StatefulWidget (vertical/horizontal)
+// =============================================================================
+module scrollbar;
+
+mount super.protocol.StatefulWidget;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// =============================================================================
+// ScrollbarOrientation
+// =============================================================================
+
+/// Scrollbar orientation.
+public type ScrollbarOrientation is Vertical | Horizontal;
+
+// =============================================================================
+// ScrollbarState — external state for the StatefulWidget
+// =============================================================================
+
+/// State for the scrollbar, tracking content size, viewport, and position.
+public type ScrollbarState is {
+    content_length: Int,
+    position: Int,
+    viewport_length: Int,
+};
+
+implement ScrollbarState {
+    /// Create a new scrollbar state.
+    public fn new(content_length: Int, viewport_length: Int) -> ScrollbarState {
+        ScrollbarState {
+            content_length: content_length,
+            position: 0,
+            viewport_length: viewport_length,
+        }
+    }
+
+    /// Set the scroll position.
+    public fn position(&mut self, pos: Int) {
+        self.position = pos.max(0).min((self.content_length - self.viewport_length).max(0));
+    }
+
+    /// Scroll down/right by one unit.
+    public fn next(&mut self) {
+        let max_pos = (self.content_length - self.viewport_length).max(0);
+        self.position = (self.position + 1).min(max_pos);
+    }
+
+    /// Scroll up/left by one unit.
+    public fn previous(&mut self) {
+        self.position = (self.position - 1).max(0);
+    }
+
+    /// Jump to the beginning.
+    public fn first(&mut self) {
+        self.position = 0;
+    }
+
+    /// Jump to the end.
+    public fn last(&mut self) {
+        self.position = (self.content_length - self.viewport_length).max(0);
+    }
+}
+
+// =============================================================================
+// Scrollbar — the widget itself (no total/position fields)
+// =============================================================================
+
+/// Scrollbar widget — rendered as a StatefulWidget using ScrollbarState.
+/// Shows a thumb on a track with optional begin/end symbols.
+/// Hidden automatically when content_length <= viewport_length.
+public type Scrollbar is {
+    orientation: ScrollbarOrientation,
+    thumb_style: Style,
+    track_style: Style,
+    begin_symbol: Maybe<Text>,
+    end_symbol: Maybe<Text>,
+    thumb_symbol: Text,
+    track_symbol: Text,
+};
+
+implement Scrollbar {
+    /// Create a vertical scrollbar with default symbols.
+    public fn vertical() -> Scrollbar {
+        Scrollbar {
+            orientation: ScrollbarOrientation.Vertical,
+            thumb_style: Style.new().fg(Color.White),
+            track_style: Style.new().fg(Color.DarkGrey),
+            begin_symbol: Some("▲"),
+            end_symbol: Some("▼"),
+            thumb_symbol: "█",
+            track_symbol: "░",
+        }
+    }
+
+    /// Create a horizontal scrollbar with default symbols.
+    public fn horizontal() -> Scrollbar {
+        Scrollbar {
+            orientation: ScrollbarOrientation.Horizontal,
+            thumb_style: Style.new().fg(Color.White),
+            track_style: Style.new().fg(Color.DarkGrey),
+            begin_symbol: Some("◄"),
+            end_symbol: Some("►"),
+            thumb_symbol: "█",
+            track_symbol: "░",
+        }
+    }
+
+    // Builder API
+    public fn thumb_style(self, style: Style) -> Scrollbar {
+        Scrollbar { thumb_style: style, ..self }
+    }
+
+    public fn track_style(self, style: Style) -> Scrollbar {
+        Scrollbar { track_style: style, ..self }
+    }
+
+    public fn begin_symbol(self, sym: Maybe<Text>) -> Scrollbar {
+        Scrollbar { begin_symbol: sym, ..self }
+    }
+
+    public fn end_symbol(self, sym: Maybe<Text>) -> Scrollbar {
+        Scrollbar { end_symbol: sym, ..self }
+    }
+
+    public fn thumb_symbol(self, sym: Text) -> Scrollbar {
+        Scrollbar { thumb_symbol: sym, ..self }
+    }
+
+    public fn track_symbol(self, sym: Text) -> Scrollbar {
+        Scrollbar { track_symbol: sym, ..self }
+    }
+
+    /// Remove begin/end arrow symbols.
+    public fn no_arrows(self) -> Scrollbar {
+        Scrollbar { begin_symbol: None, end_symbol: None, ..self }
+    }
+}
+
+implement StatefulWidget for Scrollbar {
+    type State = ScrollbarState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut ScrollbarState) {
+        // Hide scrollbar when content fits in viewport
+        if state.content_length <= state.viewport_length { return; }
+        if area.width < 1 || area.height < 1 { return; }
+
+        let track_len = match self.orientation {
+            Vertical => area.height,
+            Horizontal => area.width,
+        };
+
+        if track_len < 1 { return; }
+
+        let begin_offset = match self.begin_symbol { Some(_) => 1, None => 0 };
+        let end_offset = match self.end_symbol { Some(_) => 1, None => 0 };
+        let usable = track_len - begin_offset - end_offset;
+
+        if usable < 1 { return; }
+
+        // Thumb size proportional to viewport/content ratio
+        let thumb_size = (usable * state.viewport_length / state.content_length).max(1);
+        let max_pos = state.content_length - state.viewport_length;
+        let thumb_pos = if max_pos > 0 {
+            begin_offset + (usable - thumb_size) * state.position / max_pos
+        } else {
+            begin_offset
+        };
+
+        match self.orientation {
+            Vertical => {
+                let x = area.x;
+
+                // Begin symbol
+                match self.begin_symbol {
+                    Some(ref sym) => {
+                        buf.get_mut(x, area.y).set_char(sym, self.track_style);
+                    }
+                    None => {}
+                }
+
+                // Track and thumb
+                for i in begin_offset..(track_len - end_offset) {
+                    let y = area.y + i;
+                    if i >= thumb_pos && i < thumb_pos + thumb_size {
+                        buf.get_mut(x, y).set_char(&self.thumb_symbol, self.thumb_style);
+                    } else {
+                        buf.get_mut(x, y).set_char(&self.track_symbol, self.track_style);
+                    }
+                }
+
+                // End symbol
+                match self.end_symbol {
+                    Some(ref sym) => {
+                        buf.get_mut(x, area.bottom() - 1).set_char(sym, self.track_style);
+                    }
+                    None => {}
+                }
+            }
+            Horizontal => {
+                let y = area.y;
+
+                // Begin symbol
+                match self.begin_symbol {
+                    Some(ref sym) => {
+                        buf.get_mut(area.x, y).set_char(sym, self.track_style);
+                    }
+                    None => {}
+                }
+
+                // Track and thumb
+                for i in begin_offset..(track_len - end_offset) {
+                    let x = area.x + i;
+                    if i >= thumb_pos && i < thumb_pos + thumb_size {
+                        buf.get_mut(x, y).set_char(&self.thumb_symbol, self.thumb_style);
+                    } else {
+                        buf.get_mut(x, y).set_char(&self.track_symbol, self.track_style);
+                    }
+                }
+
+                // End symbol
+                match self.end_symbol {
+                    Some(ref sym) => {
+                        buf.get_mut(area.right() - 1, y).set_char(sym, self.track_style);
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+}

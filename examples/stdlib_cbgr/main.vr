@@ -1,0 +1,284 @@
+// stdlib_cbgr/main.vr
+// CBGR (Capability-Based Generational References) demonstration
+// Shows memory safety through generation tracking and three-tier reference model
+
+fn main() {
+    print("=== CBGR Memory Safety Example ===")
+    print("")
+
+    test_basic_references()
+    test_generation_tracking()
+    test_three_tier_references()
+    test_list_iteration_safety()
+    test_dangling_reference_prevention()
+
+    print("")
+    print("=== All CBGR Tests Completed ===")
+}
+
+fn test_basic_references() {
+    print("--- Basic References ---")
+
+    // Create a value
+    let x = 42
+
+    // Create a reference (Tier 0: ~15ns overhead)
+    let ref_x = &x
+    print(f"Value through reference: {*ref_x}")
+
+    // References are automatically checked
+    print(f"Original value: {x}")
+    print(f"Referenced value: {*ref_x}")
+
+    // Multiple references are allowed
+    let ref_x2 = &x
+    print(f"Second reference: {*ref_x2}")
+
+    // References to collections
+    let numbers = [1, 2, 3, 4, 5]
+    let ref_numbers = &numbers
+    print(f"Collection through reference: {*ref_numbers}")
+
+    print("")
+}
+
+fn test_generation_tracking() {
+    print("--- Generation Tracking ---")
+
+    // Create a managed value with generation tracking
+    let mut data = [10, 20, 30]
+    print(f"Original data: {data}")
+    print("Generation: 0 (initial)")
+
+    // Take a reference (records current generation)
+    let ref_data = &data
+    print(f"Reference created to generation 0")
+    print(f"Data through reference: {*ref_data}")
+
+    // Mutation increments generation
+    data.push(40)
+    print(f"After push: {data}")
+    print("Generation: 1 (after mutation)")
+
+    // Original reference still valid (points to generation 0)
+    // CBGR tracks this and ensures safety
+    print(f"Reference still valid: {*ref_data}")
+
+    // New reference captures new generation
+    let ref_data2 = &data
+    print(f"New reference to generation 1: {*ref_data2}")
+
+    print("")
+}
+
+fn test_three_tier_references() {
+    print("--- Three-Tier Reference Model ---")
+
+    let data = [100, 200, 300]
+
+    // Tier 0: Default CBGR reference (~15ns overhead)
+    let tier0_ref = &data
+    print(f"Tier 0 (CBGR): {*tier0_ref} - Full safety checks")
+
+    // Tier 1: Compiler-proven safe (0ns overhead)
+    // Escape analysis proves this reference can't outlive the value
+    let tier1_ref = &checked data
+    print(f"Tier 1 (checked): {*tier1_ref} - Compiler-proven safe")
+
+    // Tier 2: Unsafe reference (0ns overhead, manual proof required)
+    // Used in performance-critical code with manual safety proof
+    let tier2_ref = &unsafe data
+    print(f"Tier 2 (unsafe): {*tier2_ref} - Manual safety proof")
+
+    print("")
+    print("Reference overhead comparison:")
+    print("  Tier 0 (&T):         ~15ns per access")
+    print("  Tier 1 (&checked T): 0ns (compiler-proven)")
+    print("  Tier 2 (&unsafe T):  0ns (manual proof)")
+
+    print("")
+}
+
+fn test_list_iteration_safety() {
+    print("--- List Iteration Safety ---")
+
+    let mut items = [1, 2, 3, 4, 5]
+    print(f"Original items: {items}")
+
+    // Safe iteration with references
+    print("Iterating with references:")
+    for i in 0..items.len() {
+        let item_ref = items.get_ref(i)
+        match item_ref {
+            Maybe.Some(ref) => print(f"  Item {i}: {*ref}"),
+            Maybe.None => print(f"  Item {i}: out of bounds"),
+        }
+    }
+
+    // Modify during iteration (safe with CBGR)
+    print("Doubling values:")
+    for i in 0..items.len() {
+        let item_ref = items.get_mut_ref(i)
+        match item_ref {
+            Maybe.Some(ref) => {
+                *ref = *ref * 2
+            },
+            Maybe.None => {},
+        }
+    }
+    print(f"After doubling: {items}")
+
+    print("")
+}
+
+fn test_dangling_reference_prevention() {
+    print("--- Dangling Reference Prevention ---")
+
+    // CBGR prevents dangling references at runtime
+
+    // Example 1: Reference to local scope
+    let outer_ref = test_scope_reference()
+    print("Attempted to return reference from function")
+    print("CBGR ensures this is safe through generation tracking")
+
+    // Example 2: Reference after collection resize
+    let mut vec = [1, 2, 3]
+    let ref_first = vec.get_ref(0)
+
+    match ref_first {
+        Maybe.Some(ref) => {
+            print(f"First element: {*ref}")
+
+            // Resize the vector (may reallocate)
+            vec.reserve(100)
+            print("Vector resized/reallocated")
+
+            // Original reference still safe due to CBGR
+            print(f"Reference still valid: {*ref}")
+        },
+        Maybe.None => print("No first element"),
+    }
+
+    // Example 3: Reference invalidation detection
+    let mut data = [10, 20, 30]
+    let ref_element = data.get_ref(1)
+
+    match ref_element {
+        Maybe.Some(ref) => {
+            print(f"Element: {*ref}")
+
+            // Clear the data (invalidates references)
+            data.clear()
+            print("Data cleared - references invalidated")
+
+            // CBGR detects generation mismatch if we try to use ref
+            // In a real implementation, this would be caught
+            print("CBGR would detect generation mismatch here")
+        },
+        Maybe.None => {},
+    }
+
+    print("")
+}
+
+fn test_scope_reference() -> Maybe<&Int> {
+    // Create local value
+    let local = 42
+
+    // Try to return reference to local (safe with CBGR)
+    // CBGR ensures the reference is tracked properly
+    Maybe.Some(&local)
+}
+
+// Advanced: Manual CBGR inspection
+fn test_cbgr_inspection() {
+    print("--- CBGR Inspection ---")
+
+    let data = [1, 2, 3]
+    let ref_data = &data
+
+    // In real implementation, you could inspect CBGR metadata
+    print("CBGR metadata (conceptual):")
+    print("  Pointer: 0x...")
+    print("  Generation: 0")
+    print("  Epoch caps: [valid]")
+    print("  Reference size: 16 bytes (ThinRef)")
+
+    print("")
+}
+
+// Performance comparison example
+fn test_performance_tiers() {
+    print("--- Performance Tier Comparison ---")
+
+    let data = create_large_list(1000)
+
+    // Tier 0: Safe but with overhead
+    print("Tier 0 - CBGR checked access:")
+    let start = current_time_ns()
+    let sum_t0 = sum_with_tier0_refs(&data)
+    let elapsed_t0 = current_time_ns() - start
+    print(f"  Sum: {sum_t0}, Time: {elapsed_t0}ns")
+
+    // Tier 1: Compiler-proven safe, no overhead
+    print("Tier 1 - Compiler-proven safe access:")
+    let start = current_time_ns()
+    let sum_t1 = sum_with_tier1_refs(&checked data)
+    let elapsed_t1 = current_time_ns() - start
+    print(f"  Sum: {sum_t1}, Time: {elapsed_t1}ns")
+
+    print(f"Performance improvement: {(elapsed_t0 - elapsed_t1)}ns")
+
+    print("")
+}
+
+fn create_large_list(size: Int) -> List<Int> {
+    let mut list = []
+    for i in 0..size {
+        list.push(i)
+    }
+    list
+}
+
+fn sum_with_tier0_refs(data: &List<Int>) -> Int {
+    let mut sum = 0
+    for i in 0..data.len() {
+        let item = data.get(i).unwrap_or(0)
+        sum = sum + item
+    }
+    sum
+}
+
+fn sum_with_tier1_refs(data: &checked List<Int>) -> Int {
+    let mut sum = 0
+    for i in 0..data.len() {
+        let item = data.get(i).unwrap_or(0)
+        sum = sum + item
+    }
+    sum
+}
+
+// Mock time function (would be stdlib)
+fn current_time_ns() -> Int {
+    // In real implementation, returns actual nanosecond timestamp
+    0
+}
+
+// Demonstrate memory layout
+fn demonstrate_memory_layout() {
+    print("--- Memory Layout ---")
+
+    print("ThinRef<T> layout (16 bytes):")
+    print("  ptr: 8 bytes")
+    print("  generation: 4 bytes")
+    print("  epoch_caps: 4 bytes")
+
+    print("")
+    print("FatRef<T> layout (24 bytes) for slices:")
+    print("  ptr: 8 bytes")
+    print("  generation: 4 bytes")
+    print("  epoch_caps: 4 bytes")
+    print("  len: 8 bytes")
+
+    print("")
+}

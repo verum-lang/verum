@@ -1,0 +1,27 @@
+type Box<T> is { value: T };
+
+fn main() {
+    // Test 1: Basic nested Box<Box<Int>>
+    let double_box: Box<Box<Int>> = Box { value: Box { value: 42 } };
+    let _ = println(f"Double box: {double_box.value.value}");
+
+    // Test 2: Triple nested Box<Box<Box<Int>>>
+    let triple_box: Box<Box<Box<Int>>> = Box { value: Box { value: Box { value: 100 } } };
+    let _ = println(f"Triple box: {triple_box.value.value.value}");
+
+    // Test 3: Type inference with nested generics
+    let inferred = Box { value: Box { value: 200 } };
+    let _ = println(f"Inferred nested: {inferred.value.value}");
+
+    // Test 4: Mixed types with nested generics
+    let box_bool: Box<Box<Bool>> = Box { value: Box { value: true } };
+    let _ = println(f"Box of box of bool: {box_bool.value.value}");
+
+    // Test 5: Lists (which use Generic type internally)
+    let simple_list = [1, 2, 3];
+    let _ = println(f"Simple list length: {simple_list.len()}");
+
+    // Test 6: Nested lists - List<List<Int>>
+    let nested_list = [[1, 2], [3, 4], [5, 6]];
+    let _ = println(f"Nested list length: {nested_list.len()}");
+}

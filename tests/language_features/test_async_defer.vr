@@ -1,0 +1,13 @@
+// Test async with defer
+async fn with_defer(x: Int) -> Int {
+    defer {
+        print("Cleanup executed");
+    };
+    x * 2
+}
+
+fn main() {
+    print("Test: Async with defer");
+    let result = with_defer(21).await;
+    print(f"Result: {result}");
+}

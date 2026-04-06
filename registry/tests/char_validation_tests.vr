@@ -1,0 +1,243 @@
+// Comprehensive character validation and text manipulation tests
+
+mount core.base.{Text, List, Char};
+
+// Character classification tests
+@test
+fn test_is_lowercase() {
+    let a = 'a';
+    let z = 'z';
+    let A = 'A';
+    let digit = '5';
+
+    assert(is_lowercase(a), "'a' should be lowercase");
+    assert(is_lowercase(z), "'z' should be lowercase");
+    assert(!is_lowercase(A), "'A' should NOT be lowercase");
+    assert(!is_lowercase(digit), "'5' should NOT be lowercase");
+    print("Lowercase tests passed");
+}
+
+@test
+fn test_is_uppercase() {
+    let A = 'A';
+    let Z = 'Z';
+    let a = 'a';
+    let digit = '9';
+
+    assert(is_uppercase(A), "'A' should be uppercase");
+    assert(is_uppercase(Z), "'Z' should be uppercase");
+    assert(!is_uppercase(a), "'a' should NOT be uppercase");
+    assert(!is_uppercase(digit), "'9' should NOT be uppercase");
+    print("Uppercase tests passed");
+}
+
+@test
+fn test_is_digit() {
+    let zero = '0';
+    let nine = '9';
+    let five = '5';
+    let letter = 'a';
+
+    assert(is_digit(zero), "'0' should be a digit");
+    assert(is_digit(nine), "'9' should be a digit");
+    assert(is_digit(five), "'5' should be a digit");
+    assert(!is_digit(letter), "'a' should NOT be a digit");
+    print("Digit tests passed");
+}
+
+@test
+fn test_is_alphabetic() {
+    let a = 'a';
+    let Z = 'Z';
+    let digit = '5';
+
+    assert(is_alphabetic(a), "'a' should be alphabetic");
+    assert(is_alphabetic(Z), "'Z' should be alphabetic");
+    assert(!is_alphabetic(digit), "'5' should NOT be alphabetic");
+    print("Alphabetic tests passed");
+}
+
+@test
+fn test_is_alphanumeric() {
+    let a = 'a';
+    let Z = 'Z';
+    let digit = '5';
+    let underscore = '_';
+
+    assert(is_alphanumeric(a), "'a' should be alphanumeric");
+    assert(is_alphanumeric(Z), "'Z' should be alphanumeric");
+    assert(is_alphanumeric(digit), "'5' should be alphanumeric");
+    assert(!is_alphanumeric(underscore), "'_' should NOT be alphanumeric");
+    print("Alphanumeric tests passed");
+}
+
+// Text operation tests
+@test
+fn test_text_length() {
+    let text1 = "hello";
+    let text2 = "a";
+    let text3 = "";
+
+    assert(len(text1) == 5, "hello should have length 5");
+    assert(len(text2) == 1, "a should have length 1");
+    assert(len(text3) == 0, "empty string should have length 0");
+    print("Text length tests passed");
+}
+
+@test
+fn test_text_concatenation() {
+    let part1 = "hello";
+    let part2 = " ";
+    let part3 = "world";
+    let result = concat(concat(part1, part2), part3);
+
+    assert(len(result) == 11, "concatenated string should have length 11");
+    print(f"Concatenation: '{result}'");
+}
+
+@test
+fn test_text_contains() {
+    let text = "hello world";
+
+    assert(contains(text, "hello"), "should contain 'hello'");
+    assert(contains(text, "world"), "should contain 'world'");
+    assert(contains(text, " "), "should contain space");
+    assert(!contains(text, "xyz"), "should NOT contain 'xyz'");
+    print("Text contains tests passed");
+}
+
+@test
+fn test_text_starts_with() {
+    let text = "hello world";
+
+    assert(starts_with(text, "hello"), "should start with 'hello'");
+    assert(starts_with(text, "h"), "should start with 'h'");
+    assert(!starts_with(text, "world"), "should NOT start with 'world'");
+    print("Text starts_with tests passed");
+}
+
+@test
+fn test_text_ends_with() {
+    let text = "hello world";
+
+    assert(ends_with(text, "world"), "should end with 'world'");
+    assert(ends_with(text, "d"), "should end with 'd'");
+    assert(!ends_with(text, "hello"), "should NOT end with 'hello'");
+    print("Text ends_with tests passed");
+}
+
+// Character comparison tests
+@test
+fn test_char_equality() {
+    let a1 = 'a';
+    let a2 = 'a';
+    let b = 'b';
+
+    assert(a1 == a2, "Same chars should be equal");
+    assert(a1 != b, "Different chars should not be equal");
+    print("Character equality tests passed");
+}
+
+@test
+fn test_char_ordering() {
+    let a = 'a';
+    let b = 'b';
+    let z = 'z';
+
+    assert(a < b, "'a' should be less than 'b'");
+    assert(b < z, "'b' should be less than 'z'");
+    assert(a < z, "'a' should be less than 'z'");
+    print("Character ordering tests passed");
+}
+
+// Validation pattern tests
+@test
+fn test_validate_simple_name() {
+    let name = "test123";
+    let mut is_valid = true;
+
+    // Name should only contain alphanumeric characters
+    let name_len = len(name);
+    let mut i = 0;
+
+    while i < name_len {
+        let ch = char_at(name, i);
+        if !is_alphanumeric(ch) {
+            is_valid = false;
+        }
+        i = i + 1;
+    }
+
+    assert(is_valid, "test123 should be valid name");
+    print("Simple name validation test passed");
+}
+
+@test
+fn test_count_digits_in_text() {
+    let text = "abc123def456";
+    let text_len = len(text);
+    let mut digit_count = 0;
+    let mut i = 0;
+
+    while i < text_len {
+        let ch = char_at(text, i);
+        if is_digit(ch) {
+            digit_count = digit_count + 1;
+        }
+        i = i + 1;
+    }
+
+    assert(digit_count == 6, "Should have 6 digits");
+    print(f"Found {digit_count} digits in '{text}'");
+}
+
+@test
+fn test_count_uppercase_letters() {
+    let text = "HeLLo WoRLd";
+    let text_len = len(text);
+    let mut uppercase_count = 0;
+    let mut i = 0;
+
+    while i < text_len {
+        let ch = char_at(text, i);
+        if is_uppercase(ch) {
+            uppercase_count = uppercase_count + 1;
+        }
+        i = i + 1;
+    }
+
+    assert(uppercase_count == 6, "Should have 6 uppercase letters");
+    print(f"Found {uppercase_count} uppercase letters in '{text}'");
+}
+
+@test
+fn test_all_lowercase_check() {
+    let text1 = "hello";
+    let text2 = "Hello";
+    let text_len1 = len(text1);
+    let text_len2 = len(text2);
+
+    let mut all_lower_1 = true;
+    let mut i = 0;
+    while i < text_len1 {
+        let ch = char_at(text1, i);
+        if is_alphabetic(ch) && !is_lowercase(ch) {
+            all_lower_1 = false;
+        }
+        i = i + 1;
+    }
+
+    let mut all_lower_2 = true;
+    i = 0;
+    while i < text_len2 {
+        let ch = char_at(text2, i);
+        if is_alphabetic(ch) && !is_lowercase(ch) {
+            all_lower_2 = false;
+        }
+        i = i + 1;
+    }
+
+    assert(all_lower_1, "'hello' should be all lowercase");
+    assert(!all_lower_2, "'Hello' should NOT be all lowercase");
+    print("All lowercase check tests passed");
+}

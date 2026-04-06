@@ -1,0 +1,68 @@
+// Test 2: Declarative Refinement Types
+// Spec: 03-type-system.md Section 1.3 - Rule 4 (Named)
+// Syntax: Type where predicate_function
+
+// Test 2.1: Define predicate functions
+fn is_positive(n: Int) -> Bool {
+    n > 0
+}
+
+fn is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+fn valid_email(s: Text) -> Bool {
+    // Simple email validation: contains @ and has text before/after
+    s.contains("@") && s.len() > 3
+}
+
+fn in_range(n: Int) -> Bool {
+    n >= 0 && n <= 100
+}
+
+// Test 2.2: Define refined types using named predicates
+type PositiveInt is Int where is_positive;
+
+type EvenInt is Int where is_even;
+
+type Email is Text where valid_email;
+
+type Score is Int where in_range;
+
+// Test 2.3: Functions with declarative refinements
+fn double_positive(x: PositiveInt) -> Int {
+    x * 2
+}
+
+fn half_even(x: EvenInt) -> Int {
+    x / 2
+}
+
+fn send_email(to: Email) {
+    let _ = print(f"Sending email to: {to}");
+}
+
+// Test 2.4: Test declarative refinements
+fn main() {
+    // Test positive int
+    let pos: PositiveInt = 10;
+    let _ = print(f"Positive: {pos}");
+
+    let doubled = double_positive(pos);
+    let _ = print(f"Doubled: {doubled}");
+
+    // Test even int
+    let even: EvenInt = 8;
+    let _ = print(f"Even: {even}");
+
+    let halved = half_even(even);
+    let _ = print(f"Halved: {halved}");
+
+    // Test email
+    let email: Email = "user@example.com";
+    send_email(email);
+
+    // Test score
+    let score: Score = 85;
+    let _ = print(f"Score: {score}");
+}

@@ -1,0 +1,132 @@
+module sys.net_ops;
+
+// =============================================================================
+// sys/net_ops.vr - Network Operations (replaces C verum_tcp_*/verum_udp_*)
+// =============================================================================
+// Layer: 1 (I/O)
+// Dependencies: sys/raw
+// =============================================================================
+//
+// Pure Verum TCP/UDP operations. Compiled through VBC → LLVM.
+// No C runtime dependency.
+//
+// =============================================================================
+
+module net_ops;
+
+mount core.*;
+mount super.raw.*;
+
+// =============================================================================
+// TCP
+// =============================================================================
+
+/// A TCP connection.
+public type TcpStream is {
+    fd: Int,
+};
+
+/// A TCP server socket.
+public type TcpListener is {
+    fd: Int,
+};
+
+implement TcpStream {
+    /// Connect to a remote host:port.
+    public fn connect(host: Text, port: Int) -> Maybe<TcpStream> {
+        let fd = __tcp_connect_raw(host, port);
+        if fd < 0 {
+            None
+        } else {
+            Some(TcpStream { fd: fd })
+        }
+    }
+
+    /// Send text data.
+    public fn send(&self, data: Text) -> Int {
+        __tcp_send_raw(self.fd, data)
+    }
+
+    /// Receive text data (up to max_len bytes).
+    public fn recv(&self, max_len: Int) -> Text {
+        __tcp_recv_raw(self.fd, max_len)
+    }
+
+    /// Close the connection.
+    public fn close(&self) {
+        __tcp_close_raw(self.fd);
+    }
+
+    /// Get the underlying file descriptor.
+    public fn raw_fd(&self) -> Int {
+        self.fd
+    }
+}
+
+implement TcpListener {
+    /// Bind and listen on a port. Returns listener.
+    public fn bind(port: Int) -> Maybe<TcpListener> {
+        let fd = __tcp_listen_raw(port);
+        if fd < 0 {
+            None
+        } else {
+            Some(TcpListener { fd: fd })
+        }
+    }
+
+    /// Accept an incoming connection.
+    public fn accept(&self) -> Maybe<TcpStream> {
+        let client_fd = __tcp_accept_raw(self.fd);
+        if client_fd < 0 {
+            None
+        } else {
+            Some(TcpStream { fd: client_fd })
+        }
+    }
+
+    /// Close the listener.
+    public fn close(&self) {
+        __tcp_close_raw(self.fd);
+    }
+
+    /// Get the underlying file descriptor.
+    public fn raw_fd(&self) -> Int {
+        self.fd
+    }
+}
+
+// =============================================================================
+// UDP
+// =============================================================================
+
+/// A UDP socket.
+public type UdpSocket is {
+    fd: Int,
+};
+
+implement UdpSocket {
+    /// Bind to a local port.
+    public fn bind(port: Int) -> Maybe<UdpSocket> {
+        let fd = __udp_bind_raw(port);
+        if fd < 0 {
+            None
+        } else {
+            Some(UdpSocket { fd: fd })
+        }
+    }
+
+    /// Send data to remote host:port.
+    public fn send_to(&self, data: Text, host: Text, port: Int) -> Int {
+        __udp_send_raw(self.fd, data, host, port)
+    }
+
+    /// Receive data.
+    public fn recv(&self, max_len: Int) -> Text {
+        __udp_recv_raw(self.fd, max_len)
+    }
+
+    /// Close the socket.
+    public fn close(&self) {
+        __udp_close_raw(self.fd);
+    }
+}

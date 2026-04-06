@@ -1,0 +1,14 @@
+// Test provide statement only
+
+context Logger {
+    fn log(message: Text);
+}
+
+type ConsoleLogger = {
+    prefix: Text
+}
+
+fn main() {
+    provide Logger = ConsoleLogger { prefix: "APP" };
+    let x = 42;
+}

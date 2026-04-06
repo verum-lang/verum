@@ -1,0 +1,127 @@
+// Test literals and string features
+// Tests all literal types, string interpolation, and escape sequences
+
+fn main() {
+    print("=== Literal Tests ===")
+
+    // Integer literals
+    print("\nTest 1: Integer literals")
+    let decimal = 42
+    let hex = 0xFF
+    let binary = 0b1010
+    let octal = 0o77
+    print(f"Decimal: {decimal}")
+    print(f"Hex: {hex}")
+    print(f"Binary: {binary}")
+    print(f"Octal: {octal}")
+
+    // Float literals
+    print("\nTest 2: Float literals")
+    let pi = 3.14159
+    let scientific = 1.23e-4
+    let large = 1e10
+    print(f"Pi: {pi}")
+    print(f"Scientific: {scientific}")
+    print(f"Large: {large}")
+
+    // Boolean literals
+    print("\nTest 3: Boolean literals")
+    let t = true
+    let f = false
+    print(f"True: {t}, False: {f}")
+
+    // Character literals
+    print("\nTest 4: Character literals")
+    let ch = 'A'
+    let newline = '\n'
+    let tab = '\t'
+    print(f"Char: {ch}")
+
+    // String literals
+    print("\nTest 5: String literals")
+    let simple = "Hello, World!"
+    let with_quotes = "He said \"Hello\""
+    let with_escapes = "Line 1\nLine 2\tTabbed"
+    print(simple)
+    print(with_quotes)
+
+    // String interpolation
+    print("\nTest 6: String interpolation")
+    let name = "Alice"
+    let age = 30
+    let greeting = f"Hello, {name}! You are {age} years old."
+    print(greeting)
+
+    // Complex interpolation
+    print("\nTest 7: Complex interpolation")
+    let x = 10
+    let y = 20
+    print(f"The sum of {x} and {y} is {x + y}")
+    print(f"The product is {x * y}")
+
+    // Nested interpolation
+    print("\nTest 8: Nested expressions in interpolation")
+    let items = [1, 2, 3, 4, 5]
+    print(f"List has {items.len()} items")
+    print(f"First item: {items[0]}")
+
+    // Multi-line strings (if supported)
+    print("\nTest 9: Multi-line strings")
+    let multi = "This is a
+multiline
+string"
+    print(multi)
+
+    // Raw strings (if supported)
+    print("\nTest 10: Escape sequences")
+    let escaped = "\\n \\t \\r \\\\ \\\" \\'"
+    print(f"Escaped: {escaped}")
+
+    // Array/List literals
+    print("\nTest 11: Collection literals")
+    let numbers = [1, 2, 3, 4, 5]
+    let mixed = [10, 20, 30]
+    print(f"Numbers: {numbers}")
+    print(f"Mixed: {mixed}")
+
+    // Tuple literals
+    print("\nTest 12: Tuple literals")
+    let pair = (42, "answer")
+    let triple = (1, 2.0, "three")
+    print(f"Pair: {pair}")
+    print(f"Triple: {triple}")
+
+    // Record literals
+    print("\nTest 13: Record literals")
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 10, y: 20 }
+    print(f"Point: ({p.x}, {p.y})")
+
+    // Variant literals
+    print("\nTest 14: Variant literals")
+    type Color is | Red | Green | Blue;
+    let color = Red
+    print(f"Color: {color}")
+
+    // None and Some
+    print("\nTest 15: Maybe literals")
+    let some_val: Maybe<Int> = Some(42)
+    let none_val: Maybe<Int> = None
+    print(f"Some: {some_val}, None: {none_val}")
+
+    // Unicode in strings
+    print("\nTest 16: Unicode strings")
+    let unicode = "Hello 世界 🌍"
+    let emoji = "😀 🎉 🚀"
+    print(unicode)
+    print(emoji)
+
+    // Format specifiers in interpolation
+    print("\nTest 17: Format in interpolation")
+    let value = 123.456
+    print(f"Value: {value}")
+    print(f"Integer: {42}")
+    print(f"Boolean: {true}")
+
+    print("\nLiteral tests complete")
+}

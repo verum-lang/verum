@@ -1,0 +1,13 @@
+// Test 5: Async block expression
+// Tests inline async blocks
+
+fn main() {
+    let future = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+
+    let result = future.await;
+    print(result);
+}

@@ -1,0 +1,89 @@
+// Test: @extern attribute with different calling conventions
+// Tests various calling conventions and parameter combinations
+
+// Test 1: C calling convention (default)
+ffi LibC {
+    @extern("C")
+    fn malloc(size: usize) -> *mut u8;
+    requires size > 0;
+    ensures result != 0;
+    memory_effects = Allocates;
+    thread_safe = true;
+    errors_via = ReturnValue(0);
+    @ownership(transfer_from);
+
+    @extern("C")
+    fn free(ptr: *mut u8);
+    requires ptr != 0;
+    ensures true;
+    memory_effects = Deallocates;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(transfer_to);
+}
+
+// Test 2: StdCall convention (Windows)
+ffi WindowsAPI {
+    @extern("stdcall")
+    fn GetLastError() -> u32;
+    requires true;
+    ensures true;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+
+    @extern("stdcall")
+    fn SetLastError(code: u32);
+    requires true;
+    ensures true;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+// Test 3: Functions with multiple parameters
+ffi FileIO {
+    @extern("C")
+    fn open(path: *const u8, flags: i32, mode: i32) -> i32;
+    requires path != 0;
+    ensures result >= -1;
+    memory_effects = Reads([path]);
+    thread_safe = true;
+    errors_via = Errno;
+    @ownership(borrow);
+
+    @extern("C")
+    fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+    requires fd >= 0 && buf != 0 && count > 0;
+    ensures result >= -1;
+    memory_effects = Writes([buf]);
+    thread_safe = true;
+    errors_via = Errno;
+    @ownership(borrow);
+}
+
+// Test 4: Void return type
+ffi VoidFunctions {
+    @extern("C")
+    fn exit(code: i32);
+    requires true;
+    ensures true;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+fn main() {
+    print("=== FFI @extern Test ===");
+
+    // Test function declarations
+    print("LibC.malloc declared");
+    print("WindowsAPI.GetLastError declared");
+    print("FileIO.open declared");
+    print("VoidFunctions.exit declared");
+
+    print("FFI @extern test PASS");
+}

@@ -1,0 +1,20 @@
+// Test 4: Record pattern
+
+type Point is { x: Int, y: Int };
+
+fn test() -> Text {
+    let p = Point { x: 10, y: 20 };
+    let result = match p {
+        Point { x, y } => x + y
+    };
+
+    if result == 30 {
+        "PASS"
+    } else {
+        "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

@@ -1,0 +1,25 @@
+type Showable is protocol {
+    fn show(self) -> Text;
+}
+
+type Countable is protocol {
+    fn get_count(self) -> Int;
+}
+
+type Number is { value: Int }
+
+implement Showable for Number {
+    fn show(self) -> Text { f"Number({self.value})" }
+}
+
+implement Countable for Number {
+    fn get_count(self) -> Int {
+        self.value
+    }
+}
+
+fn main() {
+    let a = Number { value: 10 }
+    println(a.show())
+    println(f"Count: {a.get_count()}")
+}

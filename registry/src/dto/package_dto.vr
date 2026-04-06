@@ -1,0 +1,354 @@
+// Package DTOs
+//
+// API-facing types for package operations.
+// These types are optimized for JSON serialization and API contracts.
+
+mount core.collections.{List};
+mount core.base.{Text, Int, Bool};
+
+// ============================================================================
+// Response DTOs
+// ============================================================================
+
+/// Package summary for list/search responses (minimal fields for efficiency)
+pub type PackageSummaryDto is {
+    name: Text,
+    description: Text,
+    latest_version: Text,
+    downloads: Int,
+    license: Text,
+};
+
+/// Full package details for single-package responses
+pub type PackageDto is {
+    name: Text,
+    description: Text,
+    owner: Text,
+    license: Text,
+    repository_url: Text,
+    homepage_url: Text,
+    keywords: List<Text>,
+    versions: List<Text>,
+    downloads: Int,
+    created_at: Text,
+    updated_at: Text,
+};
+
+/// Dependency representation for API
+pub type DependencyDto is {
+    name: Text,
+    version_constraint: Text,
+    optional: Bool,
+};
+
+/// Package version details
+pub type PackageVersionDto is {
+    version: Text,
+    description: Text,
+    dependencies: List<DependencyDto>,
+    published_at: Text,
+    published_by: Text,
+    checksum: Text,
+    download_url: Text,
+};
+
+// ============================================================================
+// Request DTOs
+// ============================================================================
+
+/// Request to get a specific package version
+pub type GetPackageRequestDto is {
+    name: Text,
+    version: Text,
+};
+
+/// Request to publish a new package version
+pub type PublishRequestDto is {
+    name: Text,
+    version: Text,
+    description: Text,
+    license: Text,
+    tarball: List<Int>,
+};
+
+/// Request to yank a package version
+pub type YankRequestDto is {
+    name: Text,
+    version: Text,
+};
+
+/// Response after publishing
+pub type PublishResponseDto is {
+    success: Bool,
+    package_name: Text,
+    version: Text,
+    message: Text,
+};
+
+/// Response after yanking a package version
+pub type YankResponseDto is {
+    success: Bool,
+    package_name: Text,
+    version: Text,
+    message: Text,
+};
+
+/// Paginated package list response
+pub type PackageListResponseDto is {
+    packages: List<PackageSummaryDto>,
+    total: Int,
+    page: Int,
+    per_page: Int,
+};
+
+/// Version summary for version list responses
+pub type VersionSummaryDto is {
+    version: Text,
+    published_at: Text,
+    downloads: Int,
+    yanked: Bool,
+};
+
+/// List of package versions response
+pub type PackageVersionsResponseDto is {
+    versions: List<VersionSummaryDto>,
+    total: Int,
+};
+
+/// Update package metadata request
+pub type UpdatePackageMetadataDto is {
+    description: Text,
+    homepage: Text,
+    repository: Text,
+    keywords: List<Text>,
+    categories: List<Text>,
+};
+
+/// Update package metadata response
+pub type UpdatePackageResponseDto is {
+    success: Bool,
+    package_name: Text,
+    message: Text,
+};
+
+/// Download artifact response (returns URL or redirect)
+pub type DownloadArtifactResponseDto is {
+    download_url: Text,
+    checksum: Text,
+    version: Text,
+};
+
+/// Download statistics response
+pub type PackageStatsDto is {
+    package_name: Text,
+    daily_downloads: Int,
+    weekly_downloads: Int,
+    monthly_downloads: Int,
+    total_downloads: Int,
+    version_breakdown: List<VersionDownloadStatsDto>,
+};
+
+/// Per-version download statistics
+pub type VersionDownloadStatsDto is {
+    version: Text,
+    downloads: Int,
+};
+
+// ============================================================================
+// Implementations
+// ============================================================================
+
+implement PackageSummaryDto {
+    pub fn new(
+        name: Text,
+        description: Text,
+        latest_version: Text,
+        downloads: Int,
+        license: Text
+    ) -> PackageSummaryDto {
+        PackageSummaryDto {
+            name: name,
+            description: description,
+            latest_version: latest_version,
+            downloads: downloads,
+            license: license,
+        }
+    }
+}
+
+implement PackageDto {
+    pub fn new(name: Text, owner: Text) -> PackageDto {
+        PackageDto {
+            name: name,
+            description: f"",
+            owner: owner,
+            license: f"MIT",
+            repository_url: f"",
+            homepage_url: f"",
+            keywords: List.new(),
+            versions: List.new(),
+            downloads: 0,
+            created_at: f"",
+            updated_at: f"",
+        }
+    }
+}
+
+implement DependencyDto {
+    pub fn new(name: Text, version_constraint: Text, optional: Bool) -> DependencyDto {
+        DependencyDto {
+            name: name,
+            version_constraint: version_constraint,
+            optional: optional,
+        }
+    }
+}
+
+implement PublishResponseDto {
+    pub fn success(package_name: Text, version: Text) -> PublishResponseDto {
+        PublishResponseDto {
+            success: true,
+            package_name: package_name,
+            version: version,
+            message: f"Package {package_name}@{version} published successfully",
+        }
+    }
+
+    pub fn error(package_name: Text, version: Text, message: Text) -> PublishResponseDto {
+        PublishResponseDto {
+            success: false,
+            package_name: package_name,
+            version: version,
+            message: message,
+        }
+    }
+}
+
+implement YankResponseDto {
+    pub fn success(package_name: Text, version: Text) -> YankResponseDto {
+        YankResponseDto {
+            success: true,
+            package_name: package_name,
+            version: version,
+            message: f"Package {package_name}@{version} has been yanked",
+        }
+    }
+
+    pub fn error(package_name: Text, version: Text, message: Text) -> YankResponseDto {
+        YankResponseDto {
+            success: false,
+            package_name: package_name,
+            version: version,
+            message: message,
+        }
+    }
+}
+
+implement PackageListResponseDto {
+    pub fn new(packages: List<PackageSummaryDto>, total: Int, page: Int, per_page: Int) -> PackageListResponseDto {
+        PackageListResponseDto {
+            packages: packages,
+            total: total,
+            page: page,
+            per_page: per_page,
+        }
+    }
+
+    pub fn empty(page: Int, per_page: Int) -> PackageListResponseDto {
+        PackageListResponseDto {
+            packages: List.new(),
+            total: 0,
+            page: page,
+            per_page: per_page,
+        }
+    }
+}
+
+implement VersionSummaryDto {
+    pub fn new(version: Text, published_at: Text, downloads: Int, yanked: Bool) -> VersionSummaryDto {
+        VersionSummaryDto {
+            version: version,
+            published_at: published_at,
+            downloads: downloads,
+            yanked: yanked,
+        }
+    }
+}
+
+implement PackageVersionsResponseDto {
+    pub fn new(versions: List<VersionSummaryDto>, total: Int) -> PackageVersionsResponseDto {
+        PackageVersionsResponseDto {
+            versions: versions,
+            total: total,
+        }
+    }
+
+    pub fn empty() -> PackageVersionsResponseDto {
+        PackageVersionsResponseDto {
+            versions: List.new(),
+            total: 0,
+        }
+    }
+}
+
+implement UpdatePackageMetadataDto {
+    pub fn new() -> UpdatePackageMetadataDto {
+        UpdatePackageMetadataDto {
+            description: "",
+            homepage: "",
+            repository: "",
+            keywords: List.new(),
+            categories: List.new(),
+        }
+    }
+}
+
+implement UpdatePackageResponseDto {
+    pub fn success(package_name: Text) -> UpdatePackageResponseDto {
+        UpdatePackageResponseDto {
+            success: true,
+            package_name: package_name,
+            message: f"Package {package_name} metadata updated successfully",
+        }
+    }
+
+    pub fn error(package_name: Text, message: Text) -> UpdatePackageResponseDto {
+        UpdatePackageResponseDto {
+            success: false,
+            package_name: package_name,
+            message: message,
+        }
+    }
+}
+
+implement DownloadArtifactResponseDto {
+    pub fn new(download_url: Text, checksum: Text, version: Text) -> DownloadArtifactResponseDto {
+        DownloadArtifactResponseDto {
+            download_url: download_url,
+            checksum: checksum,
+            version: version,
+        }
+    }
+}
+
+implement PackageStatsDto {
+    pub fn new(package_name: Text) -> PackageStatsDto {
+        PackageStatsDto {
+            package_name: package_name,
+            daily_downloads: 0,
+            weekly_downloads: 0,
+            monthly_downloads: 0,
+            total_downloads: 0,
+            version_breakdown: List.new(),
+        }
+    }
+}
+
+implement VersionDownloadStatsDto {
+    pub fn new(version: Text, downloads: Int) -> VersionDownloadStatsDto {
+        VersionDownloadStatsDto {
+            version: version,
+            downloads: downloads,
+        }
+    }
+}

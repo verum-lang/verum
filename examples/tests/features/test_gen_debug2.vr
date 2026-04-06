@@ -1,0 +1,11 @@
+// Test array syntax
+
+fn sequence_maybe<T>(list: [Maybe<T>; 3]) -> Maybe<[T; 3]] {
+    None
+}
+
+type Maybe<T> is Some(T) | None;
+
+fn main() {
+    let _ = print("Test");
+}

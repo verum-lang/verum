@@ -1,0 +1,189 @@
+// Test: FFI Error Protocols
+// Tests error handling mechanisms in FFI declarations
+// According to grammar: ffi_error_protocol = 'errors_via' , '=' , error_mechanism , ';'
+
+// FFI with no error handling
+ffi PureMath {
+    @extern("abs")
+    fn abs(x: Int) -> Int;
+
+    @extern("fabs")
+    fn fabs(x: Float) -> Float;
+
+    // Pure math functions don't error
+    errors_via = None;
+    memory_effects = Pure;
+    thread_safe = true;
+}
+
+// FFI with errno-based error handling (POSIX style)
+ffi PosixIO {
+    @extern("open")
+    fn open(path: *const Text, flags: Int) -> Int;
+
+    @extern("read")
+    fn read(fd: Int, buf: *mut Int, count: Int) -> Int;
+
+    @extern("write")
+    fn write(fd: Int, buf: *const Int, count: Int) -> Int;
+
+    @extern("close")
+    fn close(fd: Int) -> Int;
+
+    // POSIX functions use errno for errors
+    errors_via = Errno;
+    memory_effects = Reads(buf) + Writes(buf);
+    thread_safe = false;
+}
+
+// FFI with return code error handling
+ffi Database {
+    @extern("db_connect")
+    fn db_connect(host: *const Text) -> Int;
+
+    @extern("db_execute")
+    fn db_execute(sql: *const Text) -> Int;
+
+    @extern("db_close")
+    fn db_close(handle: Int) -> Int;
+
+    // Return 0 for success, non-zero for error
+    errors_via = ReturnCode(0);
+    memory_effects = Reads(sql) + Writes(db_state);
+    thread_safe = false;
+}
+
+// FFI with return value error handling
+ffi Allocator {
+    @extern("try_malloc")
+    fn try_malloc(size: Int) -> *mut Int;
+
+    // Returns NULL on error, sets errno
+    errors_via = ReturnValue(null) with Errno;
+    memory_effects = Allocates;
+    thread_safe = true;
+}
+
+// FFI with exception-based error handling (C++ interop)
+ffi CppLibrary {
+    @extern("cpp_create_object")
+    fn create_object(type_id: Int) -> *mut Int;
+
+    @extern("cpp_invoke_method")
+    fn invoke_method(obj: *mut Int, method: Int) -> Int;
+
+    // C++ functions can throw exceptions
+    errors_via = Exception;
+    memory_effects = Allocates + Writes(obj);
+    thread_safe = false;
+}
+
+// FFI with multiple error mechanisms
+ffi ComplexAPI {
+    @extern("init_system")
+    fn init_system(config: *const Text) -> Int;
+
+    @extern("process_data")
+    fn process_data(data: *const Int, len: Int) -> *mut Int;
+
+    @extern("cleanup_system")
+    fn cleanup_system() -> Int;
+
+    // Init uses return code
+    requires init_system(config) == 0;
+
+    // Process data can return NULL with errno
+    errors_via = ReturnValue(null) with Errno;
+
+    // Cleanup should succeed
+    ensures cleanup_system() == 0;
+
+    memory_effects = Allocates + Reads(data) + Writes(result);
+    thread_safe = false;
+}
+
+// FFI with pre/post conditions
+ffi SafeAPI {
+    @extern("safe_divide")
+    fn safe_divide(numerator: Float, denominator: Float) -> Float;
+
+    // Precondition: denominator must not be zero
+    requires denominator != 0.0;
+
+    // Postcondition: result is finite
+    ensures result.is_finite();
+
+    errors_via = None;
+    memory_effects = Pure;
+    thread_safe = true;
+}
+
+// Test pure math (no errors)
+fn test_pure_math() -> Int {
+    let x = -42;
+    let result = PureMath.abs(x);
+    result
+}
+
+// Test errno-based errors
+fn test_posix_io() -> Int {
+    unsafe {
+        // This would need actual file paths in real code
+        // Just testing the syntax here
+        let fd = PosixIO.open("/tmp/test.txt", 0);
+        if fd >= 0 {
+            let _ = PosixIO.close(fd);
+            0
+        } else {
+            -1
+        }
+    }
+}
+
+// Test return code errors
+fn test_database() -> Int {
+    unsafe {
+        let result = Database.db_connect("localhost");
+        if result == 0 {
+            let _ = Database.db_close(0);
+            0
+        } else {
+            -1
+        }
+    }
+}
+
+// Test return value errors
+fn test_allocator() -> Int {
+    unsafe {
+        let ptr = Allocator.try_malloc(1024);
+        // In real code, would check if ptr is null
+        0
+    }
+}
+
+fn main() {
+    let _ = print("=== FFI Error Protocol Tests ===");
+
+    // Test 1: Pure math (no errors)
+    let _ = print("\nTest 1: Pure math (no errors)");
+    let result1 = test_pure_math();
+    let _ = print(f"Pure math result: {result1}");
+
+    // Test 2: POSIX IO (errno)
+    let _ = print("\nTest 2: POSIX IO (errno-based)");
+    let result2 = test_posix_io();
+    let _ = print(f"POSIX IO result: {result2}");
+
+    // Test 3: Database (return code)
+    let _ = print("\nTest 3: Database (return code)");
+    let result3 = test_database();
+    let _ = print(f"Database result: {result3}");
+
+    // Test 4: Allocator (return value + errno)
+    let _ = print("\nTest 4: Allocator (return value + errno)");
+    let result4 = test_allocator();
+    let _ = print(f"Allocator result: {result4}");
+
+    let _ = print("\n=== All FFI error protocol tests completed ===");
+}

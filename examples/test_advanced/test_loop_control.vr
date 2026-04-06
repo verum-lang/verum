@@ -1,0 +1,34 @@
+// Test loop control flow (break, continue)
+// This test verifies break and continue statements in loops
+
+fn main() {
+    println("=== Test 1: Break statement ===")
+    for i in 0..10 {
+        if i == 5 {
+            println(f"Breaking at {i}")
+            break
+        }
+        println(f"i = {i}")
+    }
+
+    println("")
+    println("=== Test 2: Continue statement ===")
+    for j in 0..7 {
+        if j % 2 == 0 {
+            continue
+        }
+        println(f"Odd number: {j}")
+    }
+
+    println("")
+    println("=== Test 3: Nested loops with break ===")
+    for x in 0..3 {
+        for y in 0..3 {
+            if x == 1 && y == 1 {
+                println(f"Breaking inner loop at ({x}, {y})")
+                break
+            }
+            println(f"({x}, {y})")
+        }
+    }
+}

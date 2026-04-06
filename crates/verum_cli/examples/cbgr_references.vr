@@ -1,0 +1,228 @@
+// CBGR Three-Tier Reference Model Example
+// Demonstrates Verum's innovative reference system for memory safety
+
+// Import standard library using dots (not slashes)
+link std.io.stdio.println;
+link core.base.list.List;
+link std.time.instant.Instant;
+
+// Define Matrix type using 'is' syntax (no struct keyword in Verum)
+type Matrix is List<List<Float>>;
+
+// Function using managed reference (&T) - default, safe, ~15ns overhead
+fn sum_matrix(matrix: &Matrix) -> Float {
+    let mut sum = 0.0;
+    for row in matrix {
+        for value in row {
+            sum += value;
+        }
+    }
+    sum
+}
+
+// Function using checked reference (&checked T) - statically verified, 0ns overhead
+// The 'where' clause provides the static proof required
+fn get_element(matrix: &checked Matrix, row: Int, col: Int) -> Float
+    where meta row < len(matrix) && col < len(matrix[0])  // Static proof required
+{
+    matrix[row][col]  // No bounds check needed at runtime
+}
+
+// Function using unsafe reference (&unsafe T) - zero cost, manual safety
+// Note: 'unsafe' modifier is applied to the function
+unsafe fn fast_matrix_multiply(
+    a: &unsafe Matrix,
+    b: &unsafe Matrix,
+    result: &mut unsafe Matrix
+) {
+    // SAFETY: Caller must ensure matrices have compatible dimensions
+    let n = len(a);
+    let m = len(a[0]);
+    let p = len(b[0]);
+
+    for i in 0..n {
+        for j in 0..p {
+            let mut sum = 0.0;
+            for k in 0..m {
+                // No bounds checking - maximum performance
+                sum += a[i][k] * b[k][j];
+            }
+            result[i][j] = sum;
+        }
+    }
+}
+
+// Smart reference selection with escape analysis
+fn process_data(data: List<Int>) -> Int {
+    // Compiler automatically selects reference tier based on usage
+
+    // Local reference - can use &checked (no escape)
+    let local_ref = &data;
+
+    // This would escape - must use & (managed)
+    // spawn(|| { use_data(local_ref); });
+
+    let mut sum = 0;
+    for item in local_ref {
+        sum += item;
+    }
+    sum
+}
+
+// Demonstration of reference coercion
+fn coercion_example() {
+    let data = List.from([1, 2, 3, 4, 5]);
+
+    // Start with unsafe reference
+    let unsafe_ref: &unsafe List<Int> = unsafe { &unsafe data };
+
+    // Can implicitly upcast to checked (with proof)
+    let checked_ref: &checked List<Int> = unsafe_ref;  // OK
+
+    // Can implicitly upcast to managed
+    let managed_ref: &List<Int> = checked_ref;  // OK
+
+    // Cannot downcast without explicit unsafe
+    // let unsafe_again: &unsafe List<Int> = managed_ref;  // ERROR
+
+    print(f"Data sum: {sum_list(managed_ref)}");
+}
+
+fn sum_list(v: &List<Int>) -> Int {
+    let mut sum = 0;
+    for item in v {
+        sum += item;
+    }
+    sum
+}
+
+// Example with mutable references
+fn sort_with_refs() {
+    let mut numbers = List.from([5, 2, 8, 1, 9, 3]);
+
+    // Managed mutable reference (safe, with CBGR checks)
+    sort_managed(&mut numbers);
+    print(f"Sorted (managed): {numbers:?}");
+
+    // Checked mutable reference (proven safe at compile time)
+    let mut more_numbers = List.from([7, 4, 6]);
+    sort_checked(&mut checked more_numbers);
+    print(f"Sorted (checked): {more_numbers:?}");
+}
+
+fn sort_managed(nums: &mut List<Int>) {
+    // CBGR ensures no aliasing during mutation
+    // Simple bubble sort for demonstration
+    let n = len(nums);
+    for i in 0..n {
+        for j in 0..(n - 1 - i) {
+            if nums[j] > nums[j + 1] {
+                let temp = nums[j];
+                nums[j] = nums[j + 1];
+                nums[j + 1] = temp;
+            }
+        }
+    }
+}
+
+fn sort_checked(nums: &mut checked List<Int>) {
+    // Statically verified - no runtime checks
+    let n = len(nums);
+    for i in 0..n {
+        for j in 0..(n - 1 - i) {
+            if nums[j] > nums[j + 1] {
+                let temp = nums[j];
+                nums[j] = nums[j + 1];
+                nums[j + 1] = temp;
+            }
+        }
+    }
+}
+
+// Performance comparison example
+fn performance_demo() {
+    let size = 100;  // Smaller size for demo
+    let matrix_a = create_matrix(size, size);
+    let matrix_b = create_matrix(size, size);
+    let mut result = create_matrix(size, size);
+
+    // Measure with managed references (~15ns per check)
+    let start = Instant.now();
+    let sum = sum_matrix(&matrix_a);
+    let managed_time = start.elapsed();
+    print(f"Managed ref sum: {sum} (time: {managed_time:?})");
+
+    // Measure with unsafe references (0ns overhead)
+    let start = Instant.now();
+    unsafe {
+        fast_matrix_multiply(&unsafe matrix_a, &unsafe matrix_b, &mut unsafe result);
+    }
+    let unsafe_time = start.elapsed();
+    print(f"Unsafe multiply time: {unsafe_time:?}");
+
+    // Show the performance difference
+    let overhead_percent = (managed_time.as_nanos() as Float / unsafe_time.as_nanos() as Float - 1.0) * 100.0;
+    print(f"CBGR overhead: {overhead_percent:.2}%");
+}
+
+fn create_matrix(rows: Int, cols: Int) -> Matrix {
+    let mut matrix = List.with_capacity(rows);
+    for i in 0..rows {
+        let mut row = List.with_capacity(cols);
+        for j in 0..cols {
+            row.push((i * cols + j) as Float);
+        }
+        matrix.push(row);
+    }
+    matrix
+}
+
+// Data structure example using 'is' syntax
+type DataPoint is {
+    x: Float,
+    y: Float,
+    label: Text,
+};
+
+fn process_points(points: &List<DataPoint>) -> Float {
+    let mut sum = 0.0;
+    for point in points {
+        sum += point.x + point.y;
+    }
+    sum
+}
+
+fn main() {
+    print(f"=== CBGR Three-Tier Reference Demo ===\n");
+
+    // Basic usage
+    let data = List.from([
+        List.from([1.0, 2.0]),
+        List.from([3.0, 4.0])
+    ]);
+    let sum = sum_matrix(&data);
+    print(f"Matrix sum: {sum}");
+
+    // Coercion demo
+    coercion_example();
+
+    // Mutable references
+    sort_with_refs();
+
+    // Process data points
+    let points = List.from([
+        DataPoint { x: 1.0, y: 2.0, label: "A" },
+        DataPoint { x: 3.0, y: 4.0, label: "B" },
+    ]);
+    print(f"Points sum: {process_points(&points)}");
+
+    // Performance comparison
+    print(f"\n=== Performance Comparison ===");
+    performance_demo();
+
+    print(f"\nCBGR provides memory safety with minimal overhead!");
+    print(f"Reference tiers:");
+    print(f"  &T         - Managed (CBGR, ~15ns overhead)");
+    print(f"  &checked T - Compile-time verified (0ns)");
+    print(f"  &unsafe T  - Manual safety (0ns)");
+}

@@ -1,0 +1,712 @@
+module sys.linux.thread;
+
+// =============================================================================
+// sys/linux/thread.vr - Linux Thread Creation and Synchronization
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/linux/syscall, sys/linux/tls
+// Platform: Linux x86_64
+// =============================================================================
+//
+// This module provides thread creation via clone/clone3 and comprehensive
+// futex operations for synchronization primitives.
+//
+// Thread creation flow:
+// 1. Allocate stack (mmap or from pool)
+// 2. Initialize TLS block (create_thread_tls)
+// 3. clone3() with CLONE_SETTLS to create thread
+// 4. Thread starts at entry function
+//
+// Futex provides building blocks for:
+// - Mutexes (futex_wait/wake)
+// - Condition variables (futex_wait with requeue)
+// - Semaphores (atomic inc + wake)
+// - Read-write locks (multiple wait queues)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.{OSError, MemProt, MapFlags};
+mount core.intrinsics.{
+    atomic_load_u32, atomic_store_u32, atomic_cas_u32, atomic_fetch_add_u32,
+    atomic_load_u64,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+mount sys.linux.syscall.{
+    syscall_raw,
+    SYS_CLONE, SYS_CLONE3, SYS_FUTEX, SYS_GETTID,
+    SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
+};
+mount sys.linux.tls.{ThreadControlBlock, create_thread_tls, cleanup_thread_tls};
+
+// =============================================================================
+// Clone Flags
+// =============================================================================
+
+/// Share virtual memory
+public const CLONE_VM: Int = 0x00000100;
+
+/// Share filesystem information
+public const CLONE_FS: Int = 0x00000200;
+
+/// Share open files
+public const CLONE_FILES: Int = 0x00000400;
+
+/// Share signal handlers
+public const CLONE_SIGHAND: Int = 0x00000800;
+
+/// Create a new PID namespace
+public const CLONE_NEWPID: Int = 0x20000000;
+
+/// Notify parent on child termination
+public const CLONE_PARENT_SETTID: Int = 0x00100000;
+
+/// Clear the TID in child
+public const CLONE_CHILD_CLEARTID: Int = 0x00200000;
+
+/// Set TID in child's TLS
+public const CLONE_CHILD_SETTID: Int = 0x01000000;
+
+/// Set child thread ID
+public const CLONE_SETTLS: Int = 0x00080000;
+
+/// Share SYSV semaphore adjustments
+public const CLONE_SYSVSEM: Int = 0x00040000;
+
+/// Create thread (don't report to parent)
+public const CLONE_THREAD: Int = 0x00010000;
+
+/// Create new namespace (requires CAP_SYS_ADMIN)
+public const CLONE_NEWNS: Int = 0x00020000;
+
+/// Create new user namespace
+public const CLONE_NEWUSER: Int = 0x10000000;
+
+/// Clear child TID on exit (for futex wake)
+public const CLONE_DETACHED: Int = 0x00400000;
+
+/// Signal mask for clone (SIGCHLD = 17)
+public const SIGCHLD: Int = 17;
+
+/// Standard flags for creating a new thread
+public const CLONE_THREAD_FLAGS: Int =
+    CLONE_VM |
+    CLONE_FS |
+    CLONE_FILES |
+    CLONE_SIGHAND |
+    CLONE_THREAD |
+    CLONE_SYSVSEM |
+    CLONE_SETTLS |
+    CLONE_PARENT_SETTID |
+    CLONE_CHILD_CLEARTID;
+
+// =============================================================================
+// Clone3 Arguments Structure
+// =============================================================================
+
+/// Arguments for clone3 syscall (Linux 5.3+)
+@repr(C)
+public type Clone3Args is {
+    flags: UInt64,           // Clone flags
+    pidfd: UInt64,           // Pointer to store PID fd
+    child_tid: UInt64,       // Pointer for CLONE_CHILD_SETTID
+    parent_tid: UInt64,      // Pointer for CLONE_PARENT_SETTID
+    exit_signal: UInt64,     // Signal to send on exit
+    stack: UInt64,           // Stack base
+    stack_size: UInt64,      // Stack size
+    tls: UInt64,             // TLS pointer (for CLONE_SETTLS)
+    set_tid: UInt64,         // Pointer to TID array
+    set_tid_size: UInt64,    // Number of TIDs
+    cgroup: UInt64,          // cgroup fd
+};
+
+// =============================================================================
+// Thread Types
+// =============================================================================
+
+/// Thread handle.
+public type Thread is {
+    tid: Int,
+    stack_base: &unsafe Byte,
+    stack_size: USize,
+    tls: &unsafe ThreadControlBlock,
+    joined: Bool,
+};
+
+/// Thread entry function type
+public type ThreadFn is fn(&unsafe Byte) -> Int;
+
+/// Thread spawn error
+public type ThreadError is
+    | StackAllocationFailed { code: Int }
+    | TlsAllocationFailed { code: Int }
+    | CloneFailed { code: Int }
+    | AlreadyJoined
+    ;
+
+/// Default stack size (2 MB)
+public const DEFAULT_STACK_SIZE: USize = 2 * 1024 * 1024;
+
+/// Stack guard page size (4 KB)
+public const STACK_GUARD_SIZE: USize = 4096;
+
+// =============================================================================
+// Thread Creation
+// =============================================================================
+
+/// Spawn a new thread.
+///
+/// # Arguments
+/// * `entry` - Thread entry function
+/// * `arg` - Argument passed to entry function
+/// * `stack_size` - Stack size (0 = default 2MB)
+///
+/// # Returns
+/// Thread handle on success, error on failure.
+public fn spawn(entry: ThreadFn, arg: &unsafe Byte, stack_size: USize) -> Result<Thread, ThreadError> {
+    let actual_stack_size = if stack_size == 0 { DEFAULT_STACK_SIZE } else { stack_size };
+
+    // Allocate stack with guard page
+    let total_size = actual_stack_size + STACK_GUARD_SIZE;
+    let stack_base = unsafe {
+        syscall_raw(
+            SYS_MMAP,
+            0,
+            total_size as Int,
+            (MemProt.Read | MemProt.Write).to_unix_flags(),
+            (MapFlags.Private | MapFlags.Anonymous).to_unix_flags(),
+            -1,
+            0
+        )
+    };
+
+    if stack_base < 0 && stack_base > -4096 {
+        return Err(ThreadError.StackAllocationFailed { code: -stack_base as Int });
+    }
+
+    // Make guard page inaccessible
+    let guard_result = unsafe {
+        syscall_raw(
+            SYS_MPROTECT,
+            stack_base,
+            STACK_GUARD_SIZE as Int,
+            0,  // PROT_NONE
+            0, 0, 0
+        )
+    };
+
+    if guard_result < 0 {
+        unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
+        return Err(ThreadError.StackAllocationFailed { code: -guard_result as Int });
+    }
+
+    // Stack grows down, so top is at base + total_size
+    let stack_top = (stack_base as USize + total_size) as &unsafe Byte;
+
+    // Allocate TLS
+    let tls = match create_thread_tls(actual_stack_size) {
+        Ok(tls) => tls,
+        Err(e) => {
+            unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
+            return Err(ThreadError.TlsAllocationFailed { code: 0 });
+        }
+    };
+
+    // Prepare clone3 arguments
+    let mut parent_tid: Int = 0;
+    let mut child_tid: Int = 0;
+
+    let args = Clone3Args {
+        flags: CLONE_THREAD_FLAGS as UInt64,
+        pidfd: 0,
+        child_tid: &mut child_tid as UInt64,
+        parent_tid: &mut parent_tid as UInt64,
+        exit_signal: 0,  // SIGCHLD not needed for threads
+        stack: stack_base as UInt64 + STACK_GUARD_SIZE as UInt64,
+        stack_size: actual_stack_size as UInt64,
+        tls: tls as UInt64,
+        set_tid: 0,
+        set_tid_size: 0,
+        cgroup: 0,
+    };
+
+    // Setup stack for thread entry
+    // Push entry point and argument onto stack
+    let stack_ptr = setup_thread_stack(stack_top, entry, arg);
+
+    // Clone with clone3
+    let result = unsafe {
+        syscall_raw(
+            SYS_CLONE3,
+            &args as Int,
+            Clone3Args.size as Int,
+            0, 0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        // clone3 failed, try fallback to clone
+        let clone_result = clone_fallback(
+            CLONE_THREAD_FLAGS,
+            stack_ptr,
+            &mut parent_tid,
+            tls,
+            &mut child_tid,
+            entry,
+            arg
+        );
+
+        if clone_result < 0 {
+            cleanup_thread_tls();
+            unsafe { syscall_raw(SYS_MUNMAP, stack_base, total_size as Int, 0, 0, 0, 0) };
+            return Err(ThreadError.CloneFailed { code: -clone_result as Int });
+        }
+    }
+
+    Ok(Thread {
+        tid: if result >= 0 { result } else { parent_tid },
+        stack_base: stack_base as &unsafe Byte,
+        stack_size: total_size,
+        tls: tls,
+        joined: false,
+    })
+}
+
+/// Set up thread stack with entry point.
+fn setup_thread_stack(stack_top: &unsafe Byte, entry: ThreadFn, arg: &unsafe Byte) -> &unsafe Byte {
+    // x86_64 ABI: Stack must be 16-byte aligned before call
+    let stack = (stack_top as USize - 16) & !15;
+
+    // The actual entry trampoline is platform-specific
+    // For now, clone3 handles this via stack/stack_size fields
+    stack as &unsafe Byte
+}
+
+/// Fallback clone (for kernels without clone3)
+fn clone_fallback(
+    flags: Int,
+    stack: &unsafe Byte,
+    parent_tid: &mut Int,
+    tls: &unsafe ThreadControlBlock,
+    child_tid: &mut Int,
+    entry: ThreadFn,
+    arg: &unsafe Byte
+) -> Int {
+    unsafe {
+        syscall_raw(
+            SYS_CLONE,
+            flags,
+            stack as Int,
+            parent_tid as Int,
+            child_tid as Int,
+            tls as Int,
+            0
+        )
+    }
+}
+
+implement Thread {
+    /// Wait for thread to exit and get exit code.
+    public fn join(&mut self) -> Result<Int, ThreadError> {
+        if self.joined {
+            return Err(ThreadError.AlreadyJoined);
+        }
+
+        // Use futex to wait for thread exit
+        // child_tid is cleared and futex woken on exit due to CLONE_CHILD_CLEARTID
+        let tid_ptr = unsafe { &(*self.tls).tid };
+        loop {
+            // Load tid atomically (tid is Int/64-bit on Linux x86_64)
+            let tid = atomic_load_u64(tid_ptr as *const UInt64, ORDERING_ACQUIRE) as Int;
+            if tid == 0 {
+                break;
+            }
+
+            // Wait for TID to be cleared
+            let result = futex_wait(tid_ptr as &Int, tid as Int, None);
+            match result {
+                Ok(_) => continue,
+                Err(OSError { code }) if code == EAGAIN => continue,
+                Err(e) => return Err(ThreadError.CloneFailed { code: e.code }),
+            }
+        }
+
+        self.joined = true;
+
+        // Clean up stack (TLS is cleaned by thread on exit)
+        unsafe {
+            syscall_raw(SYS_MUNMAP, self.stack_base as Int, self.stack_size as Int, 0, 0, 0, 0);
+        }
+
+        Ok(0)  // Return exit code would need storage
+    }
+
+    /// Detach thread (no join needed).
+    public fn detach(mut self) {
+        self.joined = true;  // Prevent join from waiting
+        // Resources will be cleaned up when thread exits
+    }
+
+    /// Get thread ID.
+    public fn tid(&self) -> Int {
+        self.tid
+    }
+}
+
+// =============================================================================
+// Futex Operations
+// =============================================================================
+
+/// Futex operation codes
+public const FUTEX_WAIT: Int = 0;
+public const FUTEX_WAKE: Int = 1;
+public const FUTEX_FD: Int = 2;
+public const FUTEX_REQUEUE: Int = 3;
+public const FUTEX_CMP_REQUEUE: Int = 4;
+public const FUTEX_WAKE_OP: Int = 5;
+public const FUTEX_LOCK_PI: Int = 6;
+public const FUTEX_UNLOCK_PI: Int = 7;
+public const FUTEX_TRYLOCK_PI: Int = 8;
+public const FUTEX_WAIT_BITSET: Int = 9;
+public const FUTEX_WAKE_BITSET: Int = 10;
+public const FUTEX_WAIT_REQUEUE_PI: Int = 11;
+public const FUTEX_CMP_REQUEUE_PI: Int = 12;
+
+/// Futex private flag (don't share across processes)
+public const FUTEX_PRIVATE_FLAG: Int = 128;
+
+/// Combined private flags
+public const FUTEX_WAIT_PRIVATE: Int = FUTEX_WAIT | FUTEX_PRIVATE_FLAG;
+public const FUTEX_WAKE_PRIVATE: Int = FUTEX_WAKE | FUTEX_PRIVATE_FLAG;
+public const FUTEX_REQUEUE_PRIVATE: Int = FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG;
+public const FUTEX_CMP_REQUEUE_PRIVATE: Int = FUTEX_CMP_REQUEUE | FUTEX_PRIVATE_FLAG;
+public const FUTEX_WAIT_BITSET_PRIVATE: Int = FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG;
+public const FUTEX_WAKE_BITSET_PRIVATE: Int = FUTEX_WAKE_BITSET | FUTEX_PRIVATE_FLAG;
+
+/// Match any bitset
+public const FUTEX_BITSET_MATCH_ANY: UInt32 = 0xFFFFFFFF;
+
+/// Wait on a futex if value matches expected.
+///
+/// # Arguments
+/// * `addr` - Address of futex word
+/// * `expected` - Expected value (wait only if *addr == expected)
+/// * `timeout_ns` - Timeout in nanoseconds (None = infinite)
+///
+/// # Returns
+/// * `Ok(())` - Woken normally
+/// * `Err(EAGAIN)` - Value changed before sleep
+/// * `Err(EINTR)` - Interrupted by signal
+/// * `Err(ETIMEDOUT)` - Timeout expired
+public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
+    let (timeout_ptr, ts) = match timeout_ns {
+        Some(ns) => {
+            let sec = ns / 1_000_000_000;
+            let nsec = ns % 1_000_000_000;
+            let ts: [Int64; 2] = [sec as Int64, nsec as Int64];
+            (&ts as Int, ts)
+        }
+        None => (0, [0_i64, 0_i64]),
+    };
+
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_WAIT_PRIVATE,
+            expected,
+            timeout_ptr,
+            0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Wake threads waiting on a futex.
+///
+/// # Arguments
+/// * `addr` - Address of futex word
+/// * `count` - Maximum number of threads to wake
+///
+/// # Returns
+/// Number of threads woken.
+public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_WAKE_PRIVATE,
+            count,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Requeue waiters from one futex to another.
+///
+/// # Arguments
+/// * `addr` - Address of source futex
+/// * `wake_count` - Number of waiters to wake
+/// * `requeue_count` - Number of waiters to requeue
+/// * `new_addr` - Address of destination futex
+public fn futex_requeue(
+    addr: &Int,
+    wake_count: Int,
+    requeue_count: Int,
+    new_addr: &Int
+) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_REQUEUE_PRIVATE,
+            wake_count,
+            requeue_count,
+            new_addr as Int,
+            0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Requeue with value check.
+///
+/// Only requeues if *addr == expected.
+public fn futex_cmp_requeue(
+    addr: &Int,
+    expected: Int,
+    wake_count: Int,
+    requeue_count: Int,
+    new_addr: &Int
+) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_CMP_REQUEUE_PRIVATE,
+            wake_count,
+            requeue_count,
+            new_addr as Int,
+            expected
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Wait with bitset (selective wakeup).
+public fn futex_wait_bitset(
+    addr: &Int,
+    expected: Int,
+    bitset: UInt32,
+    timeout_ns: Maybe<UInt64>
+) -> Result<(), OSError> {
+    let (timeout_ptr, ts) = match timeout_ns {
+        Some(ns) => {
+            let sec = ns / 1_000_000_000;
+            let nsec = ns % 1_000_000_000;
+            let ts: [Int64; 2] = [sec as Int64, nsec as Int64];
+            (&ts as Int, ts)
+        }
+        None => (0, [0_i64, 0_i64]),
+    };
+
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_WAIT_BITSET_PRIVATE,
+            expected,
+            timeout_ptr,
+            0,
+            bitset as Int
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Wake with bitset (selective wakeup).
+public fn futex_wake_bitset(addr: &Int, count: Int, bitset: UInt32) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_FUTEX,
+            addr as Int,
+            FUTEX_WAKE_BITSET_PRIVATE,
+            count,
+            0,
+            0,
+            bitset as Int
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// High-Level Synchronization Primitives
+// =============================================================================
+
+// =============================================================================
+// Atomic Helpers
+// =============================================================================
+
+/// Atomic swap using CAS loop - exchanges value and returns old value.
+@inline
+fn atomic_swap_u32(ptr: *mut UInt32, new_val: UInt32, ordering: UInt8) -> UInt32 {
+    loop {
+        let old = atomic_load_u32(ptr, ORDERING_RELAXED);
+        let (_, success) = atomic_cas_u32(ptr, old, new_val, ordering, ORDERING_RELAXED);
+        if success {
+            return old;
+        }
+    }
+}
+
+/// Simple spinlock (for short critical sections).
+public type SpinLock is {
+    state: UInt32,  // 0 = unlocked, 1 = locked
+};
+
+implement SpinLock {
+    public fn new() -> SpinLock {
+        SpinLock { state: 0 }
+    }
+
+    public fn lock(&mut self) {
+        loop {
+            let (old, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+            if success {
+                break;
+            }
+            // Spin with pause hint
+            @asm("pause");
+        }
+    }
+
+    public fn try_lock(&mut self) -> Bool {
+        let (_, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        success
+    }
+
+    public fn unlock(&mut self) {
+        atomic_store_u32(&mut self.state, 0, ORDERING_RELEASE);
+    }
+}
+
+/// Futex-based mutex (sleeps on contention).
+public type Mutex is {
+    state: UInt32,  // 0 = unlocked, 1 = locked, 2 = locked with waiters
+};
+
+implement Mutex {
+    public fn new() -> Mutex {
+        Mutex { state: 0 }
+    }
+
+    public fn lock(&mut self) {
+        // Fast path: try to acquire
+        let (_, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        if success {
+            return;
+        }
+
+        // Slow path: set waiter flag and sleep
+        loop {
+            // Mark that there are waiters
+            let old = atomic_swap_u32(&mut self.state, 2, ORDERING_ACQUIRE);
+            if old == 0 {
+                // Got the lock
+                return;
+            }
+
+            // Sleep until woken
+            let _ = futex_wait(&self.state as &Int, 2 as Int, None);
+        }
+    }
+
+    public fn try_lock(&mut self) -> Bool {
+        let (_, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        success
+    }
+
+    public fn unlock(&mut self) {
+        let old = atomic_swap_u32(&mut self.state, 0, ORDERING_RELEASE);
+        if old == 2 {
+            // There were waiters, wake one
+            let _ = futex_wake(&self.state as &Int, 1);
+        }
+    }
+}
+
+/// Condition variable.
+public type Condvar is {
+    seq: UInt32,  // Sequence counter for spurious wakeup detection
+};
+
+implement Condvar {
+    public fn new() -> Condvar {
+        Condvar { seq: 0 }
+    }
+
+    public fn wait(&mut self, mutex: &mut Mutex) {
+        let seq = self.seq;
+        mutex.unlock();
+        let _ = futex_wait(&self.seq as &Int, seq as Int, None);
+        mutex.lock();
+    }
+
+    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ns: UInt64) -> Bool {
+        let seq = self.seq;
+        mutex.unlock();
+        let result = futex_wait(&self.seq as &Int, seq as Int, Some(timeout_ns));
+        mutex.lock();
+
+        match result {
+            Err(e) if e.code == ETIMEDOUT => false,
+            _ => true,
+        }
+    }
+
+    public fn notify_one(&mut self) {
+        atomic_fetch_add_u32(&mut self.seq, 1, ORDERING_RELEASE);
+        let _ = futex_wake(&self.seq as &Int, 1);
+    }
+
+    public fn notify_all(&mut self) {
+        atomic_fetch_add_u32(&mut self.seq, 1, ORDERING_RELEASE);
+        let _ = futex_wake(&self.seq as &Int, Int.MAX);
+    }
+}
+
+/// EAGAIN constant for error handling
+const EAGAIN: Int = 11;
+const ETIMEDOUT: Int = 110;

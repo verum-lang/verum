@@ -1,0 +1,40 @@
+# Cargo-deny configuration for Verum platform
+# Minimal configuration for cargo-deny 0.18.5+
+
+[advisories]
+# The path where the advisory database is cloned/fetched into
+db-path = "~/.cargo/advisory-db"
+
+# The url(s) of the advisory databases to use
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# A list of advisory IDs to ignore
+# IMPORTANT: Only ignore after thorough security review!
+ignore = [
+    # None currently - all advisories must be addressed
+]
+
+[licenses]
+# Allow common open source licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+]
+
+[bans]
+# Lint level for when multiple versions of the same crate appear in the graph
+multiple-versions = "warn"
+
+# Lint level for when there are wildcard dependencies
+wildcards = "warn"
+
+[sources]
+# Lint level for what to happen when a crate from a crate registry that is not in the allow list is detected
+unknown-registry = "warn"
+
+# Lint level for what to happen when a crate from a git repository that is not in the allow list is detected
+unknown-git = "warn"

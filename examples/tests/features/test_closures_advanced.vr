@@ -1,0 +1,42 @@
+// Advanced closure tests - capturing variables
+
+fn make_counter() -> fn() -> Float {
+    let mut count = 0.0;
+    || {
+        count = count + 1.0;
+        count
+    }
+}
+
+fn make_multiplier(factor: Float) -> fn(Float) -> Float {
+    |x| x * factor
+}
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn main() {
+    let _ = print("=== Advanced Closure Tests ===");
+
+    // Closure capturing mutable variable
+    // let counter = make_counter();
+    // let _ = print(f"Counter: {counter()}");
+    // let _ = print(f"Counter: {counter()}");
+
+    // Closure capturing immutable parameter
+    let triple = make_multiplier(3.0);
+    let result = triple(5.0);
+    let _ = print(f"triple(5) = {result}");
+
+    let double = make_multiplier(2.0);
+    let result2 = double(7.0);
+    let _ = print(f"double(7) = {result2}");
+
+    // Higher-order function with closure
+    let square = |x: Float| x * x;
+    let squared = apply(square, 4.0);
+    let _ = print(f"apply(square, 4) = {squared}");
+
+    let _ = print("=== Tests Complete ===");
+}

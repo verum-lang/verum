@@ -1,0 +1,220 @@
+// Test: Async - Async/await functionality (Working subset)
+// Priority: Critical
+// Expected output: Async operations
+// NOTE: Some advanced features (spawn, defer, yield, async closures, async protocols) not yet fully supported
+
+// Basic async function
+async fn fetch_number() -> Int {
+    42
+}
+
+// Async function with computation
+async fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Async function calling another async function
+async fn double_fetch() -> Int {
+    let n = fetch_number().await;
+    n * 2
+}
+
+// Async function with complex logic
+async fn process_data(x: Int) -> Int {
+    let doubled = x * 2;
+    let result = compute_sum(doubled, 10).await;
+    result
+}
+
+// Async function with pattern matching
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+async fn maybe_value(flag: Bool) -> Maybe<Int> {
+    if flag {
+        Maybe.Some(42)
+    } else {
+        Maybe.None
+    }
+}
+
+// Async function with Result
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+async fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("Division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+// Async function with multiple awaits
+async fn chain_operations() -> Int {
+    let a = fetch_number().await;
+    let b = compute_sum(a, 10).await;
+    let c = double_fetch().await;
+    compute_sum(b, c).await
+}
+
+// Async block
+async fn async_block_test() -> Int {
+    let future = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    future.await
+}
+
+// Async function with loop
+async fn async_sum(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+// Async function with for loop - using range
+async fn async_range_sum(n: Int) -> Int {
+    let mut sum = 0;
+    for i in 1..=n {
+        sum = sum + i;
+    }
+    sum
+}
+
+// Async function with early return
+async fn check_and_return(x: Int) -> Int {
+    if x < 0 {
+        return 0;
+    }
+    fetch_number().await
+}
+
+// Async function with match
+async fn match_result(flag: Bool) -> Text {
+    let result = maybe_value(flag).await;
+    match result {
+        Maybe.Some(v) => f"Got value: {v}",
+        Maybe.None => f"No value",
+    }
+}
+
+// Async with try
+async fn try_async() -> Result<Int, Text> {
+    let result = safe_divide(10, 2).await;
+    match result {
+        Result.Ok(v) => Result.Ok(v * 2),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+// Generic async function
+async fn async_identity<T>(value: T) -> T {
+    value
+}
+
+// Main async function
+async fn main() {
+    // Test basic async
+    let result = fetch_number().await;
+    print(f"Fetch: {result}");
+
+    // Test async with parameters
+    let sum = compute_sum(10, 20).await;
+    print(f"Sum: {sum}");
+
+    // Test chained async
+    let doubled = double_fetch().await;
+    print(f"Doubled: {doubled}");
+
+    // Test process data
+    let processed = process_data(5).await;
+    print(f"Processed: {processed}");
+
+    // Test maybe value
+    let maybe_result = maybe_value(true).await;
+    match maybe_result {
+        Maybe.Some(v) => print(f"Maybe: {v}"),
+        Maybe.None => print(f"None"),
+    }
+
+    // Test safe divide
+    let div_result = safe_divide(10, 2).await;
+    match div_result {
+        Result.Ok(v) => print(f"Division: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    let div_error = safe_divide(10, 0).await;
+    match div_error {
+        Result.Ok(v) => print(f"Division: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Test chain operations
+    let chained = chain_operations().await;
+    print(f"Chained: {chained}");
+
+    // Test async block
+    let block_result = async_block_test().await;
+    print(f"Async block: {block_result}");
+
+    // Test async sum
+    let sum_result = async_sum(10).await;
+    print(f"Async sum: {sum_result}");
+
+    // Test async range sum
+    let range_sum = async_range_sum(5).await;
+    print(f"Range sum: {range_sum}");
+
+    // Test check and return
+    let check_result = check_and_return(-5).await;
+    print(f"Check result: {check_result}");
+
+    // Test match result
+    let match_text = match_result(true).await;
+    print(f"{match_text}");
+
+    // Test try async
+    let try_result = try_async().await;
+    match try_result {
+        Result.Ok(v) => print(f"Try: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Test generic async
+    let generic_int = async_identity(42).await;
+    print(f"Generic int: {generic_int}");
+    let generic_text = async_identity("hello").await;
+    print(f"Generic text: {generic_text}");
+
+    // Test inline async block (inline async blocks may have parsing issues)
+    // let inline = (async {
+    //     let x = 5;
+    //     let y = 10;
+    //     x + y
+    // }).await;
+    // print(f"Inline async: {inline}");
+
+    // Test async in expression (await in expressions may have issues)
+    // let expr_result = (fetch_number().await) + (double_fetch().await);
+    // print(f"Expression: {expr_result}");
+
+    // Test sequential awaits
+    let seq1 = fetch_number().await;
+    let seq2 = compute_sum(seq1, 10).await;
+    let seq3 = double_fetch().await;
+    print(f"Sequential 1: {seq1}");
+    print(f"Sequential 2: {seq2}");
+    print(f"Sequential 3: {seq3}");
+
+    print(f"All async tests complete");
+}

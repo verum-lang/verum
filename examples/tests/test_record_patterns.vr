@@ -1,0 +1,122 @@
+// Test: Match expressions with record patterns
+
+fn test_record_exact_match() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    let result = match p {
+        Point { x: 10, y: 20 } => "exact match",
+        _ => "no match"
+    };
+    result
+}
+
+fn test_record_binding() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 5, y: 10 };
+    let result = match p {
+        Point { x, y } => x + y,
+        _ => 0
+    };
+    result
+}
+
+fn test_record_partial_match() {
+    type Point3D is { x: Int, y: Int, z: Int };
+
+    let p = Point3D { x: 1, y: 2, z: 3 };
+    let result = match p {
+        Point3D { x: 1, .. } => "x is one",
+        Point3D { y: 2, .. } => "y is two",
+        _ => "other"
+    };
+    result
+}
+
+fn test_record_with_guards() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 5, y: 10 };
+    let result = match p {
+        Point { x, y } if x > 0 && y > 0 => "quadrant 1",
+        Point { x, y } if x < 0 && y > 0 => "quadrant 2",
+        Point { x, y } if x < 0 && y < 0 => "quadrant 3",
+        Point { x, y } if x > 0 && y < 0 => "quadrant 4",
+        _ => "on axis"
+    };
+    result
+}
+
+fn test_record_rename_binding() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 3, y: 4 };
+    let result = match p {
+        Point { x: x_coord, y: y_coord } => x_coord * y_coord,
+        _ => 0
+    };
+    result
+}
+
+fn test_record_nested() {
+    type Inner is { value: Int };
+    type Outer is { inner: Inner, name: Text };
+
+    let obj = Outer {
+        inner: Inner { value: 42 },
+        name: "test"
+    };
+    let result = match obj {
+        Outer { inner: Inner { value: 42 }, .. } => "value is 42",
+        _ => "other"
+    };
+    result
+}
+
+fn test_record_with_variant() {
+    type Shape is | Circle { radius: Int } | Rectangle { width: Int, height: Int };
+
+    let s = Circle { radius: 5 };
+    let result = match s {
+        Circle { radius } => radius * 2,
+        Rectangle { width, height } => width + height
+    };
+    result
+}
+
+fn test_record_ignore_field() {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    let result = match p {
+        Point { x, y: _ } => x,
+        _ => 0
+    };
+    result
+}
+
+fn test_record_multiple_fields() {
+    type Person is { name: Text, age: Int, score: Int };
+
+    let person = Person { name: "Alice", age: 30, score: 95 };
+    let result = match person {
+        Person { age, score, .. } if age > 25 && score > 90 => "senior high scorer",
+        Person { age, score, .. } if age > 25 => "senior",
+        Person { score, .. } if score > 90 => "high scorer",
+        _ => "other"
+    };
+    result
+}
+
+fn main() {
+    println(test_record_exact_match());
+    println(test_record_binding());
+    println(test_record_partial_match());
+    println(test_record_with_guards());
+    println(test_record_rename_binding());
+    println(test_record_nested());
+    println(test_record_with_variant());
+    println(test_record_ignore_field());
+    println(test_record_multiple_fields());
+}

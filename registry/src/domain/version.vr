@@ -1,0 +1,302 @@
+// Version domain types
+// Defines SemVer and VersionConstraint types for package versioning
+
+mount core.base.{Text, Int, Bool};
+
+// SemVer represents a semantic version (major.minor.patch)
+pub type SemVer is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+    pre_release: Text,
+    build_metadata: Text
+}
+    invariant {
+        // All version components must be non-negative
+        self.major >= 0,
+        self.minor >= 0,
+        self.patch >= 0,
+    };
+
+implement SemVer {
+    pub fn new(major: Int, minor: Int, patch: Int) -> SemVer {
+        SemVer {
+            major: major,
+            minor: minor,
+            patch: patch,
+            pre_release: "",
+            build_metadata: ""
+        }
+    }
+
+    pub fn parse(version_str: Text) -> Result<SemVer, Text> {
+        // Parse a version string like "1.2.3" or "1.2.3-alpha.1+build.123"
+        let parts = version_str.split(".");
+
+        if parts.len() < 3 {
+            return Result.Err(f"Invalid version format: {version_str}");
+        }
+
+        let major = match parse_int_component(parts.get(0).unwrap()) {
+            Result.Ok(n) => n,
+            Result.Err(e) => return Result.Err(e),
+        };
+
+        let minor = match parse_int_component(parts.get(1).unwrap()) {
+            Result.Ok(n) => n,
+            Result.Err(e) => return Result.Err(e),
+        };
+
+        // Handle patch which may contain pre-release or build metadata
+        let patch_part = parts.get(2).unwrap();
+        let (patch, pre_release, build_metadata) = parse_patch_component(patch_part);
+
+        Result.Ok(SemVer {
+            major: major,
+            minor: minor,
+            patch: patch,
+            pre_release: pre_release,
+            build_metadata: build_metadata
+        })
+    }
+
+    pub fn with_pre_release(self, pre_release: Text) -> SemVer {
+        SemVer {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch,
+            pre_release: pre_release,
+            build_metadata: self.build_metadata
+        }
+    }
+
+    pub fn with_build_metadata(self, build_metadata: Text) -> SemVer {
+        SemVer {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch,
+            pre_release: self.pre_release,
+            build_metadata: build_metadata
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        let base = f"{self.major}.{self.minor}.{self.patch}";
+
+        let with_pre = if self.pre_release.len() > 0 {
+            f"{base}-{self.pre_release}"
+        } else {
+            base
+        };
+
+        if self.build_metadata.len() > 0 {
+            f"{with_pre}+{self.build_metadata}"
+        } else {
+            with_pre
+        }
+    }
+
+    pub fn is_stable(self) -> Bool
+        requires { self.major >= 0 }
+        ensures {
+            // Stable version has major > 0 and no pre-release
+            result == (self.major > 0 && self.pre_release.len() == 0)
+        }
+    {
+        self.major > 0 && self.pre_release.len() == 0
+    }
+
+    pub fn is_pre_release(self) -> Bool {
+        self.pre_release.len() > 0
+    }
+
+    pub fn compare(self, other: SemVer) -> Int
+        requires {
+            self.major >= 0 && self.minor >= 0 && self.patch >= 0,
+            other.major >= 0 && other.minor >= 0 && other.patch >= 0,
+        }
+        ensures {
+            // Equal versions return 0
+            (self.major == other.major && self.minor == other.minor && self.patch == other.patch) => result == 0,
+            // Greater major version returns positive
+            (self.major > other.major) => result > 0,
+            // Lesser major version returns negative
+            (self.major < other.major) => result < 0,
+        }
+    {
+        if self.major != other.major {
+            return self.major - other.major
+        }
+
+        if self.minor != other.minor {
+            return self.minor - other.minor
+        }
+
+        if self.patch != other.patch {
+            return self.patch - other.patch
+        }
+
+        0
+    }
+
+    pub fn is_compatible_with(self, other: SemVer) -> Bool {
+        if self.major == 0 {
+            self.minor == other.minor && self.patch == other.patch
+        } else {
+            self.major == other.major
+        }
+    }
+}
+
+// VersionConstraint represents a version requirement/constraint
+pub type VersionConstraint is
+    | Exact { version: SemVer }
+    | GreaterThan { version: SemVer }
+    | GreaterThanOrEqual { version: SemVer }
+    | LessThan { version: SemVer }
+    | LessThanOrEqual { version: SemVer }
+    | Caret { version: SemVer }
+    | Tilde { version: SemVer }
+    | Wildcard { major: Int, minor: Int }
+    | Any;
+
+implement VersionConstraint {
+    pub fn exact(version: SemVer) -> VersionConstraint {
+        VersionConstraint.Exact { version: version }
+    }
+
+    pub fn greater_than(version: SemVer) -> VersionConstraint {
+        VersionConstraint.GreaterThan { version: version }
+    }
+
+    pub fn caret(version: SemVer) -> VersionConstraint {
+        VersionConstraint.Caret { version: version }
+    }
+
+    pub fn tilde(version: SemVer) -> VersionConstraint {
+        VersionConstraint.Tilde { version: version }
+    }
+
+    pub fn any() -> VersionConstraint {
+        VersionConstraint.Any
+    }
+
+    pub fn matches(self, version: SemVer) -> Bool {
+        match self {
+            VersionConstraint.Exact { version: v } => {
+                version.major == v.major &&
+                version.minor == v.minor &&
+                version.patch == v.patch
+            },
+            VersionConstraint.GreaterThan { version: v } => {
+                version.compare(v) > 0
+            },
+            VersionConstraint.GreaterThanOrEqual { version: v } => {
+                version.compare(v) >= 0
+            },
+            VersionConstraint.LessThan { version: v } => {
+                version.compare(v) < 0
+            },
+            VersionConstraint.LessThanOrEqual { version: v } => {
+                version.compare(v) <= 0
+            },
+            VersionConstraint.Caret { version: v } => {
+                version.is_compatible_with(v) && version.compare(v) >= 0
+            },
+            VersionConstraint.Tilde { version: v } => {
+                version.major == v.major &&
+                version.minor == v.minor &&
+                version.patch >= v.patch
+            },
+            VersionConstraint.Wildcard { major, minor } => {
+                if minor == -1 {
+                    // Wildcard for any minor (e.g., "1.*")
+                    version.major == major
+                } else {
+                    // Specific major.minor (e.g., "1.2.*")
+                    version.major == major && version.minor == minor
+                }
+            },
+            VersionConstraint.Any => true
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        match self {
+            VersionConstraint.Exact { version } => version.to_string(),
+            VersionConstraint.GreaterThan { version } => f">{version.to_string()}",
+            VersionConstraint.GreaterThanOrEqual { version } => f">={version.to_string()}",
+            VersionConstraint.LessThan { version } => f"<{version.to_string()}",
+            VersionConstraint.LessThanOrEqual { version } => f"<={version.to_string()}",
+            VersionConstraint.Caret { version } => f"^{version.to_string()}",
+            VersionConstraint.Tilde { version } => f"~{version.to_string()}",
+            VersionConstraint.Wildcard { major, minor } => {
+                if minor == -1 {
+                    f"{major}.*"
+                } else {
+                    f"{major}.{minor}.*"
+                }
+            },
+            VersionConstraint.Any => "*"
+        }
+    }
+}
+
+// Helper functions for parsing
+
+fn parse_int_component(s: Text) -> Result<Int, Text> {
+    if s.len() == 0 {
+        return Result.Err("Empty version component");
+    }
+
+    let mut result = 0;
+    for ch in s.chars() {
+        let cs = ch.to_string();
+        if cs >= "0" && cs <= "9" {
+            let digit = match cs {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else {
+            return Result.Err(f"Invalid digit in version component: {s}");
+        }
+    }
+
+    Result.Ok(result)
+}
+
+fn parse_patch_component(s: Text) -> (Int, Text, Text) {
+    // Extract patch, pre-release, and build metadata
+    // Format: patch[-prerelease][+build]
+
+    let mut patch_str = "";
+    let mut pre_release = "";
+    let mut build_metadata = "";
+    let mut mode = 0; // 0=patch, 1=pre-release, 2=build
+
+    for ch in s.chars() {
+        let cs = ch.to_string();
+
+        if cs == "-" && mode == 0 {
+            mode = 1;
+        } else if cs == "+" {
+            mode = 2;
+        } else {
+            match mode {
+                0 => patch_str = patch_str + cs,
+                1 => pre_release = pre_release + cs,
+                2 => build_metadata = build_metadata + cs,
+                _ => {},
+            }
+        }
+    }
+
+    let patch = match parse_int_component(patch_str) {
+        Result.Ok(n) => n,
+        Result.Err(_) => 0,
+    };
+
+    (patch, pre_release, build_metadata)
+}

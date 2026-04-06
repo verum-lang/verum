@@ -1,0 +1,169 @@
+// =============================================================================
+// list.vr - Selectable list widget
+// =============================================================================
+module list;
+
+mount super.protocol.{Widget, StatefulWidget, Styled};
+mount super.block.Block;
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+/// State for a selectable list.
+public type ListState is {
+    selected: Maybe<Int>,
+    offset: Int,
+};
+
+implement ListState {
+    public fn new() -> ListState {
+        ListState { selected: None, offset: 0 }
+    }
+
+    public fn with_selected(idx: Int) -> ListState {
+        ListState { selected: Some(idx), offset: 0 }
+    }
+
+    /// Move selection up by one.
+    public fn previous(&mut self, total: Int) {
+        match self.selected {
+            Some(i) => {
+                self.selected = Some(if i > 0 { i - 1 } else { total - 1 });
+            }
+            None => {
+                if total > 0 { self.selected = Some(0); }
+            }
+        }
+    }
+
+    /// Move selection down by one.
+    public fn next(&mut self, total: Int) {
+        match self.selected {
+            Some(i) => {
+                self.selected = Some(if i < total - 1 { i + 1 } else { 0 });
+            }
+            None => {
+                if total > 0 { self.selected = Some(0); }
+            }
+        }
+    }
+
+    /// Unselect.
+    public fn unselect(&mut self) {
+        self.selected = None;
+    }
+}
+
+/// A selectable list of items.
+public type SelectableList is {
+    items: List<Line>,
+    block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    highlight_symbol: Text,
+    repeat_highlight_symbol: Bool,
+};
+
+implement SelectableList {
+    public fn new(items: List<Line>) -> SelectableList {
+        SelectableList {
+            items: items,
+            block: None,
+            style: Style.DEFAULT,
+            highlight_style: Style.DEFAULT,
+            highlight_symbol: ">> ",
+            repeat_highlight_symbol: false,
+        }
+    }
+
+    // Builder API
+    public fn block(self, block: Block) -> SelectableList {
+        SelectableList { block: Some(block), ..self }
+    }
+
+    public fn highlight_style(self, style: Style) -> SelectableList {
+        SelectableList { highlight_style: style, ..self }
+    }
+
+    public fn highlight_symbol(self, symbol: Text) -> SelectableList {
+        SelectableList { highlight_symbol: symbol, ..self }
+    }
+}
+
+implement Styled for SelectableList {
+    fn style(self, style: Style) -> SelectableList {
+        SelectableList { style: style, ..self }
+    }
+}
+
+implement StatefulWidget for SelectableList {
+    type State = ListState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
+        // Render block
+        let list_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if list_area.width < 1 || list_area.height < 1 { return; }
+
+        buf.set_style(list_area, self.style);
+
+        let total = self.items.len();
+        if total == 0 { return; }
+
+        // Adjust scroll offset to keep selection visible
+        match state.selected {
+            Some(selected) => {
+                if selected < state.offset {
+                    state.offset = selected;
+                }
+                if selected >= state.offset + list_area.height {
+                    state.offset = selected - list_area.height + 1;
+                }
+            }
+            None => {}
+        }
+
+        // Render visible items
+        let symbol_width = self.highlight_symbol.len();
+        for i in 0..list_area.height {
+            let item_idx = state.offset + i;
+            if item_idx >= total { break; }
+
+            let y = list_area.y + i;
+            let is_selected = state.selected == Some(item_idx);
+
+            // Draw highlight symbol
+            let content_x = if is_selected {
+                buf.set_string(list_area.x, y, &self.highlight_symbol, self.highlight_style);
+                list_area.x + symbol_width
+            } else {
+                // Pad with spaces for alignment
+                list_area.x + symbol_width
+            };
+
+            // Draw item content
+            let item = &self.items[item_idx];
+            let item_style = if is_selected { self.highlight_style } else { self.style };
+            let mut x = content_x;
+            for span in &item.spans {
+                let combined = item_style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined);
+            }
+
+            // Fill remaining width with highlight style if selected
+            if is_selected {
+                for fill_x in x..list_area.right() {
+                    buf.get_mut(fill_x, y).style = self.highlight_style;
+                }
+            }
+        }
+    }
+}

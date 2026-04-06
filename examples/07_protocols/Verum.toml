@@ -1,0 +1,7 @@
+[package]
+name = "protocols"
+version = "0.1.0"
+description = "Protocol (trait) definition and implementation"
+
+[language]
+profile = "application"

@@ -1,0 +1,10 @@
+// Test macro invocation syntax
+
+fn main() {
+    let _ = print("=== Macro Test ===");
+
+    // Test println! macro
+    println!("Hello from macro!");
+
+    let _ = print("=== Done ===");
+}

@@ -1,0 +1,39 @@
+// Demonstration of Verum type alias support
+// Shows how type aliases enable cleaner, more expressive code
+
+// Simple tuple alias for 2D coordinates
+type Point is (Float, Float);
+
+// 3D coordinate type
+type Point3D is (Float, Float, Float);
+
+// Newtype for type safety
+type UserId is Int;
+
+// Function using type aliases
+fn distance(p1: Point, p2: Point) -> Float {
+    let (x1, y1) = p1;
+    let (x2, y2) = p2;
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    (dx * dx + dy * dy) ** 0.5
+}
+
+fn main() {
+    // Create points using the Point alias
+    let origin: Point = (0.0, 0.0);
+    let target: Point = (3.0, 4.0);
+    
+    // Calculate distance
+    let d = distance(origin, target);
+    print("Distance: ");
+    print(d);  // Should be 5.0
+    
+    // 3D point example
+    let p3d: Point3D = (1.0, 2.0, 3.0);
+    
+    // Newtype example for type safety
+    let user_id: UserId = 12345;
+    
+    print("\nType aliases work correctly!");
+}

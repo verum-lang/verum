@@ -1,0 +1,392 @@
+// Resilience Patterns Module
+//
+// Industrial-grade fault tolerance patterns for building robust distributed systems.
+//
+// This module provides five core resilience patterns that can be composed together:
+//
+// 1. Circuit Breaker - Prevents cascading failures by stopping requests to failing services
+// 2. Retry - Automatically retries failed operations with exponential backoff
+// 3. Timeout - Prevents indefinite blocking with configurable timeouts
+// 4. Bulkhead - Isolates resources to prevent resource exhaustion
+// 5. Fallback - Provides graceful degradation with alternative operations
+//
+// ## Usage Examples
+//
+// ### Basic Circuit Breaker
+// ```
+// let cb = CircuitBreaker.new(5, 3, 30000);  // Open after 5 failures
+// let (result, updated_cb) = execute_with_circuit_breaker(
+//     cb,
+//     || Database.query("SELECT * FROM users"),
+//     || Result.Err(RegistryError.service_unavailable("Circuit open"))
+// );
+// ```
+//
+// ### Retry with Exponential Backoff
+// ```
+// let result = with_retry(
+//     || ExternalApi.call(),
+//     RetryConfig.default(),
+//     |err| err.is_recoverable()
+// );
+// ```
+//
+// ### Timeout Protection
+// ```
+// let result = with_timeout(
+//     || SlowOperation.execute(),
+//     5000  // 5 second timeout
+// ).await;
+// ```
+//
+// ### Bulkhead Isolation
+// ```
+// let bulkhead = Bulkhead.new(10, 100);  // 10 concurrent, queue 100
+// let (result, updated_bulkhead) = with_bulkhead(
+//     bulkhead,
+//     || Database.query("SELECT * FROM packages")
+// ).await;
+// ```
+//
+// ### Fallback Pattern
+// ```
+// let result = with_fallback(
+//     || Database.get_package(name),
+//     |err| Cache.get_package(name)
+// );
+// ```
+//
+// ## Composing Patterns
+//
+// These patterns can be composed for comprehensive protection:
+//
+// ```
+// let db_circuit = CircuitBreaker.new(5, 3, 30000);
+// let db_bulkhead = Bulkhead.new(10, 50);
+//
+// pub async fn get_package_resilient(name: Text) -> Result<PackageDto, RegistryError>
+//     using [Database, Cache]
+// {
+//     // Check circuit breaker
+//     if !db_circuit.should_allow() {
+//         return with_fallback(
+//             || Cache.get(f"pkg:{name}"),
+//             |_| Result.Err(RegistryError.service_unavailable("Database circuit open"))
+//         );
+//     }
+//
+//     // Apply bulkhead, retry, and timeout
+//     let (result, updated_bulkhead) = with_bulkhead(
+//         db_bulkhead,
+//         || with_retry(
+//             || with_timeout(
+//                 || Database.fetch_package(name),
+//                 5000  // 5 second timeout
+//             ),
+//             RetryConfig.aggressive(),
+//             |err| err.is_recoverable()
+//         )
+//     ).await;
+//
+//     // Update circuit breaker based on result
+//     match result {
+//         Result.Ok(pkg) => {
+//             db_circuit = db_circuit.record_success();
+//             Result.Ok(pkg)
+//         },
+//         Result.Err(err) => {
+//             db_circuit = db_circuit.record_failure();
+//             // Fallback to cache
+//             with_fallback(
+//                 || Cache.get(f"pkg:{name}"),
+//                 |_| Result.Err(err)
+//             )
+//         }
+//     }
+// }
+// ```
+
+// Re-export all resilience pattern types and functions
+pub import super.circuit_breaker.{
+    CircuitState,
+    CircuitBreaker,
+    CircuitBreakerMetrics,
+    execute_with_circuit_breaker,
+};
+
+pub import super.retry.{
+    RetryConfig,
+    RetryStats,
+    with_retry,
+    with_retry_async,
+    with_custom_retry,
+    is_retryable_error,
+};
+
+pub import super.timeout.{
+    TimeoutConfig,
+    TimeoutStats,
+    AdaptiveTimeout,
+    with_timeout,
+    with_timeout_config,
+    with_parallel_timeouts,
+};
+
+pub import super.bulkhead.{
+    Bulkhead,
+    BulkheadPermit,
+    BulkheadStats,
+    BulkheadGroup,
+    with_bulkhead,
+    database_bulkhead,
+    api_bulkhead,
+    io_bulkhead,
+    cpu_bulkhead,
+};
+
+pub import super.fallback.{
+    FallbackStrategy,
+    FallbackLevel,
+    FallbackStats,
+    with_fallback,
+    with_fallback_async,
+    with_static_fallback,
+    with_fallback_chain,
+    with_fallback_chain_async,
+    with_conditional_fallback,
+    with_timed_fallback,
+    database_with_cache_fallback,
+    primary_with_replica_fallback,
+    service_with_default,
+};
+
+// ============================================================================
+// Comprehensive Resilience Wrapper
+// ============================================================================
+
+/// Complete resilience configuration combining all patterns
+pub type ResilienceConfig is {
+    circuit_breaker: Maybe<CircuitBreaker>,
+    retry_config: Maybe<RetryConfig>,
+    timeout_ms: Maybe<Int>,
+    bulkhead: Maybe<Bulkhead>,
+    fallback: Maybe<fn(RegistryError) -> Result<T, RegistryError>>,
+};
+
+implement ResilienceConfig {
+    /// Create a new resilience configuration
+    pub fn new() -> ResilienceConfig {
+        ResilienceConfig {
+            circuit_breaker: Maybe.None,
+            retry_config: Maybe.None,
+            timeout_ms: Maybe.None,
+            bulkhead: Maybe.None,
+            fallback: Maybe.None,
+        }
+    }
+
+    /// Enable circuit breaker
+    pub fn with_circuit_breaker(mut self, cb: CircuitBreaker) -> ResilienceConfig {
+        self.circuit_breaker = Maybe.Some(cb);
+        self
+    }
+
+    /// Enable retry with exponential backoff
+    pub fn with_retry(mut self, config: RetryConfig) -> ResilienceConfig {
+        self.retry_config = Maybe.Some(config);
+        self
+    }
+
+    /// Enable timeout protection
+    pub fn with_timeout(mut self, timeout_ms: Int) -> ResilienceConfig {
+        self.timeout_ms = Maybe.Some(timeout_ms);
+        self
+    }
+
+    /// Enable bulkhead isolation
+    pub fn with_bulkhead(mut self, bulkhead: Bulkhead) -> ResilienceConfig {
+        self.bulkhead = Maybe.Some(bulkhead);
+        self
+    }
+
+    /// Enable fallback
+    pub fn with_fallback<T>(
+        mut self,
+        fallback: fn(RegistryError) -> Result<T, RegistryError>
+    ) -> ResilienceConfig {
+        self.fallback = Maybe.Some(fallback);
+        self
+    }
+
+    /// Create default resilience configuration for database operations
+    pub fn database_default() -> ResilienceConfig {
+        ResilienceConfig.new()
+            .with_circuit_breaker(CircuitBreaker.new(5, 3, 30000))
+            .with_retry(RetryConfig.default())
+            .with_timeout(5000)
+            .with_bulkhead(database_bulkhead())
+    }
+
+    /// Create default resilience configuration for external API calls
+    pub fn api_default() -> ResilienceConfig {
+        ResilienceConfig.new()
+            .with_circuit_breaker(CircuitBreaker.new(3, 2, 60000))
+            .with_retry(RetryConfig.conservative())
+            .with_timeout(10000)
+            .with_bulkhead(api_bulkhead())
+    }
+
+    /// Create default resilience configuration for cache operations
+    pub fn cache_default() -> ResilienceConfig {
+        ResilienceConfig.new()
+            .with_timeout(1000)  // Fast timeout for cache
+            .with_retry(RetryConfig.aggressive())
+    }
+}
+
+/// Execute an operation with comprehensive resilience protection
+///
+/// Applies all configured resilience patterns in the optimal order:
+/// 1. Circuit breaker check
+/// 2. Bulkhead acquisition
+/// 3. Timeout wrapper
+/// 4. Retry logic
+/// 5. Fallback on failure
+///
+/// # Example
+/// ```
+/// let config = ResilienceConfig.database_default()
+///     .with_fallback(|err| Cache.get_package(name));
+///
+/// let result = execute_resilient(
+///     config,
+///     || Database.get_package(name)
+/// ).await;
+/// ```
+pub async fn execute_resilient<T>(
+    config: ResilienceConfig,
+    operation: fn() -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    // 1. Check circuit breaker
+    match config.circuit_breaker {
+        Maybe.Some(cb) => {
+            if !cb.should_allow() {
+                // Circuit is open, try fallback immediately
+                return match config.fallback {
+                    Maybe.Some(fb) => fb(RegistryError.service_unavailable("Circuit breaker open")),
+                    Maybe.None => Result.Err(RegistryError.service_unavailable("Circuit breaker open"))
+                };
+            }
+        },
+        Maybe.None => {}
+    }
+
+    // 2. Apply bulkhead if configured
+    let base_operation = operation;
+    let bulkhead_wrapped = match config.bulkhead {
+        Maybe.Some(bh) => {
+            || {
+                let (result, _updated_bh) = with_bulkhead(bh, base_operation).await;
+                result
+            }
+        },
+        Maybe.None => base_operation
+    };
+
+    // 3. Apply timeout if configured
+    let timeout_wrapped = match config.timeout_ms {
+        Maybe.Some(timeout) => {
+            || with_timeout(bulkhead_wrapped, timeout).await
+        },
+        Maybe.None => bulkhead_wrapped
+    };
+
+    // 4. Apply retry if configured
+    let retry_wrapped = match config.retry_config {
+        Maybe.Some(retry_cfg) => {
+            || with_retry_async(timeout_wrapped, retry_cfg, is_retryable_error).await
+        },
+        Maybe.None => timeout_wrapped
+    };
+
+    // 5. Execute and handle result
+    let result = retry_wrapped().await;
+
+    // 6. Update circuit breaker
+    match config.circuit_breaker {
+        Maybe.Some(mut cb) => {
+            match result {
+                Result.Ok(_) => {
+                    cb = cb.record_success();
+                },
+                Result.Err(_) => {
+                    cb = cb.record_failure();
+                }
+            }
+        },
+        Maybe.None => {}
+    }
+
+    // 7. Apply fallback if operation failed
+    match result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(err) => {
+            match config.fallback {
+                Maybe.Some(fb) => fb(err),
+                Maybe.None => Result.Err(err)
+            }
+        }
+    }
+}
+
+/// Resilience metrics aggregator
+pub type ResilienceMetrics is {
+    circuit_breaker: Maybe<CircuitBreakerMetrics>,
+    retry: Maybe<RetryStats>,
+    timeout: Maybe<TimeoutStats>,
+    bulkhead: Maybe<BulkheadStats>,
+    fallback: Maybe<FallbackStats>,
+};
+
+implement ResilienceMetrics {
+    pub fn new() -> ResilienceMetrics {
+        ResilienceMetrics {
+            circuit_breaker: Maybe.None,
+            retry: Maybe.None,
+            timeout: Maybe.None,
+            bulkhead: Maybe.None,
+            fallback: Maybe.None,
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        let mut parts = List.new();
+
+        match self.circuit_breaker {
+            Maybe.Some(cb) => parts = parts.push(cb.to_string()),
+            Maybe.None => {}
+        }
+
+        match self.retry {
+            Maybe.Some(r) => parts = parts.push(r.to_string()),
+            Maybe.None => {}
+        }
+
+        match self.timeout {
+            Maybe.Some(t) => parts = parts.push(t.to_string()),
+            Maybe.None => {}
+        }
+
+        match self.bulkhead {
+            Maybe.Some(b) => parts = parts.push(b.to_string()),
+            Maybe.None => {}
+        }
+
+        match self.fallback {
+            Maybe.Some(f) => parts = parts.push(f.to_string()),
+            Maybe.None => {}
+        }
+
+        f"ResilienceMetrics[{parts.join(", ")}]"
+    }
+}

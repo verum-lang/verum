@@ -1,0 +1,86 @@
+// Fibonacci Calculator Application
+// Demonstrates: recursion, memoization, iterative algorithms
+
+type Maybe<T> is Some(T) | None;
+
+// Recursive Fibonacci (simple but slow)
+fn fib_recursive(n: Float) -> Float {
+    if n <= 1.0 {
+        n
+    } else {
+        fib_recursive(n - 1.0) + fib_recursive(n - 2.0)
+    }
+}
+
+// Iterative Fibonacci (fast)
+fn fib_iterative(n: Float) -> Float {
+    if n <= 1.0 {
+        n
+    } else {
+        let mut a = 0.0;
+        let mut b = 1.0;
+        let mut i = 2.0;
+        while i <= n {
+            let temp = a + b;
+            a = b;
+            b = temp;
+            i = i + 1.0;
+        }
+        b
+    }
+}
+
+// Print Fibonacci sequence
+fn print_sequence(count: Float) {
+    let _ = print(f"First {count} Fibonacci numbers:");
+    let mut i = 0.0;
+    while i < count {
+        let val = fib_iterative(i);
+        let _ = print(f"  F({i}) = {val}");
+        i = i + 1.0;
+    }
+}
+
+// Check if number is Fibonacci
+fn is_fibonacci(n: Float) -> Bool {
+    let mut a = 0.0;
+    let mut b = 1.0;
+    while a < n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+    }
+    a == n
+}
+
+fn main() {
+    let _ = print("=== Fibonacci Calculator ===");
+    let _ = print("");
+
+    // Print sequence
+    print_sequence(15.0);
+    let _ = print("");
+
+    // Compare recursive vs iterative
+    let _ = print("Performance comparison (F(20)):");
+    let result = fib_iterative(20.0);
+    let _ = print(f"  Iterative: F(20) = {result}");
+
+    // Note: Recursive is too slow for large n without memoization
+    let small_result = fib_recursive(10.0);
+    let _ = print(f"  Recursive: F(10) = {small_result}");
+    let _ = print("");
+
+    // Test is_fibonacci
+    let _ = print("Fibonacci membership test:");
+    let test_nums = [1.0, 5.0, 8.0, 10.0, 13.0, 21.0, 50.0];
+    let _ = print(f"  Is 1 Fibonacci? {is_fibonacci(1.0)}");
+    let _ = print(f"  Is 5 Fibonacci? {is_fibonacci(5.0)}");
+    let _ = print(f"  Is 8 Fibonacci? {is_fibonacci(8.0)}");
+    let _ = print(f"  Is 10 Fibonacci? {is_fibonacci(10.0)}");
+    let _ = print(f"  Is 13 Fibonacci? {is_fibonacci(13.0)}");
+    let _ = print(f"  Is 50 Fibonacci? {is_fibonacci(50.0)}");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

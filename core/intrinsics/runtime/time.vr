@@ -1,0 +1,84 @@
+// =============================================================================
+// core/intrinsics/runtime/time.vr - Time Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Operating system
+//
+// High-resolution timing using direct kernel interfaces.
+// Note: rdtsc/rdtscp are in platform.vr (CPU instruction, no OS needed)
+//
+// Implementation varies by platform:
+// - Linux: VDSO clock_gettime
+// - macOS: mach_absolute_time via libSystem FFI
+// - Windows: QueryPerformanceCounter via kernel32 FFI
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.time;
+
+// =============================================================================
+// SECTION 1: Monotonic Time
+// =============================================================================
+
+/// Get current monotonic time in nanoseconds.
+///
+/// Implementation:
+/// - Linux: VDSO clock_gettime(CLOCK_MONOTONIC) ~15ns
+/// - macOS: mach_absolute_time() via libSystem FFI
+/// - Windows: QueryPerformanceCounter via kernel32 FFI
+///
+/// Requires: Operating system
+@intrinsic("monotonic_nanos")
+@vbc_direct_lowering
+public fn monotonic_nanos() -> UInt64;
+
+// =============================================================================
+// SECTION 2: Real Time
+// =============================================================================
+
+/// Get current wall-clock time as Unix timestamp (seconds since epoch).
+///
+/// Implementation:
+/// - Linux: VDSO clock_gettime(CLOCK_REALTIME)
+/// - macOS: gettimeofday() via libSystem FFI
+/// - Windows: GetSystemTimeAsFileTime via kernel32 FFI
+///
+/// Requires: Operating system
+@intrinsic("realtime_secs")
+@vbc_direct_lowering
+public fn realtime_secs() -> Int64;
+
+/// Get current wall-clock time in nanoseconds since Unix epoch.
+///
+/// Implementation:
+/// - Linux: VDSO clock_gettime(CLOCK_REALTIME)
+/// - macOS: gettimeofday() via libSystem FFI
+/// - Windows: GetSystemTimeAsFileTime via kernel32 FFI
+///
+/// Requires: Operating system
+@intrinsic("realtime_nanos")
+@vbc_direct_lowering
+public fn realtime_nanos() -> UInt64;
+
+// =============================================================================
+// SECTION 3: System Information
+// =============================================================================
+
+/// Get number of CPU cores.
+///
+/// Requires: Operating system (sysconf on Linux)
+@intrinsic("num_cpus")
+public fn num_cpus() -> Int;
+
+// =============================================================================
+// SECTION 4: Sleep Operations
+// =============================================================================
+
+/// Sleep for given number of milliseconds.
+@intrinsic("sleep_ms")
+public fn sleep_ms(ms: UInt64);
+
+/// Sleep for given number of nanoseconds.
+@intrinsic("sleep_ns")
+public fn sleep_ns(ns: UInt64);

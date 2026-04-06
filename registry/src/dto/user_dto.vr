@@ -1,0 +1,292 @@
+// User DTOs
+//
+// API-facing types for user operations.
+// These types are optimized for JSON serialization and API contracts.
+
+mount core.collections.{List};
+mount core.base.{Text, Int, Bool, Maybe};
+
+// ============================================================================
+// Response DTOs
+// ============================================================================
+
+/// Public user information (safe to expose in API)
+pub type UserDto is {
+    id: Text,
+    username: Text,
+    created_at: Text,
+};
+
+/// Full user profile (authenticated user only)
+pub type UserProfileDto is {
+    id: Text,
+    username: Text,
+    email: Text,
+    role: Text,
+    can_publish: Bool,
+    is_admin: Bool,
+    created_at: Text,
+    owned_packages: List<Text>,
+};
+
+/// Token information (never expose actual token value after creation)
+pub type TokenDto is {
+    id: Text,
+    name: Text,
+    scopes: List<Text>,
+    created_at: Text,
+    expires_at: Maybe<Text>,
+    last_used_at: Maybe<Text>,
+    is_active: Bool,
+};
+
+/// Token with value (only returned on creation)
+pub type TokenWithValueDto is {
+    token: TokenDto,
+    value: Text,
+};
+
+// ============================================================================
+// Request DTOs
+// ============================================================================
+
+/// Login request
+pub type LoginRequestDto is {
+    username: Text,
+    password: Text,
+};
+
+/// Login response
+pub type LoginResponseDto is {
+    success: Bool,
+    token: Text,
+    user: UserProfileDto,
+    expires_in: Int,
+};
+
+/// Registration request
+pub type RegisterRequestDto is {
+    username: Text,
+    email: Text,
+    password: Text,
+    confirm_password: Text,
+};
+
+/// Registration response
+pub type RegisterResponseDto is {
+    success: Bool,
+    user: UserDto,
+    message: Text,
+};
+
+/// Token creation request
+pub type CreateTokenRequestDto is {
+    name: Text,
+    scopes: List<Text>,
+    expires_days: Int,
+};
+
+/// Token verification response
+pub type TokenResponseDto is {
+    valid: Bool,
+    user: Maybe<UserProfileDto>,
+    expires_at: Maybe<Text>,
+};
+
+/// Delete account request
+pub type DeleteAccountRequestDto is {
+    password: Text,
+    transfer_packages_to: Maybe<Text>,
+};
+
+/// Delete account response
+pub type DeleteAccountResponseDto is {
+    success: Bool,
+    message: Text,
+    deleted_user: Text,
+};
+
+/// Public user profile (safe to expose without email)
+pub type PublicUserProfileDto is {
+    username: Text,
+    avatar_url: Text,
+    bio: Text,
+    packages_owned: List<Text>,
+    member_since: Text,
+    total_downloads: Int,
+};
+
+// ============================================================================
+// Implementations
+// ============================================================================
+
+implement UserDto {
+    pub fn new(id: Text, username: Text, created_at: Text) -> UserDto {
+        UserDto {
+            id: id,
+            username: username,
+            created_at: created_at,
+        }
+    }
+}
+
+implement UserProfileDto {
+    pub fn new(
+        id: Text,
+        username: Text,
+        email: Text,
+        role: Text,
+        can_publish: Bool,
+        is_admin: Bool,
+        created_at: Text,
+        owned_packages: List<Text>
+    ) -> UserProfileDto {
+        UserProfileDto {
+            id: id,
+            username: username,
+            email: email,
+            role: role,
+            can_publish: can_publish,
+            is_admin: is_admin,
+            created_at: created_at,
+            owned_packages: owned_packages,
+        }
+    }
+}
+
+implement TokenDto {
+    pub fn new(
+        id: Text,
+        name: Text,
+        scopes: List<Text>,
+        created_at: Text,
+        is_active: Bool
+    ) -> TokenDto {
+        TokenDto {
+            id: id,
+            name: name,
+            scopes: scopes,
+            created_at: created_at,
+            expires_at: Maybe.None,
+            last_used_at: Maybe.None,
+            is_active: is_active,
+        }
+    }
+
+    pub fn with_expiry(self, expires_at: Text) -> TokenDto {
+        TokenDto {
+            id: self.id,
+            name: self.name,
+            scopes: self.scopes,
+            created_at: self.created_at,
+            expires_at: Maybe.Some(expires_at),
+            last_used_at: self.last_used_at,
+            is_active: self.is_active,
+        }
+    }
+}
+
+implement LoginResponseDto {
+    pub fn success(token: Text, user: UserProfileDto, expires_in: Int) -> LoginResponseDto {
+        LoginResponseDto {
+            success: true,
+            token: token,
+            user: user,
+            expires_in: expires_in,
+        }
+    }
+}
+
+implement RegisterResponseDto {
+    pub fn success(user: UserDto) -> RegisterResponseDto {
+        RegisterResponseDto {
+            success: true,
+            user: user,
+            message: f"Account created successfully",
+        }
+    }
+
+    pub fn error(message: Text) -> RegisterResponseDto {
+        RegisterResponseDto {
+            success: false,
+            user: UserDto.new("", "", ""),
+            message: message,
+        }
+    }
+}
+
+implement TokenResponseDto {
+    pub fn valid(user: UserProfileDto, expires_at: Maybe<Text>) -> TokenResponseDto {
+        TokenResponseDto {
+            valid: true,
+            user: Maybe.Some(user),
+            expires_at: expires_at,
+        }
+    }
+
+    pub fn invalid() -> TokenResponseDto {
+        TokenResponseDto {
+            valid: false,
+            user: Maybe.None,
+            expires_at: Maybe.None,
+        }
+    }
+}
+
+implement DeleteAccountRequestDto {
+    pub fn new(password: Text) -> DeleteAccountRequestDto {
+        DeleteAccountRequestDto {
+            password: password,
+            transfer_packages_to: Maybe.None,
+        }
+    }
+
+    pub fn with_transfer(password: Text, transfer_to: Text) -> DeleteAccountRequestDto {
+        DeleteAccountRequestDto {
+            password: password,
+            transfer_packages_to: Maybe.Some(transfer_to),
+        }
+    }
+}
+
+implement DeleteAccountResponseDto {
+    pub fn success(deleted_user: Text) -> DeleteAccountResponseDto {
+        DeleteAccountResponseDto {
+            success: true,
+            message: f"Account {deleted_user} has been permanently deleted",
+            deleted_user: deleted_user,
+        }
+    }
+
+    pub fn error(username: Text, message: Text) -> DeleteAccountResponseDto {
+        DeleteAccountResponseDto {
+            success: false,
+            message: message,
+            deleted_user: username,
+        }
+    }
+}
+
+implement PublicUserProfileDto {
+    pub fn new(username: Text, member_since: Text) -> PublicUserProfileDto {
+        PublicUserProfileDto {
+            username: username,
+            avatar_url: "",
+            bio: "",
+            packages_owned: List.new(),
+            member_since: member_since,
+            total_downloads: 0,
+        }
+    }
+
+    pub fn with_packages(self, packages: List<Text>, total_downloads: Int) -> PublicUserProfileDto {
+        PublicUserProfileDto {
+            username: self.username,
+            avatar_url: self.avatar_url,
+            bio: self.bio,
+            packages_owned: packages,
+            member_since: self.member_since,
+            total_downloads: total_downloads,
+        }
+    }
+}

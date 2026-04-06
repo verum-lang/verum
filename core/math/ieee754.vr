@@ -1,0 +1,456 @@
+// =============================================================================
+// ieee754.vr - IEEE 754 Floating-Point Utilities
+// =============================================================================
+// Layer: 0 (Foundation)
+//
+// Provides utilities for working with IEEE 754 binary floating-point format,
+// including classification, bit manipulation, and special value handling.
+//
+// # IEEE 754 Binary64 (Float64) Format
+//
+// ```
+// [63]     [62-52]        [51-0]
+// sign     exponent       mantissa
+// 1 bit    11 bits        52 bits
+//          (bias: 1023)   (implicit leading 1)
+// ```
+//
+// # IEEE 754 Binary32 (Float32) Format
+//
+// ```
+// [31]     [30-23]        [22-0]
+// sign     exponent       mantissa
+// 1 bit    8 bits         23 bits
+//          (bias: 127)    (implicit leading 1)
+// ```
+//
+// Spec: docs/architecture/math-spec.md Section 1.1
+// =============================================================================
+
+module core.math.ieee754;
+
+mount super.constants.{INFINITY, NEG_INFINITY, MAX_FLOAT};
+
+// =============================================================================
+// Bit Layout Types
+// =============================================================================
+
+// IEEE 754 binary32 (single precision) bit layout
+public type F32Bits is {
+    sign: Bool,           // bit 31
+    exponent: UInt8,      // bits 30-23 (biased by 127)
+    mantissa: UInt32,     // bits 22-0 (23 bits, implicit leading 1)
+};
+
+// IEEE 754 binary64 (double precision) bit layout
+public type F64Bits is {
+    sign: Bool,           // bit 63
+    exponent: UInt16,     // bits 62-52 (biased by 1023, only 11 bits used)
+    mantissa: UInt64,     // bits 51-0 (52 bits, implicit leading 1)
+};
+
+// =============================================================================
+// Floating-Point Classification
+// =============================================================================
+
+// Classification of floating-point values per IEEE 754
+public type FpCategory is
+    | Zero           // ±0.0
+    | Subnormal      // Denormalized (exponent = 0, mantissa != 0)
+    | Normal         // Normalized (0 < exponent < max)
+    | Infinite       // ±∞
+    | NaN;           // Not-a-Number (quiet or signaling)
+
+// Decompose Float64 into IEEE 754 components
+public fn f64_decompose(x: Float) -> F64Bits {
+    let bits = x.to_bits();
+    F64Bits {
+        sign: (bits >> 63) != 0,
+        exponent: ((bits >> 52) & 0x7FF) as UInt16,
+        mantissa: bits & 0xFFFFFFFFFFFFF,
+    }
+}
+
+// Decompose Float32 into IEEE 754 components
+public fn f32_decompose(x: Float32) -> F32Bits {
+    let bits = x.to_bits();
+    F32Bits {
+        sign: (bits >> 31) != 0,
+        exponent: ((bits >> 23) & 0xFF) as UInt8,
+        mantissa: bits & 0x7FFFFF,
+    }
+}
+
+// Compose Float64 from IEEE 754 components
+public fn f64_compose(bits: F64Bits) -> Float {
+    let sign_bit: UInt64 = if bits.sign { 1 << 63 } else { 0 };
+    let exp_bits: UInt64 = (bits.exponent as UInt64 & 0x7FF) << 52;
+    let mant_bits: UInt64 = bits.mantissa & 0xFFFFFFFFFFFFF;
+    Float.from_bits(sign_bit | exp_bits | mant_bits)
+}
+
+// Compose Float32 from IEEE 754 components
+public fn f32_compose(bits: F32Bits) -> Float32 {
+    let sign_bit: UInt32 = if bits.sign { 1 << 31 } else { 0 };
+    let exp_bits: UInt32 = (bits.exponent as UInt32 & 0xFF) << 23;
+    let mant_bits: UInt32 = bits.mantissa & 0x7FFFFF;
+    Float32.from_bits(sign_bit | exp_bits | mant_bits)
+}
+
+// =============================================================================
+// Classification Functions
+// =============================================================================
+
+// Classify a Float64 value
+public fn classify(x: Float) -> FpCategory {
+    let bits = f64_decompose(x);
+    match (bits.exponent, bits.mantissa) {
+        (0, 0) => FpCategory.Zero,
+        (0, _) => FpCategory.Subnormal,
+        (0x7FF, 0) => FpCategory.Infinite,
+        (0x7FF, _) => FpCategory.NaN,
+        (_, _) => FpCategory.Normal,
+    }
+}
+
+// Classify a Float32 value
+public fn classify_f32(x: Float32) -> FpCategory {
+    let bits = f32_decompose(x);
+    match (bits.exponent, bits.mantissa) {
+        (0, 0) => FpCategory.Zero,
+        (0, _) => FpCategory.Subnormal,
+        (0xFF, 0) => FpCategory.Infinite,
+        (0xFF, _) => FpCategory.NaN,
+        (_, _) => FpCategory.Normal,
+    }
+}
+
+// Check if value is NaN (Not-a-Number)
+// NaN is the only value that is not equal to itself.
+@inline(always)
+public fn is_nan(x: Float) -> Bool {
+    x != x
+}
+
+// Check if Float32 is NaN
+@inline(always)
+public fn is_nan_f32(x: Float32) -> Bool {
+    x != x
+}
+
+// Check if value is infinity (positive or negative)
+@inline(always)
+public fn is_infinite(x: Float) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 52) & 0x7FF;
+    let mant = bits & 0xFFFFFFFFFFFFF;
+    exp == 0x7FF && mant == 0
+}
+
+// Check if Float32 is infinity
+@inline(always)
+public fn is_infinite_f32(x: Float32) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 23) & 0xFF;
+    let mant = bits & 0x7FFFFF;
+    exp == 0xFF && mant == 0
+}
+
+// Check if value is finite (not NaN or infinity)
+@inline(always)
+public fn is_finite(x: Float) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 52) & 0x7FF;
+    exp != 0x7FF
+}
+
+// Check if Float32 is finite
+@inline(always)
+public fn is_finite_f32(x: Float32) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 23) & 0xFF;
+    exp != 0xFF
+}
+
+// Check if value is normalized (normal, non-zero, finite)
+@inline(always)
+public fn is_normal(x: Float) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 52) & 0x7FF;
+    exp != 0 && exp != 0x7FF
+}
+
+// Check if Float32 is normalized
+@inline(always)
+public fn is_normal_f32(x: Float32) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 23) & 0xFF;
+    exp != 0 && exp != 0xFF
+}
+
+// Check if value is subnormal (denormalized)
+@inline(always)
+public fn is_subnormal(x: Float) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 52) & 0x7FF;
+    let mant = bits & 0xFFFFFFFFFFFFF;
+    exp == 0 && mant != 0
+}
+
+// Check if Float32 is subnormal
+@inline(always)
+public fn is_subnormal_f32(x: Float32) -> Bool {
+    let bits = x.to_bits();
+    let exp = (bits >> 23) & 0xFF;
+    let mant = bits & 0x7FFFFF;
+    exp == 0 && mant != 0
+}
+
+// Check if value is positive or negative zero
+@inline(always)
+public fn is_zero(x: Float) -> Bool {
+    let bits = x.to_bits();
+    (bits & 0x7FFFFFFFFFFFFFFF) == 0
+}
+
+// Check if Float32 is zero
+@inline(always)
+public fn is_zero_f32(x: Float32) -> Bool {
+    let bits = x.to_bits();
+    (bits & 0x7FFFFFFF) == 0
+}
+
+// =============================================================================
+// Sign Operations
+// =============================================================================
+
+// Get sign bit (true if negative)
+@inline(always)
+public fn signbit(x: Float) -> Bool {
+    (x.to_bits() >> 63) != 0
+}
+
+// Get sign bit of Float32
+@inline(always)
+public fn signbit_f32(x: Float32) -> Bool {
+    (x.to_bits() >> 31) != 0
+}
+
+// Copy sign from y to x: returns |x| with sign of y
+@inline(always)
+public fn copysign(x: Float, y: Float) -> Float {
+    let x_bits = x.to_bits();
+    let y_bits = y.to_bits();
+    let magnitude = x_bits & 0x7FFFFFFFFFFFFFFF;
+    let sign = y_bits & 0x8000000000000000;
+    Float.from_bits(magnitude | sign)
+}
+
+// Copy sign for Float32
+@inline(always)
+public fn copysign_f32(x: Float32, y: Float32) -> Float32 {
+    let x_bits = x.to_bits();
+    let y_bits = y.to_bits();
+    let magnitude = x_bits & 0x7FFFFFFF;
+    let sign = y_bits & 0x80000000;
+    Float32.from_bits(magnitude | sign)
+}
+
+// Negate (flip sign bit)
+@inline(always)
+public fn negate(x: Float) -> Float {
+    Float.from_bits(x.to_bits() ^ 0x8000000000000000)
+}
+
+// Negate Float32
+@inline(always)
+public fn negate_f32(x: Float32) -> Float32 {
+    Float32.from_bits(x.to_bits() ^ 0x80000000)
+}
+
+// =============================================================================
+// Decomposition Functions
+// =============================================================================
+
+// Extract mantissa and exponent: x = m * 2^e where 0.5 <= |m| < 1
+// Returns (mantissa, exponent) tuple.
+public fn frexp(x: Float) -> (Float, Int) {
+    if is_zero(x) { return (0.0, 0); }
+    if is_nan(x) || is_infinite(x) { return (x, 0); }
+
+    let bits = x.to_bits();
+    let sign = bits & 0x8000000000000000;
+    let exp_bits = ((bits >> 52) & 0x7FF) as Int;
+    let mant_bits = bits & 0xFFFFFFFFFFFFF;
+
+    if exp_bits == 0 {
+        // Subnormal: normalize first
+        let normalized = x * ((1 as UInt64) << 52) as Float;
+        let (m, e) = frexp(normalized);
+        return (m, e - 52);
+    }
+
+    // Normal: mantissa = sign | 0.5 (implicit 1 becomes 0.5)
+    let mantissa_bits = sign | 0x3FE0000000000000 | mant_bits;
+    let mantissa = Float.from_bits(mantissa_bits);
+    let exponent = exp_bits - 1022;  // Unbias and adjust for 0.5 normalization
+
+    (mantissa, exponent)
+}
+
+// Scale x by 2^n: ldexp(x, n) = x * 2^n
+// Efficient implementation using bit manipulation.
+public fn ldexp(x: Float, n: Int) -> Float {
+    if n == 0 || is_zero(x) || is_nan(x) || is_infinite(x) {
+        return x;
+    }
+
+    let bits = x.to_bits();
+    let exp_bits = ((bits >> 52) & 0x7FF) as Int;
+
+    if exp_bits == 0 {
+        // Subnormal: normalize first
+        let normalized = x * ((1 as UInt64) << 52) as Float;
+        return ldexp(normalized, n - 52);
+    }
+
+    let new_exp = exp_bits + n;
+
+    if new_exp >= 0x7FF {
+        // Overflow to infinity
+        return if signbit(x) { NEG_INFINITY } else { INFINITY };
+    }
+
+    if new_exp <= 0 {
+        // Underflow to subnormal or zero
+        if new_exp < -52 {
+            return if signbit(x) { -0.0 } else { 0.0 };
+        }
+        // Create subnormal
+        let shift = 1 - new_exp;
+        let mant = (bits & 0xFFFFFFFFFFFFF) | 0x10000000000000;  // Add implicit 1
+        let new_mant = mant >> shift;
+        let sign = bits & 0x8000000000000000;
+        return Float.from_bits(sign | new_mant);
+    }
+
+    // Normal case: just update exponent
+    let sign_mant = bits & 0x800FFFFFFFFFFFFF;
+    Float.from_bits(sign_mant | ((new_exp as UInt64) << 52))
+}
+
+// Extract integer and fractional parts: modf(x) = (integral, fractional)
+// Both parts have the same sign as x.
+public fn modf(x: Float) -> (Float, Float) {
+    if is_nan(x) { return (x, x); }
+    if is_infinite(x) { return (x, copysign(0.0, x)); }
+
+    let integral = trunc(x);
+    let fractional = x - integral;
+    (integral, fractional)
+}
+
+// Truncate toward zero (integer part)
+@intrinsic("llvm.trunc.f64")
+public fn trunc(x: Float) -> Float;
+
+// Truncate Float32 toward zero
+@intrinsic("llvm.trunc.f32")
+public fn trunc_f32(x: Float32) -> Float32;
+
+// =============================================================================
+// Next/Previous Representable Values
+// =============================================================================
+
+// Next representable value greater than x
+// Returns the smallest Float > x (or NaN if x is NaN).
+public fn next_up(x: Float) -> Float {
+    if is_nan(x) { return x; }
+    if x == INFINITY { return x; }
+    if x == NEG_INFINITY { return -MAX_FLOAT; }
+
+    let bits = x.to_bits();
+    if bits == 0x8000000000000000 {
+        // -0.0 -> smallest positive subnormal
+        return Float.from_bits(1);
+    }
+    if signbit(x) {
+        Float.from_bits(bits - 1)
+    } else {
+        Float.from_bits(bits + 1)
+    }
+}
+
+// Previous representable value less than x
+// Returns the largest Float < x (or NaN if x is NaN).
+public fn next_down(x: Float) -> Float {
+    if is_nan(x) { return x; }
+    if x == NEG_INFINITY { return x; }
+    if x == INFINITY { return MAX_FLOAT; }
+
+    let bits = x.to_bits();
+    if bits == 0 {
+        // +0.0 -> smallest negative subnormal
+        return Float.from_bits(0x8000000000000001);
+    }
+    if signbit(x) {
+        Float.from_bits(bits + 1)
+    } else {
+        Float.from_bits(bits - 1)
+    }
+}
+
+// Distance in ULPs (Units in Last Place) between two floats
+// Returns the number of representable values between x and y.
+public fn ulp_distance(x: Float, y: Float) -> UInt64 {
+    if is_nan(x) || is_nan(y) { return UInt64.MAX; }
+
+    let x_bits = x.to_bits() as Int64;
+    let y_bits = y.to_bits() as Int64;
+
+    // Handle sign differences
+    let x_adjusted = if x_bits < 0 { 0x8000000000000000 - x_bits as UInt64 } else { x_bits as UInt64 };
+    let y_adjusted = if y_bits < 0 { 0x8000000000000000 - y_bits as UInt64 } else { y_bits as UInt64 };
+
+    if x_adjusted > y_adjusted {
+        x_adjusted - y_adjusted
+    } else {
+        y_adjusted - x_adjusted
+    }
+}
+
+// =============================================================================
+// Special Value Creation
+// =============================================================================
+
+// Create positive infinity
+@inline(always)
+public fn infinity() -> Float {
+    Float.from_bits(0x7FF0000000000000)
+}
+
+// Create negative infinity
+@inline(always)
+public fn neg_infinity() -> Float {
+    Float.from_bits(0xFFF0000000000000)
+}
+
+// Create quiet NaN
+@inline(always)
+public fn nan() -> Float {
+    Float.from_bits(0x7FF8000000000000)
+}
+
+// Create quiet NaN with payload
+public fn nan_with_payload(payload: UInt64) -> Float {
+    // Quiet NaN: exponent = 0x7FF, bit 51 = 1, payload in lower bits
+    let bits = 0x7FF8000000000000 | (payload & 0x7FFFFFFFFFFFF);
+    Float.from_bits(bits)
+}
+
+// Extract NaN payload
+public fn nan_payload(x: Float) -> Maybe<UInt64> {
+    if !is_nan(x) { return Maybe.None; }
+    let bits = x.to_bits();
+    Maybe.Some(bits & 0x7FFFFFFFFFFFF)
+}

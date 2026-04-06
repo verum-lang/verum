@@ -1,0 +1,22 @@
+[package]
+name = "verum_dap"
+description = "Debug Adapter Protocol server for the Verum programming language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal crates
+verum_vbc = { workspace = true }
+verum_common = { workspace = true }
+verum_compiler = { workspace = true }
+
+# Serialization (DAP is JSON-based)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }

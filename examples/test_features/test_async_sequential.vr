@@ -1,0 +1,21 @@
+async fn step1() -> Int {
+    println("Step 1")
+    10
+}
+
+async fn step2(x: Int) -> Int {
+    println(f"Step 2 with {x}")
+    x * 2
+}
+
+async fn step3(x: Int) -> Int {
+    println(f"Step 3 with {x}")
+    x + 5
+}
+
+async fn main() {
+    let a = step1().await
+    let b = step2(a).await
+    let c = step3(b).await
+    println(f"Final: {c}")
+}

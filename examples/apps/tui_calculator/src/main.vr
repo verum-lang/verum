@@ -1,0 +1,85 @@
+// TUI Calculator - Simple terminal calculator
+// Demonstrates pattern matching and state management
+
+type Op is Add | Sub | Mul | Div;
+
+type CalcState is {
+    display: Text,
+    accumulator: Float,
+    current_op: Maybe<Op>,
+    memory: Float
+};
+
+fn new_state() -> CalcState {
+    CalcState {
+        display: "0",
+        accumulator: 0.0,
+        current_op: None,
+        memory: 0.0
+    }
+}
+
+fn calculate(a: Float, op: Op, b: Float) -> Float {
+    match op {
+        Add => a + b,
+        Sub => a - b,
+        Mul => a * b,
+        Div => {
+            if b == 0.0 {
+                0.0
+            } else {
+                a / b
+            }
+        }
+    }
+}
+
+fn op_to_text(op: Op) -> Text {
+    match op {
+        Add => "+",
+        Sub => "-",
+        Mul => "*",
+        Div => "/"
+    }
+}
+
+fn print_display(state: CalcState) {
+    print("==================");
+    print(state.display);
+    match state.current_op {
+        Some(op) => print(op_to_text(op)),
+        None => {}
+    };
+    print("==================");
+}
+
+fn main() {
+    print("TUI Calculator v1.0");
+    print("==================");
+    
+    let state = new_state();
+    print_display(state);
+
+    // Demo calculations
+    let a = 10.0;
+    let b = 5.0;
+    
+    print("10 + 5 =");
+    let r1 = calculate(a, Add, b);
+    print(r1.to_string());
+
+    print("10 - 5 =");
+    let r2 = calculate(a, Sub, b);
+    print(r2.to_string());
+
+    print("10 * 5 =");
+    let r3 = calculate(a, Mul, b);
+    print(r3.to_string());
+
+    print("10 / 5 =");
+    let r4 = calculate(a, Div, b);
+    print(r4.to_string());
+
+    print("");
+    print("Calculator demo complete!");
+}

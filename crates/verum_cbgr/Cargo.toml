@@ -1,0 +1,49 @@
+[package]
+name = "verum_cbgr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Library configuration: staticlib for embedding in verum binary
+[lib]
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+verum_common = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_error = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam = { workspace = true }
+dashmap = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rayon = { workspace = true }
+tokio = { workspace = true, optional = true }
+either = "1.15.0"
+static_assertions = "1.1.0"
+z3 = { workspace = true }
+
+[features]
+default = []
+diagnostics = []        # Enable diagnostic warnings for performance implications
+profiling = []          # Enable CBGR profiling hooks for performance analysis
+tokio = ["dep:tokio"]   # Enable async tokio integration for lending iterators
+# Tier-specific compilation features (set by compiler during code generation)
+aot-compiled = []       # Set when compiling with AOT (Tier 3)
+optimizing-jit = []     # Set when using optimizing JIT (Tier 2)
+baseline-jit = []       # Set when using baseline JIT (Tier 1)
+aot-static-verification = []  # Enable AOT static verification optimizations
+
+[dev-dependencies]
+proptest = { workspace = true }
+quickcheck = { workspace = true }
+criterion = { workspace = true }
+rand = "0.9.2"
+serial_test = "3.3"
+
+[[bench]]
+name = "production_targets"
+harness = false

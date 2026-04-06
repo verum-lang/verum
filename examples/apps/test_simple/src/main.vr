@@ -1,0 +1,21 @@
+// Test simple Verum features
+// This file tests basic language functionality
+
+fn main() {
+    // Test print
+    print("Hello, Verum!");
+
+    // Test basic arithmetic
+    let a = 5;
+    let b = 10;
+    let sum = a + b;
+    print(f"Sum: {sum}");
+
+    // Test boolean
+    let is_valid = true;
+    print(f"Valid: {is_valid}");
+
+    // Test string
+    let name = "Verum";
+    print(f"Language: {name}");
+}

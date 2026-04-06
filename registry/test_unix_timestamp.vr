@@ -1,0 +1,8 @@
+// Test unix_timestamp import
+link std.time.unix_timestamp;
+
+fn main() {
+    print("About to call unix_timestamp...");
+    let ts = unix_timestamp();
+    print(f"Unix timestamp: {ts}");
+}

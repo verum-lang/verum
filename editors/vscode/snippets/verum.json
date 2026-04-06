@@ -1,0 +1,1283 @@
+{
+  "// ===========================================": {},
+  "// FUNCTION DECLARATIONS": {},
+  "// ===========================================": {},
+
+  "Function Definition": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Define a new function"
+  },
+  "Async Function": {
+    "prefix": "async-fn",
+    "body": [
+      "async fn ${1:name}(${2:params}) -> ${3:ReturnType} {",
+      "\t${0:// async implementation}",
+      "}"
+    ],
+    "description": "Define an async function"
+  },
+  "Function with Contexts": {
+    "prefix": "fn-using",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType} using [${4:Context}] {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with context dependencies"
+  },
+  "Function with Generics": {
+    "prefix": "fn-generic",
+    "body": [
+      "fn ${1:name}<${2:T}>(${3:params}: ${2:T}) -> ${4:ReturnType} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Generic function"
+  },
+  "Function with Generic Constraints": {
+    "prefix": "fn-where",
+    "body": [
+      "fn ${1:name}<${2:T}>(${3:params}: ${2:T}) -> ${4:ReturnType}",
+      "where type ${2:T}: ${5:Protocol} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Generic function with constraints"
+  },
+  "Function with Precondition": {
+    "prefix": "fn-requires",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType}",
+      "requires ${4:condition} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with precondition"
+  },
+  "Function with Postcondition": {
+    "prefix": "fn-ensures",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType}",
+      "ensures ${4:result_condition} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with postcondition"
+  },
+  "Function with Full Contract": {
+    "prefix": "fn-contract",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType}",
+      "requires ${4:precondition}",
+      "ensures ${5:postcondition} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with full contract (requires + ensures)"
+  },
+  "Verified Function (Runtime)": {
+    "prefix": "fn-verify-runtime",
+    "body": [
+      "@verify(runtime)",
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with runtime verification"
+  },
+  "Verified Function (Proof)": {
+    "prefix": "fn-verify-proof",
+    "body": [
+      "@verify(proof)",
+      "fn ${1:name}(${2:params}) -> ${3:ReturnType}",
+      "requires ${4:precondition}",
+      "ensures ${5:postcondition} {",
+      "\t${0:// implementation}",
+      "}"
+    ],
+    "description": "Function with formal proof verification"
+  },
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "@std",
+      "fn main() {",
+      "\t${0:// entry point}",
+      "}"
+    ],
+    "description": "Main entry point with @std attribute"
+  },
+  "Main with Context Group": {
+    "prefix": "main-ctx",
+    "body": [
+      "@std(${1:ServerContext})",
+      "fn main() {",
+      "\t${0:// entry point with contexts}",
+      "}"
+    ],
+    "description": "Main entry point with context group"
+  },
+  "Meta Function": {
+    "prefix": "meta-fn",
+    "body": [
+      "meta fn ${1:name}(${2:params}) {",
+      "\t${0:// compile-time computation}",
+      "}"
+    ],
+    "description": "Compile-time meta function"
+  },
+
+  "// ===========================================": {},
+  "// TYPE DEFINITIONS": {},
+  "// ===========================================": {},
+
+  "Type Alias": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name} is ${2:BaseType};"
+    ],
+    "description": "Simple type alias"
+  },
+  "Refinement Type (Inline)": {
+    "prefix": "type-refined",
+    "body": [
+      "type ${1:Name} is ${2:BaseType}{${3:constraint}};"
+    ],
+    "description": "Refinement type with inline constraint"
+  },
+  "Refinement Type (Lambda)": {
+    "prefix": "type-where",
+    "body": [
+      "type ${1:Name} is ${2:BaseType} where |${3:x}| ${4:constraint};"
+    ],
+    "description": "Refinement type with lambda predicate"
+  },
+  "Refinement Type (Sigma)": {
+    "prefix": "type-sigma",
+    "body": [
+      "type ${1:Name} is ${2:x}: ${3:BaseType} where ${4:constraint};"
+    ],
+    "description": "Refinement type with sigma notation"
+  },
+  "Positive Integer": {
+    "prefix": "positive",
+    "body": [
+      "type Positive is Int{> 0};"
+    ],
+    "description": "Positive integer refinement type"
+  },
+  "Non-Zero Integer": {
+    "prefix": "nonzero",
+    "body": [
+      "type NonZero is Int{!= 0};"
+    ],
+    "description": "Non-zero integer refinement type"
+  },
+  "Bounded Integer": {
+    "prefix": "bounded",
+    "body": [
+      "type ${1:Name} is Int{>= ${2:min} && <= ${3:max}};"
+    ],
+    "description": "Bounded integer refinement type"
+  },
+  "Non-Empty List": {
+    "prefix": "non-empty-list",
+    "body": [
+      "type NonEmptyList<T> is List<T>{len(it) > 0};"
+    ],
+    "description": "Non-empty list refinement type"
+  },
+  "Bounded Text": {
+    "prefix": "bounded-text",
+    "body": [
+      "type ${1:Name} is Text{len(it) <= ${2:100}};"
+    ],
+    "description": "Bounded text refinement type"
+  },
+  "Record Type": {
+    "prefix": "type-record",
+    "body": [
+      "type ${1:Name} is {",
+      "\t${2:field1}: ${3:Type1},",
+      "\t${4:field2}: ${5:Type2},",
+      "};"
+    ],
+    "description": "Record type definition"
+  },
+  "Struct Definition": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "\t${2:field}: ${3:Type},",
+      "}"
+    ],
+    "description": "Define a struct"
+  },
+  "Variant Type (Enum)": {
+    "prefix": "type-variant",
+    "body": [
+      "type ${1:Name} is",
+      "\t| ${2:Variant1}",
+      "\t| ${3:Variant2}(${4:Type})",
+      ";"
+    ],
+    "description": "Variant type (sum type/enum)"
+  },
+  "Enum Definition": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:Variant1},",
+      "\t${3:Variant2}(${4:Type}),",
+      "}"
+    ],
+    "description": "Define an enum"
+  },
+  "Generic Type": {
+    "prefix": "type-generic",
+    "body": [
+      "type ${1:Name}<${2:T}> is ${3:BaseType}<${2:T}>;"
+    ],
+    "description": "Generic type alias"
+  },
+  "Newtype": {
+    "prefix": "newtype",
+    "body": [
+      "type ${1:Name} is newtype ${2:BaseType};"
+    ],
+    "description": "Newtype wrapper"
+  },
+  "Tensor Type": {
+    "prefix": "type-tensor",
+    "body": [
+      "type ${1:Matrix} is Tensor<${2:f32}, [${3:M}, ${4:N}]>;"
+    ],
+    "description": "Tensor type with dimensions"
+  },
+
+  "// ===========================================": {},
+  "// PROTOCOLS (TRAITS)": {},
+  "// ===========================================": {},
+
+  "Protocol Definition": {
+    "prefix": "protocol",
+    "body": [
+      "type ${1:Name} is protocol {",
+      "\tfn ${2:method_name}(&self${3:, params}) -> ${4:ReturnType};",
+      "}"
+    ],
+    "description": "Define a protocol (trait)"
+  },
+  "Trait Definition": {
+    "prefix": "trait",
+    "body": [
+      "trait ${1:Name} {",
+      "\tfn ${2:method_name}(${3:params}) -> ${4:Type};",
+      "}"
+    ],
+    "description": "Define a trait"
+  },
+  "Protocol with Associated Type": {
+    "prefix": "protocol-assoc",
+    "body": [
+      "type ${1:Name} is protocol {",
+      "\ttype ${2:Item};",
+      "\tfn ${3:next}(&mut self) -> Maybe<${2:Item}>;",
+      "}"
+    ],
+    "description": "Protocol with associated type"
+  },
+  "Implementation Block": {
+    "prefix": "impl",
+    "body": [
+      "implement ${1:Protocol} for ${2:Type} {",
+      "\tfn ${3:method_name}(${4:params}) -> ${5:ReturnType} {",
+      "\t\t${0:// implementation}",
+      "\t}",
+      "}"
+    ],
+    "description": "Implement a protocol for a type"
+  },
+  "Generic Implementation": {
+    "prefix": "impl-generic",
+    "body": [
+      "implement<${1:T}> ${2:Protocol} for ${3:Type}<${1:T}> {",
+      "\tfn ${4:method_name}(${5:params}) -> ${6:ReturnType} {",
+      "\t\t${0:// implementation}",
+      "\t}",
+      "}"
+    ],
+    "description": "Generic implementation block"
+  },
+  "Specialized Implementation": {
+    "prefix": "impl-specialize",
+    "body": [
+      "@specialize",
+      "implement ${1:Protocol} for ${2:Type} {",
+      "\tfn ${3:method_name}(${4:params}) -> ${5:ReturnType} {",
+      "\t\t${0:// specialized implementation}",
+      "\t}",
+      "}"
+    ],
+    "description": "Specialized implementation"
+  },
+
+  "// ===========================================": {},
+  "// CONTEXT SYSTEM (DI)": {},
+  "// ===========================================": {},
+
+  "Context Definition": {
+    "prefix": "context",
+    "body": [
+      "context ${1:Name} {",
+      "\tfn ${2:method_name}(${3:params}) -> ${4:ReturnType};",
+      "}"
+    ],
+    "description": "Define a context (dependency)"
+  },
+  "Async Context": {
+    "prefix": "context-async",
+    "body": [
+      "context async ${1:Name} {",
+      "\tasync fn ${2:method_name}(${3:params}) -> ${4:ReturnType};",
+      "}"
+    ],
+    "description": "Define an async context"
+  },
+  "Parameterized Context": {
+    "prefix": "context-param",
+    "body": [
+      "context<${1:T}> ${2:Name}<${1:T}> {",
+      "\tfn ${3:get}(key: Text) -> Maybe<${1:T}>;",
+      "\tfn ${4:set}(key: Text, value: ${1:T});",
+      "}"
+    ],
+    "description": "Parameterized context"
+  },
+  "Context Group": {
+    "prefix": "using-group",
+    "body": [
+      "using ${1:GroupName} = [${2:Context1}, ${3:Context2}, ${4:Context3}];"
+    ],
+    "description": "Define a context group"
+  },
+  "Provide Context": {
+    "prefix": "provide",
+    "body": [
+      "provide ${1:Context} = ${2:implementation};"
+    ],
+    "description": "Provide context implementation"
+  },
+  "Provide Context Scoped": {
+    "prefix": "provide-in",
+    "body": [
+      "provide ${1:Context} = ${2:implementation} in {",
+      "\t${0:// code with context}",
+      "}"
+    ],
+    "description": "Provide context in scoped block"
+  },
+  "Provide Multiple Contexts": {
+    "prefix": "provide-multi",
+    "body": [
+      "provide {",
+      "\t${1:Database}: ${2:postgres_connection()},",
+      "\t${3:Logger}: ${4:file_logger(\"app.log\")},",
+      "} in {",
+      "\t${0:// code with contexts}",
+      "}"
+    ],
+    "description": "Provide multiple contexts"
+  },
+
+  "// ===========================================": {},
+  "// MODULES & IMPORTS": {},
+  "// ===========================================": {},
+
+  "Module Definition": {
+    "prefix": "module",
+    "body": [
+      "module ${1:name} {",
+      "\t${0:// module contents}",
+      "}"
+    ],
+    "description": "Define a module"
+  },
+  "Public Module": {
+    "prefix": "pub-module",
+    "body": [
+      "pub module ${1:name} {",
+      "\t${0:// public module contents}",
+      "}"
+    ],
+    "description": "Define a public module"
+  },
+  "Use Statement": {
+    "prefix": "use",
+    "body": [
+      "use ${1:module}::${2:item};"
+    ],
+    "description": "Import an item"
+  },
+  "Import Statement": {
+    "prefix": "import",
+    "body": [
+      "import ${1:module};"
+    ],
+    "description": "Import a module"
+  },
+  "Import Selective": {
+    "prefix": "import-items",
+    "body": [
+      "import ${1:module}.{ ${2:Item1}, ${3:Item2} };"
+    ],
+    "description": "Import specific items from module"
+  },
+  "Import Aliased": {
+    "prefix": "import-as",
+    "body": [
+      "import ${1:module} as ${2:alias};"
+    ],
+    "description": "Import module with alias"
+  },
+
+  "// ===========================================": {},
+  "// BINDINGS & VARIABLES": {},
+  "// ===========================================": {},
+
+  "Let Binding": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name}: ${2:Type} = ${3:value};"
+    ],
+    "description": "Create a let binding"
+  },
+  "Let Mutable": {
+    "prefix": "let-mut",
+    "body": [
+      "let mut ${1:name}: ${2:Type} = ${3:value};"
+    ],
+    "description": "Create a mutable let binding"
+  },
+  "Let Inferred": {
+    "prefix": "letv",
+    "body": [
+      "let ${1:name} = ${2:value};"
+    ],
+    "description": "Let binding with type inference"
+  },
+  "Let Destructure Tuple": {
+    "prefix": "let-tuple",
+    "body": [
+      "let (${1:a}, ${2:b}, ${3:c}) = ${4:tuple};"
+    ],
+    "description": "Destructure tuple"
+  },
+  "Let Destructure Record": {
+    "prefix": "let-record",
+    "body": [
+      "let ${1:RecordType} { ${2:field1}, ${3:field2} } = ${4:record};"
+    ],
+    "description": "Destructure record"
+  },
+  "Let Else": {
+    "prefix": "let-else",
+    "body": [
+      "let Some(${1:x}) = ${2:maybe_value} else {",
+      "\t${3:return};",
+      "};"
+    ],
+    "description": "Let-else pattern for fallible destructuring"
+  },
+  "Const Declaration": {
+    "prefix": "const",
+    "body": [
+      "let const ${1:NAME}: ${2:Type} = ${3:value};"
+    ],
+    "description": "Constant declaration"
+  },
+  "Static Declaration": {
+    "prefix": "static",
+    "body": [
+      "let static ${1:NAME}: ${2:Type} = ${3:value};"
+    ],
+    "description": "Static variable declaration"
+  },
+
+  "// ===========================================": {},
+  "// CONTROL FLOW": {},
+  "// ===========================================": {},
+
+  "If Expression": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "\t${2:// true branch}",
+      "} else {",
+      "\t${3:// false branch}",
+      "}"
+    ],
+    "description": "If-else expression"
+  },
+  "If Let": {
+    "prefix": "if-let",
+    "body": [
+      "if let Some(${1:x}) = ${2:maybe_value} {",
+      "\t${3:// handle Some}",
+      "} else {",
+      "\t${4:// handle None}",
+      "}"
+    ],
+    "description": "If-let pattern matching"
+  },
+  "Match Expression": {
+    "prefix": "match",
+    "body": [
+      "match ${1:expr} {",
+      "\t${2:pattern} => ${3:value},",
+      "\t_ => ${4:default},",
+      "}"
+    ],
+    "description": "Match expression"
+  },
+  "Pattern Matching on Maybe": {
+    "prefix": "match-maybe",
+    "body": [
+      "match ${1:maybe_value} {",
+      "\tSome(${2:x}) => ${3:// handle Some},",
+      "\tNone => ${4:// handle None},",
+      "}"
+    ],
+    "description": "Match on Maybe type"
+  },
+  "Pattern Matching on Result": {
+    "prefix": "match-result",
+    "body": [
+      "match ${1:result_value} {",
+      "\tOk(${2:x}) => ${3:// handle Ok},",
+      "\tErr(${4:e}) => ${5:// handle Err},",
+      "}"
+    ],
+    "description": "Match on Result type"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:collection} {",
+      "\t${3:// loop body}",
+      "}"
+    ],
+    "description": "For loop"
+  },
+  "For Loop with Index": {
+    "prefix": "for-idx",
+    "body": [
+      "for (${1:idx}, ${2:item}) in ${3:collection}.enumerate() {",
+      "\t${4:// loop body}",
+      "}"
+    ],
+    "description": "For loop with index"
+  },
+  "For Loop with Invariant": {
+    "prefix": "for-invariant",
+    "body": [
+      "for ${1:item} in ${2:collection} {",
+      "\t${3:// loop body}",
+      "} invariant ${4:condition}"
+    ],
+    "description": "For loop with loop invariant"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "\t${2:// loop body}",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "While Loop with Invariant": {
+    "prefix": "while-invariant",
+    "body": [
+      "while ${1:condition} {",
+      "\t${2:// loop body}",
+      "} invariant ${3:inv_condition} decreases ${4:variant}"
+    ],
+    "description": "While loop with invariant and decreases"
+  },
+  "Loop": {
+    "prefix": "loop",
+    "body": [
+      "loop {",
+      "\t${1:// infinite loop body}",
+      "\tif ${2:exit_condition} {",
+      "\t\tbreak;",
+      "\t}",
+      "}"
+    ],
+    "description": "Infinite loop with break"
+  },
+  "Loop with Invariant": {
+    "prefix": "loop-invariant",
+    "body": [
+      "loop invariant ${1:condition} {",
+      "\t${2:// loop body}",
+      "}"
+    ],
+    "description": "Loop with invariant"
+  },
+
+  "// ===========================================": {},
+  "// ERROR HANDLING": {},
+  "// ===========================================": {},
+
+  "Try-Recover": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t${1:// code that may fail}",
+      "} recover {",
+      "\t${2:err} => ${3:// handle error},",
+      "}"
+    ],
+    "description": "Try-recover error handling"
+  },
+  "Try-Finally": {
+    "prefix": "try-finally",
+    "body": [
+      "try {",
+      "\t${1:// code that may fail}",
+      "} finally {",
+      "\t${2:// cleanup code}",
+      "}"
+    ],
+    "description": "Try-finally for cleanup"
+  },
+  "Try-Recover-Finally": {
+    "prefix": "try-full",
+    "body": [
+      "try {",
+      "\t${1:// code that may fail}",
+      "} recover {",
+      "\t${2:err} => ${3:// handle error},",
+      "} finally {",
+      "\t${4:// cleanup}",
+      "}"
+    ],
+    "description": "Full try-recover-finally"
+  },
+  "Result Ok": {
+    "prefix": "ok",
+    "body": [
+      "Ok(${1:value})"
+    ],
+    "description": "Result::Ok variant"
+  },
+  "Result Err": {
+    "prefix": "err",
+    "body": [
+      "Err(${1:error})"
+    ],
+    "description": "Result::Err variant"
+  },
+  "Error Propagation": {
+    "prefix": "?",
+    "body": [
+      "${1:expr}?"
+    ],
+    "description": "Error propagation operator"
+  },
+  "Unwrap Or Default": {
+    "prefix": "unwrap-or",
+    "body": [
+      "${1:maybe_value}.unwrap_or(${2:default})"
+    ],
+    "description": "Unwrap with default value"
+  },
+
+  "// ===========================================": {},
+  "// ASYNC/AWAIT & CONCURRENCY": {},
+  "// ===========================================": {},
+
+  "Async Block": {
+    "prefix": "async",
+    "body": [
+      "async {",
+      "\t${1:// async code}",
+      "}"
+    ],
+    "description": "Async block"
+  },
+  "Await Expression": {
+    "prefix": "await",
+    "body": [
+      "${1:future}.await"
+    ],
+    "description": "Await a future"
+  },
+  "Spawn Task": {
+    "prefix": "spawn",
+    "body": [
+      "spawn {",
+      "\t${1:// concurrent task}",
+      "} using [${2:Contexts}]"
+    ],
+    "description": "Spawn concurrent task with contexts"
+  },
+  "Spawn Scoped": {
+    "prefix": "spawn-scoped",
+    "body": [
+      "spawn_scoped(${1:items}, |${2:item}| async {",
+      "\t${3:// process each item}",
+      "}).await"
+    ],
+    "description": "Spawn scoped parallel tasks"
+  },
+  "Select": {
+    "prefix": "select",
+    "body": [
+      "select! {",
+      "\t${1:future1} => ${2:handle1},",
+      "\t${3:future2} => ${4:handle2},",
+      "}"
+    ],
+    "description": "Select between multiple futures"
+  },
+  "Async Closure": {
+    "prefix": "async-closure",
+    "body": [
+      "async |${1:params}| {",
+      "\t${2:// async body}",
+      "}"
+    ],
+    "description": "Async closure"
+  },
+
+  "// ===========================================": {},
+  "// COLLECTIONS & DATA STRUCTURES": {},
+  "// ===========================================": {},
+
+  "List Creation": {
+    "prefix": "list",
+    "body": [
+      "let ${1:name}: List<${2:Type}> = [${3:elements}];"
+    ],
+    "description": "Create a list"
+  },
+  "List New": {
+    "prefix": "list-new",
+    "body": [
+      "let ${1:name}: List<${2:Type}> = List::new();"
+    ],
+    "description": "Create empty list"
+  },
+  "Map Creation": {
+    "prefix": "map",
+    "body": [
+      "let ${1:name}: Map<${2:KeyType}, ${3:ValueType}> = {",
+      "\t${4:key} => ${5:value},",
+      "};"
+    ],
+    "description": "Create a map"
+  },
+  "Map New": {
+    "prefix": "map-new",
+    "body": [
+      "let ${1:name}: Map<${2:KeyType}, ${3:ValueType}> = Map::new();"
+    ],
+    "description": "Create empty map"
+  },
+  "Set Creation": {
+    "prefix": "set",
+    "body": [
+      "let ${1:name}: Set<${2:Type}> = { ${3:elements} };"
+    ],
+    "description": "Create a set"
+  },
+  "Maybe Type": {
+    "prefix": "maybe",
+    "body": [
+      "let ${1:name}: Maybe<${2:Type}> = Some(${3:value});"
+    ],
+    "description": "Create Maybe with value"
+  },
+  "Result Type": {
+    "prefix": "result",
+    "body": [
+      "let ${1:name}: Result<${2:OkType}, ${3:ErrType}> = Ok(${4:value});"
+    ],
+    "description": "Create Result type"
+  },
+  "Heap Allocation": {
+    "prefix": "heap",
+    "body": [
+      "let ${1:name}: Heap<${2:Type}> = Heap::new(${3:value});"
+    ],
+    "description": "Heap-allocated value"
+  },
+  "Shared Reference": {
+    "prefix": "shared",
+    "body": [
+      "let ${1:name}: Shared<${2:Type}> = Shared::new(${3:value});"
+    ],
+    "description": "Shared reference"
+  },
+  "List Comprehension": {
+    "prefix": "listcomp",
+    "body": [
+      "[${1:expr} for ${2:x} in ${3:collection} if ${4:condition}]"
+    ],
+    "description": "List comprehension"
+  },
+  "Stream Comprehension": {
+    "prefix": "streamcomp",
+    "body": [
+      "stream [${1:expr} for ${2:x} in ${3:source} if ${4:condition}]"
+    ],
+    "description": "Stream comprehension"
+  },
+
+  "// ===========================================": {},
+  "// CLOSURES & LAMBDAS": {},
+  "// ===========================================": {},
+
+  "Closure": {
+    "prefix": "closure",
+    "body": [
+      "|${1:params}| ${2:body}"
+    ],
+    "description": "Simple closure"
+  },
+  "Closure with Block": {
+    "prefix": "closure-block",
+    "body": [
+      "|${1:params}| {",
+      "\t${2:// body}",
+      "}"
+    ],
+    "description": "Closure with block body"
+  },
+  "Closure with Type": {
+    "prefix": "closure-typed",
+    "body": [
+      "|${1:params}| -> ${2:ReturnType} {",
+      "\t${3:// body}",
+      "}"
+    ],
+    "description": "Closure with return type"
+  },
+  "Move Closure": {
+    "prefix": "move-closure",
+    "body": [
+      "move |${1:params}| {",
+      "\t${2:// body (owns captured values)}",
+      "}"
+    ],
+    "description": "Closure that moves captured values"
+  },
+
+  "// ===========================================": {},
+  "// REFERENCES & MEMORY": {},
+  "// ===========================================": {},
+
+  "Checked Reference": {
+    "prefix": "ref-checked",
+    "body": [
+      "&checked ${1:value}"
+    ],
+    "description": "Checked reference (CBGR Tier 1, 0ns overhead)"
+  },
+  "Unsafe Reference": {
+    "prefix": "ref-unsafe",
+    "body": [
+      "&unsafe ${1:value}"
+    ],
+    "description": "Unsafe reference (CBGR Tier 2, requires proof)"
+  },
+  "Defer Cleanup": {
+    "prefix": "defer",
+    "body": [
+      "defer ${1:cleanup_function}();"
+    ],
+    "description": "Defer cleanup action"
+  },
+
+  "// ===========================================": {},
+  "// VERIFICATION & PROOFS": {},
+  "// ===========================================": {},
+
+  "Assert Statement": {
+    "prefix": "assert",
+    "body": [
+      "assert(${1:condition});"
+    ],
+    "description": "Runtime assertion"
+  },
+  "Assert Equals": {
+    "prefix": "assert-eq",
+    "body": [
+      "assert_eq!(${1:left}, ${2:right});"
+    ],
+    "description": "Assert equality"
+  },
+  "Assert Not Equals": {
+    "prefix": "assert-ne",
+    "body": [
+      "assert_ne!(${1:left}, ${2:right});"
+    ],
+    "description": "Assert inequality"
+  },
+  "Invariant": {
+    "prefix": "invariant",
+    "body": [
+      "invariant ${1:condition}"
+    ],
+    "description": "Loop invariant"
+  },
+  "Decreases": {
+    "prefix": "decreases",
+    "body": [
+      "decreases ${1:variant}"
+    ],
+    "description": "Termination measure"
+  },
+  "Theorem": {
+    "prefix": "theorem",
+    "body": [
+      "theorem ${1:name}(${2:params}) {",
+      "\t${3:// proof}",
+      "}"
+    ],
+    "description": "Theorem declaration"
+  },
+  "Lemma": {
+    "prefix": "lemma",
+    "body": [
+      "lemma ${1:name}(${2:params}) {",
+      "\t${3:// proof}",
+      "}"
+    ],
+    "description": "Lemma declaration"
+  },
+  "Proof Block": {
+    "prefix": "proof",
+    "body": [
+      "proof {",
+      "\thave ${1:property}: ${2:assertion} by ${3:tactic};",
+      "\tshow ${4:goal} by ${5:strategy};",
+      "\tqed",
+      "}"
+    ],
+    "description": "Proof block"
+  },
+  "Verify Proof": {
+    "prefix": "verify",
+    "body": [
+      "prove {",
+      "\t${1:// proof steps}",
+      "}"
+    ],
+    "description": "Prove block for verification"
+  },
+  "Contract Literal": {
+    "prefix": "contract",
+    "body": [
+      "contract#\"",
+      "\trequires ${1:precondition};",
+      "\tensures ${2:postcondition}",
+      "\""
+    ],
+    "description": "Contract literal"
+  },
+  "Forall Quantifier": {
+    "prefix": "forall",
+    "body": [
+      "forall (${1:x}: ${2:Type}) => ${3:property}"
+    ],
+    "description": "Universal quantifier"
+  },
+  "Exists Quantifier": {
+    "prefix": "exists",
+    "body": [
+      "exists (${1:x}: ${2:Type}) => ${3:property}"
+    ],
+    "description": "Existential quantifier"
+  },
+
+  "// ===========================================": {},
+  "// TESTING": {},
+  "// ===========================================": {},
+
+  "Test Function": {
+    "prefix": "test",
+    "body": [
+      "#[test]",
+      "fn test_${1:name}() {",
+      "\t${2:// test implementation}",
+      "\tassert(${3:condition});",
+      "}"
+    ],
+    "description": "Test function"
+  },
+  "Test with Setup": {
+    "prefix": "test-setup",
+    "body": [
+      "#[test]",
+      "fn test_${1:name}() {",
+      "\t// Setup",
+      "\tlet ${2:fixture} = ${3:setup_code};",
+      "\t",
+      "\t// Act",
+      "\tlet result = ${4:action};",
+      "\t",
+      "\t// Assert",
+      "\tassert_eq!(result, ${5:expected});",
+      "}"
+    ],
+    "description": "Test with setup/act/assert"
+  },
+  "Property Test": {
+    "prefix": "test-property",
+    "body": [
+      "@property(iterations: ${1:100})",
+      "fn test_${2:name}(${3:x}: ${4:Type}) {",
+      "\t${5:// property that should always hold}",
+      "}"
+    ],
+    "description": "Property-based test"
+  },
+  "Test Fixture": {
+    "prefix": "fixture",
+    "body": [
+      "@fixture",
+      "fn ${1:setup}() -> ${2:State} {",
+      "\t${3:// create test fixture}",
+      "}"
+    ],
+    "description": "Test fixture"
+  },
+
+  "// ===========================================": {},
+  "// ATTRIBUTES & ANNOTATIONS": {},
+  "// ===========================================": {},
+
+  "Inline Attribute": {
+    "prefix": "attr-inline",
+    "body": [
+      "@inline"
+    ],
+    "description": "Inline attribute"
+  },
+  "Inline Always": {
+    "prefix": "attr-inline-always",
+    "body": [
+      "@inline(always)"
+    ],
+    "description": "Always inline"
+  },
+  "Profile Attribute": {
+    "prefix": "attr-profile",
+    "body": [
+      "@profile(${1|application,systems,research|})"
+    ],
+    "description": "Profile attribute"
+  },
+  "Feature Attribute": {
+    "prefix": "attr-feature",
+    "body": [
+      "@feature(enable: [\"${1:feature_name}\"])"
+    ],
+    "description": "Feature flag attribute"
+  },
+  "Differentiable": {
+    "prefix": "attr-diff",
+    "body": [
+      "@differentiable"
+    ],
+    "description": "Differentiable function (autodiff)"
+  },
+  "GPU Kernel": {
+    "prefix": "gpu-kernel",
+    "body": [
+      "#[gpu::kernel]",
+      "fn ${1:kernel_name}(${2:params}) {",
+      "\t${3:// GPU computation}",
+      "}"
+    ],
+    "description": "GPU kernel function"
+  },
+
+  "// ===========================================": {},
+  "// LITERALS & SPECIAL SYNTAX": {},
+  "// ===========================================": {},
+
+  "Format String": {
+    "prefix": "fstring",
+    "body": [
+      "f\"${1:text} {${2:expr}}\""
+    ],
+    "description": "Formatted string interpolation"
+  },
+  "SQL Literal": {
+    "prefix": "sql",
+    "body": [
+      "sql\"SELECT ${1:columns} FROM ${2:table} WHERE ${3:condition}\""
+    ],
+    "description": "SQL query literal"
+  },
+  "Regex Literal": {
+    "prefix": "regex",
+    "body": [
+      "rx#\"${1:pattern}\""
+    ],
+    "description": "Regex pattern literal"
+  },
+  "Date Literal": {
+    "prefix": "date",
+    "body": [
+      "d#\"${1:2025-01-01}\""
+    ],
+    "description": "Date literal"
+  },
+  "HTML Literal": {
+    "prefix": "html",
+    "body": [
+      "html\"<${1:tag}>${2:content}</${1:tag}>\""
+    ],
+    "description": "HTML literal"
+  },
+  "Pipeline": {
+    "prefix": "pipe",
+    "body": [
+      "${1:data}",
+      "\t|> ${2:transform}",
+      "\t|> ${3:filter}",
+      "\t|> ${4:collect}"
+    ],
+    "description": "Pipeline operator chain"
+  },
+
+  "// ===========================================": {},
+  "// COMMON PATTERNS": {},
+  "// ===========================================": {},
+
+  "Guard Clause": {
+    "prefix": "guard",
+    "body": [
+      "if !${1:condition} {",
+      "\treturn ${2:Err(\"${3:error message}\")};",
+      "}"
+    ],
+    "description": "Guard clause pattern"
+  },
+  "Early Return": {
+    "prefix": "early-return",
+    "body": [
+      "if ${1:condition} {",
+      "\treturn ${2:value};",
+      "}"
+    ],
+    "description": "Early return pattern"
+  },
+  "Builder Pattern": {
+    "prefix": "builder",
+    "body": [
+      "${1:Builder}::new()",
+      "\t.${2:with_option}(${3:value})",
+      "\t.${4:with_another}(${5:value})",
+      "\t.build()"
+    ],
+    "description": "Builder pattern"
+  },
+  "Method Chain": {
+    "prefix": "chain",
+    "body": [
+      "${1:collection}",
+      "\t.${2:map}(|${3:x}| ${4:transform})",
+      "\t.${5:filter}(|${6:x}| ${7:predicate})",
+      "\t.${8:collect}()"
+    ],
+    "description": "Method chain pattern"
+  },
+  "Option Chaining": {
+    "prefix": "opt-chain",
+    "body": [
+      "${1:maybe_value}?.${2:field}?.${3:method}()"
+    ],
+    "description": "Optional chaining"
+  },
+  "Null Coalescing": {
+    "prefix": "null-coalesce",
+    "body": [
+      "${1:maybe_value} ?? ${2:default_value}"
+    ],
+    "description": "Null coalescing operator"
+  },
+  "Resource Acquisition": {
+    "prefix": "resource",
+    "body": [
+      "let ${1:resource} = ${2:acquire}()?;",
+      "defer ${3:release}(${1:resource});",
+      "${0:// use resource}"
+    ],
+    "description": "Resource acquisition with deferred cleanup"
+  },
+
+  "// ===========================================": {},
+  "// DOCUMENTATION": {},
+  "// ===========================================": {},
+
+  "Doc Comment": {
+    "prefix": "doc",
+    "body": [
+      "/// ${1:Description}",
+      "///",
+      "/// # Examples",
+      "///",
+      "/// ```verum",
+      "/// ${2:example_code}",
+      "/// ```"
+    ],
+    "description": "Documentation comment with example"
+  },
+  "Doc Function": {
+    "prefix": "doc-fn",
+    "body": [
+      "/// ${1:Brief description}",
+      "///",
+      "/// # Arguments",
+      "///",
+      "/// * `${2:param}` - ${3:param description}",
+      "///",
+      "/// # Returns",
+      "///",
+      "/// ${4:return description}",
+      "///",
+      "/// # Examples",
+      "///",
+      "/// ```verum",
+      "/// ${5:example}",
+      "/// ```"
+    ],
+    "description": "Full function documentation"
+  },
+  "Safety Comment": {
+    "prefix": "safety",
+    "body": [
+      "// SAFETY: ${1:reason why this is safe}"
+    ],
+    "description": "Safety comment for unsafe blocks"
+  },
+  "Spec Reference": {
+    "prefix": "spec",
+    "body": [
+      "// Spec: docs/detailed/${1:XX}-${2:name}.md#${3:section}"
+    ],
+    "description": "Specification reference comment"
+  }
+}

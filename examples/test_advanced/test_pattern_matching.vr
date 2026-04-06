@@ -1,0 +1,30 @@
+// Test pattern matching
+// This test verifies pattern matching on literals, ranges, and complex expressions
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ if n < 0 => "negative",
+        _ if n > 100 => "large",
+        _ => "other"
+    }
+}
+
+fn main() {
+    let numbers = [0, 1, 2, -5, 50, 150]
+
+    for num in numbers {
+        let classification = classify_number(num)
+        println(f"{num} is {classification}")
+    }
+
+    // Test match as expression
+    let value = 42
+    let parity = match value % 2 {
+        0 => "even",
+        _ => "odd"
+    }
+    println(f"{value} is {parity}")
+}

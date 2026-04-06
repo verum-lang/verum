@@ -1,0 +1,34 @@
+// Infrastructure Layer Module
+//
+// This layer contains concrete implementations of repository protocols and
+// infrastructure-specific concerns (database access, external services, etc.).
+//
+// Following the Dependency Inversion Principle (DIP):
+// - Domain layer depends on repository protocols (abstractions)
+// - Infrastructure layer implements those protocols (concretions)
+// - Direction of dependency: Infrastructure → Domain (NOT Domain → Infrastructure)
+//
+// Module Structure:
+// - postgres/:   PostgreSQL implementations of domain repositories
+// - providers/:  Context protocol provider implementations
+
+module postgres;
+module providers;
+
+// Re-export repository implementations
+pub import .postgres.{
+    PostgresPackageRepository,
+    PostgresUserRepository,
+    PostgresTokenRepository,
+    PostgresPackageVersionRepository,
+};
+
+// Re-export context provider implementations
+pub import .providers.{
+    PostgresDatabaseProvider,
+    FilesystemStorageProvider,
+    LruCacheProvider,
+    MemorySearchProvider,
+    StdoutLoggerProvider,
+    InMemoryMetricsProvider,
+};

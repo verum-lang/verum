@@ -1,0 +1,75 @@
+// 09 — Closures
+// Closures, higher-order functions, and functional patterns.
+// Closure syntax: |params| body   or   |params| { multi-line body }
+
+// --- Higher-order function: takes a function as a parameter ---
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+// --- Function that returns a closure ---
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(factor: Int) -> fn(Int) -> Int {
+    |x| x * factor
+}
+
+// --- Pipeline helper ---
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x| g(f(x))
+}
+
+fn main() {
+    // --- Basic closures ---
+    let double = |x: Int| x * 2
+    let negate = |x: Int| -x
+    print(f"double(5) = {double(5)}")
+    print(f"negate(3) = {negate(3)}")
+
+    // --- Capturing variables ---
+    let offset = 100
+    let shifted = |x| x + offset
+    print(f"shifted(5) = {shifted(5)}")
+
+    // --- Higher-order functions ---
+    print(f"apply_twice(double, 3) = {apply_twice(double, 3)}")  // 12
+
+    // --- Factory functions ---
+    let add10 = make_adder(10)
+    let triple = make_multiplier(3)
+    print(f"add10(5) = {add10(5)}")
+    print(f"triple(7) = {triple(7)}")
+
+    // --- Functional combinators on collections ---
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"evens: {evens}")
+
+    let squares = numbers.map(|x| x * x)
+    print(f"squares: {squares}")
+
+    let sum = numbers.fold(0, |acc, x| acc + x)
+    print(f"sum: {sum}")
+
+    // --- Chaining combinators ---
+    let result = numbers
+        .filter(|x| x % 2 == 0)
+        .map(|x| x * x)
+        .fold(0, |acc, x| acc + x)
+    print(f"sum of squares of evens: {result}")
+
+    // --- Mutable captures ---
+    let mut count = 0
+    let items = ["a", "b", "c", "d"]
+    for item in items {
+        count = count + 1
+        print(f"  [{count}] {item}")
+    }
+
+    // --- Composition ---
+    let double_then_add10 = compose(double, add10)
+    print(f"double_then_add10(3) = {double_then_add10(3)}")  // (3*2)+10 = 16
+}

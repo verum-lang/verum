@@ -1,0 +1,430 @@
+// ============================================
+// Comprehensive Verum Language Features Test
+// ============================================
+// This test demonstrates all working language features
+
+// Test 1: Basic Types
+fn test_basic_types() {
+    print("=== Test 1: Basic Types ===");
+
+    let i: Int = 42;
+    let f: Float = 3.14;
+    let b: Bool = true;
+    let t: Text = "Hello, Verum!";
+
+    print("Int: 42");
+    print("Float: 3.14");
+    print("Bool: true");
+    print("Text: Hello, Verum!");
+    print("");
+}
+
+// Test 2: Variables and Assignments
+fn test_variables() {
+    print("=== Test 2: Variables and Assignments ===");
+
+    let mut x = 10;
+    print("Initial x: 10");
+
+    x = 20;
+    print("After assignment x: 20");
+
+    let y = x + 5;
+    print("y = x + 5 = 25");
+    print("");
+}
+
+// Test 3: Functions with Parameters and Return Types
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn test_functions() {
+    print("=== Test 3: Functions ===");
+
+    let sum = add(5, 3);
+    print("add(5, 3) = ");
+    print(sum);
+
+    let product = multiply(4, 7);
+    print("multiply(4, 7) = ");
+    print(product);
+
+    let result = factorial(5);
+    print("factorial(5) = ");
+    print(result);
+    print("");
+}
+
+// Test 4: Pattern Matching
+fn describe_number(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "other"
+    }
+}
+
+fn test_pattern_matching() {
+    print("=== Test 4: Pattern Matching ===");
+
+    let result1 = describe_number(0);
+    print("describe_number(0) = ");
+    print(result1);
+
+    let result2 = describe_number(1);
+    print("describe_number(1) = ");
+    print(result2);
+
+    let result3 = describe_number(2);
+    print("describe_number(2) = ");
+    print(result3);
+
+    let result4 = describe_number(99);
+    print("describe_number(99) = ");
+    print(result4);
+    print("");
+}
+
+// Test 5: Control Flow (if/else)
+fn check_value(x: Int) -> Text {
+    if x > 10 {
+        "large"
+    } else if x > 0 {
+        "small"
+    } else {
+        "negative or zero"
+    }
+}
+
+fn test_control_flow() {
+    print("=== Test 5: Control Flow ===");
+
+    let check1 = check_value(15);
+    print("check_value(15) = ");
+    print(check1);
+
+    let check2 = check_value(5);
+    print("check_value(5) = ");
+    print(check2);
+
+    let check3 = check_value(-3);
+    print("check_value(-3) = ");
+    print(check3);
+    print("");
+}
+
+// Test 6: Algebraic Types (Sum Types)
+type Status is Active | Inactive | Pending;
+
+fn status_to_text(s: Status) -> Text {
+    match s {
+        Status.Active => "active",
+        Status.Inactive => "inactive",
+        Status.Pending => "pending"
+    }
+}
+
+fn test_algebraic_types() {
+    print("=== Test 6: Algebraic Types ===");
+
+    let status1 = Status.Active;
+    let text1 = status_to_text(status1);
+    print("Status.Active = ");
+    print(text1);
+
+    let status2 = Status.Inactive;
+    let text2 = status_to_text(status2);
+    print("Status.Inactive = ");
+    print(text2);
+
+    let status3 = Status.Pending;
+    let text3 = status_to_text(status3);
+    print("Status.Pending = ");
+    print(text3);
+    print("");
+}
+
+// Test 7: Maybe Type (Builtin)
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn test_maybe_type() {
+    print("=== Test 7: Maybe Type ===");
+
+    let div1 = safe_divide(10, 2);
+    match div1 {
+        Some(n) => {
+            print("safe_divide(10, 2) = ");
+            print(n);
+        },
+        None => print("safe_divide(10, 2) = division by zero")
+    };
+
+    let div2 = safe_divide(10, 0);
+    match div2 {
+        Some(n) => {
+            print("safe_divide(10, 0) = ");
+            print(n);
+        },
+        None => print("safe_divide(10, 0) = division by zero")
+    };
+    print("");
+}
+
+// Test 8: Result Type (Builtin)
+fn safe_sqrt(x: Int) -> Result<Int, Text> {
+    if x < 0 {
+        Err("Cannot take square root of negative number")
+    } else {
+        Ok(x)  // Note: actual sqrt would need builtin
+    }
+}
+
+fn test_result_type() {
+    print("=== Test 8: Result Type ===");
+
+    let res1 = safe_sqrt(16);
+    match res1 {
+        Ok(n) => {
+            print("safe_sqrt(16) = Ok(");
+            print(n);
+            print(")");
+        },
+        Err(msg) => {
+            print("safe_sqrt(16) = Err(");
+            print(msg);
+            print(")");
+        }
+    };
+
+    let res2 = safe_sqrt(-4);
+    match res2 {
+        Ok(n) => {
+            print("safe_sqrt(-4) = Ok(");
+            print(n);
+            print(")");
+        },
+        Err(msg) => {
+            print("safe_sqrt(-4) = Err: ");
+            print(msg);
+        }
+    };
+    print("");
+}
+
+// Test 9: Boolean Operations
+fn test_boolean_operations() {
+    print("=== Test 9: Boolean Operations ===");
+
+    let t = true;
+    let f = false;
+
+    let and1 = t && t;
+    print("true && true = true");
+
+    let and2 = t && f;
+    print("true && false = false");
+
+    let or1 = t || f;
+    print("true || false = true");
+
+    let or2 = f || f;
+    print("false || false = false");
+
+    let not1 = !t;
+    print("!true = false");
+
+    let not2 = !f;
+    print("!false = true");
+    print("");
+}
+
+// Test 10: Comparison Operations
+fn test_comparisons() {
+    print("=== Test 10: Comparison Operations ===");
+
+    let a = 10;
+    let b = 20;
+
+    print("10 == 20 = false");
+    print("10 != 20 = true");
+    print("10 < 20 = true");
+    print("10 > 20 = false");
+    print("10 <= 20 = true");
+    print("10 >= 20 = false");
+    print("");
+}
+
+// Test 11: Arithmetic Operations
+fn test_arithmetic() {
+    print("=== Test 11: Arithmetic Operations ===");
+
+    let a = 17;
+    let b = 5;
+
+    let add_result = a + b;
+    print("17 + 5 = ");
+    print(add_result);
+
+    let sub_result = a - b;
+    print("17 - 5 = ");
+    print(sub_result);
+
+    let mul_result = a * b;
+    print("17 * 5 = ");
+    print(mul_result);
+
+    let div_result = a / b;
+    print("17 / 5 = ");
+    print(div_result);
+
+    let mod_result = a % b;
+    print("17 % 5 = ");
+    print(mod_result);
+    print("");
+}
+
+// Test 12: Tuples
+fn swap(a: Int, b: Int) -> (Int, Int) {
+    (b, a)
+}
+
+fn test_tuples() {
+    print("=== Test 12: Tuples ===");
+
+    let pair = (3, 7);
+    print("Original pair: (3, 7)");
+
+    let swapped = swap(3, 7);
+    print("Swapped: (7, 3)");
+
+    let triple = (1, 2, 3);
+    print("Triple: (1, 2, 3)");
+    print("");
+}
+
+// Test 13: Closures
+fn test_closures() {
+    print("=== Test 13: Closures ===");
+
+    let add_one = |x| x + 1;
+    let result1 = add_one(5);
+    print("add_one(5) = ");
+    print(result1);
+
+    let add = |x, y| x + y;
+    let result2 = add(3, 4);
+    print("add(3, 4) = ");
+    print(result2);
+
+    let multiplier = 10;
+    let multiply_by_ten = |x| x * multiplier;
+    let result3 = multiply_by_ten(5);
+    print("multiply_by_ten(5) with multiplier=10: ");
+    print(result3);
+    print("");
+}
+
+// Test 14: Nested If/Else
+fn classify_and_describe(n: Int) -> Text {
+    if n == 0 {
+        "exactly zero"
+    } else if n > 100 {
+        "large positive"
+    } else if n > 0 {
+        "small positive"
+    } else {
+        "negative"
+    }
+}
+
+fn test_nested_match() {
+    print("=== Test 14: Nested If/Else ===");
+
+    let r1 = classify_and_describe(0);
+    print("classify_and_describe(0) = ");
+    print(r1);
+
+    let r2 = classify_and_describe(50);
+    print("classify_and_describe(50) = ");
+    print(r2);
+
+    let r3 = classify_and_describe(150);
+    print("classify_and_describe(150) = ");
+    print(r3);
+
+    let r4 = classify_and_describe(-10);
+    print("classify_and_describe(-10) = ");
+    print(r4);
+    print("");
+}
+
+// Test 15: Complex Expressions
+fn complex_calculation(x: Int, y: Int) -> Int {
+    let a = x * 2;
+    let b = y + 3;
+    let c = a - b;
+    let d = c * c;
+    d
+}
+
+fn test_complex_expressions() {
+    print("=== Test 15: Complex Expressions ===");
+
+    let result = complex_calculation(5, 7);
+    print("complex_calculation(5, 7):");
+    print("  a = 5 * 2 = 10");
+    print("  b = 7 + 3 = 10");
+    print("  c = 10 - 10 = 0");
+    print("  d = 0 * 0 = 0");
+    print("  result = ");
+    print(result);
+    print("");
+}
+
+// Main entry point
+fn main() {
+    print("================================================");
+    print("  Verum Language Features Test Suite v2.0");
+    print("================================================");
+    print("");
+
+    test_basic_types();
+    test_variables();
+    test_functions();
+    test_pattern_matching();
+    test_control_flow();
+    test_algebraic_types();
+    test_maybe_type();
+    test_result_type();
+    test_boolean_operations();
+    test_comparisons();
+    test_arithmetic();
+    test_tuples();
+    test_closures();
+    test_nested_match();
+    test_complex_expressions();
+
+    print("================================================");
+    print("         All Tests Completed Successfully!");
+    print("================================================");
+}

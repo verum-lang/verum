@@ -1,0 +1,410 @@
+// PostgreSQL Implementation of TokenRepository
+//
+// Provides concrete PostgreSQL implementation for API token persistence.
+// Uses Database context for all operations.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount core.collections.Map;
+
+mount super.super.super.domain.user.ApiToken;
+mount super.super.super.domain.errors.RegistryError;
+mount super.super.super.domain.refinements.{EntityId, TokenValue, QueryOffset, QueryLimit};
+mount super.super.super.domain.repositories.TokenRepository;
+mount super.super.super.contexts.database.{Database, DatabaseError};
+
+pub type PostgresTokenRepository is {};
+
+implement PostgresTokenRepository {
+    pub fn new() -> PostgresTokenRepository {
+        PostgresTokenRepository {}
+    }
+}
+
+implement TokenRepository for PostgresTokenRepository {
+    async fn get_by_id(id: EntityId) -> Result<Maybe<ApiToken>, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM api_tokens WHERE id = $1",
+            sql_params_1(id.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => row_to_token(r).map(Maybe.Some),
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn get_by_value(token_value: TokenValue) -> Result<Maybe<ApiToken>, RegistryError>
+        using [Database]
+    {
+        // Note: In production, hash token_value before querying
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM api_tokens WHERE token = $1",
+            sql_params_1(token_value.clone())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => row_to_token(r).map(Maybe.Some),
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn save(token: ApiToken) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let scopes_str = scopes_to_string(&token.scopes);
+        let active_str = if token.is_active { "true" } else { "false" };
+
+        Database.execute_with(
+            "INSERT INTO api_tokens (id, name, token, created_at, expires_at, last_used_at, is_active, scopes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                expires_at = EXCLUDED.expires_at,
+                last_used_at = EXCLUDED.last_used_at,
+                is_active = EXCLUDED.is_active,
+                scopes = EXCLUDED.scopes",
+            sql_params_8(
+                token.id.to_string(),
+                token.name.clone(),
+                token.token.clone(),
+                token.created_at.to_string(),
+                token.expires_at.to_string(),
+                token.last_used_at.to_string(),
+                active_str,
+                scopes_str
+            )
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn delete(id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "DELETE FROM api_tokens WHERE id = $1",
+            sql_params_1(id.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn exists(id: EntityId) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM api_tokens WHERE id = $1",
+            sql_params_1(id.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn get_by_user(user_id: EntityId) -> Result<List<ApiToken>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC",
+            sql_params_1(user_id.to_string())
+        ).await;
+
+        rows_to_tokens(rows)
+    }
+
+    async fn count_by_user(user_id: EntityId) -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one_with(
+            "SELECT COUNT(*) as count FROM api_tokens WHERE user_id = $1",
+            sql_params_1(user_id.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(r) => Result.Ok(get_count(&r)),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn update_last_used(token_id: EntityId, timestamp: Int) -> Result<(), RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "UPDATE api_tokens SET last_used_at = $1 WHERE id = $2",
+            sql_params_2(timestamp.to_string(), token_id.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn deactivate(token_id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "UPDATE api_tokens SET is_active = false WHERE id = $1",
+            sql_params_1(token_id.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn activate(token_id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "UPDATE api_tokens SET is_active = true WHERE id = $1",
+            sql_params_1(token_id.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn delete_all_for_user(user_id: EntityId) -> Result<Int, RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "DELETE FROM api_tokens WHERE user_id = $1",
+            sql_params_1(user_id.to_string())
+        ).await.map_err(db_to_registry)
+    }
+
+    async fn get_expired(current_time: Int) -> Result<List<ApiToken>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM api_tokens WHERE expires_at > 0 AND expires_at < $1",
+            sql_params_1(current_time.to_string())
+        ).await;
+
+        rows_to_tokens(rows)
+    }
+
+    async fn delete_expired(current_time: Int) -> Result<Int, RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "DELETE FROM api_tokens WHERE expires_at > 0 AND expires_at < $1",
+            sql_params_1(current_time.to_string())
+        ).await.map_err(db_to_registry)
+    }
+
+    async fn get_inactive(days_inactive: Int) -> Result<List<ApiToken>, RegistryError>
+        using [Database]
+    {
+        let cutoff = days_inactive * 86400; // days to seconds
+        let rows = Database.query_with(
+            "SELECT * FROM api_tokens WHERE EXTRACT(EPOCH FROM NOW()) - last_used_at > $1",
+            sql_params_1(cutoff.to_string())
+        ).await;
+
+        rows_to_tokens(rows)
+    }
+
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<ApiToken>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM api_tokens ORDER BY created_at DESC LIMIT $2 OFFSET $1",
+            sql_params_2(offset.to_string(), limit.to_string())
+        ).await;
+
+        rows_to_tokens(rows)
+    }
+
+    async fn count() -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one("SELECT COUNT(*) as count FROM api_tokens").await;
+
+        match row {
+            Result.Ok(r) => Result.Ok(get_count(&r)),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn count_active(current_time: Int) -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one_with(
+            "SELECT COUNT(*) as count FROM api_tokens
+             WHERE is_active = true AND (expires_at = 0 OR expires_at > $1)",
+            sql_params_1(current_time.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(r) => Result.Ok(get_count(&r)),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn update_scopes(token_id: EntityId, new_scopes: List<Text>) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let scopes_str = scopes_to_string(&new_scopes);
+        Database.execute_with(
+            "UPDATE api_tokens SET scopes = $1 WHERE id = $2",
+            sql_params_2(scopes_str, token_id.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn next_id() -> Result<EntityId, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one(
+            "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM api_tokens"
+        ).await;
+
+        match row {
+            Result.Ok(r) => {
+                match r.get("next_id") {
+                    Maybe.Some(id) => Result.Ok(parse_int(id)),
+                    Maybe.None => Result.Ok(1),
+                }
+            },
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+}
+
+// Helper functions
+fn row_to_token(row: Map<Text, Text>) -> Result<ApiToken, RegistryError> {
+    let id = get_int(&row, "id")?;
+    let name = get_text(&row, "name")?;
+    let token = get_text(&row, "token")?;
+    let created_at = get_int(&row, "created_at")?;
+    let expires_at = get_int(&row, "expires_at")?;
+    let last_used_at = get_int(&row, "last_used_at")?;
+    let is_active = get_bool(&row, "is_active")?;
+    let scopes_str = get_text(&row, "scopes")?;
+    let scopes = parse_scopes(scopes_str);
+
+    Result.Ok(ApiToken {
+        id: id,
+        name: name,
+        token: token,
+        created_at: created_at,
+        expires_at: expires_at,
+        last_used_at: last_used_at,
+        is_active: is_active,
+        scopes: scopes,
+    })
+}
+
+fn rows_to_tokens(result: Result<List<Map<Text, Text>>, DatabaseError>) -> Result<List<ApiToken>, RegistryError> {
+    match result {
+        Result.Ok(rows) => {
+            let mut tokens = List.new();
+            for row in rows {
+                match row_to_token(row) {
+                    Result.Ok(t) => tokens.push(t),
+                    Result.Err(e) => return Result.Err(e),
+                }
+            }
+            Result.Ok(tokens)
+        },
+        Result.Err(e) => Result.Err(db_to_registry(e)),
+    }
+}
+
+fn scopes_to_string(scopes: &List<Text>) -> Text {
+    let mut result = "";
+    let mut first = true;
+    for scope in scopes.clone() {
+        if !first { result = result + ","; }
+        result = result + scope;
+        first = false;
+    }
+    result
+}
+
+fn parse_scopes(s: Text) -> List<Text> {
+    if s.len() == 0 { return List.new(); }
+    s.split(",").map(|x| x.trim()).collect()
+}
+
+fn db_to_registry(e: DatabaseError) -> RegistryError {
+    match e {
+        DatabaseError.NotFound => RegistryError.database_error("Not found"),
+        DatabaseError.ConnectionFailed(m) => RegistryError.database_error(f"Connection: {m}"),
+        DatabaseError.QueryFailed(m) => RegistryError.database_error(f"Query: {m}"),
+        DatabaseError.DuplicateKey(m) => RegistryError.database_error(f"Duplicate: {m}"),
+        DatabaseError.TransactionFailed(m) => RegistryError.database_error(f"Transaction: {m}"),
+    }
+}
+
+fn get_int(row: &Map<Text, Text>, key: Text) -> Result<Int, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => Result.Ok(parse_int(v)),
+        Maybe.None => Result.Err(RegistryError.database_error(f"Missing field: {key}")),
+    }
+}
+
+fn get_text(row: &Map<Text, Text>, key: Text) -> Result<Text, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => Result.Ok(v.clone()),
+        Maybe.None => Result.Err(RegistryError.database_error(f"Missing field: {key}")),
+    }
+}
+
+fn get_bool(row: &Map<Text, Text>, key: Text) -> Result<Bool, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => Result.Ok(v == "true" || v == "1" || v == "t"),
+        Maybe.None => Result.Err(RegistryError.database_error(f"Missing field: {key}")),
+    }
+}
+
+fn get_count(row: &Map<Text, Text>) -> Int {
+    match row.get("count") {
+        Maybe.Some(c) => parse_int(c),
+        Maybe.None => 0,
+    }
+}
+
+fn parse_int(s: &Text) -> Int {
+    let mut result = 0;
+    let mut is_neg = false;
+    let mut started = false;
+
+    for ch in s.chars() {
+        let cs = ch.to_string();
+        if cs == "-" && !started {
+            is_neg = true;
+            started = true;
+        } else if cs >= "0" && cs <= "9" {
+            started = true;
+            let digit = match cs {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_neg { -result } else { result }
+}
+
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p
+}
+
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p.push(p2);
+    p
+}
+
+fn sql_params_8(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text, p6: Text, p7: Text, p8: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p.push(p2);
+    p.push(p3);
+    p.push(p4);
+    p.push(p5);
+    p.push(p6);
+    p.push(p7);
+    p.push(p8);
+    p
+}

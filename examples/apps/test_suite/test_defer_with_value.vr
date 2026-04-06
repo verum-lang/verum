@@ -1,0 +1,8 @@
+// Test: Defer with captured value
+// Tests if defer can capture and use variables
+
+fn main() {
+    let x = 42;
+    defer print(x);
+    print("Before defer");
+}

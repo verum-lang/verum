@@ -1,0 +1,64 @@
+// Test context system - dependency injection
+// Tests using keyword, provide statement, and context requirements
+
+// Define a simple context interface
+context Logger {
+    fn log(message: Text)
+    fn debug(message: Text)
+}
+
+context Config {
+    fn get(key: Text) -> Text
+}
+
+// Function using a single context
+fn log_message(msg: Text) using [Logger] {
+    Logger.log(f"Message: {msg}")
+}
+
+// Function using multiple contexts
+fn configure_and_log(key: Text) using [Logger, Config] {
+    let value = Config.get(key)
+    Logger.log(f"Config {key} = {value}")
+}
+
+// Function calling other functions with contexts
+fn process_data(data: Text) using [Logger] {
+    Logger.debug(f"Processing: {data}")
+    log_message(data)
+    Logger.debug("Processing complete")
+}
+
+// Nested context usage
+fn complex_operation(id: Int) using [Logger, Config] {
+    Logger.log(f"Starting operation {id}")
+
+    let setting = Config.get("max_retries")
+    Logger.debug(f"Max retries: {setting}")
+
+    configure_and_log("timeout")
+
+    Logger.log("Operation complete")
+}
+
+fn main() {
+    print("=== Context System Tests ===")
+
+    print("\nTest 1: Context declaration")
+    print("Functions with 'using [Context]' declared")
+
+    print("\nTest 2: Single context requirement")
+    print("log_message requires [Logger]")
+
+    print("\nTest 3: Multiple context requirements")
+    print("configure_and_log requires [Logger, Config]")
+
+    print("\nTest 4: Nested context usage")
+    print("complex_operation uses multiple contexts")
+
+    print("\nNote: Actual context provision requires runtime support")
+    print("Syntax: provide ContextName = implementation")
+    print("Example: provide Logger = console_logger()")
+
+    print("\nContext tests complete (syntax verified)")
+}

@@ -1,0 +1,13 @@
+// Test 6: Complex refinement expressions
+type EvenPositive is Int where it > 0 && it % 2 == 0;
+type BoundedText is Text where len(it) >= 5 && len(it) <= 20;
+
+fn process(num: EvenPositive, text: BoundedText) -> Text {
+    f"Number: {num}, Text: {text}"
+}
+
+fn main() {
+    let n: EvenPositive = 42;
+    let t: BoundedText = "hello world";
+    let _ = println(process(n, t));
+}

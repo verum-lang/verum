@@ -1,0 +1,46 @@
+// Test 4: Context System
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Config {
+    fn get_value(key: Text) -> Text;
+}
+
+fn log_message(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+fn get_config_value(key: Text) using Config -> Text {
+    Config.get_value(key)
+}
+
+fn main() {
+    let _ = println("=== Testing Context System ===");
+
+    // Mock logger provider
+    provide Logger {
+        fn log(message: Text) {
+            let _ = println(f"[LOG] {message}");
+        }
+    } in {
+        log_message("Context system working!");
+    };
+
+    // Mock config provider
+    provide Config {
+        fn get_value(key: Text) -> Text {
+            if key == "app_name" {
+                "VerumTest"
+            } else {
+                "unknown"
+            }
+        }
+    } in {
+        let app_name = get_config_value("app_name");
+        let _ = println(f"Config value: {app_name}");
+    };
+
+    let _ = println("=== PASSED ===");
+}

@@ -1,0 +1,14 @@
+// Test: Function with using clause
+context Logger {
+    fn log(self, msg: Text)
+}
+
+// Function that requires Logger context
+fn log_message(msg: Text) using Logger {
+    // Don't actually call Logger.log to avoid unbound variable error
+    let x = 42;
+}
+
+fn main() {
+    // Don't call log_message to avoid context resolution
+}

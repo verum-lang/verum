@@ -1,0 +1,11 @@
+// Minimal test case for early return bug fix
+
+fn test(n: Int) -> Bool {
+    if n < 2 { return false; }
+    true
+}
+
+fn main() {
+    let result = test(1);
+    print("Done");
+}

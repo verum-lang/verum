@@ -1,0 +1,7 @@
+// Test: Simple defer statement
+
+fn main() {
+    println("Before defer");
+    defer println("This is deferred");
+    println("After defer");
+}

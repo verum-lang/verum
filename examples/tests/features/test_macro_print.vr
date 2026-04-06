@@ -1,0 +1,14 @@
+// Test print! macro specifically
+
+fn main() {
+    // Test that print! doesn't add newline
+    print!("A");
+    print!("B");
+    print!("C");
+    println!("D");
+
+    // Verify with another test
+    print!("Start");
+    print!("Middle");
+    println!("End");
+}

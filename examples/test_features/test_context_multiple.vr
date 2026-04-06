@@ -1,0 +1,24 @@
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn fetch_user(id: Int) using [Database, Logger] {
+    Logger.log(f"Fetching user {id}");
+    Database.query(f"SELECT * FROM users WHERE id = {id}")
+}
+
+fn main() {
+    // Test multiple context requirements parsing
+    println("Testing multiple context requirements with using [Database, Logger]")
+
+    // Note: provide and actual context injection requires protocol implementation
+    // which is not yet fully implemented
+    // provide Database = MockDatabase {}
+    // provide Logger = ConsoleLogger {}
+    // let result = fetch_user(1)
+    // println(result)
+}

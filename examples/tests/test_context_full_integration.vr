@@ -1,0 +1,25 @@
+// Test: Full context integration (may have issues)
+context Logger {
+    fn log(self, msg: Text)
+    fn debug(self, msg: Text)
+}
+
+type ConsoleLogger is {
+    prefix: Text,
+    level: Int
+};
+
+fn log_info(msg: Text) using Logger {
+    // This will fail: context method calls not yet implemented
+    // Logger.log(msg);
+    let x = 42;
+}
+
+fn main() {
+    provide Logger = ConsoleLogger {
+        prefix: "[INFO]",
+        level: 1
+    };
+
+    log_info("Hello from context");
+}

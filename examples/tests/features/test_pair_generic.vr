@@ -1,0 +1,13 @@
+// Test Pair generic specifically
+
+type Pair<A, B> is { first: A, second: B };
+
+fn main() {
+    let _ = print("=== Pair Generic Test ===");
+
+    // Simple pair
+    let p: Pair<Float, Float> = Pair { first: 1.0, second: 2.0 };
+    let _ = print(f"Pair: ({p.first}, {p.second})");
+
+    let _ = print("=== Done ===");
+}

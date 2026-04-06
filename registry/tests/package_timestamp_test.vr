@@ -1,0 +1,31 @@
+// Test to verify that timestamp fixes work correctly
+mount super.domain.package.{Package, PackageVersion};
+mount super.domain.version.SemVer;
+mount core.time.unix_timestamp;
+
+// Test that add_version sets updated_at to current timestamp
+pub fn test_add_version_updates_timestamp() {
+    let package = Package.new("test-package", "test-owner");
+    let initial_updated_at = package.updated_at;
+
+    // Wait a bit to ensure timestamp changes
+    // (In real code, this would be a sleep, but we'll just check it's not 0)
+    let version = SemVer.new(1, 0, 0);
+    let updated_package = package.add_version(version);
+
+    // The updated_at should NOT be 0 (the bug we fixed)
+    // and should be a valid Unix timestamp
+    assert updated_package.updated_at != 0;
+    assert updated_package.updated_at > 0;
+}
+
+// Test that PackageVersion.new sets published_at to current timestamp
+pub fn test_package_version_sets_published_at() {
+    let version = SemVer.new(1, 0, 0);
+    let pkg_version = PackageVersion.new("test-package", version, "test-user");
+
+    // The published_at should NOT be 0 (the bug we fixed)
+    // and should be a valid Unix timestamp
+    assert pkg_version.published_at != 0;
+    assert pkg_version.published_at > 0;
+}

@@ -1,0 +1,17 @@
+// Test: Simple field access through managed reference
+
+struct Point {
+    x: Int,
+    y: Int
+}
+
+fn get_x(p: &Point) -> Int {
+    p.x
+}
+
+fn main() -> Int {
+    let point = Point { x: 10, y: 20 };
+    let result = get_x(&point);
+    println(f"X: {result}");
+    result
+}

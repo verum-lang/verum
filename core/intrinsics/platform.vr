@@ -1,0 +1,73 @@
+// =============================================================================
+// core/intrinsics/platform.vr - Platform Detection Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides platform detection intrinsics evaluated at compile time.
+// All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Build mode: is_debug, is_release
+// - Target info: target_os, target_arch, target_pointer_width
+// - Target features: target_is_little_endian, target_has_atomic, target_has_feature
+// - CPU timing: rdtsc, rdtscp, spin_hint
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.platform;
+
+// =============================================================================
+// SECTION 1: Build Mode
+// =============================================================================
+
+/// Check if compiling in debug mode
+public meta fn is_debug() -> Bool { @intrinsic("is_debug") }
+
+/// Check if compiling in release mode
+public meta fn is_release() -> Bool { @intrinsic("is_release") }
+
+// =============================================================================
+// SECTION 2: Target Information
+// =============================================================================
+
+/// Target operating system (compile-time constant)
+/// Returns: 0=unknown, 1=linux, 2=macos, 3=windows, 4=wasm, 5=freebsd
+public meta fn target_os() -> UInt8 { @intrinsic("target_os") }
+
+/// Target architecture (compile-time constant)
+/// Returns: 0=unknown, 1=x86_64, 2=aarch64, 3=riscv64, 4=wasm32, 5=arm
+public meta fn target_arch() -> UInt8 { @intrinsic("target_arch") }
+
+/// Target pointer width in bits (32 or 64)
+public meta fn target_pointer_width() -> UInt32 { @intrinsic("target_pointer_width") }
+
+/// Target endianness (true = little endian)
+public meta fn target_is_little_endian() -> Bool { @intrinsic("target_is_little_endian") }
+
+// =============================================================================
+// SECTION 3: Target Features
+// =============================================================================
+
+/// Check if target has atomic operations for given size
+public meta fn target_has_atomic<T>() -> Bool { @intrinsic("target_has_atomic", T) }
+
+/// Check if target supports specific CPU feature
+public meta fn target_has_feature(feature: Text) -> Bool { @intrinsic("target_has_feature", feature) }
+
+// =============================================================================
+// SECTION 4: CPU Timing
+// =============================================================================
+
+/// Read CPU timestamp counter (x86 RDTSC)
+/// Note: Not monotonic across cores, use for micro-benchmarking only.
+public fn rdtsc() -> UInt64 { @intrinsic("rdtsc") }
+
+/// Read CPU timestamp counter with processor ID (x86 RDTSCP)
+/// Returns (timestamp, processor_id)
+public fn rdtscp() -> (UInt64, UInt32) { @intrinsic("rdtscp") }
+
+/// CPU spin hint for busy-wait loops (PAUSE on x86, YIELD on ARM)
+public fn spin_hint() { @intrinsic("spin_hint") }

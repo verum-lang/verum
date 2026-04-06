@@ -1,0 +1,10 @@
+// Test sigma types
+type PositiveInt = x: Int where x > 0;
+
+fn make_positive() -> PositiveInt {
+    42
+}
+
+fn main() -> Int {
+    make_positive()
+}

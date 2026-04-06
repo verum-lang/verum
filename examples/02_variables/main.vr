@@ -1,0 +1,45 @@
+// 02 — Variables
+// Demonstrates let bindings, mutability, type annotations, and basic types.
+
+fn main() {
+    // --- Immutable bindings (default) ---
+    let x = 42              // Int (inferred)
+    let pi = 3.14159        // Float (inferred)
+    let greeting = "hello"  // Text (inferred)
+    let active = true       // Bool (inferred)
+
+    print(f"x = {x}, pi = {pi}, greeting = {greeting}, active = {active}")
+
+    // --- Explicit type annotations ---
+    let count: Int = 10
+    let ratio: Float = 0.75
+    let name: Text = "Verum"
+    let flag: Bool = false
+
+    print(f"count = {count}, ratio = {ratio}, name = {name}, flag = {flag}")
+
+    // --- Mutable bindings ---
+    let mut counter = 0
+    print(f"counter starts at {counter}")
+
+    counter = counter + 1
+    print(f"counter after increment: {counter}")
+
+    counter = counter + 9
+    print(f"counter after adding 9: {counter}")
+
+    // --- Shadowing ---
+    // A new `let` in the same scope creates a fresh binding.
+    let value = 5
+    let value = value * 2   // shadows the previous `value`
+    print(f"shadowed value = {value}")
+
+    // --- Tuples ---
+    let pair = (1, "one")
+    print(f"pair = {pair}")
+
+    // --- Constants (expression-bodied) ---
+    // `let` bindings are the standard way to name values.
+    let max_retries = 3
+    print(f"max_retries = {max_retries}")
+}

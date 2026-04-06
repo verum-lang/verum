@@ -1,0 +1,240 @@
+# VCS Test Execution Action
+#
+# Wrapper for running VCS tests with standardized configuration.
+# Handles test execution, result formatting, and artifact management.
+#
+# Usage:
+#   - uses: ./.github/actions/run-vtest
+#     with:
+#       level: L0
+#       parallel: 8
+#       format: junit
+
+name: 'Run VCS Tests'
+description: 'Executes VCS tests with standardized configuration'
+
+inputs:
+  level:
+    description: 'Test level to run (L0, L1, L2, L3, L4, or all)'
+    required: true
+    default: 'all'
+  parallel:
+    description: 'Number of parallel test jobs'
+    required: false
+    default: '8'
+  timeout:
+    description: 'Per-test timeout in milliseconds'
+    required: false
+    default: '30000'
+  format:
+    description: 'Output format (junit, json, tap, text)'
+    required: false
+    default: 'json'
+  config:
+    description: 'Path to VCS config file'
+    required: false
+    default: 'vcs/config/vcs.toml'
+  filter:
+    description: 'Test name filter pattern'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: 'vcs'
+  vtest-path:
+    description: 'Path to vtest binary'
+    required: false
+    default: 'vcs/runner/vtest/target/release/vtest'
+  fail-on-error:
+    description: 'Fail the action if tests fail'
+    required: false
+    default: 'true'
+  continue-on-flaky:
+    description: 'Retry flaky tests before failing'
+    required: false
+    default: 'true'
+  retry-count:
+    description: 'Number of retries for flaky tests'
+    required: false
+    default: '2'
+  artifact-name:
+    description: 'Name for the result artifact'
+    required: false
+    default: ''
+
+outputs:
+  total:
+    description: 'Total number of tests'
+    value: ${{ steps.run.outputs.total }}
+  passed:
+    description: 'Number of passed tests'
+    value: ${{ steps.run.outputs.passed }}
+  failed:
+    description: 'Number of failed tests'
+    value: ${{ steps.run.outputs.failed }}
+  skipped:
+    description: 'Number of skipped tests'
+    value: ${{ steps.run.outputs.skipped }}
+  pass-rate:
+    description: 'Pass rate percentage'
+    value: ${{ steps.run.outputs.pass_rate }}
+  duration:
+    description: 'Total test duration in seconds'
+    value: ${{ steps.run.outputs.duration }}
+  result-file:
+    description: 'Path to the result file'
+    value: ${{ steps.run.outputs.result_file }}
+  status:
+    description: 'Test status (passed, failed, error)'
+    value: ${{ steps.run.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare test environment
+      id: prepare
+      shell: bash
+      run: |
+        WD="${{ inputs.working-directory }}"
+        mkdir -p "$WD/reports"
+
+        # Generate unique result file name
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        LEVEL="${{ inputs.level }}"
+        RESULT_FILE="$WD/reports/vtest-${LEVEL}-${TIMESTAMP}"
+
+        echo "result_base=$RESULT_FILE" >> $GITHUB_OUTPUT
+        echo "reports_dir=$WD/reports" >> $GITHUB_OUTPUT
+
+    - name: Run VCS tests
+      id: run
+      shell: bash
+      run: |
+        WD="${{ inputs.working-directory }}"
+        VTEST="${{ inputs.vtest-path }}"
+        RESULT_BASE="${{ steps.prepare.outputs.result_base }}"
+        FORMAT="${{ inputs.format }}"
+        LEVEL="${{ inputs.level }}"
+
+        # Determine file extension
+        case "$FORMAT" in
+          junit) EXT="xml" ;;
+          json) EXT="json" ;;
+          tap) EXT="tap" ;;
+          *) EXT="txt" ;;
+        esac
+
+        RESULT_FILE="${RESULT_BASE}.${EXT}"
+        echo "result_file=$RESULT_FILE" >> $GITHUB_OUTPUT
+
+        # Build command
+        CMD="$VTEST run --level $LEVEL --parallel ${{ inputs.parallel }}"
+        CMD="$CMD --timeout ${{ inputs.timeout }}"
+        CMD="$CMD --format $FORMAT --output $RESULT_FILE"
+        CMD="$CMD --config ${{ inputs.config }}"
+
+        # Add filter if specified
+        if [ -n "${{ inputs.filter }}" ]; then
+          CMD="$CMD --filter '${{ inputs.filter }}'"
+        fi
+
+        # Add retry for flaky tests
+        if [ "${{ inputs.continue-on-flaky }}" == "true" ]; then
+          CMD="$CMD --retry ${{ inputs.retry-count }}"
+        fi
+
+        # Run tests and capture exit code
+        echo "Running: $CMD"
+        START_TIME=$(date +%s)
+
+        cd "$WD"
+        set +e
+        eval "${CMD#$WD/}" 2>&1 | tee reports/vtest-${LEVEL}.log
+        EXIT_CODE=$?
+        set -e
+
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
+        # Parse results
+        if [ -f "$RESULT_FILE" ]; then
+          case "$FORMAT" in
+            json)
+              TOTAL=$(jq -r '.summary.total // 0' "$RESULT_FILE")
+              PASSED=$(jq -r '.summary.passed // 0' "$RESULT_FILE")
+              FAILED=$(jq -r '.summary.failed // 0' "$RESULT_FILE")
+              SKIPPED=$(jq -r '.summary.skipped // 0' "$RESULT_FILE")
+              PASS_RATE=$(jq -r '.summary.pass_percentage // 0' "$RESULT_FILE")
+              ;;
+            junit)
+              TOTAL=$(grep -oP 'tests="\K[0-9]+' "$RESULT_FILE" | head -1 || echo "0")
+              FAILED=$(grep -oP 'failures="\K[0-9]+' "$RESULT_FILE" | head -1 || echo "0")
+              SKIPPED=$(grep -oP 'skipped="\K[0-9]+' "$RESULT_FILE" | head -1 || echo "0")
+              PASSED=$((TOTAL - FAILED - SKIPPED))
+              if [ "$TOTAL" -gt 0 ]; then
+                PASS_RATE=$(echo "scale=2; $PASSED * 100 / $TOTAL" | bc)
+              else
+                PASS_RATE=0
+              fi
+              ;;
+            *)
+              TOTAL=0
+              PASSED=0
+              FAILED=0
+              SKIPPED=0
+              PASS_RATE=0
+              ;;
+          esac
+
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
+          echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "total=0" >> $GITHUB_OUTPUT
+          echo "passed=0" >> $GITHUB_OUTPUT
+          echo "failed=0" >> $GITHUB_OUTPUT
+          echo "skipped=0" >> $GITHUB_OUTPUT
+          echo "pass_rate=0" >> $GITHUB_OUTPUT
+          echo "status=error" >> $GITHUB_OUTPUT
+        fi
+
+        # Handle exit
+        if [ "${{ inputs.fail-on-error }}" == "true" ] && [ $EXIT_CODE -ne 0 ]; then
+          echo "::error::VCS tests failed with exit code $EXIT_CODE"
+          exit $EXIT_CODE
+        fi
+
+    - name: Generate test summary
+      shell: bash
+      run: |
+        echo "## VCS Test Results: ${{ inputs.level }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Total | ${{ steps.run.outputs.total }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Passed | ${{ steps.run.outputs.passed }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Failed | ${{ steps.run.outputs.failed }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Skipped | ${{ steps.run.outputs.skipped }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Pass Rate | ${{ steps.run.outputs.pass_rate }}% |" >> $GITHUB_STEP_SUMMARY
+        echo "| Duration | ${{ steps.run.outputs.duration }}s |" >> $GITHUB_STEP_SUMMARY
+        echo "| Status | ${{ steps.run.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload test results
+      if: inputs.artifact-name != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ steps.prepare.outputs.reports_dir }}/*
+        retention-days: 30
+        if-no-files-found: ignore

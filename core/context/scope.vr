@@ -1,0 +1,170 @@
+// =============================================================================
+// context/scope.vr — DI Scope Types for Level 1 Static Injection
+// =============================================================================
+// Grammar: injection_scope = 'Scope' '.' ('Singleton' | 'Request' | 'Transient')
+// Spec: docs/detailed/16-context-system.md Section 1A
+// =============================================================================
+
+module scope;
+
+/// Dependency injection scope.
+///
+/// Controls the lifetime and sharing of @injectable instances.
+///
+/// # Scope Hierarchy
+///
+/// ```
+/// Singleton (longest lived)
+///     └── Request (per-request)
+///         └── Transient (per-injection)
+/// ```
+///
+/// # Rules
+///
+/// - Singleton can only depend on other Singletons
+/// - Request can depend on Singleton or Request
+/// - Transient can depend on any scope
+///
+/// Violating these rules is a compile-time error (E806).
+///
+/// # Examples
+///
+/// ```verum
+/// @injectable(Scope.Singleton)
+/// type DatabasePool is { ... };
+///
+/// @injectable(Scope.Request)
+/// type RequestLogger is { ... };
+///
+/// @injectable(Scope.Transient)
+/// type TemporaryBuffer is { ... };
+/// ```
+public type Scope is Singleton | Request | Transient;
+
+/// Singleton scope: one instance for the entire application lifetime.
+///
+/// - Initialized once at startup (or first access)
+/// - Shared across all requests and tasks
+/// - Thread-safe by default (immutable after init)
+/// - Cost: 0ns (direct field access after init)
+///
+/// Use for: database pools, configuration, caches, connection managers.
+
+/// Request scope: one instance per logical request.
+///
+/// - Created at request boundary
+/// - Shared within a single request handling chain
+/// - Automatically cleaned up when request completes
+/// - Cost: ~3ns (request-local lookup)
+///
+/// Use for: request loggers, transaction contexts, auth tokens.
+
+/// Transient scope: fresh instance for every injection point.
+///
+/// - New instance created each time `inject TypeName` is evaluated
+/// - No sharing between injection sites
+/// - Garbage collected normally
+/// - Cost: ~8ns (constructor call)
+///
+/// Use for: temporary buffers, one-shot processors, builder patterns.
+
+/// Check if a scope can depend on another scope.
+///
+/// Enforces the scope hierarchy: long-lived scopes cannot depend on
+/// short-lived scopes (would create dangling references).
+///
+/// Returns true if `self` can depend on `dependency`.
+///
+/// # Examples
+///
+/// ```verum
+/// assert(Scope.Singleton.can_depend_on(Scope.Singleton) == true);
+/// assert(Scope.Singleton.can_depend_on(Scope.Request) == false);
+/// assert(Scope.Request.can_depend_on(Scope.Singleton) == true);
+/// assert(Scope.Transient.can_depend_on(Scope.Request) == true);
+/// ```
+implement Scope {
+    fn can_depend_on(&self, dependency: Scope) -> Bool {
+        match self {
+            Singleton => match dependency {
+                Singleton => true,
+                _ => false,
+            },
+            Request => match dependency {
+                Singleton => true,
+                Request => true,
+                _ => false,
+            },
+            Transient => true,
+        }
+    }
+
+    fn name(&self) -> Text {
+        match self {
+            Singleton => "Singleton",
+            Request => "Request",
+            Transient => "Transient",
+        }
+    }
+
+    /// Returns the ordinal rank of the scope (higher = shorter lived).
+    /// Used internally for scope compatibility checks.
+    fn rank(&self) -> Int {
+        match self {
+            Singleton => 0,
+            Request => 1,
+            Transient => 2,
+        }
+    }
+}
+
+// =============================================================================
+// Context Scope — stack-based runtime context management
+// =============================================================================
+
+/// ContextScope tracks the depth of context nesting at runtime.
+///
+/// When `provide X = value { body }` is compiled:
+/// 1. A ContextScope is entered (depth incremented)
+/// 2. The context value is pushed with the current depth
+/// 3. The body executes
+/// 4. The scope exits, all contexts at this depth are popped
+///
+/// This ensures proper LIFO cleanup even when exceptions occur.
+///
+/// # Stack-Based Model
+///
+/// ```
+/// provide A = a1 {           // depth 1: push A
+///     provide B = b1 {       // depth 2: push B
+///         // A and B available
+///     }                      // depth 2: pop B
+///     // only A available
+/// }                          // depth 1: pop A
+/// ```
+public type ContextScope is {
+    depth: Int,
+    parent_depth: Int,
+};
+
+implement ContextScope {
+    /// Create a root context scope (depth 0).
+    public fn root() -> Self {
+        ContextScope { depth: 0, parent_depth: 0 }
+    }
+
+    /// Enter a nested scope, incrementing the depth.
+    public fn enter(&self) -> Self {
+        ContextScope { depth: self.depth + 1, parent_depth: self.depth }
+    }
+
+    /// Get the current scope depth.
+    public fn current_depth(&self) -> Int {
+        self.depth
+    }
+
+    /// Get the parent scope depth (for cleanup).
+    public fn parent(&self) -> Int {
+        self.parent_depth
+    }
+}

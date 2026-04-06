@@ -1,0 +1,93 @@
+// Test pattern matching features
+// Verifies all pattern types work correctly
+
+type Color is Red | Green | Blue | Custom(Float, Float, Float);
+type Maybe<T> is Some(T) | None;
+
+// Module-level functions for pattern matching tests
+fn describe_number(n: Float) -> Text {
+    match n {
+        0.0 => "zero",
+        1.0 => "one",
+        2.0 => "two",
+        _ => "many"
+    }
+}
+
+fn categorize(n: Float) -> Text {
+    match n {
+        x where x < 0.0 => "negative",
+        x where x == 0.0 => "zero",
+        x where x > 0.0 => "positive",
+        _ => "unknown"
+    }
+}
+
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red => true,
+        Green => true,
+        Blue => true,
+        _ => false
+    }
+}
+
+fn main() {
+    let _ = print("=== Pattern Matching Tests ===");
+
+    // Simple variant patterns
+    let color1: Color = Red;
+    let color2: Color = Custom(0.5, 0.5, 0.5);
+
+    match color1 {
+        Red => { let _ = print("Color is Red"); },
+        Green => { let _ = print("Color is Green"); },
+        Blue => { let _ = print("Color is Blue"); },
+        Custom(r, g, b) => { let _ = print(f"Custom({r}, {g}, {b})"); }
+    }
+
+    match color2 {
+        Red => { let _ = print("Color is Red"); },
+        Green => { let _ = print("Color is Green"); },
+        Blue => { let _ = print("Color is Blue"); },
+        Custom(r, g, b) => { let _ = print(f"Custom RGB: ({r}, {g}, {b})"); }
+    }
+
+    // Simple Maybe pattern
+    let simple: Maybe<Float> = Some(42.0);
+    match simple {
+        Some(v) => { let _ = print(f"Got value: {v}"); },
+        None => { let _ = print("Got None"); }
+    }
+
+    // Literal patterns
+    let _ = print(f"0 is {describe_number(0.0)}");
+    let _ = print(f"1 is {describe_number(1.0)}");
+    let _ = print(f"99 is {describe_number(99.0)}");
+
+    // Guards in patterns
+    let _ = print(f"-5 is {categorize(-5.0)}");
+    let _ = print(f"0 is {categorize(0.0)}");
+    let _ = print(f"10 is {categorize(10.0)}");
+
+    // Tuple patterns
+    let pair = (10.0, 20.0);
+    match pair {
+        (a, b) where a < b => { let _ = print(f"First ({a}) < Second ({b})"); },
+        (a, b) where a > b => { let _ = print(f"First ({a}) > Second ({b})"); },
+        (a, b) => { let _ = print(f"Equal: {a}"); }
+    }
+
+    // Wildcard and binding
+    let opt: Maybe<Float> = Some(100.0);
+    match opt {
+        Some(val) => { let _ = print(f"Got value: {val}"); },
+        _ => { let _ = print("No value"); }
+    }
+
+    // Multiple patterns test
+    let _ = print(f"Red is primary: {is_primary(Red)}");
+    let _ = print(f"Custom is primary: {is_primary(Custom(1.0, 1.0, 1.0))}");
+
+    let _ = print("=== Tests Complete ===");
+}

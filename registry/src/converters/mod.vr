@@ -1,0 +1,49 @@
+// Converters Module
+//
+// Functions for converting between domain types and DTOs.
+// This layer bridges the domain model with the API layer.
+//
+// Pattern:
+// - domain_to_dto: Domain → DTO (for responses)
+// - dto_to_domain: DTO → Domain (for requests, if needed)
+
+module package_converter;
+module user_converter;
+module search_converter;
+
+// Re-export package converters
+pub import .package_converter.{
+    // Domain → DTO
+    package_to_dto,
+    package_to_summary_dto,
+    package_version_to_dto,
+    dependency_to_dto,
+    packages_to_summary_dtos,
+    // DTO → Domain
+    publish_request_to_version,
+    dependencies_from_dtos,
+    dependency_from_dto,
+};
+
+// Re-export user converters
+pub import .user_converter.{
+    // Domain → DTO
+    user_to_dto,
+    user_to_profile_dto,
+    token_to_dto,
+    auth_user_to_profile_dto,
+    tokens_to_dtos,
+    // DTO → Domain
+    register_request_to_user,
+};
+
+// Re-export search converters
+pub import .search_converter.{
+    // Domain → DTO
+    search_result_to_dto,
+    search_hits_to_dtos,
+    SearchHit,
+    // DTO → Domain
+    search_request_to_query,
+    SearchQuery,
+};

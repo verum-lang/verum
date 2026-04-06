@@ -1,0 +1,26 @@
+// Test context injection at runtime
+
+context Config {
+    fn get_value(key: Text) -> Text;
+}
+
+// Function that uses a context
+fn get_app_name() using Config {
+    Config.get_value("app_name")
+}
+
+fn main() {
+    // Provide a simple config value
+    let my_config = "MyAppConfig"
+
+    provide Config = my_config
+
+    println("Context provided successfully")
+
+    // Try to call function with context requirement
+    // This will likely fail because Config.get_value is not actually implemented
+    // let name = get_app_name()
+    // println(name)
+
+    println("Test completed")
+}

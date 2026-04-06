@@ -1,0 +1,113 @@
+// 08 — Generics
+// Generic functions, generic types, and protocol bounds.
+
+// --- Generic function ---
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn swap<A, B>(a: A, b: B) -> (B, A) {
+    (b, a)
+}
+
+// --- Generic record type ---
+type Pair<T> is {
+    first: T,
+    second: T
+};
+
+implement Pair<T> {
+    fn new(a: T, b: T) -> Pair<T> {
+        Pair { first: a, second: b }
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Pair<U> {
+        Pair { first: f(self.first), second: f(self.second) }
+    }
+}
+
+// --- Generic sum type (variant) ---
+type Either<L, R> is Left(L) | Right(R);
+
+fn describe_either<L, R>(e: Either<L, R>) -> Text {
+    match e {
+        Left(_)  => "left",
+        Right(_) => "right"
+    }
+}
+
+// --- Generic function with protocol bound ---
+type Summable is protocol {
+    fn zero() -> Self;
+    fn add(&self, other: &Self) -> Self;
+};
+
+fn sum_list<T: Summable>(items: List<T>) -> T {
+    let mut acc = T.zero()
+    for item in items {
+        acc = acc.add(&item)
+    }
+    acc
+}
+
+// --- Generic stack ---
+type Stack<T> is {
+    items: List<T>
+};
+
+implement Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { items: [] }
+    }
+
+    fn push(self, item: T) -> Stack<T> {
+        let mut new_items = self.items
+        new_items.push(item)
+        Stack { items: new_items }
+    }
+
+    fn peek(&self) -> Maybe<T> {
+        if self.items.len() > 0 {
+            Some(self.items[self.items.len() - 1])
+        } else {
+            None
+        }
+    }
+
+    fn size(&self) -> Int {
+        self.items.len()
+    }
+}
+
+fn main() {
+    // Generic functions
+    print(f"identity(42) = {identity(42)}")
+    print(f"identity('hi') = {identity("hi")}")
+
+    let swapped = swap(1, "one")
+    print(f"swap(1, 'one') = {swapped}")
+
+    // Generic record
+    let p = Pair.new(10, 20)
+    print(f"Pair: {p.first}, {p.second}")
+
+    let doubled = p.map(|x| x * 2)
+    print(f"Doubled: {doubled.first}, {doubled.second}")
+
+    // Generic sum type
+    let a: Either<Int, Text> = Left(42)
+    let b: Either<Int, Text> = Right("hello")
+    print(f"a is {describe_either(a)}")
+    print(f"b is {describe_either(b)}")
+
+    // Generic stack
+    let mut s = Stack.new()
+    s = s.push(1)
+    s = s.push(2)
+    s = s.push(3)
+    print(f"Stack size: {s.size()}")
+    match s.peek() {
+        Some(top) => print(f"Top: {top}"),
+        None      => print("Empty stack")
+    }
+}

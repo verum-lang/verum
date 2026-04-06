@@ -1,0 +1,16 @@
+// Test match without defer
+
+fn test() -> Int {
+    let value = 42;
+
+    let result = value.match {
+        42 => 100,
+        _ => 200,
+    };
+
+    result
+}
+
+fn main() -> Int {
+    test()
+}

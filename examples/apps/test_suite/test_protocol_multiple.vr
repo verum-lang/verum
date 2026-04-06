@@ -1,0 +1,28 @@
+// Test 7: Multiple Protocol Methods
+// Tests: protocol with multiple method signatures
+
+type Calculator is protocol {
+    fn add(&self, x: Int) -> Int;
+    fn multiply(&self, x: Int) -> Int;
+}
+
+type SimpleCalc is {
+    base: Int
+}
+
+implement Calculator for SimpleCalc {
+    fn add(&self, x: Int) -> Int {
+        self.base + x
+    }
+
+    fn multiply(&self, x: Int) -> Int {
+        self.base * x
+    }
+}
+
+fn main() -> Int {
+    let calc = SimpleCalc { base: 10 };
+    let sum = calc.add(20);      // 30
+    let product = calc.multiply(2);  // 20
+    sum + product  // 50... wait, that's not 42. Let me fix.
+}

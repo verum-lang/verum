@@ -1,0 +1,13 @@
+// Test equality in guards
+
+fn main() {
+    let _ = print("=== Equality Guard Test ===");
+
+    let x = 0.0;
+    match x {
+        n where n == 0.0 => { let _ = print("zero"); },
+        _ => { let _ = print("other"); }
+    }
+
+    let _ = print("=== Done ===");
+}

@@ -1,0 +1,21 @@
+fn main() {
+    let greeting = "Hello, world!";
+    let chinese = "你好世界";
+    let emoji = "🦀🔥✨";
+    let japanese = "こんにちは";
+    let arabic = "مرحبا";
+    let escaped = "line1\nline2\ttab";
+    let hex_escape = "\x41\x42\x43";
+    let unicode_escape = "\u{1F600}\u{2764}\u{FE0F}";
+    let empty = "";
+    let multiline = "first line
+second line
+third line";
+    let formatted = f"value = {42 + 1}";
+    let nested_interp = f"hello {f"inner {0}"}";
+
+    let alpha = 1;
+    let _underscore = 2;
+    let camelCase = 3;
+    let SCREAMING = 4;
+}

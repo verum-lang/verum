@@ -1,0 +1,95 @@
+// Test operators and expressions
+// Tests arithmetic, comparison, logical, and other operators
+
+fn main() {
+    print("=== Operator Tests ===")
+
+    // Arithmetic operators
+    print("\nTest 1: Arithmetic operators")
+    let a = 10
+    let b = 3
+    print(f"a = {a}, b = {b}")
+    print(f"a + b = {a + b}")
+    print(f"a - b = {a - b}")
+    print(f"a * b = {a * b}")
+    print(f"a / b = {a / b}")
+    print(f"a % b = {a % b}")
+
+    // Unary operators
+    print("\nTest 2: Unary operators")
+    let x = 5
+    print(f"x = {x}")
+    print(f"-x = {-x}")
+    let flag = true
+    print(f"flag = {flag}")
+    print(f"!flag = {!flag}")
+
+    // Comparison operators
+    print("\nTest 3: Comparison operators")
+    print(f"10 == 10: {10 == 10}")
+    print(f"10 != 5: {10 != 5}")
+    print(f"10 > 5: {10 > 5}")
+    print(f"10 < 5: {10 < 5}")
+    print(f"10 >= 10: {10 >= 10}")
+    print(f"10 <= 5: {10 <= 5}")
+
+    // Logical operators
+    print("\nTest 4: Logical operators")
+    let t = true
+    let f = false
+    print(f"true && true: {t && t}")
+    print(f"true && false: {t && f}")
+    print(f"true || false: {t || f}")
+    print(f"false || false: {f || f}")
+
+    // Operator precedence
+    print("\nTest 5: Operator precedence")
+    print(f"2 + 3 * 4 = {2 + 3 * 4}")  // Should be 14, not 20
+    print(f"(2 + 3) * 4 = {(2 + 3) * 4}")  // Should be 20
+    print(f"10 - 5 - 2 = {10 - 5 - 2}")  // Left associative: 3
+    print(f"2 * 3 + 4 * 5 = {2 * 3 + 4 * 5}")  // Should be 26
+
+    // Comparison chaining
+    print("\nTest 6: Comparison expressions")
+    let val = 15
+    print(f"val = {val}")
+    print(f"10 < val && val < 20: {10 < val && val < 20}")
+
+    // Bitwise operators (if supported)
+    print("\nTest 7: Bitwise operators")
+    print(f"5 & 3 = {5 & 3}")  // AND: 1
+    print(f"5 | 3 = {5 | 3}")  // OR: 7
+    print(f"5 ^ 3 = {5 ^ 3}")  // XOR: 6
+
+    // Range operator
+    print("\nTest 8: Range operator")
+    let range = 0..5
+    print(f"Range 0..5: {range}")
+    for i in range {
+        print(f"  {i}")
+    }
+
+    // String concatenation
+    print("\nTest 9: String operations")
+    let s1 = "Hello"
+    let s2 = "World"
+    print(f"{s1} + {s2} = {s1} {s2}")
+
+    // Compound expressions
+    print("\nTest 10: Compound expressions")
+    let result = (10 + 5) * 2 - 3
+    print(f"(10 + 5) * 2 - 3 = {result}")
+
+    let complex = 2 * 3 + 4 * 5 - 6 / 2
+    print(f"2 * 3 + 4 * 5 - 6 / 2 = {complex}")
+
+    // Short-circuit evaluation
+    print("\nTest 11: Short-circuit evaluation")
+    let test_and = false && (print("Should not print") == ())
+    print("After false && ...")
+
+    let test_or = true || (print("Should not print") == ())
+    print("After true || ...")
+
+    print("\nOperator tests complete")
+}

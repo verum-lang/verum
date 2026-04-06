@@ -1,0 +1,1513 @@
+module sys.linux.syscall;
+
+// =============================================================================
+// syscall.vr - Linux syscall interface
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: Linux (x86_64)
+// =============================================================================
+//
+// This module provides direct access to Linux system calls via the
+// SYSCALL_LINUX VBC opcode. It defines the syscall_raw intrinsic and
+// syscall number constants for x86_64 Linux.
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// =============================================================================
+
+// Re-export common types for consumers of this module
+public mount sys.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
+
+// Import syscall intrinsic from consolidated stdlib.intrinsics
+mount core.intrinsics.syscall6;
+
+// =============================================================================
+// Syscall Wrapper
+// =============================================================================
+
+/// Raw syscall wrapper - executes a Linux syscall directly.
+///
+/// This function wraps the syscall6 intrinsic from stdlib.intrinsics, which
+/// compiles to the SYSCALL_LINUX VBC opcode in the interpreter or inlines
+/// to the syscall instruction in AOT compilation.
+///
+/// # Arguments
+/// * `num` - Syscall number (from SYS_* constants below)
+/// * `a1`-`a6` - Up to 6 syscall arguments
+///
+/// # Returns
+/// The raw syscall return value. Negative values typically indicate
+/// errors (-errno).
+///
+/// # Safety
+/// This is an unsafe operation. Incorrect arguments can cause
+/// undefined behavior or system instability.
+public unsafe fn syscall_raw(
+    num: Int,
+    a1: Int,
+    a2: Int,
+    a3: Int,
+    a4: Int,
+    a5: Int,
+    a6: Int
+) -> Int {
+    syscall6(num, a1, a2, a3, a4, a5, a6)
+}
+
+// =============================================================================
+// Syscall Numbers (x86_64 Linux)
+// =============================================================================
+
+// File operations
+public const SYS_READ: Int = 0;
+public const SYS_WRITE: Int = 1;
+public const SYS_OPEN: Int = 2;
+public const SYS_CLOSE: Int = 3;
+public const SYS_STAT: Int = 4;
+public const SYS_FSTAT: Int = 5;
+public const SYS_LSTAT: Int = 6;
+public const SYS_POLL: Int = 7;
+public const SYS_LSEEK: Int = 8;
+
+// Memory operations
+public const SYS_MMAP: Int = 9;
+public const SYS_MPROTECT: Int = 10;
+public const SYS_MUNMAP: Int = 11;
+public const SYS_BRK: Int = 12;
+public const SYS_MREMAP: Int = 25;
+public const SYS_MSYNC: Int = 26;
+public const SYS_MINCORE: Int = 27;
+public const SYS_MADVISE: Int = 28;
+
+// I/O operations
+public const SYS_IOCTL: Int = 16;
+public const SYS_PREAD64: Int = 17;
+public const SYS_PWRITE64: Int = 18;
+public const SYS_READV: Int = 19;
+public const SYS_WRITEV: Int = 20;
+public const SYS_ACCESS: Int = 21;
+public const SYS_PIPE: Int = 22;
+public const SYS_SELECT: Int = 23;
+
+// Process operations
+public const SYS_GETPID: Int = 39;
+public const SYS_FORK: Int = 57;
+public const SYS_VFORK: Int = 58;
+public const SYS_EXECVE: Int = 59;
+public const SYS_EXIT: Int = 60;
+public const SYS_WAIT4: Int = 61;
+public const SYS_KILL: Int = 62;
+public const SYS_CLONE: Int = 56;
+public const SYS_CLONE3: Int = 435;
+
+// Thread/process info
+public const SYS_GETUID: Int = 102;
+public const SYS_GETGID: Int = 104;
+public const SYS_SETUID: Int = 105;
+public const SYS_SETGID: Int = 106;
+public const SYS_GETEUID: Int = 107;
+public const SYS_GETEGID: Int = 108;
+public const SYS_GETPPID: Int = 110;
+public const SYS_GETTID: Int = 186;
+
+// File descriptor operations
+public const SYS_DUP: Int = 32;
+public const SYS_DUP2: Int = 33;
+public const SYS_DUP3: Int = 292;
+public const SYS_FCNTL: Int = 72;
+
+// Directory operations
+public const SYS_GETDENTS64: Int = 217;
+public const SYS_GETCWD: Int = 79;
+public const SYS_CHDIR: Int = 80;
+public const SYS_FCHDIR: Int = 81;
+public const SYS_RENAME: Int = 82;
+public const SYS_MKDIR: Int = 83;
+public const SYS_RMDIR: Int = 84;
+public const SYS_UNLINK: Int = 87;
+public const SYS_SYMLINK: Int = 88;
+public const SYS_READLINK: Int = 89;
+public const SYS_CHMOD: Int = 90;
+public const SYS_FCHMOD: Int = 91;
+public const SYS_CHOWN: Int = 92;
+public const SYS_FCHOWN: Int = 93;
+
+// Time operations
+public const SYS_GETTIMEOFDAY: Int = 96;
+public const SYS_NANOSLEEP: Int = 35;
+public const SYS_CLOCK_GETTIME: Int = 228;
+public const SYS_CLOCK_NANOSLEEP: Int = 230;
+
+// Socket operations
+public const SYS_SOCKET: Int = 41;
+public const SYS_CONNECT: Int = 42;
+public const SYS_ACCEPT: Int = 43;
+public const SYS_SENDTO: Int = 44;
+public const SYS_RECVFROM: Int = 45;
+public const SYS_SENDMSG: Int = 46;
+public const SYS_RECVMSG: Int = 47;
+public const SYS_SHUTDOWN: Int = 48;
+public const SYS_BIND: Int = 49;
+public const SYS_LISTEN: Int = 50;
+public const SYS_GETSOCKNAME: Int = 51;
+public const SYS_GETPEERNAME: Int = 52;
+public const SYS_SOCKETPAIR: Int = 53;
+public const SYS_SETSOCKOPT: Int = 54;
+public const SYS_GETSOCKOPT: Int = 55;
+public const SYS_ACCEPT4: Int = 288;
+
+// Epoll/event operations
+public const SYS_EPOLL_CREATE: Int = 213;
+public const SYS_EPOLL_CREATE1: Int = 291;
+public const SYS_EPOLL_CTL: Int = 233;
+public const SYS_EPOLL_WAIT: Int = 232;
+public const SYS_EPOLL_PWAIT: Int = 281;
+public const SYS_EPOLL_PWAIT2: Int = 441;
+
+// Signal operations
+public const SYS_RT_SIGACTION: Int = 13;
+public const SYS_RT_SIGPROCMASK: Int = 14;
+public const SYS_RT_SIGRETURN: Int = 15;
+public const SYS_SIGALTSTACK: Int = 131;
+
+// Futex operations
+public const SYS_FUTEX: Int = 202;
+public const SYS_FUTEX_WAITV: Int = 449;
+
+// io_uring operations
+public const SYS_IO_URING_SETUP: Int = 425;
+public const SYS_IO_URING_ENTER: Int = 426;
+public const SYS_IO_URING_REGISTER: Int = 427;
+
+// Misc
+public const SYS_EXIT_GROUP: Int = 231;
+public const SYS_PRCTL: Int = 157;
+public const SYS_ARCH_PRCTL: Int = 158;
+public const SYS_GETRANDOM: Int = 318;
+public const SYS_MEMFD_CREATE: Int = 319;
+public const SYS_OPENAT: Int = 257;
+public const SYS_OPENAT2: Int = 437;
+public const SYS_STATX: Int = 332;
+
+// Event and signaling
+public const SYS_EVENTFD: Int = 284;
+public const SYS_EVENTFD2: Int = 290;
+public const SYS_TIMERFD_CREATE: Int = 283;
+public const SYS_TIMERFD_SETTIME: Int = 286;
+public const SYS_TIMERFD_GETTIME: Int = 287;
+public const SYS_SIGNALFD: Int = 282;
+public const SYS_SIGNALFD4: Int = 289;
+
+// TLS
+public const SYS_SET_TID_ADDRESS: Int = 218;
+
+// Terminal ioctl constants
+public const TCGETS: Int = 0x5401;
+public const TCSETS: Int = 0x5402;
+public const TCSETSW: Int = 0x5403;
+public const TCSETSF: Int = 0x5404;
+public const TIOCGWINSZ: Int = 0x5413;
+public const TIOCSWINSZ: Int = 0x5414;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Timespec structure for nanosleep, clock_gettime, etc.
+@repr(C)
+public type Timespec is {
+    tv_sec: Int64,
+    tv_nsec: Int64,
+};
+
+// =============================================================================
+// Safe Syscall Wrappers
+// =============================================================================
+
+/// Read from a file descriptor.
+public fn read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_READ, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Write to a file descriptor.
+public fn write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_WRITE, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Close a file descriptor.
+public fn close(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_CLOSE, fd.as_raw(), 0, 0, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Memory map a region.
+public fn mmap(
+    addr: Int,
+    len: Int,
+    prot: MemProt,
+    flags: MapFlags,
+    fd: FileDesc,
+    offset: Int
+) -> Result<&unsafe Byte, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_MMAP,
+            addr,
+            len,
+            prot.to_unix_flags(),
+            flags.to_unix_flags(),
+            fd.as_raw(),
+            offset
+        )
+    };
+    // MAP_FAILED is typically -1, but syscall returns -errno
+    if result < 0 && result > -4096 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result as &unsafe Byte)
+    }
+}
+
+/// Unmap a memory region.
+public fn munmap(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_MUNMAP, addr as Int, len, 0, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get the current process ID.
+public fn getpid() -> Int {
+    unsafe { syscall_raw(SYS_GETPID, 0, 0, 0, 0, 0, 0) }
+}
+
+/// Get the current thread ID.
+public fn gettid() -> Int {
+    unsafe { syscall_raw(SYS_GETTID, 0, 0, 0, 0, 0, 0) }
+}
+
+/// Exit the current thread.
+public fn exit(code: Int) -> ! {
+    unsafe { syscall_raw(SYS_EXIT, code, 0, 0, 0, 0, 0) };
+    // This should never return
+    @unreachable()
+}
+
+/// Exit the process (all threads).
+public fn exit_group(code: Int) -> ! {
+    unsafe { syscall_raw(SYS_EXIT_GROUP, code, 0, 0, 0, 0, 0) };
+    @unreachable()
+}
+
+/// Nanosleep (high-precision sleep).
+/// Returns remaining time if interrupted.
+public fn nanosleep(seconds: Int, nanoseconds: Int) -> Result<(Int, Int), OSError> {
+    // timespec structure: [seconds: Int64, nanoseconds: Int64]
+    let req: [Int; 2] = [seconds, nanoseconds];
+    let rem: [Int; 2] = [0, 0];
+
+    let result = unsafe {
+        syscall_raw(SYS_NANOSLEEP, &req as Int, &rem as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok((rem[0], rem[1]))
+    }
+}
+
+/// POSIX-style nanosleep accepting a Timespec struct reference.
+/// The second parameter (remainder) is optional - pass null to ignore.
+public fn nanosleep_ts(req: &Timespec, rem: Maybe<&mut Timespec>) -> Result<(), OSError> {
+    let result = nanosleep(req.tv_sec, req.tv_nsec);
+    match result {
+        Ok((rem_sec, rem_nsec)) => {
+            match rem {
+                Some(r) => {
+                    r.tv_sec = rem_sec;
+                    r.tv_nsec = rem_nsec;
+                },
+                None => {},
+            };
+            Ok(())
+        },
+        Err(e) => Err(e),
+    }
+}
+
+/// Get random bytes from the kernel.
+public fn getrandom(buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_GETRANDOM, buf.as_ptr() as Int, buf.len(), flags, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// Terminal ioctl Operations
+// =============================================================================
+
+/// Generic ioctl syscall wrapper.
+public fn ioctl(fd: FileDesc, request: Int, arg: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_IOCTL, fd.as_raw(), request, arg, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Check if a file descriptor refers to a terminal.
+public fn isatty(fd: FileDesc) -> Bool {
+    // TIOCGWINSZ succeeds only on terminals
+    let mut ws: [Byte; 8] = [0; 8];
+    let result = unsafe {
+        syscall_raw(SYS_IOCTL, fd.as_raw(), TIOCGWINSZ, &ws as Int, 0, 0, 0)
+    };
+    result == 0
+}
+
+// =============================================================================
+// Futex Operations
+// =============================================================================
+
+/// Futex operation codes.
+public const FUTEX_WAIT: Int = 0;
+public const FUTEX_WAKE: Int = 1;
+public const FUTEX_WAIT_PRIVATE: Int = 128;
+public const FUTEX_WAKE_PRIVATE: Int = 129;
+
+/// Futex wait operation.
+public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<Int>) -> Result<(), OSError> {
+    let (timeout_ptr, timeout_sec, timeout_nsec) = match timeout_ns {
+        Some(ns) => {
+            let sec = ns / 1_000_000_000;
+            let nsec = ns % 1_000_000_000;
+            let ts: [Int; 2] = [sec, nsec];
+            (&ts as Int, sec, nsec)
+        }
+        None => (0, 0, 0),
+    };
+
+    let result = unsafe {
+        syscall_raw(SYS_FUTEX, addr as Int, FUTEX_WAIT_PRIVATE, expected, timeout_ptr, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Futex wake operation.
+public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FUTEX, addr as Int, FUTEX_WAKE_PRIVATE, count, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// Clock Operations
+// =============================================================================
+
+/// Clock IDs for clock_gettime.
+public const CLOCK_REALTIME: Int = 0;
+public const CLOCK_MONOTONIC: Int = 1;
+public const CLOCK_PROCESS_CPUTIME_ID: Int = 2;
+public const CLOCK_THREAD_CPUTIME_ID: Int = 3;
+public const CLOCK_MONOTONIC_RAW: Int = 4;
+public const CLOCK_BOOTTIME: Int = 7;
+
+/// Get time from a clock source.
+public fn clock_gettime(clock_id: Int, ts: &mut Timespec) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_CLOCK_GETTIME, clock_id, ts as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+// =============================================================================
+// File Operations
+// =============================================================================
+
+/// Open flags for file operations.
+public const O_RDONLY: Int = 0;       // Read only
+public const O_WRONLY: Int = 1;       // Write only
+public const O_RDWR: Int = 2;         // Read and write
+public const O_CREAT: Int = 0o100;    // Create if not exists
+public const O_EXCL: Int = 0o200;     // Error if exists
+public const O_TRUNC: Int = 0o1000;   // Truncate file
+public const O_APPEND: Int = 0o2000;  // Append mode
+public const O_CLOEXEC: Int = 0o2000000; // Close on exec
+
+/// Seek whence values.
+public const SEEK_SET: Int = 0;  // From beginning
+public const SEEK_CUR: Int = 1;  // From current position
+public const SEEK_END: Int = 2;  // From end
+
+/// Stat structure for fstat/stat.
+@repr(C)
+public type Stat is {
+    st_dev: UInt64,
+    st_ino: UInt64,
+    st_nlink: UInt64,
+    st_mode: UInt32,
+    st_uid: UInt32,
+    st_gid: UInt32,
+    _pad0: UInt32,
+    st_rdev: UInt64,
+    st_size: Int64,
+    st_blksize: Int64,
+    st_blocks: Int64,
+    st_atime_sec: Int64,
+    st_atime_nsec: Int64,
+    st_mtime_sec: Int64,
+    st_mtime_nsec: Int64,
+    st_ctime_sec: Int64,
+    st_ctime_nsec: Int64,
+    _unused: [Int64; 3],
+};
+
+/// Open a file.
+public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    // Ensure null-terminated path
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_OPEN, path_buf.as_ptr() as Int, flags, mode, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+/// Open a file relative to a directory file descriptor.
+public fn openat(dirfd: FileDesc, path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    // Ensure null-terminated path
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_OPENAT, dirfd.as_raw(), path_buf.as_ptr() as Int, flags, mode, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+/// Seek within a file.
+public fn lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_LSEEK, fd.as_raw(), offset, whence, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Get file status.
+public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FSTAT, fd.as_raw(), stat as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get file status by path.
+public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+    // Ensure null-terminated path
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_STAT, path_buf.as_ptr() as Int, stat_buf as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get symbolic link status (doesn't follow symlinks).
+public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+    // Ensure null-terminated path
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_LSTAT, path_buf.as_ptr() as Int, stat_buf as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Sync file to disk.
+public const SYS_FSYNC: Int = 74;
+public const SYS_FDATASYNC: Int = 75;
+
+public fn fsync(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FSYNC, fd.as_raw(), 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Sync file data to disk (may skip metadata).
+public fn fdatasync(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FDATASYNC, fd.as_raw(), 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Truncate a file to a specified length.
+public const SYS_FTRUNCATE: Int = 77;
+
+public fn ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FTRUNCATE, fd.as_raw(), length, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Duplicate a file descriptor.
+public fn dup(oldfd: FileDesc) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_DUP, oldfd.as_raw(), 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+// =============================================================================
+// Directory Operations
+// =============================================================================
+
+/// Create a directory.
+public fn mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
+    // Ensure null-terminated path
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_MKDIR, path_buf.as_ptr() as Int, mode, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove a directory.
+public fn rmdir(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_RMDIR, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove a file.
+public fn unlink(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_UNLINK, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Rename a file or directory.
+public fn rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
+    let mut old_buf = [0_u8; 4096];
+    let old_len = oldpath.len().min(4095);
+    old_buf[..old_len].copy_from_slice(&oldpath[..old_len]);
+    old_buf[old_len] = 0;
+
+    let mut new_buf = [0_u8; 4096];
+    let new_len = newpath.len().min(4095);
+    new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
+    new_buf[new_len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_RENAME, old_buf.as_ptr() as Int, new_buf.as_ptr() as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get current working directory.
+public fn getcwd(buf: &mut [Byte]) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_GETCWD, buf.as_ptr() as Int, buf.len(), 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Change current working directory.
+public fn chdir(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_CHDIR, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Read directory entries.
+/// Returns the number of bytes read, or 0 for end of directory.
+public fn getdents64(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_GETDENTS64, fd.as_raw(), buf.as_ptr() as Int, buf.len(), 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Create a symbolic link.
+public fn symlink(target: &[Byte], linkpath: &[Byte]) -> Result<(), OSError> {
+    let mut target_buf = [0_u8; 4096];
+    let target_len = target.len().min(4095);
+    target_buf[..target_len].copy_from_slice(&target[..target_len]);
+    target_buf[target_len] = 0;
+
+    let mut link_buf = [0_u8; 4096];
+    let link_len = linkpath.len().min(4095);
+    link_buf[..link_len].copy_from_slice(&linkpath[..link_len]);
+    link_buf[link_len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_SYMLINK, target_buf.as_ptr() as Int, link_buf.as_ptr() as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Read the target of a symbolic link.
+public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_READLINK, path_buf.as_ptr() as Int, buf.as_ptr() as Int, buf.len(), 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Create a hard link.
+public const SYS_LINK: Int = 86;
+
+public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
+    let mut old_buf = [0_u8; 4096];
+    let old_len = oldpath.len().min(4095);
+    old_buf[..old_len].copy_from_slice(&oldpath[..old_len]);
+    old_buf[old_len] = 0;
+
+    let mut new_buf = [0_u8; 4096];
+    let new_len = newpath.len().min(4095);
+    new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
+    new_buf[new_len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_LINK, old_buf.as_ptr() as Int, new_buf.as_ptr() as Int, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Change file permissions.
+public fn chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe {
+        syscall_raw(SYS_CHMOD, path_buf.as_ptr() as Int, mode, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Change file permissions by file descriptor.
+public fn fchmod(fd: FileDesc, mode: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FCHMOD, fd.as_raw(), mode, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Socket Operations
+// =============================================================================
+
+/// Socket address families.
+public const AF_UNSPEC: Int = 0;
+public const AF_UNIX: Int = 1;
+public const AF_LOCAL: Int = 1;
+public const AF_INET: Int = 2;
+public const AF_INET6: Int = 10;
+
+/// Socket types.
+public const SOCK_STREAM: Int = 1;     // TCP
+public const SOCK_DGRAM: Int = 2;      // UDP
+public const SOCK_RAW: Int = 3;
+public const SOCK_NONBLOCK: Int = 0o4000;
+public const SOCK_CLOEXEC: Int = 0o2000000;
+
+/// Socket protocol.
+public const IPPROTO_IP: Int = 0;
+public const IPPROTO_TCP: Int = 6;
+public const IPPROTO_UDP: Int = 17;
+
+/// Socket options levels.
+public const SOL_SOCKET: Int = 1;
+public const SOL_TCP: Int = 6;
+public const SOL_IP: Int = 0;
+
+/// Socket options.
+public const SO_REUSEADDR: Int = 2;
+public const SO_REUSEPORT: Int = 15;
+public const SO_KEEPALIVE: Int = 9;
+public const SO_RCVTIMEO: Int = 20;
+public const SO_SNDTIMEO: Int = 21;
+public const SO_ERROR: Int = 4;
+public const SO_BROADCAST: Int = 6;
+public const SO_SNDBUF: Int = 7;
+public const SO_RCVBUF: Int = 8;
+
+/// TCP options.
+public const TCP_NODELAY: Int = 1;
+public const TCP_KEEPIDLE: Int = 4;
+public const TCP_KEEPINTVL: Int = 5;
+public const TCP_KEEPCNT: Int = 6;
+
+/// IP-level multicast options (SOL_IP = 0, IPPROTO_IP = 0).
+public const IP_MULTICAST_IF: Int = 32;
+public const IP_MULTICAST_TTL: Int = 33;
+public const IP_MULTICAST_LOOP: Int = 34;
+public const IP_ADD_MEMBERSHIP: Int = 35;
+public const IP_DROP_MEMBERSHIP: Int = 36;
+
+/// IPv6 multicast options (IPPROTO_IPV6 = 41).
+public const IPPROTO_IPV6: Int = 41;
+public const IPV6_MULTICAST_IF: Int = 17;
+public const IPV6_MULTICAST_HOPS: Int = 18;
+public const IPV6_MULTICAST_LOOP: Int = 19;
+public const IPV6_JOIN_GROUP: Int = 20;
+public const IPV6_LEAVE_GROUP: Int = 21;
+
+/// MSG flags for send/recv.
+public const MSG_PEEK: Int = 2;
+public const MSG_DONTWAIT: Int = 0x40;
+public const MSG_NOSIGNAL: Int = 0x4000;
+
+/// Shutdown modes.
+public const SHUT_RD: Int = 0;
+public const SHUT_WR: Int = 1;
+public const SHUT_RDWR: Int = 2;
+
+/// File control flags.
+public const F_GETFL: Int = 3;
+public const F_SETFL: Int = 4;
+public const O_NONBLOCK: Int = 0o4000;
+
+/// sockaddr_in structure for IPv4.
+@repr(C)
+public type SockaddrIn is {
+    sin_family: UInt16,
+    sin_port: UInt16,           // Network byte order (big-endian)
+    sin_addr: UInt32,           // Network byte order
+    sin_zero: [UInt8; 8],
+};
+
+implement SockaddrIn {
+    /// Create a new IPv4 socket address.
+    public fn new(addr: UInt32, port: UInt16) -> SockaddrIn {
+        SockaddrIn {
+            sin_family: AF_INET as UInt16,
+            sin_port: port.to_be(),      // Convert to network byte order
+            sin_addr: addr.to_be(),
+            sin_zero: [0; 8],
+        }
+    }
+
+    /// Create from octets and port.
+    public fn from_octets(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> SockaddrIn {
+        let addr = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
+        SockaddrIn.new(addr, port)
+    }
+}
+
+/// sockaddr_in6 structure for IPv6.
+@repr(C)
+public type SockaddrIn6 is {
+    sin6_family: UInt16,
+    sin6_port: UInt16,
+    sin6_flowinfo: UInt32,
+    sin6_addr: [UInt8; 16],
+    sin6_scope_id: UInt32,
+};
+
+/// Create a socket.
+public fn socket(domain: Int, sock_type: Int, protocol: Int) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_SOCKET, domain, sock_type, protocol, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+/// Connect a socket to an address.
+public fn connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_CONNECT, fd.as_raw(), addr as Int, addr_len, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Connect to an IPv4 address.
+public fn connect_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
+    connect(fd, addr as &unsafe Byte, 16)  // sizeof(sockaddr_in) = 16
+}
+
+/// Bind a socket to an address.
+public fn bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_BIND, fd.as_raw(), addr as Int, addr_len, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Bind to an IPv4 address.
+public fn bind_v4(fd: FileDesc, addr: &SockaddrIn) -> Result<(), OSError> {
+    bind(fd, addr as &unsafe Byte, 16)
+}
+
+/// Listen for connections on a socket.
+public fn listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_LISTEN, fd.as_raw(), backlog, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Accept a connection on a socket.
+/// Returns the new socket file descriptor and fills addr_buf with peer address.
+public fn accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_ACCEPT,
+            fd.as_raw(),
+            addr_buf.as_ptr() as Int,
+            addr_len as &mut Int as Int,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+/// Accept a connection with flags (accept4).
+public fn accept4(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int, flags: Int) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_ACCEPT4,
+            fd.as_raw(),
+            addr_buf.as_ptr() as Int,
+            addr_len as &mut Int as Int,
+            flags,
+            0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
+/// Send data on a socket.
+public fn sendto(
+    fd: FileDesc,
+    buf: &[Byte],
+    flags: Int,
+    dest_addr: &unsafe Byte,
+    addr_len: Int
+) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_SENDTO,
+            fd.as_raw(),
+            buf.as_ptr() as Int,
+            buf.len(),
+            flags,
+            dest_addr as Int,
+            addr_len
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Send data on a connected socket.
+public fn send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSError> {
+    sendto(fd, buf, flags, 0 as &unsafe Byte, 0)
+}
+
+/// Receive data from a socket.
+public fn recvfrom(
+    fd: FileDesc,
+    buf: &mut [Byte],
+    flags: Int,
+    src_addr: &mut [Byte],
+    addr_len: &mut Int
+) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_RECVFROM,
+            fd.as_raw(),
+            buf.as_ptr() as Int,
+            buf.len(),
+            flags,
+            src_addr.as_ptr() as Int,
+            addr_len as &mut Int as Int
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Receive data from a connected socket.
+public fn recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
+    let mut dummy_addr = [0_u8; 1];
+    let mut dummy_len = 0;
+    recvfrom(fd, buf, flags, &mut dummy_addr, &mut dummy_len)
+}
+
+/// Set a socket option.
+public fn setsockopt(
+    fd: FileDesc,
+    level: Int,
+    optname: Int,
+    optval: &unsafe Byte,
+    optlen: Int
+) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_SETSOCKOPT,
+            fd.as_raw(),
+            level,
+            optname,
+            optval as Int,
+            optlen,
+            0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Set an integer socket option.
+public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> Result<(), OSError> {
+    let val: Int32 = value as Int32;
+    setsockopt(fd, level, optname, &val as &unsafe Byte, 4)
+}
+
+/// Get a socket option.
+public fn getsockopt(
+    fd: FileDesc,
+    level: Int,
+    optname: Int,
+    optval: &mut [Byte],
+    optlen: &mut Int
+) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_GETSOCKOPT,
+            fd.as_raw(),
+            level,
+            optname,
+            optval.as_ptr() as Int,
+            optlen as &mut Int as Int,
+            0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get socket error.
+public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
+    let mut err: Int32 = 0;
+    let mut len = 4;
+    let mut buf = [0_u8; 4];
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf, &mut len)?;
+
+    // Convert from bytes (assuming little-endian)
+    let error = (buf[0] as Int) | ((buf[1] as Int) << 8) |
+                ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
+    Ok(error)
+}
+
+/// Shutdown a socket.
+public fn shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_SHUTDOWN, fd.as_raw(), how, 0, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get socket name (local address).
+public fn getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_GETSOCKNAME,
+            fd.as_raw(),
+            addr_buf.as_ptr() as Int,
+            addr_len as &mut Int as Int,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Get peer name (remote address).
+public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_GETPEERNAME,
+            fd.as_raw(),
+            addr_buf.as_ptr() as Int,
+            addr_len as &mut Int as Int,
+            0, 0, 0
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// File control operations.
+public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_FCNTL, fd.as_raw(), cmd, arg, 0, 0, 0)
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Set file descriptor to non-blocking mode.
+public fn set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError> {
+    let flags = fcntl(fd, F_GETFL, 0)?;
+    let new_flags = if nonblocking {
+        flags | O_NONBLOCK
+    } else {
+        flags & !O_NONBLOCK
+    };
+    fcntl(fd, F_SETFL, new_flags)?;
+    Ok(())
+}
+
+/// Set SO_REUSEADDR option.
+public fn set_reuseaddr(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_REUSEADDR, if reuse { 1 } else { 0 })
+}
+
+/// Set SO_REUSEPORT option.
+public fn set_reuseport(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_REUSEPORT, if reuse { 1 } else { 0 })
+}
+
+/// Set TCP_NODELAY option (disable Nagle's algorithm).
+public fn set_tcp_nodelay(fd: FileDesc, nodelay: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_TCP, TCP_NODELAY, if nodelay { 1 } else { 0 })
+}
+
+/// Set SO_KEEPALIVE option.
+public fn set_keepalive(fd: FileDesc, keepalive: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_KEEPALIVE, if keepalive { 1 } else { 0 })
+}
+
+/// Set socket send/receive timeout.
+/// timeout_ms: timeout in milliseconds, 0 to disable.
+public fn set_socket_timeout(fd: FileDesc, timeout_ms: Int, is_recv: Bool) -> Result<(), OSError> {
+    let tv_sec = timeout_ms / 1000;
+    let tv_usec = (timeout_ms % 1000) * 1000;
+
+    // struct timeval { time_t tv_sec; suseconds_t tv_usec; }
+    // On Linux x86_64: 8 + 8 = 16 bytes
+    let mut timeval = [0_u8; 16];
+
+    // Write tv_sec (little-endian Int64)
+    timeval[0] = (tv_sec & 0xFF) as UInt8;
+    timeval[1] = ((tv_sec >> 8) & 0xFF) as UInt8;
+    timeval[2] = ((tv_sec >> 16) & 0xFF) as UInt8;
+    timeval[3] = ((tv_sec >> 24) & 0xFF) as UInt8;
+    timeval[4] = ((tv_sec >> 32) & 0xFF) as UInt8;
+    timeval[5] = ((tv_sec >> 40) & 0xFF) as UInt8;
+    timeval[6] = ((tv_sec >> 48) & 0xFF) as UInt8;
+    timeval[7] = ((tv_sec >> 56) & 0xFF) as UInt8;
+
+    // Write tv_usec (little-endian Int64)
+    timeval[8] = (tv_usec & 0xFF) as UInt8;
+    timeval[9] = ((tv_usec >> 8) & 0xFF) as UInt8;
+    timeval[10] = ((tv_usec >> 16) & 0xFF) as UInt8;
+    timeval[11] = ((tv_usec >> 24) & 0xFF) as UInt8;
+    timeval[12] = ((tv_usec >> 32) & 0xFF) as UInt8;
+    timeval[13] = ((tv_usec >> 40) & 0xFF) as UInt8;
+    timeval[14] = ((tv_usec >> 48) & 0xFF) as UInt8;
+    timeval[15] = ((tv_usec >> 56) & 0xFF) as UInt8;
+
+    let optname = if is_recv { SO_RCVTIMEO } else { SO_SNDTIMEO };
+    setsockopt(fd, SOL_SOCKET, optname, timeval.as_ptr() as &unsafe Byte, 16)
+}
+
+/// Set SO_BROADCAST option (required for UDP broadcast).
+public fn set_broadcast(fd: FileDesc, broadcast: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_BROADCAST, if broadcast { 1 } else { 0 })
+}
+
+/// Set send buffer size.
+public fn set_send_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_SNDBUF, size)
+}
+
+/// Set receive buffer size.
+public fn set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
+}
+
+/// struct ip_mreq for multicast membership.
+@repr(C)
+public type IpMreq is {
+    imr_multiaddr: UInt32,   // Multicast group address (network byte order)
+    imr_interface: UInt32,   // Interface address (network byte order), 0 = default
+};
+
+/// Join an IPv4 multicast group.
+///
+/// multiaddr: multicast group address (4 bytes, network byte order)
+/// interface: local interface address (4 bytes, network byte order), 0 = default
+public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        imr_multiaddr: multiaddr,
+        imr_interface: interface,
+    };
+    setsockopt(fd, SOL_IP, IP_ADD_MEMBERSHIP,
+               &mreq as &unsafe Byte, 8)  // sizeof(ip_mreq) = 8
+}
+
+/// Leave an IPv4 multicast group.
+public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        imr_multiaddr: multiaddr,
+        imr_interface: interface,
+    };
+    setsockopt(fd, SOL_IP, IP_DROP_MEMBERSHIP,
+               &mreq as &unsafe Byte, 8)
+}
+
+/// Set multicast TTL (time-to-live) for IPv4.
+///
+/// TTL controls how many network hops a multicast packet can traverse:
+/// - 0: Restricted to same host
+/// - 1: Restricted to same subnet (default)
+/// - 32: Restricted to same site
+/// - 64: Restricted to same region
+/// - 128: Restricted to same continent
+/// - 255: Unrestricted (global)
+public fn set_multicast_ttl_v4(fd: FileDesc, ttl: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_IP, IP_MULTICAST_TTL, ttl)
+}
+
+/// Set multicast loopback for IPv4.
+///
+/// When enabled (default), multicast packets sent are looped back to the local
+/// socket if it has joined the same multicast group.
+public fn set_multicast_loop_v4(fd: FileDesc, enabled: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_IP, IP_MULTICAST_LOOP, if enabled { 1 } else { 0 })
+}
+
+/// Peek at data without consuming it (MSG_PEEK).
+///
+/// Returns the number of bytes available. The data remains in the socket buffer.
+public fn peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    recv(fd, buf, MSG_PEEK)
+}
+
+/// Receive with MSG_DONTWAIT (non-blocking, even on blocking socket).
+public fn recv_nonblock(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    recv(fd, buf, MSG_DONTWAIT)
+}
+
+/// Send with MSG_DONTWAIT (non-blocking, even on blocking socket).
+public fn send_nonblock(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    send(fd, buf, MSG_DONTWAIT)
+}
+
+// =============================================================================
+// Terminal ioctl constants
+// =============================================================================
+
+/// Get current termios attributes
+public const TCGETS: Int = 0x5401;
+/// Set termios attributes immediately
+public const TCSETS: Int = 0x5402;
+/// Set termios attributes after output drain
+public const TCSETSW: Int = 0x5403;
+/// Set termios attributes after output drain, flush input
+public const TCSETSF: Int = 0x5404;
+/// Get terminal window size
+public const TIOCGWINSZ: Int = 0x5413;
+/// Set terminal window size
+public const TIOCSWINSZ: Int = 0x5414;
+
+// =============================================================================
+// Terminal ioctl wrappers
+// =============================================================================
+
+/// Perform ioctl on a file descriptor.
+///
+/// # Arguments
+/// * `fd` - File descriptor to operate on
+/// * `request` - Ioctl request code (TCGETS, TIOCGWINSZ, etc.)
+/// * `arg` - Pointer argument (cast to Int)
+///
+/// # Returns
+/// Ok with ioctl return value on success, Err with OSError on failure.
+public fn ioctl(fd: FileDesc, request: Int, arg: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_IOCTL, fd.as_raw(), request, arg, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Check whether a file descriptor refers to a terminal.
+///
+/// Attempts TIOCGWINSZ ioctl; success means it is a tty.
+public fn isatty(fd: FileDesc) -> Bool {
+    let mut ws: [Byte; 8] = [0; 8];
+    let result = unsafe {
+        syscall_raw(SYS_IOCTL, fd.as_raw(), TIOCGWINSZ, &ws as Int, 0, 0, 0)
+    };
+    result == 0
+}

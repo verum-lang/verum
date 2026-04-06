@@ -1,0 +1,55 @@
+// Test various higher-order function scenarios
+
+// Simple higher-order function
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+// Function with multiple function parameters
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+// Function returning a function (if supported)
+// fn make_adder(n: Int) -> fn(Int) -> Int {
+//     |x| x + n  // Would require closure support
+// }
+
+// Higher-order function with different types
+fn map_int(f: fn(Int) -> Bool, x: Int) -> Bool {
+    f(x)
+}
+
+// Nested function types
+fn apply(f: fn(fn(Int) -> Int, Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g, x)
+}
+
+// Helper functions
+fn add_one(x: Int) -> Int {
+    x + 1
+}
+
+fn double(x: Int) -> Int {
+    x + x
+}
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn main() -> Int {
+    // Test apply_twice
+    let result1 = apply_twice(add_one, 5);  // Should be 7
+
+    // Test compose
+    let result2 = compose(double, add_one, 3);  // Should be 8
+
+    // Test map_int
+    let result3 = map_int(is_positive, 5);  // Should be true (1)
+
+    // Test nested
+    let result4 = apply(apply_twice, add_one, 10);  // Should be 12
+
+    result1 + result2 + result4
+}

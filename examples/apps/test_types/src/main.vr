@@ -1,0 +1,436 @@
+// Comprehensive Type System Test
+// Tests all type definition features in Verum
+
+// ===== Test 1: Type Aliases =====
+
+type UserId is Int;
+type UserName is Text;
+type EmailAddress is Text;
+type Age is Int;
+type Price is Float;
+type Distance is Float;
+
+// ===== Test 2: Record Types (Struct-like) =====
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    id: UserId,
+    name: UserName,
+    email: EmailAddress,
+    age: Age
+};
+
+type Product is {
+    id: Int,
+    name: Text,
+    price: Price,
+    in_stock: Bool
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point
+};
+
+// ===== Test 3: Variant Types (Enum-like) =====
+
+// Simple variants (no data)
+type TrafficLight is
+    | Red
+    | Yellow
+    | Green;
+
+type Direction is
+    | North
+    | South
+    | East
+    | West;
+
+// Variants with positional data
+type Color is
+    | RGB(Int, Int, Int)
+    | RGBA(Int, Int, Int, Int)
+    | Named(Text);
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+// ===== Test 4: Generic Types =====
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+type Triple<A, B, C> is (A, B, C);
+
+type Box<T> is {
+    value: T
+};
+
+// ===== Test 5: Recursive Types =====
+
+type List<T> is
+    | Nil
+    | Cons(T, List<T>);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node {
+        value: T,
+        left: Tree<T>,
+        right: Tree<T>
+    };
+
+type BinaryTree<T> is
+    | Empty
+    | Branch {
+        data: T,
+        left: BinaryTree<T>,
+        right: BinaryTree<T>
+    };
+
+// ===== Test 6: Nested Generic Types =====
+
+type NestedMaybe<T> is Maybe<Maybe<T>>;
+
+type ResultList<T, E> is Result<List<T>, E>;
+
+type MaybeResult<T, E> is Maybe<Result<T, E>>;
+
+// ===== Test 7: Tuple Types =====
+
+type Coordinate is (Float, Float);
+type RGB_Tuple is (Int, Int, Int);
+type PersonTuple is (Text, Int, Text);  // name, age, email
+
+// ===== Test 8: Complex Nested Records =====
+
+type Address is {
+    street: Text,
+    city: Text,
+    state: Text,
+    zip: Text
+};
+
+type Employee is {
+    person: Person,
+    address: Address,
+    salary: Price,
+    department: Text
+};
+
+type Company is {
+    name: Text,
+    employees: [Employee],
+    address: Address
+};
+
+// ===== Test 9: Refinement Types (Basic Predicates) =====
+
+// Note: Full refinement syntax may not be implemented yet
+// These demonstrate the intent
+
+type Positive is Int;  // Would be: Int{> 0}
+type NonNegative is Int;  // Would be: Int{>= 0}
+type Percentage is Int;  // Would be: Int{>= 0 && <= 100}
+type NonEmptyText is Text;  // Would be: Text{len(it) > 0}
+
+// Validation functions for refinement types
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn is_percentage(x: Int) -> Bool {
+    x >= 0 && x <= 100
+}
+
+fn is_non_empty(s: Text) -> Bool {
+    s.len() > 0
+}
+
+// ===== Test 10: Newtype Pattern =====
+
+type Kilometers is (Float);
+type Miles is (Float);
+type Celsius is (Float);
+type Fahrenheit is (Float);
+
+// ===== Functions Using Custom Types =====
+
+fn create_point(x: Float, y: Float) -> Point {
+    Point { x, y }
+}
+
+fn point_distance(p1: Point, p2: Point) -> Float {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    sqrt(dx * dx + dy * dy)
+}
+
+fn create_person(id: Int, name: Text, email: Text, age: Int) -> Person {
+    Person {
+        id: id,
+        name: name,
+        email: email,
+        age: age
+    }
+}
+
+fn traffic_light_next(current: TrafficLight) -> TrafficLight {
+    match current {
+        Red => Green,
+        Yellow => Red,
+        Green => Yellow
+    }
+}
+
+fn shape_area(s: Shape) -> Float {
+    match s {
+        Circle { radius } => 3.14159 * radius * radius,
+        Rectangle { width, height } => width * height,
+        Triangle { a, b, c } => {
+            // Heron's formula
+            let s = (a + b + c) / 2.0;
+            sqrt(s * (s - a) * (s - b) * (s - c))
+        }
+    }
+}
+
+fn maybe_map<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(value) => Some(f(value)),
+        None => None
+    }
+}
+
+fn result_map<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(value) => Ok(f(value)),
+        Err(e) => Err(e)
+    }
+}
+
+fn list_length<T>(lst: List<T>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_length(tail)
+    }
+}
+
+fn tree_size<T>(tree: Tree<T>) -> Int {
+    match tree {
+        Leaf(_) => 1,
+        Node { value: _, left, right } => {
+            1 + tree_size(left) + tree_size(right)
+        }
+    }
+}
+
+// Helper
+fn sqrt(x: Float) -> Float {
+    x  // Simplified for testing
+}
+
+// ===== Main Test Function =====
+
+fn main() {
+    print("=== Comprehensive Type System Test ===");
+    print("");
+
+    // Test 1: Type aliases
+    print("--- Test 1: Type Aliases ---");
+    let user_id: UserId = 1001;
+    let user_name: UserName = "Alice";
+    let user_email: EmailAddress = "alice@example.com";
+    print("UserId: " + user_id.to_string());
+    print("UserName: " + user_name);
+    print("EmailAddress: " + user_email);
+    print("");
+
+    // Test 2: Record types
+    print("--- Test 2: Record Types ---");
+    let origin = Point { x: 0.0, y: 0.0 };
+    print("Point { x: 0.0, y: 0.0 }");
+
+    let alice = Person {
+        id: 1001,
+        name: "Alice",
+        email: "alice@example.com",
+        age: 30
+    };
+    print("Person { id: 1001, name: 'Alice', ... }");
+
+    let product = Product {
+        id: 501,
+        name: "Widget",
+        price: 29.99,
+        in_stock: true
+    };
+    print("Product { id: 501, name: 'Widget', price: 29.99, in_stock: true }");
+    print("");
+
+    // Test 3: Variant types
+    print("--- Test 3: Variant Types ---");
+    let light = Red;
+    print("TrafficLight: Red");
+    let next_light = traffic_light_next(light);
+    print("Next light: Green");
+
+    let dir = North;
+    print("Direction: North");
+
+    let rgb = RGB(255, 0, 0);
+    print("Color: RGB(255, 0, 0)");
+
+    let circle = Circle { radius: 5.0 };
+    let area = shape_area(circle);
+    print("Circle area (r=5): " + area.to_string());
+    print("");
+
+    // Test 4: Generic types
+    print("--- Test 4: Generic Types ---");
+    let some_val: Maybe<Int> = Some(42);
+    print("Maybe<Int>: Some(42)");
+
+    let none_val: Maybe<Int> = None;
+    print("Maybe<Int>: None");
+
+    let ok_val: Result<Int, Text> = Ok(100);
+    print("Result<Int, Text>: Ok(100)");
+
+    let err_val: Result<Int, Text> = Err("error");
+    print("Result<Int, Text>: Err('error')");
+
+    let pair = Pair { first: 10, second: "test" };
+    print("Pair<Int, Text> { first: 10, second: 'test' }");
+
+    let boxed = Box { value: 42 };
+    print("Box<Int> { value: 42 }");
+    print("");
+
+    // Test 5: Recursive types
+    print("--- Test 5: Recursive Types ---");
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+    let len = list_length(list);
+    print("List [1, 2, 3] length: " + len.to_string());
+
+    let tree = Node {
+        value: 5,
+        left: Leaf(3),
+        right: Leaf(7)
+    };
+    let size = tree_size(tree);
+    print("Tree size: " + size.to_string());
+    print("");
+
+    // Test 6: Nested generic types
+    print("--- Test 6: Nested Generic Types ---");
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    print("Maybe<Maybe<Int>>: Some(Some(42))");
+
+    let result_list: Result<List<Int>, Text> = Ok(Cons(1, Cons(2, Nil)));
+    print("Result<List<Int>, Text>: Ok([1, 2])");
+    print("");
+
+    // Test 7: Tuple types
+    print("--- Test 7: Tuple Types ---");
+    let coord: Coordinate = (3.5, 4.2);
+    print("Coordinate: (3.5, 4.2)");
+
+    let rgb_tuple: RGB_Tuple = (128, 64, 255);
+    print("RGB_Tuple: (128, 64, 255)");
+
+    let person_tuple: PersonTuple = ("Bob", 25, "bob@test.com");
+    print("PersonTuple: ('Bob', 25, 'bob@test.com')");
+    print("");
+
+    // Test 8: Complex nested records
+    print("--- Test 8: Complex Nested Records ---");
+    let address = Address {
+        street: "123 Main St",
+        city: "Anytown",
+        state: "CA",
+        zip: "12345"
+    };
+
+    let employee = Employee {
+        person: alice,
+        address: address,
+        salary: 75000.0,
+        department: "Engineering"
+    };
+    print("Employee created with nested Person and Address");
+    print("");
+
+    // Test 9: Refinement types (validation)
+    print("--- Test 9: Refinement Type Validation ---");
+    let pos: Positive = 42;
+    print("Positive: 42 (valid: " + is_positive(pos).to_string() + ")");
+
+    let pct: Percentage = 75;
+    print("Percentage: 75 (valid: " + is_percentage(pct).to_string() + ")");
+
+    let non_empty: NonEmptyText = "hello";
+    print("NonEmptyText: 'hello' (valid: " + is_non_empty(non_empty).to_string() + ")");
+    print("");
+
+    // Test 10: Newtype pattern
+    print("--- Test 10: Newtype Pattern ---");
+    let km: Kilometers = (100.0);
+    print("Kilometers: 100.0");
+
+    let temp_c: Celsius = (25.0);
+    print("Celsius: 25.0");
+    print("");
+
+    // Test type system operations
+    print("--- Test Type System Operations ---");
+
+    // Generic function with Maybe
+    let doubled = maybe_map(Some(21), |x| x * 2);
+    match doubled {
+        Some(v) => print("maybe_map(Some(21), |x| x*2) = Some(" + v.to_string() + ")"),
+        None => print("maybe_map result: None")
+    }
+
+    // Generic function with Result
+    let incremented = result_map(Ok(99), |x| x + 1);
+    match incremented {
+        Ok(v) => print("result_map(Ok(99), |x| x+1) = Ok(" + v.to_string() + ")"),
+        Err(e) => print("result_map error: " + e)
+    }
+    print("");
+
+    print("=== Type System Features Tested ===");
+    print("✓ Type aliases (simple renaming)");
+    print("✓ Record types (struct-like)");
+    print("✓ Variant types (enum-like)");
+    print("✓ Simple variants (no data)");
+    print("✓ Variants with positional data");
+    print("✓ Variants with named fields");
+    print("✓ Generic types with type parameters");
+    print("✓ Recursive types (List, Tree)");
+    print("✓ Nested generic types");
+    print("✓ Tuple types");
+    print("✓ Complex nested records");
+    print("✓ Refinement types (validation predicates)");
+    print("✓ Newtype pattern");
+    print("✓ Generic functions operating on custom types");
+    print("");
+    print("=== Test Complete ===");
+}

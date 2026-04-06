@@ -1,0 +1,53 @@
+// Comprehensive test for functions returning closures
+
+// Test 1: Block body with just a closure
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+// Test 2: Expression body with closure
+fn make_adder2(n: Int) -> fn(Int) -> Int = |x| x + n;
+
+// Test 3: Block body with let statement then closure
+fn make_adder3(n: Int) -> fn(Int) -> Int {
+    let a = 1;
+    |x| x + a
+}
+
+// Test 4: Nested function types
+fn make_multiplier_maker(factor: Int) -> fn(Int) -> fn(Int) -> Int {
+    |n| |x| x * n * factor
+}
+
+// Test 5: Function returning closure with multiple parameters
+fn make_complex_fn(a: Int, b: Int) -> fn(Int, Int) -> Int {
+    |x, y| x + y + a + b
+}
+
+fn main() {
+    // Test 1
+    let adder = make_adder(5);
+    let result = adder(10);
+    print(f"Test 1 - make_adder result: {result}");
+
+    // Test 2
+    let adder2 = make_adder2(3);
+    let result2 = adder2(7);
+    print(f"Test 2 - make_adder2 result: {result2}");
+
+    // Test 3
+    let adder3 = make_adder3(0);
+    let result3 = adder3(42);
+    print(f"Test 3 - make_adder3 result: {result3}");
+
+    // Test 4
+    let mm = make_multiplier_maker(2);
+    let mult = mm(3);
+    let result4 = mult(4);
+    print(f"Test 4 - nested result: {result4}");
+
+    // Test 5
+    let complex = make_complex_fn(1, 2);
+    let result5 = complex(3, 4);
+    print(f"Test 5 - complex result: {result5}");
+}

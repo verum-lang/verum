@@ -1,0 +1,555 @@
+// Comprehensive Protocol System Test Suite
+// Tests protocol definitions, implementations, and advanced features
+
+// ========================================
+// 1. BASIC PROTOCOL DEFINITIONS
+// ========================================
+
+// Simple protocol with single method
+type Display is protocol {
+    fn display(self) -> Text;
+};
+
+// Protocol with multiple methods
+type Debug is protocol {
+    fn debug(self) -> Text;
+    fn verbose_debug(self) -> Text;
+};
+
+// Protocol with associated type
+type Container is protocol {
+    type Item;
+    fn get(self, index: Int) -> Item;
+    fn size(self) -> Int;
+};
+
+// Protocol with const
+type Bounded is protocol {
+    const MIN: Int;
+    const MAX: Int;
+    fn in_bounds(self, val: Int) -> Bool;
+};
+
+fn test_basic_protocol_definitions() {
+    let _ = print("=== Test 1: Basic Protocol Definitions ===");
+    let _ = print("Display protocol defined with display() method");
+    let _ = print("Debug protocol defined with debug() and verbose_debug() methods");
+    let _ = print("Container protocol defined with associated type Item");
+    let _ = print("Bounded protocol defined with constants MIN and MAX");
+}
+
+// ========================================
+// 2. TYPE DEFINITIONS FOR TESTING
+// ========================================
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    name: Text,
+    age: Int
+};
+
+type Color is | Red | Green | Blue;
+
+type Maybe<T> is | Some(T) | None;
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+// ========================================
+// 3. IMPLEMENTING PROTOCOLS FOR RECORDS
+// ========================================
+
+// Display for Point
+implement Display for Point {
+    fn display(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Debug for Point
+implement Debug for Point {
+    fn debug(self) -> Text {
+        f"Point {{ x: {self.x}, y: {self.y} }}"
+    }
+
+    fn verbose_debug(self) -> Text {
+        f"Point record with x-coordinate {self.x} and y-coordinate {self.y}"
+    }
+}
+
+// Display for Person
+implement Display for Person {
+    fn display(self) -> Text {
+        f"{self.name} (age {self.age})"
+    }
+}
+
+// Debug for Person
+implement Debug for Person {
+    fn debug(self) -> Text {
+        f"Person {{ name: {self.name}, age: {self.age} }}"
+    }
+
+    fn verbose_debug(self) -> Text {
+        f"Person record: name is {self.name}, age is {self.age} years"
+    }
+}
+
+fn test_protocol_implementation() {
+    let _ = print("\n=== Test 2: Protocol Implementations ===");
+
+    let p1 = Point { x: 3.0, y: 4.0 };
+    let _ = print(f"Point.display(): {p1.display()}");
+    let _ = print(f"Point.debug(): {p1.debug()}");
+    let _ = print(f"Point.verbose_debug(): {p1.verbose_debug()}");
+
+    let person = Person { name: "Alice", age: 30 };
+    let _ = print(f"Person.display(): {person.display()}");
+    let _ = print(f"Person.debug(): {person.debug()}");
+    let _ = print(f"Person.verbose_debug(): {person.verbose_debug()}");
+}
+
+// ========================================
+// 4. IMPLEMENTING PROTOCOLS FOR VARIANTS
+// ========================================
+
+// Display for Color
+implement Display for Color {
+    fn display(self) -> Text {
+        match self {
+            Red => "Red",
+            Green => "Green",
+            Blue => "Blue"
+        }
+    }
+}
+
+// Debug for Color
+implement Debug for Color {
+    fn debug(self) -> Text {
+        match self {
+            Red => "Color.Red",
+            Green => "Color.Green",
+            Blue => "Color.Blue"
+        }
+    }
+
+    fn verbose_debug(self) -> Text {
+        match self {
+            Red => "Color variant: Red (RGB: 255, 0, 0)",
+            Green => "Color variant: Green (RGB: 0, 255, 0)",
+            Blue => "Color variant: Blue (RGB: 0, 0, 255)"
+        }
+    }
+}
+
+fn test_variant_protocols() {
+    let _ = print("\n=== Test 3: Protocols for Variants ===");
+
+    let red = Red;
+    let _ = print(f"Color.display(): {red.display()}");
+    let _ = print(f"Color.debug(): {red.debug()}");
+    let _ = print(f"Color.verbose_debug(): {red.verbose_debug()}");
+}
+
+// ========================================
+// 5. GENERIC PROTOCOL IMPLEMENTATIONS
+// ========================================
+
+// Display for Maybe<T> where T: Display
+implement<T> Display for Maybe<T> where type T: Display {
+    fn display(self) -> Text {
+        match self {
+            Some(val) => f"Some({val.display()})",
+            None => "None"
+        }
+    }
+}
+
+// Display for Result<T, E> where T: Display, E: Display
+implement<T, E> Display for Result<T, E> where type T: Display, type E: Display {
+    fn display(self) -> Text {
+        match self {
+            Ok(val) => f"Ok({val.display()})",
+            Err(err) => f"Err({err.display()})"
+        }
+    }
+}
+
+// Display for Pair<A, B> where A: Display, B: Display
+implement<A, B> Display for Pair<A, B> where type A: Display, type B: Display {
+    fn display(self) -> Text {
+        f"({self.first.display()}, {self.second.display()})"
+    }
+}
+
+fn test_generic_protocols() {
+    let _ = print("\n=== Test 4: Generic Protocol Implementations ===");
+
+    let some_point: Maybe<Point> = Some(Point { x: 1.0, y: 2.0 });
+    let none_point: Maybe<Point> = None;
+    let _ = print(f"Maybe<Point>.display(): {some_point.display()}");
+    let _ = print(f"Maybe<Point> None.display(): {none_point.display()}");
+
+    // For Text, we'll assume it implements Display trivially
+    // In a real implementation, Text would have Display implemented
+}
+
+// ========================================
+// 6. PROTOCOLS WITH GENERIC CONSTRAINTS
+// ========================================
+
+type Comparable is protocol {
+    fn compare(self, other: Self) -> Int;
+    fn less_than(self, other: Self) -> Bool;
+    fn greater_than(self, other: Self) -> Bool;
+};
+
+implement Comparable for Int {
+    fn compare(self, other: Self) -> Int {
+        if self < other {
+            -1
+        } else if self > other {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn less_than(self, other: Self) -> Bool {
+        self < other
+    }
+
+    fn greater_than(self, other: Self) -> Bool {
+        self > other
+    }
+}
+
+implement Comparable for Float {
+    fn compare(self, other: Self) -> Int {
+        if self < other {
+            -1
+        } else if self > other {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn less_than(self, other: Self) -> Bool {
+        self < other
+    }
+
+    fn greater_than(self, other: Self) -> Bool {
+        self > other
+    }
+}
+
+fn min<T>(a: T, b: T) -> T where type T: Comparable {
+    if a.less_than(b) {
+        a
+    } else {
+        b
+    }
+}
+
+fn max<T>(a: T, b: T) -> T where type T: Comparable {
+    if a.greater_than(b) {
+        a
+    } else {
+        b
+    }
+}
+
+fn test_comparable_protocol() {
+    let _ = print("\n=== Test 5: Comparable Protocol ===");
+
+    let a = 10;
+    let b = 20;
+    let _ = print(f"min(10, 20) = {min(a, b)}");
+    let _ = print(f"max(10, 20) = {max(a, b)}");
+
+    let x = 3.5;
+    let y = 2.1;
+    let _ = print(f"min(3.5, 2.1) = {min(x, y)}");
+    let _ = print(f"max(3.5, 2.1) = {max(x, y)}");
+}
+
+// ========================================
+// 7. PROTOCOLS WITH DEFAULT IMPLEMENTATIONS
+// ========================================
+
+type Stringify is protocol {
+    fn to_string(self) -> Text;
+    fn to_upper(self) -> Text;  // Could have default impl in real system
+};
+
+implement Stringify for Point {
+    fn to_string(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+
+    fn to_upper(self) -> Text {
+        "POINT"
+    }
+}
+
+fn test_stringify_protocol() {
+    let _ = print("\n=== Test 6: Stringify Protocol ===");
+
+    let p = Point { x: 5.0, y: 10.0 };
+    let _ = print(f"Point.to_string(): {p.to_string()}");
+    let _ = print(f"Point.to_upper(): {p.to_upper()}");
+}
+
+// ========================================
+// 8. MULTIPLE PROTOCOL BOUNDS
+// ========================================
+
+fn show_and_debug<T>(value: T) -> Text where type T: Display, type T: Debug {
+    let display_str = value.display();
+    let debug_str = value.debug();
+    f"Display: {display_str}, Debug: {debug_str}"
+}
+
+fn test_multiple_bounds() {
+    let _ = print("\n=== Test 7: Multiple Protocol Bounds ===");
+
+    let p = Point { x: 7.0, y: 8.0 };
+    let result = show_and_debug(p);
+    let _ = print(result);
+
+    let person = Person { name: "Bob", age: 25 };
+    let result2 = show_and_debug(person);
+    let _ = print(result2);
+}
+
+// ========================================
+// 9. PROTOCOLS FOR OPERATIONS
+// ========================================
+
+type Addable is protocol {
+    fn add(self, other: Self) -> Self;
+};
+
+type Multipliable is protocol {
+    fn multiply(self, other: Self) -> Self;
+};
+
+implement Addable for Int {
+    fn add(self, other: Self) -> Self {
+        self + other
+    }
+}
+
+implement Multipliable for Int {
+    fn multiply(self, other: Self) -> Self {
+        self * other
+    }
+}
+
+implement Addable for Float {
+    fn add(self, other: Self) -> Self {
+        self + other
+    }
+}
+
+implement Multipliable for Float {
+    fn multiply(self, other: Self) -> Self {
+        self * other
+    }
+}
+
+fn combine<T>(a: T, b: T, c: T) -> T where type T: Addable, type T: Multipliable {
+    let sum = a.add(b);
+    sum.multiply(c)
+}
+
+fn test_operation_protocols() {
+    let _ = print("\n=== Test 8: Operation Protocols ===");
+
+    let int_result = combine(2, 3, 4);
+    let _ = print(f"combine(2, 3, 4) = (2 + 3) * 4 = {int_result}");
+
+    let float_result = combine(1.5, 2.5, 3.0);
+    let _ = print(f"combine(1.5, 2.5, 3.0) = (1.5 + 2.5) * 3.0 = {float_result}");
+}
+
+// ========================================
+// 10. PROTOCOL INHERITANCE (EXTENSION)
+// ========================================
+
+// Note: Protocol extension syntax would be:
+// type DebugDisplay is protocol extends Display {
+//     fn debug_display(self) -> Text;
+// };
+
+// For now, we define separate protocols
+type Show is protocol {
+    fn show(self) -> Text;
+};
+
+implement Show for Point {
+    fn show(self) -> Text {
+        self.display()
+    }
+}
+
+fn test_protocol_extension() {
+    let _ = print("\n=== Test 9: Protocol Extension Concept ===");
+
+    let p = Point { x: 9.0, y: 11.0 };
+    let _ = print(f"Point.show(): {p.show()}");
+}
+
+// ========================================
+// 11. GENERIC FUNCTIONS WITH PROTOCOLS
+// ========================================
+
+fn format_list<T>(items: T, separator: Text) -> Text where type T: Display {
+    // In a real implementation, this would iterate over a list
+    // For now, just demonstrate the type constraint
+    items.display()
+}
+
+fn log_value<T>(value: T, prefix: Text) where type T: Debug {
+    let debug_str = value.debug();
+    let _ = print(f"{prefix}: {debug_str}");
+}
+
+fn test_generic_protocol_functions() {
+    let _ = print("\n=== Test 10: Generic Functions with Protocols ===");
+
+    let p = Point { x: 12.0, y: 13.0 };
+    let formatted = format_list(p, ", ");
+    let _ = print(f"format_list: {formatted}");
+
+    log_value(p, "Point value");
+
+    let person = Person { name: "Charlie", age: 35 };
+    log_value(person, "Person value");
+}
+
+// ========================================
+// 12. PROTOCOLS WITH SELF TYPE
+// ========================================
+
+type Cloneable is protocol {
+    fn clone(self) -> Self;
+};
+
+implement Cloneable for Point {
+    fn clone(self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+implement Cloneable for Person {
+    fn clone(self) -> Self {
+        Person { name: self.name, age: self.age }
+    }
+}
+
+fn duplicate<T>(value: T) -> T where type T: Cloneable {
+    value.clone()
+}
+
+fn test_self_type_protocol() {
+    let _ = print("\n=== Test 11: Protocols with Self Type ===");
+
+    let p1 = Point { x: 14.0, y: 15.0 };
+    let p2 = duplicate(p1);
+    let _ = print(f"Original: {p1.display()}");
+    let _ = print(f"Clone: {p2.display()}");
+
+    let person1 = Person { name: "Dave", age: 40 };
+    let person2 = duplicate(person1);
+    let _ = print(f"Original: {person1.display()}");
+    let _ = print(f"Clone: {person2.display()}");
+}
+
+// ========================================
+// 13. CONDITIONAL PROTOCOL IMPLEMENTATION
+// ========================================
+
+// Implement Debug for Pair only when both types implement Debug
+implement<A, B> Debug for Pair<A, B> where type A: Debug, type B: Debug {
+    fn debug(self) -> Text {
+        f"Pair({self.first.debug()}, {self.second.debug()})"
+    }
+
+    fn verbose_debug(self) -> Text {
+        f"Pair with first={self.first.debug()}, second={self.second.debug()}"
+    }
+}
+
+fn test_conditional_implementation() {
+    let _ = print("\n=== Test 12: Conditional Protocol Implementation ===");
+
+    let pair_points: Pair<Point, Point> = Pair {
+        first: Point { x: 1.0, y: 2.0 },
+        second: Point { x: 3.0, y: 4.0 }
+    };
+    let _ = print(f"Pair<Point, Point>.debug(): {pair_points.debug()}");
+
+    let pair_mixed: Pair<Point, Person> = Pair {
+        first: Point { x: 5.0, y: 6.0 },
+        second: Person { name: "Eve", age: 28 }
+    };
+    let _ = print(f"Pair<Point, Person>.debug(): {pair_mixed.debug()}");
+}
+
+// ========================================
+// 14. PROTOCOL METHOD CHAINING
+// ========================================
+
+type Builder is protocol {
+    fn build(self) -> Text;
+    fn with_prefix(self, prefix: Text) -> Self;
+};
+
+fn test_builder_protocol() {
+    let _ = print("\n=== Test 13: Protocol Method Chaining Concept ===");
+    let _ = print("Builder protocol defined with build() and with_prefix()");
+}
+
+// ========================================
+// 15. MAIN ENTRY POINT
+// ========================================
+
+fn main() {
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  COMPREHENSIVE PROTOCOL SYSTEM TEST SUITE            ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    test_basic_protocol_definitions();
+    test_protocol_implementation();
+    test_variant_protocols();
+    test_generic_protocols();
+    test_comparable_protocol();
+    test_stringify_protocol();
+    test_multiple_bounds();
+    test_operation_protocols();
+    test_protocol_extension();
+    test_generic_protocol_functions();
+    test_self_type_protocol();
+    test_conditional_implementation();
+    test_builder_protocol();
+
+    let _ = print("");
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  ALL PROTOCOL SYSTEM TESTS COMPLETED                 ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+    let _ = print("Note: This test validates protocol definitions, implementations,");
+    let _ = print("and generic constraints in the Verum type system.");
+}

@@ -1,0 +1,39 @@
+// Test: Spawn expression
+// Tests spawn keyword for creating concurrent tasks
+
+async fn fetch_data() -> Text {
+    "data from async task"
+}
+
+async fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn delayed_result() -> Text {
+    "delayed value"
+}
+
+async fn main() {
+    // Test basic spawn
+    let task = spawn fetch_data();
+    let result = task.await;
+    println(result);
+
+    // Test spawn with arguments
+    let sum_task = spawn compute_sum(10, 20);
+    let sum = sum_task.await;
+    println(sum);
+
+    // Test multiple spawns
+    let task1 = spawn delayed_result();
+    let task2 = spawn fetch_data();
+    let task3 = spawn compute_sum(5, 15);
+
+    let r1 = task1.await;
+    let r2 = task2.await;
+    let r3 = task3.await;
+
+    println(r1);
+    println(r2);
+    println(r3);
+}

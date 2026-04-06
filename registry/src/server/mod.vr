@@ -1,0 +1,31 @@
+// Server Module
+//
+// HTTP server infrastructure for Verum Registry.
+// Exports configuration, routing, and server types.
+
+module config;
+module router;
+
+pub import .config.{
+    ServerConfig,
+    DatabaseConfig,
+    StorageConfig,
+    CacheConfig,
+    SearchConfig,
+    RegistryConfig,
+    ConfigError,
+};
+
+pub import .router.{
+    HttpMethod,
+    HttpStatus,
+    HttpRequest,
+    HttpResponse,
+    Handler,
+    Route,
+    Router,
+    setup_routes,
+    extract_params,
+    matches_route,
+    print_routes,
+};

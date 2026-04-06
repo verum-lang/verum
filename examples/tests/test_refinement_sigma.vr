@@ -1,0 +1,28 @@
+// Test 3: Sigma types (dependent pairs)
+// Syntax: x: Type where predicate(x)
+
+type PositiveInt = x: Int where x > 0;
+
+type BoundedInt = n: Int where n >= 0 && n <= 100;
+
+type EvenInt = e: Int where e % 2 == 0;
+
+fn make_positive() -> PositiveInt {
+    42
+}
+
+fn make_bounded() -> BoundedInt {
+    75
+}
+
+fn make_even() -> EvenInt {
+    10
+}
+
+fn main() {
+    let p = make_positive();
+    let b = make_bounded();
+    let e = make_even();
+
+    p + b + e
+}

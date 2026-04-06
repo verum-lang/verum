@@ -1,0 +1,35 @@
+// Test FFI edge cases
+
+// Empty FFI boundary
+ffi Empty {
+}
+
+// FFI with multiple return types and complex signatures
+ffi Complex {
+    @extern("C")
+    fn complex_sig(
+        a: i32,
+        b: *const u8,
+        c: *mut f64,
+        d: usize
+    ) -> *mut u8;
+
+    @extern("C")
+    fn no_params() -> i32;
+
+    @extern("C")
+    fn no_return(x: i32);
+}
+
+// Test nested pointers
+ffi Pointers {
+    @extern("C")
+    fn double_ptr(p: *mut *mut u8) -> *const *const i32;
+}
+
+fn main() {
+    let _ = println("FFI edge cases parsed successfully!");
+    let _ = println("- Empty FFI boundary");
+    let _ = println("- Complex function signatures");
+    let _ = println("- Nested pointers");
+}

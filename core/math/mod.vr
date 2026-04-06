@@ -1,0 +1,880 @@
+// =============================================================================
+// mod.vr - Verum Scientific Computing Module
+// =============================================================================
+// Layer: 0-9 (Mathematical Computing Stack)
+//
+// This module provides production-ready scientific computing organized into
+// hierarchical layers (L0-L9), from bare-metal IEEE 754 operations to
+// distributed tensor computations.
+//
+// # Architecture
+//
+// ```
+// Layer 9: Agent       - LLM integration, inference optimization, agents
+// Layer 8: Distributed - Multi-node distributed compute, FSDP, DDP
+// Layer 8: SSM         - State Space Models, Mamba, MoE
+// Layer 7: Neural Nets - Layers, optimizers, training
+// Layer 6: Autodiff    - Automatic differentiation, VJP/JVP
+// Layer 5: GPU         - Accelerator compute, device abstraction
+// Layer 4: Tensor      - N-dimensional arrays, static/dynamic shape
+// Layer 3: Analysis    - Numerical analysis, ODEs, calculus, random
+// Layer 2: Linear      - Linear algebra, BLAS operations
+// Layer 1: Scalar      - Elementary & special functions
+// Layer 0: Foundation  - IEEE 754, integers, bits, SIMD (→ core/simd, core/intrinsics)
+// ```
+//
+// # Usage
+//
+// ```verum
+// mount core.math.*;           // Full math library
+// mount core.math.simple.*;    // Simple API for prototyping
+// mount core.math.linalg.*;    // Linear algebra only
+// ```
+//
+// # Refinement Types
+//
+// The math library uses refinement types to provide compile-time verification
+// of mathematical preconditions and postconditions:
+//
+// ```verum
+// fn sqrt(x: Float{>= 0.0}) -> Float{>= 0.0}
+// fn log(x: Float{> 0.0}) -> Float
+// fn asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float
+// ```
+//
+// # Context System
+//
+// Mathematical operations use Verum's context system for cross-cutting concerns:
+// - RandomSource: Pseudorandom number generation
+// - ComputeDevice: Device selection (CPU, GPU)
+// - PrecisionMode: Numerical precision control
+// - GradientTape: Autodiff recording
+//
+// Spec: docs/architecture/math-spec.md
+// =============================================================================
+
+module core.math;
+
+// =============================================================================
+// Submodule declarations (Layered Architecture)
+// =============================================================================
+
+// Layer 0: Foundation (primitives, IEEE 754, bits)
+// Note: SIMD types are in core/simd, intrinsics in core/intrinsics
+public module ieee754;      // IEEE 754 floating-point utilities
+public module integers;     // Integer operations and division modes
+public module bits;         // Bit manipulation operations
+public module checked;      // Overflow-checked arithmetic
+public module libm;         // Software math library (pure Verum, replaces libc libm)
+
+// Layer 1: Scalar Mathematics
+public module constants;    // Mathematical constants (PI, E, etc.)
+public module elementary;   // sin, cos, exp, log, pow, sqrt, etc.
+public module special;      // gamma, erf, bessel, etc.
+public module hyperbolic;   // sinh, cosh, tanh, asinh, acosh, atanh
+
+// Layer 2: Linear Algebra
+public module linalg;       // Vectors, matrices, BLAS
+
+// Layer 3: Numerical Analysis
+public module calculus;     // Integration, differentiation, ODEs
+
+// Layer 3 (continued): Random Numbers
+public module random;       // PRNG, distributions
+
+// Layer 4: Tensor System
+public module tensor;       // N-dimensional arrays, static/dynamic shape
+
+// Layer 5: GPU/Accelerator
+public module gpu;          // Device abstraction, kernels, memory, streams
+
+// Layer 6: Automatic Differentiation
+public module autodiff;     // VJP/JVP, gradients, checkpointing
+
+// Layer 7: Neural Networks
+public module nn;           // Layers, optimizers, training utilities
+
+// Layer 8: State Space Models
+public module ssm;          // S4, Mamba, BiMamba, Jamba, MoE
+
+// Layer 8: Distributed Training
+public module distributed;  // DDP, FSDP, tensor/pipeline parallelism, actor mesh
+
+// Layer 9: Agent Systems
+public module agent;        // LLM integration, tokenization, KV cache, inference, agents
+public module guardrails;   // Content filtering, safety constraints, PII redaction
+public module rag;          // Retrieval-Augmented Generation, vector stores, chunking
+
+// =============================================================================
+// Mathematical Foundations (Pure Mathematics)
+// =============================================================================
+
+// Abstract algebra: groups, rings, fields, lattices, Boolean algebras
+public module algebra;
+
+// Category theory: categories, functors, natural transformations,
+// adjunctions, monads, limits, colimits, toposes, sheaves, Kan extensions
+public module category;
+
+// Point-set and algebraic topology: spaces, continuity, compactness,
+// manifolds, fundamental group, homology
+public module topology;
+
+// Real and functional analysis: sequences, limits, continuity,
+// differentiability, measure theory, Banach/Hilbert spaces
+public module analysis;
+
+// Formal logic: propositions-as-types, proof terms, connectives,
+// quantifiers, decidability, classical vs constructive logic
+public module logic;
+
+// Number theory: Peano naturals, primes, divisibility, modular arithmetic,
+// GCD/LCM, Euler/Fermat/FTA theorem statements
+public module number_theory;
+
+// =============================================================================
+// Progressive API Disclosure
+// =============================================================================
+
+// Level 1: Simple API - high-level, convenience-focused, no generics required
+public module simple;
+
+// Level 3: Advanced API - fine-grained control, explicit tiling, custom kernels
+public module advanced;
+
+// Level 4: Internal API - library internals, requires @allow(internal_api)
+// Note: Do not import directly unless developing low-level extensions
+@internal
+public module internal;
+
+// =============================================================================
+// Prelude re-exports (commonly used items)
+// =============================================================================
+
+// Mathematical constants
+public mount .constants.{
+    PI,
+    TAU,
+    E,
+    PHI,
+    SQRT2,
+    SQRT3,
+    LN2,
+    LN10,
+    LOG2_E,
+    LOG10_E,
+    EPSILON,
+    INFINITY,
+    NEG_INFINITY,
+    NAN,
+};
+
+// Refinement type aliases for mathematical domains
+public mount .constants.{
+    NonNegative,
+    Positive,
+    UnitInterval,
+    Probability,
+    Angle,
+};
+
+// IEEE 754 utilities
+public mount .ieee754.{
+    FpCategory,
+    is_nan,
+    is_infinite,
+    is_finite,
+    is_normal,
+    is_subnormal,
+    copysign,
+    signbit,
+};
+
+// Elementary functions
+public mount .elementary.{
+    // Trigonometric
+    sin,
+    cos,
+    tan,
+    asin,
+    acos,
+    atan,
+    atan2,
+    sincos,
+    // Exponential/Logarithmic
+    exp,
+    exp2,
+    expm1,
+    log,
+    log2,
+    log10,
+    log1p,
+    // Power
+    pow,
+    powi,
+    sqrt,
+    cbrt,
+    hypot,
+    // Rounding
+    floor,
+    ceil,
+    round,
+    rint,
+    trunc,
+    fract,
+    // Min/Max/Clamp/Sign
+    min,
+    max,
+    clamp,
+    abs,
+    signum,
+    // FMA
+    fma,
+    // Linear Interpolation
+    lerp,
+    inverse_lerp,
+    remap,
+    // Smooth Interpolation
+    smoothstep,
+    smootherstep,
+};
+
+// Safe variants (return Maybe<T>)
+public mount .elementary.{
+    sqrt_safe,
+    log_safe,
+    asin_safe,
+    acos_safe,
+};
+
+// Hyperbolic functions
+public mount .hyperbolic.{
+    sinh,
+    cosh,
+    tanh,
+    asinh,
+    acosh,
+    atanh,
+};
+
+// Special functions
+public mount .special.{
+    gamma,
+    lgamma,
+    digamma,
+    beta,
+    erf,
+    erfc,
+    erfinv,
+};
+
+// Bit operations
+public mount .bits.{
+    clz,
+    ctz,
+    popcnt,
+    rotl,
+    rotr,
+    is_power_of_two,
+    next_power_of_two,
+};
+
+// Checked arithmetic
+public mount .checked.{
+    CheckedResult,
+    checked_add,
+    checked_sub,
+    checked_mul,
+    saturating_add,
+    saturating_sub,
+    saturating_mul,
+    wrapping_add,
+    wrapping_sub,
+    wrapping_mul,
+};
+
+// Integer operations
+public mount .integers.{
+    DivMode,
+    div_floor,
+    div_ceiling,
+    div_euclidean,
+    mod_euclidean,
+    gcd,
+    lcm,
+};
+
+// Linear algebra
+public mount .linalg.{
+    // Types
+    Numeric,
+    Vector,
+    Matrix,
+    StaticVector,
+    StaticMatrix,
+    Transpose,
+    TriangularType,
+    DiagonalType,
+    Side,
+    // BLAS Level 1
+    dot,
+    nrm2,
+    asum,
+    iamax,
+    scal,
+    axpy,
+    copy,
+    swap,
+    rotg,
+    rot,
+    // BLAS Level 2
+    gemv,
+    trsv,
+    ger,
+    syr,
+    // BLAS Level 3
+    gemm,
+    trsm,
+    syrk,
+    // Decompositions
+    LUDecomposition,
+    QRDecomposition,
+    CholeskyDecomposition,
+    lu,
+    lu_solve,
+    qr,
+    qr_solve,
+    cholesky,
+    cholesky_solve,
+    determinant,
+    inverse,
+    solve,
+};
+
+// Numerical analysis and calculus
+public mount .calculus.{
+    // Differentiation
+    diff_forward,
+    diff_backward,
+    diff_central,
+    diff2_central,
+    derivative,
+    gradient,
+    jacobian,
+    hessian,
+    richardson,
+    // Integration
+    trapezoid,
+    simpson,
+    romberg,
+    gauss_legendre,
+    adaptive_simpson,
+    // ODE solvers
+    ODESystem,
+    ODESolution,
+    euler,
+    heun,
+    midpoint,
+    rk4,
+    rk45,
+    // Root finding
+    RootResult,
+    bisection,
+    newton,
+    newton_raphson,
+    secant,
+    brent,
+    // Optimization
+    OptimResult,
+    gradient_descent,
+    gradient_descent_bt,
+    newton_optimize,
+    bfgs,
+};
+
+// Random number generation
+public mount .random.{
+    // Key-based PRNG
+    RandomKey,
+    // Generators
+    XorShift128,
+    PCG,
+    Rng,
+    // Uniform distribution
+    uniform_01,
+    uniform,
+    uniform_vec,
+    uniform_int,
+    // Normal distribution
+    normal_01,
+    normal,
+    normal_vec,
+    truncated_normal,
+    // Other distributions
+    exponential,
+    bernoulli,
+    poisson,
+    gamma,
+    beta,
+    chi_squared,
+    student_t,
+    cauchy,
+    categorical,
+    categorical_logits,
+    // Shuffling
+    permutation,
+    shuffle_vec,
+    choice,
+};
+
+// Tensor system
+public mount .tensor.{
+    // Data types
+    DType,
+    // Shape types
+    Dim,
+    Shape,
+    StaticShape,
+    DynShape,
+    // Core tensor types
+    Tensor,
+    DynTensor,
+    // Views
+    TensorView,
+    TensorViewMut,
+    DynTensorView,
+    DynTensorViewMut,
+    // Strided layout
+    Strides,
+    Layout,
+    // Scalar tensor
+    Scalar,
+    // Constructors
+    zeros,
+    ones,
+    full,
+    eye,
+    arange,
+    linspace,
+    from_fn,
+    from_list,
+    // Random tensors
+    rand,
+    randn,
+    // Shape operations
+    broadcast,
+    reshape,
+    squeeze,
+    unsqueeze,
+    transpose,
+    permute,
+    flatten,
+    // Indexing
+    TensorIndex,
+    slice,
+    gather,
+    scatter,
+    // Reduction operations
+    sum,
+    mean,
+    prod,
+    max,
+    min,
+    argmax,
+    argmin,
+    // Element-wise operations
+    add,
+    sub,
+    mul,
+    div,
+    neg,
+    // Matrix operations
+    matmul,
+    mm,
+    bmm,
+    // Comparison
+    eq,
+    ne,
+    lt,
+    le,
+    gt,
+    ge,
+    // Logical
+    logical_and,
+    logical_or,
+    logical_not,
+    where_cond,
+    // Concatenation
+    cat,
+    stack,
+    split,
+    chunk,
+};
+
+// GPU compute
+public mount .gpu.{
+    // Backend types
+    GPUBackend,
+    Vendor,
+    // Device identification
+    DeviceId,
+    DeviceInfo,
+    GpuInfo,
+    CpuInfo,
+    ComputeCapability,
+    // Device selection
+    DeviceSelector,
+    DeviceSelection,
+    DeviceRegistry,
+    // Global access
+    get_registry,
+    default_device,
+    has_gpu,
+    gpu_count,
+    get_devices,
+    select_device,
+    // Device context
+    current_device,
+    set_device,
+    with_device,
+    // Memory spaces
+    MemorySpace,
+    DevicePtr,
+    GPUBuffer,
+    PinnedBuffer,
+    // Memory operations
+    to_device,
+    to_host,
+    memcpy,
+    memcpy_async,
+    prefetch,
+    memset,
+    memset_async,
+    pin_memory,
+    unpin_memory,
+    // Memory info
+    MemoryInfo,
+    get_memory_info,
+    // Launch configuration
+    Dim3,
+    LaunchConfig,
+    // Streams and events
+    Stream,
+    Event,
+    StreamHandle,
+    EventHandle,
+    device_synchronize,
+    all_device_synchronize,
+    // Kernel launch
+    GPUKernel,
+    launch,
+    launch_cooperative,
+    // CUDA graphs
+    CudaGraph,
+    capture_graph,
+    // Multi-GPU
+    enable_peer_access,
+    disable_peer_access,
+    can_access_peer,
+    parallel_devices,
+    // Profiling
+    profile,
+    profiler_push,
+    profiler_pop,
+    profiler_scope,
+    // Context
+    ComputeDevice,
+    CPUDevice,
+    GPUDevice,
+};
+
+// Automatic differentiation
+public mount .autodiff.{
+    // Core protocols
+    Differentiable,
+    // Differentiation modes
+    DiffMode,
+    // VJP/JVP results
+    VJPResult,
+    JVPResult,
+    // Core operations
+    vjp,
+    jvp,
+    grad,
+    value_and_grad,
+    grad_argnums,
+    // Control flow
+    stop_gradient,
+    custom_vjp,
+    // Higher-order derivatives
+    jacobian,
+    hessian,
+    hvp,
+    gnvp,
+    // Gradient scope
+    GradientScope,
+    with_no_grad,
+    with_inference,
+    // Checkpointing
+    checkpoint,
+    recompute,
+    checkpointed_sequential,
+    optimal_checkpoint,
+    // Contexts
+    AutodiffContext,
+    GradientAccumulation,
+};
+
+// Neural networks
+public mount .nn.{
+    // Core protocols
+    Module,
+    Trainable,
+    Serializable,
+    // Parameters
+    Parameter,
+    // Linear layers
+    Linear,
+    Embedding,
+    // Convolutions
+    Conv2d,
+    // Normalization
+    LayerNorm,
+    RMSNorm,
+    BatchNorm,
+    // Activations
+    Activation,
+    relu,
+    gelu,
+    silu,
+    sigmoid,
+    softmax_axis,
+    log_softmax,
+    softplus,
+    // Dropout
+    Dropout,
+    dropout,
+    // Attention
+    MultiHeadAttention,
+    scaled_dot_product_attention,
+    // Transformer components
+    FeedForward,
+    TransformerBlock,
+    // Positional encoding
+    sinusoidal_encoding,
+    RoPE,
+    apply_rope,
+    // Optimizers
+    Optimizer,
+    SGD,
+    AdamW,
+    // Learning rate schedulers
+    LRScheduler,
+    CosineScheduler,
+    LinearWarmup,
+    // Gradient utilities
+    clip_grad_norm,
+    clip_grad_value,
+    // Loss functions
+    cross_entropy_loss,
+    mse_loss,
+    smooth_l1_loss,
+    binary_cross_entropy,
+    binary_cross_entropy_with_logits,
+};
+
+// State Space Models (SSM/Mamba)
+public mount .ssm.{
+    // Discretization
+    DiscretizationMethod,
+    // State Space Kernel
+    StateSpaceKernel,
+    // S4
+    S4Layer,
+    // Mamba
+    MambaBlock,
+    Mamba,
+    // Bidirectional Mamba
+    BiMambaBlock,
+    // Jamba (Hybrid)
+    JambaLayer,
+    Jamba,
+    // Mixture of Experts
+    RoutingStrategy,
+    BalanceLoss,
+    Activation,
+    Expert,
+    Router,
+    MoELayer,
+    MoETransformerBlock,
+};
+
+// Distributed Training
+public mount .distributed.{
+    // Communication backend
+    CommBackend,
+    ProcessGroup,
+    current_rank,
+    world_size,
+    // Reduction operations
+    ReduceOp,
+    // Collective operations
+    all_reduce,
+    all_gather,
+    reduce_scatter,
+    broadcast,
+    scatter,
+    gather,
+    send,
+    recv,
+    send_to,
+    recv_from,
+    barrier,
+    // Data parallelism
+    DataParallel,
+    DistributedDataParallel,
+    // Tensor parallelism
+    ColumnParallelLinear,
+    RowParallelLinear,
+    // Pipeline parallelism
+    PipelineSchedule,
+    PipelineParallel,
+    // FSDP
+    ShardingStrategy,
+    FSDP,
+    DType,
+    // Actor mesh
+    MeshDims,
+    MeshTopology,
+    MeshSelector,
+    SliceOrIndex,
+    ActorId,
+    ActorDeviceId,
+    ActorHandle,
+    ActorMesh,
+    Actor,
+    // Supervision
+    SupervisionStrategy,
+    MeshFailure,
+    SupervisionDecision,
+    Supervision,
+    DefaultSupervision,
+    // RDMA
+    RdmaRef,
+    RdmaContext,
+};
+
+// Agent Systems (LLM/Inference)
+public mount .agent.{
+    // Tokenization
+    Tokenizer,
+    BPETokenizer,
+    SentencePieceTokenizer,
+    // KV Cache
+    KVCache,
+    PagedKVCache,
+    // Speculative Decoding
+    SpeculativeDecoder,
+    // Continuous Batching
+    Request,
+    ContinuousBatcher,
+    // Agent framework
+    Tool,
+    Message,
+    Role,
+    Agent,
+    LLMAgent,
+    // ReAct pattern
+    ReActAgent,
+    // Memory/RAG
+    MemoryStore,
+    // Quantization
+    QuantizedLinear,
+    quantize_per_channel,
+    // Attention optimizations
+    flash_attention,
+    paged_attention,
+    // Sampling
+    sample_top_p,
+    sample_temperature,
+    sample_greedy,
+    // Prompt Engineering (Section 49)
+    MessageContent,
+    ImageDetail,
+    ChatMessage,
+    ToMap,
+    PromptTemplate,
+    FewShotPrompt,
+    ChainOfThoughtPrompt,
+    StructuredOutputPrompt,
+    // Function Calling (Section 50)
+    JsonSchema,
+    JsonSchemaType,
+    FunctionSchema,
+    FunctionCall,
+    FunctionCallResult,
+    ExecutableTool,
+    CallableTool,
+    FunctionCallingAgent,
+    ToolChoice,
+    ParseError,
+};
+
+// Guardrails and Safety (Section 51)
+public mount .guardrails.{
+    // Guardrail result types
+    GuardrailResult,
+    ClassificationResult,
+    // Content classifier
+    ContentClassifier,
+    // Guardrail protocol
+    Guardrail,
+    // PII filter
+    Pattern,
+    PIIFilter,
+    // Topic guardrail
+    TopicGuardrail,
+    // Guardrail chain
+    GuardrailMode,
+    GuardrailChain,
+    // Guarded agent
+    GuardedAgent,
+    // Additional filters
+    KeywordFilter,
+    LengthGuardrail,
+    RateLimitGuardrail,
+    // Builder pattern
+    GuardrailBuilder,
+};
+
+// RAG (Retrieval-Augmented Generation) (Section 52)
+public mount .rag.{
+    // Document types
+    Document,
+    // Vector store protocol
+    VectorStore,
+    // HNSW index
+    HNSWConfig,
+    HNSWIndex,
+    HNSWVectorStore,
+    // Chunking
+    ChunkStrategy,
+    TextChunker,
+    // RAG pipeline
+    RAGPipeline,
+    // Sparse retrieval (BM25)
+    SparseIndex,
+    BM25Config,
+    BM25Index,
+    // Hybrid retrieval
+    HybridRetriever,
+};
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+public const VERSION: Text = "0.1.0";
+public const VERSION_MAJOR: Int = 0;
+public const VERSION_MINOR: Int = 1;
+public const VERSION_PATCH: Int = 0;

@@ -1,0 +1,16 @@
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_adder2(n: Int) -> fn(Int) -> Int = |x| x + n;
+
+fn make_adder3(n: Int) -> fn(Int) -> Int {
+    let a = 1;
+    |x| x + a
+}
+
+fn main() {
+    let adder = make_adder(5);
+    let result = adder(10);
+    print(result);
+}

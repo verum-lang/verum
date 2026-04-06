@@ -1,0 +1,25 @@
+// Test complex pipeline operations
+// This test verifies pipeline operator with multiple types and transformations
+
+fn add_ten(x: Int) -> Int { x + 10 }
+fn square(x: Int) -> Int { x * x }
+fn halve(x: Int) -> Int { x / 2 }
+fn double(x: Int) -> Int { x * 2 }
+fn to_text(x: Int) -> Text { f"{x}" }
+
+fn main() {
+    println("Test 1: Simple numeric pipeline")
+    let result1 = 5 |> add_ten |> square |> halve
+    println(f"5 |> add_ten |> square |> halve = {result1}")
+
+    println("")
+    println("Test 2: Pipeline with type transformation")
+    let result2 = 7 |> add_ten |> square |> to_text
+    println(f"7 |> add_ten |> square |> to_text = {result2}")
+
+    println("")
+    println("Test 3: Pipeline in expression")
+    let x = 3
+    let y = (x |> double |> add_ten) + 5
+    println(f"(3 |> double |> add_ten) + 5 = {y}")
+}

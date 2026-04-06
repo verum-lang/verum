@@ -1,0 +1,53 @@
+// Test record types and field access
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Rectangle is {
+    origin: Point,
+    width: Float,
+    height: Float
+};
+
+fn distance(p1: Point, p2: Point) -> Float {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    // Note: sqrt not available, just return squared distance
+    dx * dx + dy * dy
+}
+
+fn area(rect: Rectangle) -> Float {
+    rect.width * rect.height
+}
+
+fn main() {
+    let _ = print("Testing records...");
+
+    // Create point
+    let p1 = Point { x: 0.0, y: 0.0 };
+    let p2 = Point { x: 3.0, y: 4.0 };
+
+    let _ = print(f"p1.x = {p1.x}");
+    let _ = print(f"p2.y = {p2.y}");
+
+    // Distance squared
+    let dist = distance(p1, p2);
+    let _ = print(f"distance_squared(p1, p2) = {dist}");
+
+    // Nested record
+    let rect = Rectangle {
+        origin: Point { x: 1.0, y: 2.0 },
+        width: 10.0,
+        height: 5.0
+    };
+
+    let a = area(rect);
+    let _ = print(f"area = {a}");
+
+    // Access nested field
+    let _ = print(f"rect.origin.x = {rect.origin.x}");
+
+    let _ = print("Done!");
+}

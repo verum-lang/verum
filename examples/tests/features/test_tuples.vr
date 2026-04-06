@@ -1,0 +1,31 @@
+// Test tuple operations - including tuple index access
+
+fn swap(a: Float, b: Float) -> (Float, Float) {
+    (b, a)
+}
+
+fn main() {
+    let _ = print("=== Tuple Tests ===");
+
+    // Tuple literals
+    let pair = (10.0, 20.0);
+
+    // Tuple destructuring
+    let (x, y) = pair;
+    let _ = print(f"Destructuring - Pair: ({x}, {y})");
+
+    // Tuple index access with .0 and .1
+    let first = pair.0;
+    let second = pair.1;
+    let _ = print(f"Index access - First: {first}, Second: {second}");
+
+    // Tuple from function
+    let (a, b) = swap(5.0, 3.0);
+    let _ = print(f"Swapped (5, 3): ({a}, {b})");
+
+    // Tuple index access on function result
+    let result = swap(7.0, 9.0);
+    let _ = print(f"Swap result via index: ({result.0}, {result.1})");
+
+    let _ = print("=== Tests Complete ===");
+}

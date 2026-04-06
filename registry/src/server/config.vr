@@ -1,0 +1,245 @@
+// Server Configuration
+//
+// Configuration types for the Verum Registry server.
+// Demonstrates Verum's type system with records and validation.
+
+mount core.base.{Result, Text, Int};
+
+// ============================================================================
+// Configuration Types
+// ============================================================================
+
+/// Server configuration
+pub type ServerConfig is {
+    /// Host address to bind to (e.g., "0.0.0.0", "127.0.0.1")
+    host: Text,
+
+    /// Port to listen on
+    port: Int,
+
+    /// Maximum request body size in bytes
+    max_body_size: Int,
+
+    /// Request timeout in seconds
+    timeout_secs: Int,
+};
+
+/// Database configuration
+pub type DatabaseConfig is {
+    /// PostgreSQL connection URL
+    url: Text,
+
+    /// Maximum number of connections in the pool
+    max_connections: Int,
+
+    /// Connection timeout in seconds
+    connection_timeout: Int,
+};
+
+/// Storage configuration
+pub type StorageConfig is {
+    /// Base path for storing package artifacts
+    base_path: Text,
+
+    /// Maximum file size in bytes
+    max_file_size: Int,
+};
+
+/// Cache configuration
+pub type CacheConfig is {
+    /// Redis connection URL
+    url: Text,
+
+    /// Default TTL in seconds
+    default_ttl: Int,
+};
+
+/// Search configuration
+pub type SearchConfig is {
+    /// Elasticsearch endpoint
+    endpoint: Text,
+
+    /// Index name for packages
+    index_name: Text,
+};
+
+/// Complete registry configuration
+pub type RegistryConfig is {
+    server: ServerConfig,
+    database: DatabaseConfig,
+    storage: StorageConfig,
+    cache: CacheConfig,
+    search: SearchConfig,
+};
+
+// ============================================================================
+// Configuration Validation
+// ============================================================================
+
+pub type ConfigError is
+    | InvalidHost(Text)
+    | InvalidPort(Int)
+    | InvalidPath(Text)
+    | InvalidUrl(Text)
+    | InvalidValue(Text);
+
+implement ConfigError {
+    pub fn message(self) -> Text {
+        match self {
+            ConfigError.InvalidHost(host) => f"Invalid host: {host}",
+            ConfigError.InvalidPort(port) => f"Invalid port: {port}",
+            ConfigError.InvalidPath(path) => f"Invalid path: {path}",
+            ConfigError.InvalidUrl(url) => f"Invalid URL: {url}",
+            ConfigError.InvalidValue(msg) => f"Invalid configuration: {msg}",
+        }
+    }
+}
+
+// ============================================================================
+// Default Configurations
+// ============================================================================
+
+implement ServerConfig {
+    /// Create default server configuration
+    pub fn default() -> ServerConfig {
+        ServerConfig {
+            host: "127.0.0.1",
+            port: 8080,
+            max_body_size: 10485760,  // 10 MB
+            timeout_secs: 30,
+        }
+    }
+
+    /// Validate server configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if self.port < 1 || self.port > 65535 {
+            return Result.Err(ConfigError.InvalidPort(self.port));
+        }
+
+        if self.max_body_size < 1024 {
+            return Result.Err(ConfigError.InvalidValue("max_body_size must be at least 1KB"));
+        }
+
+        if self.timeout_secs < 1 {
+            return Result.Err(ConfigError.InvalidValue("timeout_secs must be positive"));
+        }
+
+        Result.Ok(())
+    }
+}
+
+implement DatabaseConfig {
+    /// Create default database configuration
+    pub fn default() -> DatabaseConfig {
+        DatabaseConfig {
+            url: "postgres://localhost/verum_registry",
+            max_connections: 10,
+            connection_timeout: 5,
+        }
+    }
+
+    /// Validate database configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if !self.url.starts_with("postgres://") {
+            return Result.Err(ConfigError.InvalidUrl(self.url.clone()));
+        }
+
+        if self.max_connections < 1 {
+            return Result.Err(ConfigError.InvalidValue("max_connections must be positive"));
+        }
+
+        Result.Ok(())
+    }
+}
+
+implement StorageConfig {
+    /// Create default storage configuration
+    pub fn default() -> StorageConfig {
+        StorageConfig {
+            base_path: "/var/lib/verum-registry",
+            max_file_size: 104857600,  // 100 MB
+        }
+    }
+
+    /// Validate storage configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if self.base_path.is_empty() {
+            return Result.Err(ConfigError.InvalidPath("base_path cannot be empty"));
+        }
+
+        if self.max_file_size < 1024 {
+            return Result.Err(ConfigError.InvalidValue("max_file_size must be at least 1KB"));
+        }
+
+        Result.Ok(())
+    }
+}
+
+implement CacheConfig {
+    /// Create default cache configuration
+    pub fn default() -> CacheConfig {
+        CacheConfig {
+            url: "redis://localhost:6379",
+            default_ttl: 3600,  // 1 hour
+        }
+    }
+
+    /// Validate cache configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if !self.url.starts_with("redis://") {
+            return Result.Err(ConfigError.InvalidUrl(self.url.clone()));
+        }
+
+        if self.default_ttl < 0 {
+            return Result.Err(ConfigError.InvalidValue("default_ttl must be non-negative"));
+        }
+
+        Result.Ok(())
+    }
+}
+
+implement SearchConfig {
+    /// Create default search configuration
+    pub fn default() -> SearchConfig {
+        SearchConfig {
+            endpoint: "http://localhost:9200",
+            index_name: "verum_packages",
+        }
+    }
+
+    /// Validate search configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if !self.endpoint.starts_with("http://") && !self.endpoint.starts_with("https://") {
+            return Result.Err(ConfigError.InvalidUrl(self.endpoint.clone()));
+        }
+
+        if self.index_name.is_empty() {
+            return Result.Err(ConfigError.InvalidValue("index_name cannot be empty"));
+        }
+
+        Result.Ok(())
+    }
+}
+
+implement RegistryConfig {
+    /// Create default registry configuration
+    pub fn default() -> RegistryConfig {
+        RegistryConfig {
+            server: ServerConfig.default(),
+            database: DatabaseConfig.default(),
+            storage: StorageConfig.default(),
+            cache: CacheConfig.default(),
+            search: SearchConfig.default(),
+        }
+    }
+
+    /// Validate complete configuration
+    pub fn validate(self) -> Result<(), ConfigError> {
+        self.server.validate()?;
+        self.database.validate()?;
+        self.storage.validate()?;
+        self.cache.validate()?;
+        self.search.validate()?;
+        Result.Ok(())
+    }
+}

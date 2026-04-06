@@ -1,0 +1,50 @@
+// Minimal closure test to identify parsing issues
+
+fn apply_op(x: Int, op: fn(Int) -> Int) -> Int {
+    op(x)
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() {
+    let _ = print("=== MINIMAL CLOSURE TEST ===");
+
+    // Test 1: Basic closure
+    let add_one = |x| x + 1;
+    let result1 = add_one(5);
+    let _ = print(f"Test 1: |x| x + 1 applied to 5 = {result1}");
+
+    // Test 2: Two parameters
+    let add = |x, y| x + y;
+    let result2 = add(10, 20);
+    let _ = print(f"Test 2: |x, y| x + y applied to (10, 20) = {result2}");
+
+    // Test 3: No parameters
+    let get_const = || 42;
+    let result3 = get_const();
+    let _ = print(f"Test 3: || 42 returns {result3}");
+
+    // Test 4: Typed closure
+    let typed = |x: Int| -> Int { x * 2 };
+    let result4 = typed(7);
+    let _ = print(f"Test 4: |x: Int| -> Int {{ x * 2 }} applied to 7 = {result4}");
+
+    // Test 5: Capture
+    let factor = 10;
+    let multiply = |x| x * factor;
+    let result5 = multiply(5);
+    let _ = print(f"Test 5: Captured factor=10, multiply(5) = {result5}");
+
+    // Test 6: Closure as argument
+    let result6 = apply_op(5, |x| x * 2);
+    let _ = print(f"Test 6: apply_op(5, |x| x * 2) = {result6}");
+
+    // Test 7: Closure as return value
+    let add10 = make_adder(10);
+    let result7 = add10(5);
+    let _ = print(f"Test 7: make_adder(10) applied to 5 = {result7}");
+
+    let _ = print("=== ALL MINIMAL TESTS PASSED ===");
+}

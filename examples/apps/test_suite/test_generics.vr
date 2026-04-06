@@ -1,0 +1,54 @@
+// Test generic types and functions
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+type Triple<T> is {
+    a: T,
+    b: T,
+    c: T
+};
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn first<A, B>(pair: Pair<A, B>) -> A {
+    pair.first
+}
+
+fn second<A, B>(pair: Pair<A, B>) -> B {
+    pair.second
+}
+
+fn make_triple<T>(value: T) -> Triple<T> {
+    Triple { a: value, b: value, c: value }
+}
+
+fn main() {
+    let _ = print("Testing generics...");
+
+    // Generic pair with Int, Text
+    let pair1 = Pair { first: 42, second: "hello" };
+    let _ = print(f"pair1.first = {pair1.first}");
+    let _ = print(f"pair1.second = {pair1.second}");
+
+    // Swap
+    let swapped = swap(pair1);
+    let _ = print(f"swapped.first = {swapped.first}");
+
+    // Generic pair with Float, Float
+    let pair2 = Pair { first: 1.5, second: 2.5 };
+    let f = first(pair2);
+    let _ = print(f"first(pair2) = {f}");
+
+    // Triple of ints
+    let t = make_triple(100);
+    let _ = print(f"triple.a = {t.a}");
+    let _ = print(f"triple.b = {t.b}");
+    let _ = print(f"triple.c = {t.c}");
+
+    let _ = print("Done!");
+}

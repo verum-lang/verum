@@ -1,0 +1,233 @@
+// Package Version Repository Protocol
+//
+// Defines the PackageVersionRepository protocol for persisting and retrieving
+// PackageVersion entities. This protocol handles version-specific operations
+// separately from Package operations, following the Single Responsibility Principle.
+//
+// Design Principles:
+// - Version lifecycle is independent of Package lifecycle
+// - Each version is immutable once published (no updates, only yanking)
+// - Version queries are optimized for dependency resolution
+//
+// All methods are async for non-blocking I/O and return Result<T, RegistryError>
+// for explicit error handling.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount super.super.package.PackageVersion;
+mount super.super.version.SemVer;
+mount super.super.errors.RegistryError;
+mount super.super.refinements.{EntityId, PackageName, QueryOffset, QueryLimit};
+
+/// PackageVersionRepository protocol defines the contract for PackageVersion persistence
+///
+/// Implementations must provide thread-safe, async database operations for:
+/// - Version CRUD operations (Create, Read, Delete - no Update as versions are immutable)
+/// - Version queries (find by package, find specific versions, list all)
+/// - Version validation (existence checks, yank status)
+///
+/// Example Usage:
+/// ```verum
+/// using [PackageVersionRepository] async fn publish_version(
+///     pkg_name: PackageName,
+///     version: PackageVersion
+/// ) -> Result<(), RegistryError> {
+///     // Check if this version already exists
+///     if PackageVersionRepository.exists(pkg_name, version.version).await? {
+///         return Result.Err(RegistryError.VersionAlreadyExists {
+///             package: pkg_name,
+///             version: version.version.to_string()
+///         });
+///     }
+///
+///     // Save new version
+///     PackageVersionRepository.save(version).await
+/// }
+/// ```
+pub protocol PackageVersionRepository {
+    /// Retrieve a specific version of a package
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to retrieve
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(version)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_version(
+        package_name: PackageName,
+        version: SemVer
+    ) -> Result<Maybe<PackageVersion>, RegistryError>;
+
+    /// Retrieve all versions of a package
+    ///
+    /// Returns versions in descending order (newest first).
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    ///
+    /// Returns:
+    /// - Ok(List<PackageVersion>) with all versions (empty list if none)
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_all_versions(package_name: PackageName) -> Result<List<PackageVersion>, RegistryError>;
+
+    /// Persist a package version (insert only - versions are immutable)
+    ///
+    /// Once published, a version cannot be modified. Only yanking is allowed.
+    ///
+    /// Parameters:
+    /// - version: The PackageVersion to persist
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.VersionAlreadyExists) if version already exists
+    /// - Err(RegistryError.DatabaseError) on persistence failure
+    /// - Err(RegistryError.ValidationError) if version data is invalid
+    async fn save(version: PackageVersion) -> Result<(), RegistryError>;
+
+    /// Delete a specific version
+    ///
+    /// This is a destructive operation. Prefer yanking for production registries.
+    /// Deletion should only be used for spam/malicious packages or by admins.
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to delete
+    ///
+    /// Returns:
+    /// - Ok(()) if version was deleted or didn't exist (idempotent)
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>;
+
+    /// Check if a specific version exists
+    ///
+    /// More efficient than get_version when only existence needs to be checked.
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to check
+    ///
+    /// Returns:
+    /// - Ok(true) if version exists
+    /// - Ok(false) if version does not exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists(package_name: PackageName, version: SemVer) -> Result<Bool, RegistryError>;
+
+    /// Get the latest (highest) version of a package
+    ///
+    /// Follows semantic versioning rules to determine "latest".
+    /// Excludes pre-release versions unless only pre-releases exist.
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(version)) if any version exists
+    /// - Ok(Maybe.None) if no versions exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_latest_version(package_name: PackageName) -> Result<Maybe<PackageVersion>, RegistryError>;
+
+    /// Find versions matching a version constraint
+    ///
+    /// Supports semantic versioning constraints like:
+    /// - "^1.0.0" (caret - compatible versions)
+    /// - "~1.2.3" (tilde - patch-level changes)
+    /// - ">=1.0.0, <2.0.0" (ranges)
+    /// - "*" (any version)
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - constraint: Version constraint string
+    ///
+    /// Returns:
+    /// - Ok(List<PackageVersion>) with matching versions in descending order
+    /// - Err(RegistryError.InvalidVersion) if constraint is malformed
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn find_matching_versions(
+        package_name: PackageName,
+        constraint: Text
+    ) -> Result<List<PackageVersion>, RegistryError>;
+
+    /// List all package versions with pagination
+    ///
+    /// Useful for admin interfaces and bulk operations.
+    ///
+    /// Parameters:
+    /// - offset: Number of versions to skip (for pagination)
+    /// - limit: Maximum number of versions to return
+    ///
+    /// Returns:
+    /// - Ok(List<PackageVersion>) with requested page
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<PackageVersion>, RegistryError>;
+
+    /// Count total number of versions for a package
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    ///
+    /// Returns:
+    /// - Ok(count) with total version count
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count_versions(package_name: PackageName) -> Result<Int, RegistryError>;
+
+    /// Mark a version as yanked
+    ///
+    /// Yanked versions are hidden from normal searches but remain downloadable
+    /// for existing projects. This is the preferred way to "remove" a version.
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to yank
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.VersionNotFound) if version doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn yank_version(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>;
+
+    /// Unmark a version as yanked (restore it)
+    ///
+    /// Reverses a yank operation, making the version visible again.
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to unyank
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.VersionNotFound) if version doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn unyank_version(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>;
+
+    /// Check if a version is yanked
+    ///
+    /// Parameters:
+    /// - package_name: Name of the package
+    /// - version: Semantic version to check
+    ///
+    /// Returns:
+    /// - Ok(true) if version is yanked
+    /// - Ok(false) if version is not yanked
+    /// - Err(RegistryError.VersionNotFound) if version doesn't exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn is_yanked(package_name: PackageName, version: SemVer) -> Result<Bool, RegistryError>;
+
+    /// Get versions published by a specific user
+    ///
+    /// Useful for user profile pages and audit trails.
+    ///
+    /// Parameters:
+    /// - publisher: Username of the publisher
+    /// - offset: Number of versions to skip (for pagination)
+    /// - limit: Maximum number of versions to return
+    ///
+    /// Returns:
+    /// - Ok(List<PackageVersion>) with versions published by user
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_versions_by_publisher(
+        publisher: Text,
+        offset: QueryOffset,
+        limit: QueryLimit
+    ) -> Result<List<PackageVersion>, RegistryError>;
+}

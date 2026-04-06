@@ -1,0 +1,655 @@
+// =============================================================================
+// advanced.vr - Advanced Math API for Performance Optimization
+// =============================================================================
+// Layer: API (Progressive Disclosure Level 3)
+//
+// This module provides fine-grained control for performance-critical code:
+// - Explicit tiling and memory control
+// - Custom kernel registration
+// - Manual memory management for tensors
+// - CBGR tier optimization
+// - Mixed precision training utilities
+//
+// # Design Philosophy
+//
+// - Full control: Expose all parameters for optimization
+// - Zero-cost abstractions: Nothing hidden from the user
+// - Performance predictability: Clear cost model for operations
+// - Expert-level: Requires understanding of hardware characteristics
+//
+// # Usage
+//
+// ```verum
+// mount core.math.advanced.*;
+//
+// fn optimized_attention(q: &Tensor, k: &Tensor, v: &Tensor) -> Tensor
+//     using [ComputeDevice]
+// {
+//     // Use tiled matmul for cache efficiency
+//     let scores = matmul_tiled(q, &transpose(k), 32, 32, 32);
+//     let attn = softmax_precise(&scores, -1);
+//     matmul_tiled(&attn, v, 32, 32, 32)
+// }
+// ```
+//
+// Spec: docs/architecture/math-spec.md Section 6.3 - Advanced API
+// =============================================================================
+
+module core.math.advanced;
+
+mount super.tensor.{
+    DynTensor, Tensor, DType, Device, Layout, TensorHandle,
+    zeros, ones, full, matmul,
+};
+mount super.autodiff.{GradientTape, GradientScope, checkpoint, stop_gradient, with_no_grad};
+mount super.gpu.{
+    ComputeDevice, Backend, GPUKernel, LaunchConfig, Dim3,
+    Stream, Event, CudaGraph,
+};
+mount super.nn.{Module, Parameter, Trainable};
+mount super.linalg.Numeric;
+
+// =============================================================================
+// Tiled Matrix Operations
+// =============================================================================
+
+// Matrix multiply with explicit tiling parameters
+//
+// Tiling improves cache locality for large matrices. Tile sizes should be
+// chosen based on L1/L2 cache sizes (typically 32-64 for L1, 128-256 for L2).
+//
+// # Parameters
+// - `a`, `b`: Input matrices
+// - `tile_m`, `tile_n`, `tile_k`: Tile dimensions
+//
+// # Example
+// ```verum
+// // 32x32x32 tiles for L1 cache (32KB)
+// let c = matmul_tiled(&a, &b, 32, 32, 32);
+// ```
+public fn matmul_tiled<T: Numeric>(
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+    tile_m: USize,
+    tile_n: USize,
+    tile_k: USize,
+) -> DynTensor<T>
+    using [ComputeDevice, PrecisionMode]
+{
+    @vbc(TENSOR_MATMUL_TILED, a, b, tile_m, tile_n, tile_k, PrecisionMode)
+}
+
+// Matrix multiply with precision control
+//
+// # Precision Modes
+// - `Float64`: Full double precision accumulation
+// - `Float32`: Single precision (default for ML)
+// - `TensorFloat32`: Tensor cores with TF32 precision (Ampere+)
+// - `Float16`: Half precision with FP16 accumulation
+// - `BFloat16`: BF16 with FP32 accumulation
+public fn matmul_precise<T: Numeric>(
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+) -> DynTensor<T>
+    using [PrecisionMode]
+{
+    @vbc(TENSOR_MATMUL_PRECISE, a, b, PrecisionMode.precision())
+}
+
+// In-place matrix multiply (stores result in pre-allocated output)
+//
+// # Safety
+// `output` must have the correct shape and be writable.
+public fn matmul_into<T: Numeric>(
+    output: &mut DynTensor<T>,
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+) using [ComputeDevice]
+{
+    @vbc(TENSOR_MATMUL_INTO, output, a, b)
+}
+
+// =============================================================================
+// Custom Kernel Registration
+// =============================================================================
+
+// Kernel variant specification for hardware-specific implementations
+public type KernelVariant is {
+    // Target backend (CPU, CUDA, ROCm, Metal)
+    backend: Backend,
+    // CUDA compute capability (for GPU variants)
+    compute_capability: Maybe<(USize, USize)>,
+    // SIMD level for CPU variants
+    simd: Maybe<SimdLevel>,
+    // Thread block size (for GPU)
+    block_size: Maybe<(USize, USize)>,
+    // Shared memory requirement in bytes
+    shared_memory: USize,
+};
+
+// SIMD instruction set levels
+public type SimdLevel is
+    | Scalar      // No SIMD
+    | Sse42       // SSE4.2 (128-bit)
+    | Avx2        // AVX2 (256-bit)
+    | Avx512      // AVX-512 (512-bit)
+    | Neon;       // ARM NEON (128-bit)
+
+// Register a custom kernel for a tensor operation
+//
+// # Parameters
+// - `name`: Unique kernel name
+// - `kernel`: Kernel function
+// - `variants`: Hardware-specific implementations
+//
+// # Example
+// ```verum
+// register_kernel<FlashAttentionOp>(
+//     "flash_attention_v2",
+//     flash_attention_kernel,
+//     &[
+//         KernelVariant {
+//             backend: Backend.Cuda,
+//             compute_capability: Maybe.Some((8, 0)),  // Ampere+
+//             block_size: Maybe.Some((128, 128)),
+//             shared_memory: 98304,
+//             simd: Maybe.None,
+//         },
+//     ],
+// );
+// ```
+public fn register_kernel<Op: TensorOp>(
+    name: Text,
+    kernel: fn(&[TensorHandle]) -> TensorHandle,
+    variants: &[KernelVariant],
+) {
+    @vbc(KERNEL_REGISTER, name, kernel, variants)
+}
+
+// Protocol for custom tensor operations
+public type TensorOp is protocol {
+    // Operation identifier
+    fn name() -> Text;
+    // Expected input count
+    fn num_inputs() -> USize;
+    // Compute output shape from inputs
+    fn output_shape(inputs: &[&TensorHandle]) -> List<USize>;
+};
+
+// =============================================================================
+// Manual Memory Management
+// =============================================================================
+
+// Create a tensor view over an existing buffer
+//
+// # Safety
+// - Buffer must have at least `product(shape) * dtype.size_bytes()` bytes
+// - Buffer must remain valid for the tensor's lifetime
+// - Strides must be valid for the given shape
+//
+// # Example
+// ```verum
+// let workspace = allocate(1024 * 1024 * 4);  // 4MB buffer
+// let tensor = tensor_with_buffer<Float32>(
+//     workspace.slice(0, 4096 * 4),
+//     &[64, 64],
+//     &[64, 1],  // Row-major strides
+// );
+// ```
+public fn tensor_with_buffer<T: Numeric>(
+    buffer: &mut [T],
+    shape: &[USize],
+    strides: &[ISize],
+) -> DynTensor<T> {
+    @vbc(TENSOR_FROM_BUFFER, buffer, shape, strides)
+}
+
+// Allocate raw memory for tensor data
+//
+// Returns a pointer to uninitialized memory. Caller is responsible for
+// initialization and proper cleanup.
+public fn allocate_tensor_memory(size_bytes: USize, align: USize) -> &mut Byte
+    using [ComputeDevice]
+{
+    @vbc(MEM_ALLOC_ALIGNED, size_bytes, align, ComputeDevice.device_type())
+}
+
+// Deallocate tensor memory
+public fn deallocate_tensor_memory(ptr: &mut Byte, size_bytes: USize, align: USize) {
+    @vbc(MEM_DEALLOC, ptr, size_bytes, align)
+}
+
+// Pre-allocated workspace for avoiding allocations in hot paths
+public type Workspace is {
+    buffer: &mut Byte,
+    size: USize,
+    offset: USize,
+};
+
+implement Workspace {
+    // Create a workspace with specified size
+    public fn new(size: USize) -> Self using [ComputeDevice] {
+        Workspace {
+            buffer: allocate_tensor_memory(size, 64),  // 64-byte alignment
+            size,
+            offset: 0,
+        }
+    }
+
+    // Allocate from workspace (bump allocator)
+    public fn alloc(&mut self, size: USize, align: USize) -> Maybe<&mut Byte> {
+        // Align offset
+        let aligned_offset = (self.offset + align - 1) & !(align - 1);
+        if aligned_offset + size > self.size {
+            return Maybe.None;
+        }
+
+        // SAFETY: bounds checked above
+        let ptr = unsafe { self.buffer.add(aligned_offset) };
+        self.offset = aligned_offset + size;
+        Maybe.Some(ptr)
+    }
+
+    // Reset workspace for reuse
+    public fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    // Get remaining capacity
+    public fn remaining(&self) -> USize {
+        self.size - self.offset
+    }
+}
+
+// =============================================================================
+// CBGR Tier Optimization
+// =============================================================================
+
+// Execute code block with Tier 1 (checked) references
+//
+// Tier 1 references have zero runtime overhead but require compiler proof
+// of safety. Use when you can prove aliasing/lifetime properties.
+//
+// # Example
+// ```verum
+// with_tier1(|| {
+//     // Compiler-proven safe references
+//     hot_loop(&checked tensor);
+// });
+// ```
+public fn with_tier1<T, F: Fn() -> T>(f: F) -> T {
+    // VBC intrinsic: execute with CBGR Tier 1 (checked) references
+    f()
+}
+
+// Execute code block with Tier 2 (unsafe) references
+//
+// Tier 2 references have zero overhead but NO safety guarantees.
+// Use only when you can manually prove safety and profiler shows
+// significant CBGR overhead (>10%).
+//
+// # Safety
+// Caller must ensure no aliasing violations or use-after-free.
+//
+// # Example
+// ```verum
+// // Only use after profiling shows CBGR bottleneck
+// with_tier2(|| {
+//     @unsafe { performance_critical_loop(tensor.raw_ptr()) }
+// });
+// ```
+public fn with_tier2<T, F: Fn() -> T>(f: F) -> T {
+    // VBC intrinsic: execute with CBGR Tier 2 (unsafe) references
+    f()
+}
+
+// Get current CBGR tier distribution statistics
+public fn cbgr_stats() -> CBGRStats {
+    @vbc(CBGR_GET_STATS)
+}
+
+// CBGR tier distribution statistics
+public type CBGRStats is {
+    tier0_checks: U64,      // Managed (full CBGR checks)
+    tier1_checks: U64,      // Checked (compiler-proven)
+    tier2_accesses: U64,    // Unsafe (manual proof)
+    total_overhead_ns: U64, // Total time spent in CBGR checks
+};
+
+implement CBGRStats {
+    // Get tier distribution as (tier0%, tier1%, tier2%)
+    public fn tier_distribution(&self) -> (Float, Float, Float) {
+        let total = self.tier0_checks + self.tier1_checks + self.tier2_accesses;
+        if total == 0 {
+            return (0.0, 0.0, 0.0);
+        }
+        let t = total as Float;
+        (
+            self.tier0_checks as Float / t,
+            self.tier1_checks as Float / t,
+            self.tier2_accesses as Float / t,
+        )
+    }
+}
+
+// =============================================================================
+// Mixed Precision Training
+// =============================================================================
+
+// Mixed precision context for training with automatic loss scaling
+public type MixedPrecisionContext is {
+    // Current loss scale
+    loss_scale: Float,
+    // Factor to increase scale after successful steps
+    growth_factor: Float,
+    // Factor to decrease scale after overflow
+    backoff_factor: Float,
+    // Steps between scale increases
+    growth_interval: USize,
+    // Steps since last scale increase
+    steps_since_growth: USize,
+    // Number of overflows detected
+    overflow_count: USize,
+};
+
+implement MixedPrecisionContext {
+    // Create with default settings
+    public fn new() -> Self {
+        MixedPrecisionContext {
+            loss_scale: 65536.0,  // 2^16 initial scale
+            growth_factor: 2.0,
+            backoff_factor: 0.5,
+            growth_interval: 2000,
+            steps_since_growth: 0,
+            overflow_count: 0,
+        }
+    }
+
+    // Create with custom settings
+    public fn with_scale(initial_scale: Float) -> Self {
+        MixedPrecisionContext {
+            loss_scale: initial_scale,
+            ..Self.new()
+        }
+    }
+
+    // Scale loss for FP16 gradient computation
+    public fn scale_loss<T: Numeric>(&self, loss: &DynTensor<T>) -> DynTensor<T> {
+        loss.mul_scalar(self.loss_scale as T)
+    }
+
+    // Unscale gradients and check for overflow
+    //
+    // Returns `true` if gradients are valid (no overflow), `false` otherwise.
+    public fn unscale_and_check<T: Numeric>(&mut self, grads: &mut List<DynTensor<T>>) -> Bool {
+        let inv_scale = (1.0 / self.loss_scale) as T;
+
+        // Unscale all gradients
+        for grad in grads.iter_mut() {
+            *grad = grad.mul_scalar(inv_scale);
+        }
+
+        // Check for inf/nan
+        let has_overflow = grads.iter().any(|g| g.has_inf_or_nan());
+
+        if has_overflow {
+            self.overflow_count += 1;
+            self.loss_scale *= self.backoff_factor;
+            self.steps_since_growth = 0;
+            false
+        } else {
+            self.steps_since_growth += 1;
+            if self.steps_since_growth >= self.growth_interval {
+                self.loss_scale *= self.growth_factor;
+                self.steps_since_growth = 0;
+            }
+            true
+        }
+    }
+}
+
+// Precision mode for compute operations
+public type Precision is
+    | Float64
+    | Float32
+    | TensorFloat32  // NVIDIA tensor core TF32
+    | Float16
+    | BFloat16;
+
+// Precision mode context
+context PrecisionMode {
+    fn precision() -> Precision;
+    fn allow_denormals() -> Bool;
+    fn rounding_mode() -> RoundingMode;
+}
+
+// Rounding modes for floating-point operations
+public type RoundingMode is
+    | RoundNearest   // Round to nearest, ties to even (default)
+    | RoundToZero    // Truncate toward zero
+    | RoundUp        // Round toward +infinity
+    | RoundDown;     // Round toward -infinity
+
+// =============================================================================
+// Gradient Checkpointing
+// =============================================================================
+
+// Apply gradient checkpointing to a function segment
+//
+// Trades compute for memory: recomputes activations during backward pass
+// instead of storing them.
+//
+// # Parameters
+// - `segment`: Function to checkpoint
+// - `inputs`: Input tensors
+//
+// # Returns
+// Output tensor (forward pass computed, backward will recompute)
+//
+// # Example
+// ```verum
+// // Checkpoint transformer layers to reduce memory
+// fn checkpointed_layer(x: &Tensor) -> Tensor {
+//     checkpoint(
+//         |inputs| self_attention(&inputs[0]),
+//         &[x],
+//     )
+// }
+// ```
+public fn checkpoint<T, F>(
+    segment: F,
+    inputs: &[&DynTensor<T>],
+) -> DynTensor<T>
+    using [GradientTape]
+where
+    F: Fn(&[&DynTensor<T>]) -> DynTensor<T>,
+    T: Numeric,
+{
+    // Forward: compute without saving intermediate activations
+    let output = with_no_grad(|| segment(inputs));
+
+    // Register custom backward that recomputes
+    @vbc(GRAD_REGISTER_BACKWARD, output, |grad_output| {
+        // Recompute forward to get activations
+        let (_, grads) = @vbc(GRAD_RECORD, || segment(inputs));
+        grads.iter().zip(inputs.iter()).for_each(|(g, input)| {
+            input.accumulate_grad(&g.mul(&grad_output));
+        });
+    });
+
+    output
+}
+
+// Optimal checkpoint placement for sequential models
+//
+// Uses sqrt(n) checkpointing strategy for memory-optimal training.
+//
+// # Parameters
+// - `layers`: List of layer functions
+// - `input`: Initial input tensor
+//
+// # Returns
+// Final output with optimal checkpointing
+public fn optimal_checkpoint<T: Numeric, F: Fn(&DynTensor<T>) -> DynTensor<T>>(
+    layers: &[F],
+    input: &DynTensor<T>,
+) -> DynTensor<T>
+    using [GradientTape]
+{
+    let n = layers.len();
+    let checkpoint_interval = (n as Float).sqrt().ceil() as USize;
+
+    let mut x = input.clone();
+    for i in 0..n {
+        let lyr = &layers[i];
+        if i % checkpoint_interval == 0 && i > 0 {
+            // Checkpoint at regular intervals
+            x = checkpoint(|inputs| (*lyr)(&inputs[0]), &[&x]);
+        } else {
+            x = (*lyr)(&x);
+        }
+    }
+    x
+}
+
+// =============================================================================
+// Custom VJP Registration
+// =============================================================================
+
+// Register a custom VJP (vector-Jacobian product) rule
+//
+// # Parameters
+// - `name`: Operation name
+// - `forward`: Forward function
+// - `vjp`: VJP function (receives output grad, returns input grads)
+//
+// # Example
+// ```verum
+// GradientTape.register_vjp(
+//     "softmax_temperature",
+//     |x, temp| softmax(&x.div_scalar(temp), -1),
+//     |x, temp, grad_out| {
+//         let s = softmax(&x.div_scalar(temp), -1);
+//         let sum_term = (&grad_out * &s).sum_keepdim(-1);
+//         (&s * (&grad_out - &sum_term)).div_scalar(temp)
+//     },
+// );
+// ```
+public fn register_vjp<F, V>(
+    name: Text,
+    forward: F,
+    vjp: V,
+) where
+    F: Fn(&DynTensor<Float>, Float) -> DynTensor<Float>,
+    V: Fn(&DynTensor<Float>, Float, &DynTensor<Float>) -> DynTensor<Float>,
+{
+    @vbc(GRAD_REGISTER_VJP, name, forward, vjp)
+}
+
+// =============================================================================
+// Profiling
+// =============================================================================
+
+// Profile a code block
+//
+// # Parameters
+// - `label`: Profile label
+// - `f`: Function to profile
+//
+// # Returns
+// Function result with timing recorded
+//
+// # Example
+// ```verum
+// let result = profile("attention", || {
+//     flash_attention(&q, &k, &v)
+// });
+// ```
+public fn profile<T, F: Fn() -> T>(label: Text, f: F) -> T {
+    // VBC intrinsic: TIMER_NOW, PROFILER_RECORD
+    let _ = label;
+    f()
+}
+
+// Profile with CBGR tier tracking
+public fn profile_cbgr<T, F: Fn() -> T>(label: Text, sample_rate: Float, f: F) -> T {
+    let _ = label;
+    let _ = sample_rate;
+    f()
+}
+
+// =============================================================================
+// Stream and Event Management
+// =============================================================================
+
+// Execute operations on a specific stream
+public fn with_stream<T, F: Fn() -> T>(stream: &Stream, f: F) -> T
+    using [ComputeDevice]
+{
+    @vbc(STREAM_PUSH, stream);
+    let result = f();
+    @vbc(STREAM_POP);
+    result
+}
+
+// Record an event on the current stream
+public fn record_event(event: &mut Event) using [ComputeDevice] {
+    @vbc(EVENT_RECORD, event)
+}
+
+// Wait for an event to complete
+public fn wait_event(event: &Event) using [ComputeDevice] {
+    @vbc(EVENT_WAIT, event)
+}
+
+// Synchronize the current stream
+public fn stream_synchronize() using [ComputeDevice] {
+    @vbc(STREAM_SYNC)
+}
+
+// =============================================================================
+// CUDA Graph Capture
+// =============================================================================
+
+// Capture a sequence of operations as a CUDA graph
+//
+// CUDA graphs reduce kernel launch overhead for repeated operations.
+//
+// # Example
+// ```verum
+// let graph = capture_graph(|| {
+//     let a = matmul(&x, &w1);
+//     let b = relu(&a);
+//     matmul(&b, &w2)
+// });
+//
+// // Execute graph multiple times (faster than individual calls)
+// for _ in 0..1000 {
+//     graph.execute();
+// }
+// ```
+// NOTE: capture_graph requires CudaGraph type from gpu.vr
+// public fn capture_graph<F: Fn()>(f: F) -> CudaGraph using [ComputeDevice] { ... }
+
+// =============================================================================
+// In-Place Operations
+// =============================================================================
+
+// In-place operations (VBC intrinsics)
+// These require VBC runtime and operate on tensor data directly.
+
+public fn scale_inplace<T: Numeric>(t: &mut DynTensor<T>, f: T) {
+    @vbc(TENSOR_SCALE_INPLACE, t, f)
+}
+
+public fn softmax_into<T: Numeric>(out: &mut DynTensor<T>, inp: &DynTensor<T>, ax: ISize) {
+    @vbc(TENSOR_SOFTMAX_INTO, out, inp, ax)
+}
+
+public fn add_inplace<T: Numeric>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
+    @vbc(TENSOR_ADD_INPLACE, a, b)
+}
+
+public fn mul_inplace<T: Numeric>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
+    @vbc(TENSOR_MUL_INPLACE, a, b)
+}

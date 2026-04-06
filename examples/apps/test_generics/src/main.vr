@@ -1,0 +1,300 @@
+// Comprehensive Generics Test
+// Tests generic types, functions, and type inference
+
+// ===== Basic Generic Types =====
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C
+}
+
+type Box<T> is Box(T);
+
+type Either<L, R> is
+    | Left(L)
+    | Right(R);
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// ===== Generic Container Types =====
+
+type MyList<T> is
+    | Nil
+    | Cons(T, MyList<T>);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { value: T, left: Tree<T>, right: Tree<T> };
+
+// ===== Basic Generic Functions =====
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn const_fn<A, B>(a: A, b: B) -> A {
+    a
+}
+
+fn flip<A, B, C>(f: fn(A, B) -> C, b: B, a: A) -> C {
+    f(a, b)
+}
+
+// ===== Generic Pair Operations =====
+
+fn first<A, B>(pair: Pair<A, B>) -> A {
+    pair.first
+}
+
+fn second<A, B>(pair: Pair<A, B>) -> B {
+    pair.second
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn map_first<A, B, C>(pair: Pair<A, B>, f: fn(A) -> C) -> Pair<C, B> {
+    Pair { first: f(pair.first), second: pair.second }
+}
+
+fn map_second<A, B, C>(pair: Pair<A, B>, f: fn(B) -> C) -> Pair<A, C> {
+    Pair { first: pair.first, second: f(pair.second) }
+}
+
+fn map_both<A, B, C, D>(pair: Pair<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> Pair<C, D> {
+    Pair { first: f(pair.first), second: g(pair.second) }
+}
+
+// ===== Generic Box Operations =====
+
+fn map_box<A, B>(b: Box<A>, f: fn(A) -> B) -> Box<B> {
+    match b {
+        Box(x) => Box(f(x))
+    }
+}
+
+fn flat_map_box<A, B>(b: Box<A>, f: fn(A) -> Box<B>) -> Box<B> {
+    match b {
+        Box(x) => f(x)
+    }
+}
+
+// ===== Generic Either Operations =====
+
+fn map_either<A, B, C>(e: Either<A, B>, f: fn(A) -> C) -> Either<C, B> {
+    match e {
+        Left(a) => Left(f(a)),
+        Right(b) => Right(b)
+    }
+}
+
+fn map_right<A, B, C>(e: Either<A, B>, f: fn(B) -> C) -> Either<A, C> {
+    match e {
+        Left(a) => Left(a),
+        Right(b) => Right(f(b))
+    }
+}
+
+fn either_to_maybe<L, R>(e: Either<L, R>) -> Maybe<R> {
+    match e {
+        Left(_) => None,
+        Right(r) => Some(r)
+    }
+}
+
+// ===== Generic Maybe Operations =====
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(a) => Some(f(a)),
+        None => None
+    }
+}
+
+fn flat_map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> Maybe<B>) -> Maybe<B> {
+    match m {
+        Some(a) => f(a),
+        None => None
+    }
+}
+
+fn get_or_else<T>(m: Maybe<T>, default: fn() -> T) -> T {
+    match m {
+        Some(v) => v,
+        None => default()
+    }
+}
+
+// ===== Generic Result Operations =====
+
+fn map_result<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(value) => Ok(f(value)),
+        Err(e) => Err(e)
+    }
+}
+
+fn flat_map_result<T, E, U>(r: Result<T, E>, f: fn(T) -> Result<U, E>) -> Result<U, E> {
+    match r {
+        Ok(value) => f(value),
+        Err(e) => Err(e)
+    }
+}
+
+fn result_to_maybe<T, E>(r: Result<T, E>) -> Maybe<T> {
+    match r {
+        Ok(v) => Some(v),
+        Err(_) => None
+    }
+}
+
+// ===== Generic List Operations =====
+
+fn list_map<A, B>(list: MyList<A>, f: fn(A) -> B) -> MyList<B> {
+    match list {
+        MyList.Nil => MyList.Nil,
+        MyList.Cons(x, xs) => MyList.Cons(f(x), list_map(xs, f))
+    }
+}
+
+fn list_length<T>(list: MyList<T>) -> Int {
+    match list {
+        MyList.Nil => 0,
+        MyList.Cons(_, xs) => 1 + list_length(xs)
+    }
+}
+
+// ===== Generic Tree Operations =====
+
+fn tree_map<A, B>(tree: Tree<A>, f: fn(A) -> B) -> Tree<B> {
+    match tree {
+        Leaf(x) => Leaf(f(x)),
+        Node { value, left, right } => {
+            Node {
+                value: f(value),
+                left: tree_map(left, f),
+                right: tree_map(right, f)
+            }
+        }
+    }
+}
+
+
+// ===== Main Test Function =====
+
+fn main() {
+    print("=== Comprehensive Generics Test ===");
+    print("");
+
+    // Test 1: Basic generics
+    print("--- Test 1: Basic Generic Functions ---");
+    let x = identity(42);
+    print("identity(42) = " + x.to_string());
+
+    let s = identity("hello");
+    print("identity('hello') = " + s);
+    print("");
+
+    // Test 2: Pair operations
+    print("--- Test 2: Generic Pair Operations ---");
+    let pair2 = Pair { first: 10, second: 20 };
+    let swapped = swap(pair2);
+    print("swap(Pair{10, 20}).first = " + swapped.first.to_string());
+    print("swap(Pair{10, 20}).second = " + swapped.second.to_string());
+    print("");
+
+    // Test 3: Box operations
+    print("--- Test 3: Generic Box Operations ---");
+    let boxed = Box(100);
+    let doubled = map_box(boxed, |x| x * 2);
+    match doubled {
+        Box(v) => print("map_box(Box(100), x*2) = Box(" + v.to_string() + ")")
+    }
+    print("");
+
+    // Test 4: Maybe operations
+    print("--- Test 4: Generic Maybe Operations ---");
+    let some_val = Some(42);
+    let mapped = map_maybe(some_val, |x| x + 10);
+    match mapped {
+        Some(v) => print("map_maybe(Some(42), x+10) = Some(" + v.to_string() + ")"),
+        None => print("None")
+    }
+
+    let chained = flat_map_maybe(Some(5), |x| Some(x * 2));
+    match chained {
+        Some(v) => print("flat_map_maybe(Some(5), x*2) = Some(" + v.to_string() + ")"),
+        None => print("None")
+    }
+    print("");
+
+    // Test 5: Result operations
+    print("--- Test 5: Generic Result Operations ---");
+    let ok_val = Ok(100);
+    let result_mapped = map_result(ok_val, |x| x / 2);
+    match result_mapped {
+        Ok(v) => print("map_result(Ok(100), x/2) = Ok(" + v.to_string() + ")"),
+        Err(e) => print("Err(" + e + ")")
+    }
+    print("");
+
+    // Test 6: List operations
+    print("--- Test 6: Generic List Operations ---");
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+    let len = list_length(list);
+    print("list_length([1,2,3]) = " + len.to_string());
+
+    let mapped_list = list_map(list, |x| x * 10);
+    print("list_map([1,2,3], x*10) created");
+    print("");
+
+    // Test 7: Either operations
+    print("--- Test 7: Generic Either Operations ---");
+    let left_val = Left(5);
+    let either_mapped = map_either(left_val, |x| x * 10);
+    match either_mapped {
+        Left(v) => print("map_either(Left(5), x*10) = Left(" + v.to_string() + ")"),
+        Right(_) => print("Right")
+    }
+
+    let right_val = Right("success");
+    let maybe_from_either = either_to_maybe(right_val);
+    match maybe_from_either {
+        Some(v) => print("either_to_maybe(Right('success')) = Some(" + v + ")"),
+        None => print("None")
+    }
+    print("");
+
+    // Test 8: Tree operations
+    print("--- Test 8: Generic Tree Operations ---");
+    let leaf = Leaf(42);
+    let mapped_tree = tree_map(leaf, |x| x * 2);
+    match mapped_tree {
+        Leaf(v) => print("tree_map(Leaf(42), x*2) = Leaf(" + v.to_string() + ")"),
+        Node { value, left, right } => print("Node")
+    }
+    print("");
+
+    print("=== Generic Features Tested ===");
+    print("✓ Basic generic types and functions");
+    print("✓ Generic pairs, triples, containers");
+    print("✓ Generic Maybe, Result, Either operations");
+    print("✓ Generic List operations (map, length)");
+    print("✓ Generic Tree operations");
+    print("✓ Type inference for generics");
+    print("");
+    print("=== Test Complete ===");
+}

@@ -1,0 +1,410 @@
+// =============================================================================
+// core/intrinsics/lowlevel/x86_64.vr - x86_64 Low-Level Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: LLVM AOT compilation
+//
+// x86_64-specific intrinsics that require AOT compilation.
+// Most functions in this module are @llvm_only.
+//
+// # Categories
+//
+// - CPU Feature Detection: cpuid
+// - SSE/SSE2: sqrtps, rcpps, rsqrtps, dpps
+// - AVX/AVX2: haddps_256, phaddd, permd, gatherd_ps_256, fmadd_ps_256
+// - AVX-512: add_ps_512_mask, fmadd_ps_512_mask, compress_ps_512, conflict_d_512
+// - Bit Manipulation: tzcnt, lzcnt, popcnt, bextr, pdep, pext
+// - Cryptographic: aesenc, aesenclast, aesdec, pclmulqdq, sha256msg1, sha256rnds2
+// - System Registers: rdmsr, wrmsr, read_cr0, read_cr3, write_cr3, invlpg
+// - Timing: rdtsc, rdtscp, mfence, lfence, sfence, pause
+// - Port I/O: inb, outb, inw, outw, inl, outl
+//
+// # Safety
+//
+// Most intrinsics are unsafe as they directly manipulate hardware state.
+// Ensure proper context (kernel mode, correct privilege level) before use.
+//
+// Spec: docs/architecture/low-level-features.md Section 5.4
+// =============================================================================
+
+// Only compile this module for x86_64
+@cfg(target_arch = "x86_64")
+
+module core.intrinsics.lowlevel.x86_64;
+
+// =============================================================================
+// CPU FEATURE DETECTION
+// =============================================================================
+
+/// CPU feature flags detected at runtime.
+public type CpuFeatures is {
+    // Basic features
+    has_sse3: Bool,
+    has_ssse3: Bool,
+    has_sse41: Bool,
+    has_sse42: Bool,
+
+    // AVX family
+    has_avx: Bool,
+    has_avx2: Bool,
+    has_avx512f: Bool,
+    has_avx512dq: Bool,
+    has_avx512bw: Bool,
+    has_avx512vl: Bool,
+
+    // Other features
+    has_fma: Bool,
+    has_bmi1: Bool,
+    has_bmi2: Bool,
+    has_popcnt: Bool,
+    has_lzcnt: Bool,
+    has_aes: Bool,
+    has_pclmulqdq: Bool,
+    has_sha: Bool,
+    has_cx16: Bool,
+};
+
+/// Detect CPU features at runtime using CPUID instruction.
+@inline(never)
+public fn cpu_features() -> CpuFeatures {
+    let (eax, ebx, ecx, edx) = cpuid(1, 0);
+    let (_, ebx7, ecx7, _) = cpuid(7, 0);
+
+    CpuFeatures {
+        has_sse3: (ecx & (1 << 0)) != 0,
+        has_ssse3: (ecx & (1 << 9)) != 0,
+        has_sse41: (ecx & (1 << 19)) != 0,
+        has_sse42: (ecx & (1 << 20)) != 0,
+        has_avx: (ecx & (1 << 28)) != 0,
+        has_fma: (ecx & (1 << 12)) != 0,
+        has_aes: (ecx & (1 << 25)) != 0,
+        has_pclmulqdq: (ecx & (1 << 1)) != 0,
+        has_popcnt: (ecx & (1 << 23)) != 0,
+        has_avx2: (ebx7 & (1 << 5)) != 0,
+        has_bmi1: (ebx7 & (1 << 3)) != 0,
+        has_bmi2: (ebx7 & (1 << 8)) != 0,
+        has_avx512f: (ebx7 & (1 << 16)) != 0,
+        has_avx512dq: (ebx7 & (1 << 17)) != 0,
+        has_avx512bw: (ebx7 & (1 << 30)) != 0,
+        has_avx512vl: (ebx7 & (1 << 31)) != 0,
+        has_sha: (ebx7 & (1 << 29)) != 0,
+        has_lzcnt: (ecx7 & (1 << 5)) != 0,
+        has_cx16: (ecx & (1 << 13)) != 0,
+    }
+}
+
+/// Execute CPUID instruction.
+/// Returns (EAX, EBX, ECX, EDX) for the given leaf and subleaf.
+@inline(always)
+@intrinsic("llvm.x86.cpuid")
+public fn cpuid(leaf: UInt32, subleaf: UInt32) -> (UInt32, UInt32, UInt32, UInt32);
+
+// =============================================================================
+// SSE/SSE2 INTRINSICS (baseline x86_64)
+// =============================================================================
+
+/// Square root of 4 single-precision floats.
+@inline(always)
+@target_feature(enable = "sse")
+@intrinsic("llvm.x86.sse.sqrt.ps")
+public fn sqrtps(a: Vec4f) -> Vec4f;
+
+/// Reciprocal approximation (1/x) for 4 floats.
+@inline(always)
+@target_feature(enable = "sse")
+@intrinsic("llvm.x86.sse.rcp.ps")
+public fn rcpps(a: Vec4f) -> Vec4f;
+
+/// Reciprocal square root approximation (1/sqrt(x)) for 4 floats.
+@inline(always)
+@target_feature(enable = "sse")
+@intrinsic("llvm.x86.sse.rsqrt.ps")
+public fn rsqrtps(a: Vec4f) -> Vec4f;
+
+/// Compute dot product of 4 floats, broadcast result to all lanes.
+@inline(always)
+@target_feature(enable = "sse4.1")
+@intrinsic("llvm.x86.sse41.dpps")
+public fn dpps<MASK: meta UInt8>(a: Vec4f, b: Vec4f) -> Vec4f;
+
+// =============================================================================
+// AVX/AVX2 INTRINSICS
+// =============================================================================
+
+/// Horizontal add of 8 floats (adjacent pairs).
+@inline(always)
+@target_feature(enable = "avx")
+@intrinsic("llvm.x86.avx.hadd.ps.256")
+public fn haddps_256(a: Vec8f, b: Vec8f) -> Vec8f;
+
+/// Horizontal add of 8 integers (adjacent pairs).
+@inline(always)
+@target_feature(enable = "avx2")
+@intrinsic("llvm.x86.avx2.phadd.d")
+public fn phaddd(a: Vec8i, b: Vec8i) -> Vec8i;
+
+/// Permute 8 integers using control indices.
+@inline(always)
+@target_feature(enable = "avx2")
+@intrinsic("llvm.x86.avx2.permd")
+public fn permd(a: Vec8i, control: Vec8i) -> Vec8i;
+
+/// Gather 8 floats using 8 indices.
+@inline(always)
+@target_feature(enable = "avx2")
+@intrinsic("llvm.x86.avx2.gather.d.ps.256")
+public fn gatherd_ps_256(
+    base: *const Float32,
+    indices: Vec8i,
+    mask: Vec8f,
+    scale: UInt8,
+) -> Vec8f;
+
+/// Fused multiply-add: a * b + c (256-bit).
+@inline(always)
+@target_feature(enable = "fma")
+@intrinsic("llvm.fma.v8f32")
+public fn fmadd_ps_256(a: Vec8f, b: Vec8f, c: Vec8f) -> Vec8f;
+
+/// Fused multiply-subtract: a * b - c (256-bit).
+@inline(always)
+@target_feature(enable = "fma")
+@intrinsic("llvm.x86.fma.vfmsub.ps.256")
+public fn fmsub_ps_256(a: Vec8f, b: Vec8f, c: Vec8f) -> Vec8f;
+
+// =============================================================================
+// AVX-512 INTRINSICS
+// =============================================================================
+
+/// Add 16 floats with mask.
+@inline(always)
+@target_feature(enable = "avx512f")
+@intrinsic("llvm.x86.avx512.mask.add.ps.512")
+public fn add_ps_512_mask(a: Vec16f, b: Vec16f, src: Vec16f, mask: UInt16) -> Vec16f;
+
+/// Fused multiply-add with mask.
+@inline(always)
+@target_feature(enable = "avx512f")
+@intrinsic("llvm.x86.avx512.mask.vfmadd.ps.512")
+public fn fmadd_ps_512_mask(
+    a: Vec16f,
+    b: Vec16f,
+    c: Vec16f,
+    mask: UInt16,
+    rounding: UInt32,
+) -> Vec16f;
+
+/// Compress floats: pack active lanes to front.
+@inline(always)
+@target_feature(enable = "avx512f")
+@intrinsic("llvm.x86.avx512.mask.compress.ps.512")
+public fn compress_ps_512(a: Vec16f, mask: UInt16) -> Vec16f;
+
+/// Expand floats: unpack from front to active lanes.
+@inline(always)
+@target_feature(enable = "avx512f")
+@intrinsic("llvm.x86.avx512.mask.expand.ps.512")
+public fn expand_ps_512(a: Vec16f, src: Vec16f, mask: UInt16) -> Vec16f;
+
+/// Conflict detection: find matching indices.
+@inline(always)
+@target_feature(enable = "avx512cd")
+@intrinsic("llvm.x86.avx512.mask.conflict.d.512")
+public fn conflict_d_512(a: Vec16i) -> Vec16i;
+
+// =============================================================================
+// BIT MANIPULATION
+// =============================================================================
+
+/// Count trailing zeros.
+@inline(always)
+@target_feature(enable = "bmi1")
+@intrinsic("llvm.cttz.i64")
+public fn tzcnt(x: UInt64) -> UInt64;
+
+/// Count leading zeros.
+@inline(always)
+@target_feature(enable = "lzcnt")
+@intrinsic("llvm.ctlz.i64")
+public fn lzcnt(x: UInt64) -> UInt64;
+
+/// Population count (number of set bits).
+@inline(always)
+@target_feature(enable = "popcnt")
+@intrinsic("llvm.ctpop.i64")
+public fn popcnt(x: UInt64) -> UInt64;
+
+/// Extract bits from a to c starting at start for len bits.
+@inline(always)
+@target_feature(enable = "bmi1")
+@intrinsic("llvm.x86.bmi.bextr.64")
+public fn bextr(a: UInt64, start: UInt32, len: UInt32) -> UInt64;
+
+/// Parallel bit deposit.
+@inline(always)
+@target_feature(enable = "bmi2")
+@intrinsic("llvm.x86.bmi.pdep.64")
+public fn pdep(a: UInt64, mask: UInt64) -> UInt64;
+
+/// Parallel bit extract.
+@inline(always)
+@target_feature(enable = "bmi2")
+@intrinsic("llvm.x86.bmi.pext.64")
+public fn pext(a: UInt64, mask: UInt64) -> UInt64;
+
+// =============================================================================
+// CRYPTOGRAPHIC INTRINSICS
+// =============================================================================
+
+/// AES encryption round.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.x86.aesni.aesenc")
+public fn aesenc(data: Vec16b, key: Vec16b) -> Vec16b;
+
+/// AES last encryption round.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.x86.aesni.aesenclast")
+public fn aesenclast(data: Vec16b, key: Vec16b) -> Vec16b;
+
+/// AES decryption round.
+@inline(always)
+@target_feature(enable = "aes")
+@intrinsic("llvm.x86.aesni.aesdec")
+public fn aesdec(data: Vec16b, key: Vec16b) -> Vec16b;
+
+/// Carry-less multiplication (for GCM, CRC).
+@inline(always)
+@target_feature(enable = "pclmulqdq")
+@intrinsic("llvm.x86.pclmulqdq")
+public fn pclmulqdq<IMM: meta UInt8>(a: Vec2l, b: Vec2l) -> Vec2l;
+
+/// SHA256 message schedule update.
+@inline(always)
+@target_feature(enable = "sha")
+@intrinsic("llvm.x86.sha256msg1")
+public fn sha256msg1(a: Vec4i, b: Vec4i) -> Vec4i;
+
+/// SHA256 rounds.
+@inline(always)
+@target_feature(enable = "sha")
+@intrinsic("llvm.x86.sha256rnds2")
+public fn sha256rnds2(a: Vec4i, b: Vec4i, k: Vec4i) -> Vec4i;
+
+// =============================================================================
+// SYSTEM REGISTERS (PRIVILEGED) - @llvm_only
+// =============================================================================
+
+/// Read Model-Specific Register.
+///
+/// # Safety
+/// Requires kernel mode (Ring 0). Reading invalid MSR causes #GP fault.
+@inline(always)
+@llvm_only(reason = "privileged instruction")
+@intrinsic("llvm.x86.rdmsr")
+public unsafe fn rdmsr(msr: UInt32) -> UInt64;
+
+/// Write Model-Specific Register.
+///
+/// # Safety
+/// Requires kernel mode (Ring 0). Writing invalid MSR causes #GP fault.
+@inline(always)
+@llvm_only(reason = "privileged instruction")
+@intrinsic("llvm.x86.wrmsr")
+public unsafe fn wrmsr(msr: UInt32, value: UInt64);
+
+/// Read CR0 control register.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov {0}, cr0")
+public unsafe fn read_cr0() -> UInt64;
+
+/// Read CR3 (page table base).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov {0}, cr3")
+public unsafe fn read_cr3() -> UInt64;
+
+/// Write CR3 (flush TLB).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov cr3, {0}")
+public unsafe fn write_cr3(value: UInt64);
+
+/// Invalidate TLB entry for address.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("invlpg [{0}]")
+public unsafe fn invlpg(addr: USize);
+
+// =============================================================================
+// TIMING AND SERIALIZATION
+// =============================================================================
+
+/// Read Time Stamp Counter.
+@inline(always)
+@intrinsic("llvm.x86.rdtsc")
+public fn rdtsc() -> UInt64;
+
+/// Read TSC with processor ID (serializing).
+@inline(always)
+@intrinsic("llvm.x86.rdtscp")
+public fn rdtscp() -> (UInt64, UInt32);
+
+/// Serialize instruction execution (memory barrier).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public fn mfence();
+
+/// Load fence.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public fn lfence();
+
+/// Store fence.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public fn sfence();
+
+/// Pause hint (spin-wait optimization).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public fn pause();
+
+// =============================================================================
+// PORT I/O (x86-specific) - @llvm_only
+// =============================================================================
+
+/// Read byte from I/O port.
+///
+/// # Safety
+/// Requires appropriate I/O permissions (IOPL or TSS bitmap).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn inb(port: UInt16) -> UInt8;
+
+/// Write byte to I/O port.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn outb(port: UInt16, value: UInt8);
+
+/// Read word from I/O port.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn inw(port: UInt16) -> UInt16;
+
+/// Write word to I/O port.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn outw(port: UInt16, value: UInt16);
+
+/// Read dword from I/O port.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn inl(port: UInt16) -> UInt32;
+
+/// Write dword to I/O port.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+public unsafe fn outl(port: UInt16, value: UInt32);

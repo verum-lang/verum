@@ -1,0 +1,5 @@
+// Test vec! macro
+fn main() {
+    let list = vec![1, 2, 3];
+    let _ = print("Vector created successfully");
+}

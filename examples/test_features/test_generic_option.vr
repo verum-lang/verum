@@ -1,0 +1,17 @@
+type Maybe<T> is
+    | Some(T)
+    | None
+
+fn unwrap_or<T>(maybe: Maybe<T>, default: T) -> T {
+    match maybe {
+        Some(value) => value,
+        None => default
+    }
+}
+
+fn main() {
+    let a: Maybe<Int> = Some(42)
+    let b: Maybe<Int> = None
+    println(f"a: {unwrap_or(a, 0)}")
+    println(f"b: {unwrap_or(b, 0)}")
+}

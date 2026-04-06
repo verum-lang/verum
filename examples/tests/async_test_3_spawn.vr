@@ -1,0 +1,38 @@
+// Comprehensive Test 3: Spawn expressions
+
+async fn compute_value(x: Int) -> Int {
+    x * 2
+}
+
+async fn background_task() -> Int {
+    print("  Background task running");
+    42
+}
+
+async fn main() -> Int {
+    print("Test 3: Spawn expressions");
+
+    // Test 3a: Simple spawn
+    print("3a: Simple spawn");
+    let task1 = spawn compute_value(10);
+    let result1 = task1.await;
+    print(f"  Result: {result1}");
+
+    // Test 3b: Multiple spawns
+    print("3b: Multiple spawns");
+    let task2 = spawn compute_value(5);
+    let task3 = spawn compute_value(7);
+    let r2 = task2.await;
+    let r3 = task3.await;
+    print(f"  Results: {r2}, {r3}");
+
+    // Test 3c: Spawn with await later
+    print("3c: Spawn then compute, await later");
+    let task4 = spawn background_task();
+    let local = compute_value(3).await;
+    let remote = task4.await;
+    print(f"  Local: {local}, Remote: {remote}");
+
+    print("✓ All spawn tests passed");
+    0
+}

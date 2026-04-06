@@ -1,0 +1,266 @@
+// Comprehensive Test of Verum Language Features
+// Tests: types, functions, control flow, pattern matching, methods
+
+// ============================================
+// Section 1: Type Definitions
+// ============================================
+
+// Simple type alias
+type UserId is Int;
+
+// Refinement type with inline predicate  
+type Positive is Int{> 0};
+
+// Variant type (enum-like)
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom { r: Int, g: Int, b: Int };
+
+// Record type (struct-like)
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// Generic Result type
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// Generic Maybe type
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// ============================================
+// Section 2: Basic Functions
+// ============================================
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(x: Float, y: Float) -> Float {
+    x * y
+}
+
+fn greet(name: Text) -> Text {
+    "Hello, " + name + "!"
+}
+
+// ============================================
+// Section 3: Pattern Matching
+// ============================================
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Color.Red => "Red",
+        Color.Green => "Green", 
+        Color.Blue => "Blue",
+        Color.Custom { r, g, b } => "Custom RGB"
+    }
+}
+
+fn unwrap_or_default(maybe_val: Maybe<Int>, default: Int) -> Int {
+    match maybe_val {
+        Some(x) => x,
+        None => default
+    }
+}
+
+fn describe_result(r: Result<Int, Text>) -> Text {
+    match r {
+        Ok(value) => "Success: " + value.to_string(),
+        Err(msg) => "Error: " + msg
+    }
+}
+
+// ============================================
+// Section 4: Control Flow
+// ============================================
+
+fn abs(x: Int) -> Int {
+    if x >= 0 {
+        x
+    } else {
+        -x
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn sum_to_n(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn count_list_elements(items: List<Int>) -> Int {
+    let mut count = 0;
+    for item in items {
+        count = count + 1;
+    }
+    count
+}
+
+// ============================================
+// Section 5: List Operations
+// ============================================
+
+fn make_list() -> List<Int> {
+    [1, 2, 3, 4, 5]
+}
+
+fn list_sum(nums: List<Int>) -> Int {
+    let mut total = 0;
+    for n in nums {
+        total = total + n;
+    }
+    total
+}
+
+fn filter_positive(nums: List<Int>) -> List<Int> {
+    let mut result = [];
+    for n in nums {
+        if n > 0 {
+            result = result.push(n);
+        }
+    }
+    result
+}
+
+// ============================================
+// Section 6: Float Methods
+// ============================================
+
+fn test_float_methods() {
+    let f = 3.14159;
+    print("Float value: " + f.to_string());
+    print("Floor: " + f.floor().to_string());
+    print("Ceil: " + f.ceil().to_string());
+    print("Round: " + f.round().to_string());
+    print("Abs of -5.0: " + (-5.0).abs().to_string());
+}
+
+// ============================================
+// Section 7: Maybe and Result Operations
+// ============================================
+
+fn test_maybe_methods() {
+    let some_val = Some(42);
+    let none_val: Maybe<Int> = None;
+    
+    print("Some(42).is_some(): " + some_val.is_some().to_string());
+    print("None.is_none(): " + none_val.is_none().to_string());
+    print("Some(42).unwrap(): " + some_val.unwrap().to_string());
+    print("None.unwrap_or(100): " + none_val.unwrap_or(100).to_string());
+}
+
+fn test_result_methods() {
+    let ok_val = Ok(10);
+    let err_val: Result<Int, Text> = Err("failed");
+    
+    print("Ok(10).is_ok(): " + ok_val.is_ok().to_string());
+    print("Err.is_err(): " + err_val.is_err().to_string());
+    print("Ok(10).unwrap(): " + ok_val.unwrap().to_string());
+    print("Err.unwrap_or(99): " + err_val.unwrap_or(99).to_string());
+}
+
+// ============================================
+// Section 8: Point Operations
+// ============================================
+
+fn create_point(x: Float, y: Float) -> Point {
+    Point { x: x, y: y }
+}
+
+fn point_distance(p: Point) -> Float {
+    let sq = p.x * p.x + p.y * p.y;
+    sq.sqrt()
+}
+
+// ============================================
+// Main Entry Point
+// ============================================
+
+fn main() {
+    print("=== Verum Comprehensive Test ===");
+    print("");
+    
+    // Test basic arithmetic
+    print("-- Basic Arithmetic --");
+    print("add(5, 3) = " + add(5, 3).to_string());
+    print("multiply(2.5, 4.0) = " + multiply(2.5, 4.0).to_string());
+    print("abs(-42) = " + abs(-42).to_string());
+    print("");
+    
+    // Test control flow
+    print("-- Control Flow --");
+    print("factorial(5) = " + factorial(5).to_string());
+    print("sum_to_n(10) = " + sum_to_n(10).to_string());
+    print("");
+    
+    // Test pattern matching
+    print("-- Pattern Matching --");
+    print("color_name(Red) = " + color_name(Color.Red));
+    print("color_name(Custom) = " + color_name(Color.Custom { r: 255, g: 128, b: 64 }));
+    print("");
+    
+    // Test Maybe
+    print("-- Maybe Type --");
+    print("unwrap_or_default(Some(99), 0) = " + unwrap_or_default(Some(99), 0).to_string());
+    print("unwrap_or_default(None, 0) = " + unwrap_or_default(None, 0).to_string());
+    print("");
+    
+    // Test Result
+    print("-- Result Type --");
+    print("describe_result(Ok(42)) = " + describe_result(Ok(42)));
+    print("describe_result(Err(\"oops\")) = " + describe_result(Err("oops")));
+    print("");
+    
+    // Test lists
+    print("-- List Operations --");
+    let nums = make_list();
+    print("list_sum([1,2,3,4,5]) = " + list_sum(nums).to_string());
+    print("");
+    
+    // Test Float methods
+    print("-- Float Methods --");
+    test_float_methods();
+    print("");
+    
+    // Test Maybe methods
+    print("-- Maybe Methods --");
+    test_maybe_methods();
+    print("");
+    
+    // Test Result methods
+    print("-- Result Methods --");
+    test_result_methods();
+    print("");
+    
+    // Test Point
+    print("-- Point Type --");
+    let p = create_point(3.0, 4.0);
+    print("point_distance(3.0, 4.0) = " + point_distance(p).to_string());
+    print("");
+    
+    // Test greetings
+    print("-- Text Operations --");
+    print(greet("Verum"));
+    print("");
+    
+    print("=== All Tests Complete ===");
+}

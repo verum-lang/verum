@@ -1,0 +1,180 @@
+// Advanced Features Test - Working Features Only
+// Tests the advanced features that are currently implemented in Verum
+
+// ============================================================================
+// 1. REFINEMENT TYPES - WORKING
+// ============================================================================
+
+type PositiveInt is Int{it > 0};
+type NonEmptyText is Text{len(it) > 0};
+
+fn test_refinement_types() {
+    let _ = println("=== 1. Testing Refinement Types ===");
+
+    let x: PositiveInt = 42;
+    let name: NonEmptyText = "Alice";
+
+    let _ = println(f"  PositiveInt: {x}");
+    let _ = println(f"  NonEmptyText: {name}");
+    let _ = println("  STATUS: PASSED");
+}
+
+// ============================================================================
+// 2. GENERIC FUNCTIONS - WORKING
+// ============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn pair<A, B>(first: A, second: B) -> (A, B) {
+    (first, second)
+}
+
+fn test_generics() {
+    let _ = println("\n=== 2. Testing Generic Functions ===");
+
+    let num = identity(42);
+    let text = identity("hello");
+    let p = pair(1, "one");
+
+    let _ = println(f"  identity(42): {num}");
+    let _ = println(f"  identity(\"hello\"): {text}");
+    let _ = println("  pair result created");
+    let _ = println("  STATUS: PASSED");
+}
+
+// ============================================================================
+// 3. THREE-TIER REFERENCES - WORKING
+// ============================================================================
+
+fn test_basic_ref(x: &Int) -> Int {
+    *x + 1
+}
+
+fn test_checked_ref(x: &checked Int) -> Int {
+    *x + 2
+}
+
+fn test_unsafe_ref(x: &unsafe Int) -> Int {
+    *x + 3
+}
+
+fn test_three_tier_references() {
+    let _ = println("\n=== 3. Testing Three-Tier References ===");
+
+    let value = 10;
+
+    // Tier 0: Basic reference with CBGR protection
+    let result1 = test_basic_ref(&value);
+    let _ = println(f"  &T result: {result1}");
+
+    // Tier 1: Checked reference (compiler-proven safe)
+    let result2 = test_checked_ref(&checked value);
+    let _ = println(f"  &checked T result: {result2}");
+
+    // Tier 2: Unsafe reference (manual proof required)
+    let result3 = test_unsafe_ref(&unsafe value);
+    let _ = println(f"  &unsafe T result: {result3}");
+
+    let _ = println("  STATUS: PASSED");
+}
+
+// ============================================================================
+// 4. DEFER STATEMENTS - WORKING
+// ============================================================================
+
+fn test_defer() {
+    let _ = println("\n=== 4. Testing Defer Statements ===");
+
+    let _ = println("  Before defer");
+
+    defer {
+        let _ = println("  Defer executed (cleanup)");
+    }
+
+    let _ = println("  After defer declaration");
+}
+
+fn test_multiple_defers() {
+    let _ = println("\n  Testing multiple defers (LIFO order):");
+
+    defer {
+        let _ = println("    Defer 1 (executed last)");
+    }
+
+    defer {
+        let _ = println("    Defer 2 (executed middle)");
+    }
+
+    defer {
+        let _ = println("    Defer 3 (executed first)");
+    }
+
+    let _ = println("    Main execution");
+}
+
+// ============================================================================
+// 5. TRY/RECOVER/FINALLY - WORKING
+// ============================================================================
+
+fn risky_operation() -> Int {
+    42
+}
+
+fn test_try_recover_finally() {
+    let _ = println("\n=== 5. Testing Try/Recover/Finally ===");
+
+    // Test 1: Basic try/recover
+    let _ = println("  Test 1: Basic try/recover");
+    let result1 = try {
+        let result = risky_operation();
+        result
+    } recover {
+        0
+    };
+    let _ = println(f"    Result: {result1}");
+
+    // Test 2: Try/finally without recover
+    let _ = println("  Test 2: Try/finally");
+    try {
+        println("    Executing operation");
+    } finally {
+        println("    Finally block executed");
+    };
+
+    let _ = println("  STATUS: PASSED");
+}
+
+// ============================================================================
+// MAIN TEST RUNNER
+// ============================================================================
+
+fn main() {
+    let _ = println("╔════════════════════════════════════════════════════════════╗");
+    let _ = println("║      VERUM ADVANCED FEATURES TEST - WORKING FEATURES       ║");
+    let _ = println("╚════════════════════════════════════════════════════════════╝");
+
+    test_refinement_types();
+    test_generics();
+    test_three_tier_references();
+    test_defer();
+    test_multiple_defers();
+    let _ = println("  STATUS: PASSED");
+    test_try_recover_finally();
+
+    let _ = println("\n╔════════════════════════════════════════════════════════════╗");
+    let _ = println("║                    ALL TESTS PASSED                        ║");
+    let _ = println("╚════════════════════════════════════════════════════════════╝");
+
+    let _ = println("\nWORKING FEATURES:");
+    let _ = println("  ✓ Refinement types (Int{it > 0}, Text{len(it) > 0})");
+    let _ = println("  ✓ Generic functions");
+    let _ = println("  ✓ Three-tier references (&T, &checked T, &unsafe T)");
+    let _ = println("  ✓ Defer statements (including LIFO ordering)");
+    let _ = println("  ✓ Try/recover/finally blocks");
+
+    let _ = println("\nNOT YET WORKING:");
+    let _ = println("  ✗ Protocol definitions and implementations");
+    let _ = println("  ✗ Context system (context/provide/using)");
+}

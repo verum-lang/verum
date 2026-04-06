@@ -1,0 +1,110 @@
+// Test Case 1: Function with Single Context
+// Tests: fn foo() using IO { ... }
+
+context IO {
+    fn println(msg: Text)
+    fn readln() -> Text
+}
+
+context Logger {
+    fn log(msg: Text)
+    fn info(msg: Text)
+    fn error(msg: Text)
+}
+
+context Database {
+    fn query(sql: Text) -> Int
+}
+
+// Test 1a: Single context without brackets
+fn greet(name: Text) using IO {
+    IO.println(f"Hello, {name}!");
+}
+
+// Test 1b: Single context with brackets (both should work)
+fn log_message(msg: Text) using [Logger] {
+    Logger.log(msg);
+    Logger.info(f"Logged: {msg}");
+}
+
+// Test 1c: Single context with return value
+fn get_user_count() -> Int using Database {
+    Database.query("SELECT COUNT(*) FROM users")
+}
+
+// Test 1d: Single context with multiple statements
+fn interactive_session() using IO {
+    IO.println("Enter your name:");
+    let name = IO.readln();
+    IO.println(f"Welcome, {name}!");
+    IO.println("Session started");
+}
+
+// Test 1e: Pure function (no context) for comparison
+fn pure_add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║        Test Case 1: Single Context Usage                  ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    // Provide contexts
+    print("📦 Providing contexts...");
+    provide IO = IO {
+        println: fn(msg: Text) { print(f"[IO] {msg}"); },
+        readln: fn() -> Text { "TestUser" }
+    };
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[LOG] {msg}"); },
+        info: fn(msg: Text) { print(f"[INFO] {msg}"); },
+        error: fn(msg: Text) { print(f"[ERROR] {msg}"); }
+    };
+
+    provide Database = Database {
+        query: fn(sql: Text) -> Int {
+            print(f"[DB] Executing: {sql}");
+            42
+        }
+    };
+    print("");
+
+    // Test 1a: Single context without brackets
+    print("Test 1a: Single context without brackets");
+    print("─────────────────────────────────────────");
+    greet("Alice");
+    print("");
+
+    // Test 1b: Single context with brackets
+    print("Test 1b: Single context with brackets");
+    print("─────────────────────────────────────────");
+    log_message("Test message");
+    print("");
+
+    // Test 1c: Context with return value
+    print("Test 1c: Context with return value");
+    print("─────────────────────────────────────────");
+    let count = get_user_count();
+    print(f"User count: {count}");
+    print("");
+
+    // Test 1d: Multiple statements
+    print("Test 1d: Multiple statements with context");
+    print("─────────────────────────────────────────");
+    interactive_session();
+    print("");
+
+    // Test 1e: Pure function
+    print("Test 1e: Pure function (no context)");
+    print("─────────────────────────────────────────");
+    let sum = pure_add(10, 32);
+    print(f"10 + 32 = {sum}");
+    print("");
+
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║              Single Context Tests Complete                 ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

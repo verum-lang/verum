@@ -1,0 +1,153 @@
+// Minimal version of verum-registry without stdlib calls
+
+type SemVer is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+implement SemVer {
+    pub fn new(major: Int, minor: Int, patch: Int) -> SemVer {
+        SemVer {
+            major: major,
+            minor: minor,
+            patch: patch,
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"{self.major}.{self.minor}.{self.patch}"
+    }
+
+    pub fn is_stable(self) -> Bool {
+        self.major > 0
+    }
+}
+
+type UserRole is
+    | Regular
+    | Moderator
+    | Admin;
+
+fn user_role_name(role: UserRole) -> Text {
+    match role {
+        UserRole.Admin => "Admin",
+        UserRole.Moderator => "Moderator",
+        UserRole.Regular => "Regular",
+    }
+}
+
+type HttpStatus is
+    | Ok
+    | Created
+    | NotFound
+    | BadRequest
+    | Unauthorized
+    | InternalServerError;
+
+fn status_code(status: HttpStatus) -> Int {
+    match status {
+        HttpStatus.Ok => 200,
+        HttpStatus.Created => 201,
+        HttpStatus.NotFound => 404,
+        HttpStatus.BadRequest => 400,
+        HttpStatus.Unauthorized => 401,
+        HttpStatus.InternalServerError => 500,
+    }
+}
+
+fn status_text(status: HttpStatus) -> Text {
+    match status {
+        HttpStatus.Ok => "OK",
+        HttpStatus.Created => "Created",
+        HttpStatus.NotFound => "Not Found",
+        HttpStatus.BadRequest => "Bad Request",
+        HttpStatus.Unauthorized => "Unauthorized",
+        HttpStatus.InternalServerError => "Internal Server Error",
+    }
+}
+
+type PublishStatus is
+    | Success { package_id: Text, version: Text }
+    | Failed { reason: Text }
+    | Pending;
+
+fn publish_status_message(status: PublishStatus) -> Text {
+    match status {
+        PublishStatus.Success { package_id, version } => {
+            f"Successfully published {package_id} version {version}"
+        }
+        PublishStatus.Failed { reason } => {
+            f"Publish failed: {reason}"
+        }
+        PublishStatus.Pending => {
+            "Publish pending approval"
+        }
+    }
+}
+
+fn main() {
+    print("╔═══════════════════════════════════════════════════════════╗");
+    print("║           VERUM PACKAGE REGISTRY v1.0.0                   ║");
+    print("║           Interpreter Feature Test                        ║");
+    print("╚═══════════════════════════════════════════════════════════╝");
+    print("");
+
+    // --- Version Demo ---
+    print("═══════════════════════════════════════════════════════════");
+    print("SECTION: SemVer Type [WORKS]");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    let ver = SemVer.new(1, 0, 0);
+    print(f"Version: {ver.to_string()}");
+    print(f"  Is Stable: {ver.is_stable()}");
+
+    let ver2 = SemVer.new(2, 1, 3);
+    print(f"Version 2: {ver2.to_string()}");
+    print("");
+
+    // --- Variant Types Demo ---
+    print("═══════════════════════════════════════════════════════════");
+    print("SECTION: Variant Types [WORKS]");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    let role1 = UserRole.Regular;
+    let role2 = UserRole.Admin;
+    print(f"Role 1: {user_role_name(role1)}");
+    print(f"Role 2: {user_role_name(role2)}");
+    print("");
+
+    // --- HTTP Status Demo ---
+    print("═══════════════════════════════════════════════════════════");
+    print("SECTION: HTTP Status [WORKS]");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    let status = HttpStatus.Ok;
+    print(f"Status: {status_code(status)} {status_text(status)}");
+
+    let status2 = HttpStatus.NotFound;
+    print(f"Status: {status_code(status2)} {status_text(status2)}");
+    print("");
+
+    // --- Named Fields in Variants Demo ---
+    print("═══════════════════════════════════════════════════════════");
+    print("SECTION: Named Fields in Variants [WORKS]");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    let status1 = PublishStatus.Success { package_id: "verum-http", version: "1.0.0" };
+    let status2 = PublishStatus.Failed { reason: "Invalid manifest" };
+    let status3 = PublishStatus.Pending;
+
+    print(f"Status 1: {publish_status_message(status1)}");
+    print(f"Status 2: {publish_status_message(status2)}");
+    print(f"Status 3: {publish_status_message(status3)}");
+    print("");
+
+    print("╔═══════════════════════════════════════════════════════════╗");
+    print("║           INTERPRETER TEST COMPLETE                       ║");
+    print("╚═══════════════════════════════════════════════════════════╝");
+}

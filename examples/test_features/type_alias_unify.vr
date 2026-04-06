@@ -1,0 +1,64 @@
+// Test: Type Alias Unification
+// This tests that type aliases properly unify with their underlying types
+
+// Basic tuple alias
+type Point2D is (Float, Float);
+type Point3D is (Float, Float, Float);
+
+// Generic tuple alias
+type Pair<T> is (T, T);
+
+// Record alias
+type Person is {
+    name: Text,
+    age: Int
+};
+
+// Nested alias (alias of alias)
+type Coordinate is Point2D;
+
+// Variant alias
+type Color is Red | Green | Blue;
+
+fn main() {
+    // Test 1: Basic tuple alias
+    let p2: Point2D = (10.0, 20.0);
+    print(f"Point2D: {p2}");
+
+    // Test 2: Generic tuple alias
+    let pair_int: Pair<Int> = (1, 2);
+    let pair_float: Pair<Float> = (1.0, 2.0);
+    print(f"Pair<Int>: {pair_int}");
+    print(f"Pair<Float>: {pair_float}");
+
+    // Test 3: 3D point
+    let p3: Point3D = (1.0, 2.0, 3.0);
+    print(f"Point3D: {p3}");
+
+    // Test 4: Record alias
+    let person: Person = {
+        name: "Alice",
+        age: 30
+    };
+    print(f"Person: {person.name}, age {person.age}");
+
+    // Test 5: Nested alias (alias of alias)
+    let coord: Coordinate = (5.0, 10.0);
+    print(f"Coordinate: {coord}");
+
+    // Test 6: Variant alias
+    let color: Color = Red;
+    print(f"Color: {color}");
+
+    // Test 7: Function returning alias type
+    fn create_point(x: Float, y: Float) -> Point2D {
+        return (x, y);
+    }
+
+    let p4: Point2D = create_point(100.0, 200.0);
+    print(f"Created point: {p4}");
+
+    // Test 8: List of aliases
+    let points: List<Point2D> = [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)];
+    print(f"Points list: {points}");
+}

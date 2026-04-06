@@ -1,0 +1,342 @@
+# VCS Result Reporting Action
+#
+# Aggregates and reports VCS test results to various destinations:
+# - GitHub job summary
+# - PR comments
+# - Artifacts
+# - Optional Slack/Discord notifications
+#
+# Usage:
+#   - uses: ./.github/actions/report-results
+#     with:
+#       results-pattern: 'vcs/reports/*.json'
+#       post-pr-comment: true
+
+name: 'Report VCS Results'
+description: 'Aggregates and reports VCS test results'
+
+inputs:
+  results-pattern:
+    description: 'Glob pattern for result files'
+    required: false
+    default: 'vcs/reports/*.json'
+  report-title:
+    description: 'Title for the report'
+    required: false
+    default: 'VCS Test Results'
+  post-pr-comment:
+    description: 'Post results as PR comment'
+    required: false
+    default: 'true'
+  update-existing-comment:
+    description: 'Update existing PR comment instead of creating new one'
+    required: false
+    default: 'true'
+  generate-badge:
+    description: 'Generate status badge'
+    required: false
+    default: 'false'
+  slack-webhook:
+    description: 'Slack webhook URL for notifications'
+    required: false
+    default: ''
+  discord-webhook:
+    description: 'Discord webhook URL for notifications'
+    required: false
+    default: ''
+  notify-on:
+    description: 'When to notify (always, failure, success)'
+    required: false
+    default: 'failure'
+  threshold-l0:
+    description: 'Required pass rate for L0 (percentage)'
+    required: false
+    default: '100'
+  threshold-l1:
+    description: 'Required pass rate for L1 (percentage)'
+    required: false
+    default: '100'
+  threshold-l2:
+    description: 'Required pass rate for L2 (percentage)'
+    required: false
+    default: '95'
+  threshold-l3:
+    description: 'Required pass rate for L3 (percentage)'
+    required: false
+    default: '90'
+  threshold-l4:
+    description: 'Required pass rate for L4 (percentage)'
+    required: false
+    default: '80'
+
+outputs:
+  overall-status:
+    description: 'Overall test status (passed, failed)'
+    value: ${{ steps.aggregate.outputs.overall_status }}
+  total-tests:
+    description: 'Total number of tests across all levels'
+    value: ${{ steps.aggregate.outputs.total_tests }}
+  total-passed:
+    description: 'Total passed tests'
+    value: ${{ steps.aggregate.outputs.total_passed }}
+  total-failed:
+    description: 'Total failed tests'
+    value: ${{ steps.aggregate.outputs.total_failed }}
+  report-file:
+    description: 'Path to generated report'
+    value: ${{ steps.report.outputs.report_file }}
+  meets-thresholds:
+    description: 'Whether all levels meet their thresholds'
+    value: ${{ steps.threshold.outputs.meets_thresholds }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Aggregate Results
+      id: aggregate
+      shell: bash
+      run: |
+        PATTERN="${{ inputs.results-pattern }}"
+        REPORT_FILE="vcs-aggregate-report.json"
+
+        # Initialize aggregates
+        TOTAL_TESTS=0
+        TOTAL_PASSED=0
+        TOTAL_FAILED=0
+        TOTAL_SKIPPED=0
+        LEVELS_PASSED=0
+        LEVELS_FAILED=0
+
+        # Create JSON array for all results
+        echo '{"results":[],"summary":{}}' > "$REPORT_FILE"
+
+        # Find and process all result files
+        for file in $PATTERN; do
+          if [ -f "$file" ]; then
+            echo "Processing: $file"
+
+            # Extract data from JSON files
+            if [[ "$file" == *.json ]]; then
+              TESTS=$(jq -r '.summary.total // 0' "$file")
+              PASSED=$(jq -r '.summary.passed // 0' "$file")
+              FAILED=$(jq -r '.summary.failed // 0' "$file")
+              SKIPPED=$(jq -r '.summary.skipped // 0' "$file")
+
+              TOTAL_TESTS=$((TOTAL_TESTS + TESTS))
+              TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
+              TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
+              TOTAL_SKIPPED=$((TOTAL_SKIPPED + SKIPPED))
+
+              if [ "$FAILED" -eq 0 ]; then
+                LEVELS_PASSED=$((LEVELS_PASSED + 1))
+              else
+                LEVELS_FAILED=$((LEVELS_FAILED + 1))
+              fi
+            fi
+          fi
+        done
+
+        echo "total_tests=$TOTAL_TESTS" >> $GITHUB_OUTPUT
+        echo "total_passed=$TOTAL_PASSED" >> $GITHUB_OUTPUT
+        echo "total_failed=$TOTAL_FAILED" >> $GITHUB_OUTPUT
+        echo "total_skipped=$TOTAL_SKIPPED" >> $GITHUB_OUTPUT
+        echo "levels_passed=$LEVELS_PASSED" >> $GITHUB_OUTPUT
+        echo "levels_failed=$LEVELS_FAILED" >> $GITHUB_OUTPUT
+
+        if [ $TOTAL_TESTS -gt 0 ]; then
+          PASS_RATE=$(echo "scale=2; $TOTAL_PASSED * 100 / $TOTAL_TESTS" | bc)
+          echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+        else
+          echo "pass_rate=0" >> $GITHUB_OUTPUT
+        fi
+
+        if [ $LEVELS_FAILED -gt 0 ]; then
+          echo "overall_status=failed" >> $GITHUB_OUTPUT
+        else
+          echo "overall_status=passed" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check Thresholds
+      id: threshold
+      shell: bash
+      run: |
+        MEETS_THRESHOLDS=true
+        PATTERN="${{ inputs.results-pattern }}"
+
+        for file in $PATTERN; do
+          if [ -f "$file" ] && [[ "$file" == *.json ]]; then
+            # Determine level from filename
+            LEVEL=$(echo "$file" | grep -oP 'L[0-4]' | head -1 || echo "")
+
+            if [ -n "$LEVEL" ]; then
+              PASS_RATE=$(jq -r '.summary.pass_percentage // 0' "$file")
+
+              case "$LEVEL" in
+                L0) THRESHOLD=${{ inputs.threshold-l0 }} ;;
+                L1) THRESHOLD=${{ inputs.threshold-l1 }} ;;
+                L2) THRESHOLD=${{ inputs.threshold-l2 }} ;;
+                L3) THRESHOLD=${{ inputs.threshold-l3 }} ;;
+                L4) THRESHOLD=${{ inputs.threshold-l4 }} ;;
+                *) THRESHOLD=0 ;;
+              esac
+
+              if (( $(echo "$PASS_RATE < $THRESHOLD" | bc -l) )); then
+                echo "::warning::$LEVEL pass rate ($PASS_RATE%) below threshold ($THRESHOLD%)"
+                MEETS_THRESHOLDS=false
+              fi
+            fi
+          fi
+        done
+
+        echo "meets_thresholds=$MEETS_THRESHOLDS" >> $GITHUB_OUTPUT
+
+    - name: Generate Report
+      id: report
+      shell: bash
+      run: |
+        REPORT_FILE="vcs-results-report.md"
+
+        echo "# ${{ inputs.report-title }}" > "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+        echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$REPORT_FILE"
+        echo "**Commit:** ${{ github.sha }}" >> "$REPORT_FILE"
+        echo "**Branch:** ${{ github.ref_name }}" >> "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+
+        echo "## Summary" >> "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+        echo "| Metric | Value |" >> "$REPORT_FILE"
+        echo "|--------|-------|" >> "$REPORT_FILE"
+        echo "| Total Tests | ${{ steps.aggregate.outputs.total_tests }} |" >> "$REPORT_FILE"
+        echo "| Passed | ${{ steps.aggregate.outputs.total_passed }} |" >> "$REPORT_FILE"
+        echo "| Failed | ${{ steps.aggregate.outputs.total_failed }} |" >> "$REPORT_FILE"
+        echo "| Skipped | ${{ steps.aggregate.outputs.total_skipped }} |" >> "$REPORT_FILE"
+        echo "| Pass Rate | ${{ steps.aggregate.outputs.pass_rate }}% |" >> "$REPORT_FILE"
+        echo "| Overall Status | ${{ steps.aggregate.outputs.overall_status }} |" >> "$REPORT_FILE"
+        echo "| Meets Thresholds | ${{ steps.threshold.outputs.meets_thresholds }} |" >> "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+
+        echo "## Thresholds" >> "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+        echo "| Level | Threshold | Status |" >> "$REPORT_FILE"
+        echo "|-------|-----------|--------|" >> "$REPORT_FILE"
+        echo "| L0 Critical | ${{ inputs.threshold-l0 }}% | - |" >> "$REPORT_FILE"
+        echo "| L1 Core | ${{ inputs.threshold-l1 }}% | - |" >> "$REPORT_FILE"
+        echo "| L2 Standard | ${{ inputs.threshold-l2 }}% | - |" >> "$REPORT_FILE"
+        echo "| L3 Extended | ${{ inputs.threshold-l3 }}% | - |" >> "$REPORT_FILE"
+        echo "| L4 Performance | ${{ inputs.threshold-l4 }}% | - |" >> "$REPORT_FILE"
+
+        echo "report_file=$REPORT_FILE" >> $GITHUB_OUTPUT
+
+    - name: Post to Job Summary
+      shell: bash
+      run: cat "${{ steps.report.outputs.report_file }}" >> $GITHUB_STEP_SUMMARY
+
+    - name: Post PR Comment
+      if: inputs.post-pr-comment == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+
+          const reportFile = '${{ steps.report.outputs.report_file }}';
+          let report = '';
+
+          if (fs.existsSync(reportFile)) {
+            report = fs.readFileSync(reportFile, 'utf8');
+          } else {
+            report = 'Report generation failed.';
+          }
+
+          // Find existing comment
+          const comments = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number
+          });
+
+          const updateExisting = '${{ inputs.update-existing-comment }}' === 'true';
+          const title = '${{ inputs.report-title }}';
+          const existingComment = updateExisting && comments.data.find(c =>
+            c.body.includes(title) &&
+            c.user.type === 'Bot'
+          );
+
+          const body = `## ${title}\n\n${report}`;
+
+          if (existingComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: body
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+          }
+
+    - name: Send Slack Notification
+      if: inputs.slack-webhook != '' && (inputs.notify-on == 'always' || (inputs.notify-on == 'failure' && steps.aggregate.outputs.overall_status == 'failed'))
+      shell: bash
+      run: |
+        STATUS="${{ steps.aggregate.outputs.overall_status }}"
+        if [ "$STATUS" == "passed" ]; then
+          COLOR="good"
+          EMOJI=":white_check_mark:"
+        else
+          COLOR="danger"
+          EMOJI=":x:"
+        fi
+
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"attachments\": [{
+              \"color\": \"$COLOR\",
+              \"title\": \"$EMOJI ${{ inputs.report-title }}\",
+              \"fields\": [
+                {\"title\": \"Status\", \"value\": \"$STATUS\", \"short\": true},
+                {\"title\": \"Pass Rate\", \"value\": \"${{ steps.aggregate.outputs.pass_rate }}%\", \"short\": true},
+                {\"title\": \"Total Tests\", \"value\": \"${{ steps.aggregate.outputs.total_tests }}\", \"short\": true},
+                {\"title\": \"Failed\", \"value\": \"${{ steps.aggregate.outputs.total_failed }}\", \"short\": true}
+              ],
+              \"footer\": \"Commit: ${{ github.sha }} | Branch: ${{ github.ref_name }}\"
+            }]
+          }" "${{ inputs.slack-webhook }}"
+
+    - name: Send Discord Notification
+      if: inputs.discord-webhook != '' && (inputs.notify-on == 'always' || (inputs.notify-on == 'failure' && steps.aggregate.outputs.overall_status == 'failed'))
+      shell: bash
+      run: |
+        STATUS="${{ steps.aggregate.outputs.overall_status }}"
+        if [ "$STATUS" == "passed" ]; then
+          COLOR=3066993
+        else
+          COLOR=15158332
+        fi
+
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"embeds\": [{
+              \"title\": \"${{ inputs.report-title }}\",
+              \"color\": $COLOR,
+              \"fields\": [
+                {\"name\": \"Status\", \"value\": \"$STATUS\", \"inline\": true},
+                {\"name\": \"Pass Rate\", \"value\": \"${{ steps.aggregate.outputs.pass_rate }}%\", \"inline\": true},
+                {\"name\": \"Total\", \"value\": \"${{ steps.aggregate.outputs.total_tests }}\", \"inline\": true},
+                {\"name\": \"Failed\", \"value\": \"${{ steps.aggregate.outputs.total_failed }}\", \"inline\": true}
+              ],
+              \"footer\": {\"text\": \"Commit: ${{ github.sha }}\"}
+            }]
+          }" "${{ inputs.discord-webhook }}"
+
+    - name: Upload Report Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vcs-results-report
+        path: ${{ steps.report.outputs.report_file }}
+        retention-days: 30

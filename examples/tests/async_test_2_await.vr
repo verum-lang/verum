@@ -1,0 +1,42 @@
+// Comprehensive Test 2: Await expressions
+
+async fn get_number() -> Int {
+    100
+}
+
+async fn double(x: Int) -> Int {
+    x * 2
+}
+
+async fn add_async(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn main() -> Int {
+    print("Test 2: Await expressions");
+
+    // Test 2a: Simple await
+    print("2a: Simple await");
+    let num = get_number().await;
+    print(f"  Result: {num}");
+
+    // Test 2b: Await with chaining
+    print("2b: Chained await");
+    let doubled = double(num).await;
+    print(f"  Result: {doubled}");
+
+    // Test 2c: Await in expressions
+    print("2c: Await in expression");
+    let result = get_number().await + 50;
+    print(f"  Result: {result}");
+
+    // Test 2d: Multiple awaits
+    print("2d: Multiple awaits");
+    let a = get_number().await;
+    let b = get_number().await;
+    let sum = add_async(a, b).await;
+    print(f"  Result: {sum}");
+
+    print("✓ All await tests passed");
+    0
+}

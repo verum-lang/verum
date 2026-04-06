@@ -1,0 +1,7 @@
+[package]
+name = "modules"
+version = "0.1.0"
+description = "Module system, mount, and visibility"
+
+[language]
+profile = "application"

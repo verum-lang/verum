@@ -1,0 +1,10 @@
+// Test async closures
+fn main() {
+    // Test async closure
+    let async_fn = async |x: Int| -> Int {
+        x * 3
+    };
+
+    let result = async_fn(7).await;
+    print(f"Async closure result: {result}");
+}

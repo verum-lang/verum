@@ -1,0 +1,318 @@
+// Webhook Delivery Service
+//
+// Handles webhook delivery logic including retry, HMAC signing, and logging.
+// This service coordinates the HttpClient context with webhook domain logic.
+
+mount core.base.{Text, Int, Bool, Map, List, Result, Maybe};
+mount core.time.{unix_timestamp, unix_timestamp_millis, sleep_millis};
+
+mount super.super.contexts.http_client.{HttpClient, HttpResponse, HttpError};
+mount super.super.contexts.logger.Logger;
+mount super.super.domain.webhook.{Webhook, WebhookEvent, WebhookDelivery, WebhookPayload};
+mount super.super.domain.errors.RegistryError;
+
+// ============================================================================
+// Webhook Delivery Result
+// ============================================================================
+
+/// Result of a webhook delivery attempt
+pub type DeliveryResult is {
+    /// Whether the delivery was successful (2xx status code)
+    success: Bool,
+    /// HTTP status code received (0 if connection failed)
+    status_code: Int,
+    /// Response time in milliseconds
+    response_time_ms: Int,
+    /// Error message if delivery failed
+    error_message: Maybe<Text>,
+    /// Timestamp when delivery was attempted
+    delivered_at: Int,
+};
+
+implement DeliveryResult {
+    /// Create a successful delivery result
+    pub fn success(status_code: Int, response_time_ms: Int, delivered_at: Int) -> DeliveryResult {
+        DeliveryResult {
+            success: true,
+            status_code: status_code,
+            response_time_ms: response_time_ms,
+            error_message: Maybe.None,
+            delivered_at: delivered_at,
+        }
+    }
+
+    /// Create a failed delivery result
+    pub fn failure(
+        status_code: Int,
+        response_time_ms: Int,
+        error_message: Text,
+        delivered_at: Int
+    ) -> DeliveryResult {
+        DeliveryResult {
+            success: false,
+            status_code: status_code,
+            response_time_ms: response_time_ms,
+            error_message: Maybe.Some(error_message),
+            delivered_at: delivered_at,
+        }
+    }
+}
+
+// ============================================================================
+// Webhook Delivery Functions
+// ============================================================================
+
+/// Deliver a webhook event to a single webhook endpoint
+///
+/// This function:
+/// 1. Builds HTTP headers including HMAC signature
+/// 2. Makes HTTP POST request to webhook URL
+/// 3. Records delivery metrics (status, response time)
+/// 4. Returns delivery result
+///
+/// # Parameters
+/// - webhook: The webhook configuration
+/// - event: The event type that triggered the webhook
+/// - payload: JSON payload to send
+///
+/// # Returns
+/// Result containing DeliveryResult on success or RegistryError on failure
+pub async fn deliver_webhook(
+    webhook: &Webhook,
+    event: WebhookEvent,
+    payload: Text
+) -> Result<DeliveryResult, RegistryError>
+    using [HttpClient, Logger]
+{
+    let start = unix_timestamp_millis();
+    let delivery_id = generate_delivery_id();
+
+    // Build HTTP headers
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("Content-Type", "application/json");
+    headers.insert("User-Agent", "Verum-Registry/1.0");
+    headers.insert("X-Webhook-Event", event.to_string());
+    headers.insert("X-Webhook-Delivery", delivery_id.clone());
+
+    // Add HMAC signature if secret is configured
+    if !webhook.secret.is_empty() {
+        let signature = compute_hmac_signature(&payload, &webhook.secret);
+        headers.insert("X-Webhook-Signature", signature);
+    }
+
+    // Make the HTTP POST request
+    match HttpClient.post(webhook.url.clone(), headers, payload.clone()).await {
+        Result.Ok(response) => {
+            let elapsed = unix_timestamp_millis() - start;
+            let delivered_at = unix_timestamp();
+
+            // Log successful delivery
+            Logger.info(f"Webhook delivered to {webhook.url}: {response.status_code} in {elapsed}ms");
+
+            // Check if 2xx status code (success)
+            let is_success = response.status_code >= 200 && response.status_code < 300;
+
+            if is_success {
+                Result.Ok(DeliveryResult.success(
+                    response.status_code,
+                    elapsed,
+                    delivered_at
+                ))
+            } else {
+                Result.Ok(DeliveryResult.failure(
+                    response.status_code,
+                    elapsed,
+                    f"HTTP {response.status_code}: {response.body}",
+                    delivered_at
+                ))
+            }
+        },
+        Result.Err(err) => {
+            let elapsed = unix_timestamp_millis() - start;
+            let delivered_at = unix_timestamp();
+            let error_msg = format_http_error(&err);
+
+            // Log failed delivery
+            Logger.warn(f"Webhook delivery failed to {webhook.url}: {error_msg}");
+
+            Result.Ok(DeliveryResult.failure(
+                0,
+                elapsed,
+                error_msg,
+                delivered_at
+            ))
+        }
+    }
+}
+
+/// Deliver webhook with automatic retry on failure
+///
+/// Implements exponential backoff retry strategy:
+/// - 1st retry: 1 second delay
+/// - 2nd retry: 2 second delay
+/// - 3rd retry: 3 second delay
+///
+/// # Parameters
+/// - webhook: The webhook configuration
+/// - event: The event type that triggered the webhook
+/// - payload: JSON payload to send
+/// - max_retries: Maximum number of delivery attempts (including initial)
+///
+/// # Returns
+/// Result containing the final DeliveryResult
+pub async fn deliver_webhook_with_retry(
+    webhook: &Webhook,
+    event: WebhookEvent,
+    payload: Text,
+    max_retries: Int
+) -> Result<DeliveryResult, RegistryError>
+    using [HttpClient, Logger]
+{
+    let mut last_result: Maybe<DeliveryResult> = Maybe.None;
+
+    // Attempt delivery up to max_retries times
+    let mut attempt = 0;
+    while attempt < max_retries {
+        let result = deliver_webhook(webhook, event, payload.clone()).await?;
+
+        // If successful, return immediately
+        if result.success {
+            return Result.Ok(result);
+        }
+
+        last_result = Maybe.Some(result);
+        attempt = attempt + 1;
+
+        // Wait before retry (exponential backoff)
+        if attempt < max_retries {
+            let delay_ms = 1000 * attempt; // 1s, 2s, 3s...
+            Logger.debug(f"Retrying webhook delivery in {delay_ms}ms (attempt {attempt + 1}/{max_retries})");
+            sleep_millis(delay_ms);
+        }
+    }
+
+    // Return the last failed result
+    match last_result {
+        Maybe.Some(result) => Result.Ok(result),
+        Maybe.None => Result.Err(RegistryError.internal_error("No delivery attempts made")),
+    }
+}
+
+/// Deliver webhook event to all registered webhooks for a user
+///
+/// # Parameters
+/// - webhooks: List of webhooks to trigger
+/// - event: The event type
+/// - payload: JSON payload to send
+///
+/// # Returns
+/// List of delivery results
+pub async fn deliver_to_all_webhooks(
+    webhooks: List<Webhook>,
+    event: WebhookEvent,
+    payload: Text
+) -> List<DeliveryResult>
+    using [HttpClient, Logger]
+{
+    let mut results = List.new();
+
+    for webhook in webhooks {
+        // Check if webhook should be triggered for this event
+        if webhook.should_trigger(&event) {
+            // Attempt delivery with retry (3 attempts)
+            match deliver_webhook_with_retry(&webhook, event, payload.clone(), 3).await {
+                Result.Ok(result) => {
+                    results.push(result);
+                },
+                Result.Err(err) => {
+                    Logger.error(f"Failed to deliver webhook {webhook.id}: {err.to_string()}");
+                    // Continue to next webhook
+                }
+            }
+        }
+    }
+
+    results
+}
+
+// ============================================================================
+// Payload Serialization
+// ============================================================================
+
+/// Serialize webhook payload to JSON string
+///
+/// This is a simple JSON serialization. In production, use a proper JSON library.
+pub fn serialize_webhook_payload(payload: &WebhookPayload) -> Text {
+    let event_json = f"\"event\":\"{payload.event}\"";
+    let timestamp_json = f"\"timestamp\":{payload.timestamp}";
+
+    let data_json = match payload.data {
+        WebhookData.Test { message } => {
+            f"\"data\":{{\"message\":\"{message}\"}}"
+        },
+        WebhookData.PackageData { package_name, version, author } => {
+            f"\"data\":{{\"package_name\":\"{package_name}\",\"version\":\"{version}\",\"author\":\"{author}\"}}"
+        },
+        WebhookData.OwnerData { package_name, owner, added_by } => {
+            f"\"data\":{{\"package_name\":\"{package_name}\",\"owner\":\"{owner}\",\"added_by\":\"{added_by}\"}}"
+        },
+    };
+
+    f"{{{event_json},{timestamp_json},{data_json}}}"
+}
+
+/// Create a test webhook payload
+pub fn create_test_payload() -> WebhookPayload {
+    WebhookPayload.test(unix_timestamp())
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Generate unique delivery ID
+///
+/// Format: whd_<timestamp_millis>
+fn generate_delivery_id() -> Text {
+    f"whd_{unix_timestamp_millis()}"
+}
+
+/// Compute HMAC-SHA256 signature for payload verification
+///
+/// Format: sha256=<hex_digest>
+///
+/// Note: This is a placeholder implementation. In production, use a proper
+/// HMAC library (core.crypto.hmac_sha256 when available).
+fn compute_hmac_signature(payload: &Text, secret: &Text) -> Text {
+    // Placeholder - would use crypto library
+    // For now, return a deterministic but non-cryptographic signature
+    let combined = payload.clone() + secret.clone();
+    let hash = simple_hash(&combined);
+    f"sha256={hash}"
+}
+
+/// Simple non-cryptographic hash (placeholder)
+fn simple_hash(s: &Text) -> Text {
+    // This is NOT a real HMAC! Just a placeholder until we have crypto lib
+    let mut hash = 0;
+    for ch in s.chars() {
+        hash = (hash * 31 + ch.to_int()) % 999999999;
+    }
+    f"{hash}"
+}
+
+/// Format HttpError into human-readable message
+fn format_http_error(err: &HttpError) -> Text {
+    match err {
+        HttpError.ConnectionFailed { url, reason } =>
+            f"Connection failed: {reason}",
+        HttpError.Timeout { url, timeout_ms } =>
+            f"Timeout after {timeout_ms}ms",
+        HttpError.InvalidUrl { url } =>
+            f"Invalid URL: {url}",
+        HttpError.TlsError { url, reason } =>
+            f"TLS error: {reason}",
+        HttpError.ResponseError { status_code, body } =>
+            f"HTTP {status_code}: {body}",
+    }
+}

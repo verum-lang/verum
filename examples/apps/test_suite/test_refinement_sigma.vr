@@ -1,0 +1,66 @@
+// Test 3: Sigma-Type Refinements
+// Spec: 03-type-system.md Section 1.3 - Rule 3 (Sigma-type)
+// Syntax: name: Type where predicate
+// Dependent types with explicit name binding
+
+// Test 3.1: Simple sigma-type refinement
+type PositiveSigma is x: Int where x > 0;
+
+// Test 3.2: Sigma-type with compound predicate
+type ValidRange is n: Int where n >= 0 && n <= 100;
+
+// Test 3.3: Sigma-type with method calls
+type NonEmptyString is s: Text where s.len() > 0;
+
+// Test 3.4: Sigma-type with multiple conditions
+type SafeIndex is i: Int where i >= 0 && i < 10;
+
+// Test 3.5: Function accepting sigma-type
+fn process_positive(x: PositiveSigma) -> Int {
+    x * 2
+}
+
+// Test 3.6: Function returning sigma-type
+fn make_safe_index(raw: Int) -> SafeIndex {
+    if raw < 0 {
+        0
+    } else if raw >= 10 {
+        9
+    } else {
+        raw
+    }
+}
+
+// Test 3.7: Nested sigma refinements
+type ValidPair is p: (Int, Int) where p.0 > 0 && p.1 > 0;
+
+fn sum_valid_pair(p: ValidPair) -> Int {
+    p.0 + p.1
+}
+
+// Test 3.8: Test sigma-type refinements
+fn main() {
+    // Test basic sigma-type
+    let pos: PositiveSigma = 5;
+    let _ = print(f"Positive sigma: {pos}");
+
+    let doubled = process_positive(pos);
+    let _ = print(f"Processed: {doubled}");
+
+    // Test range
+    let val: ValidRange = 50;
+    let _ = print(f"Valid range: {val}");
+
+    // Test safe index
+    let idx = make_safe_index(7);
+    let _ = print(f"Safe index: {idx}");
+
+    // Test out-of-bounds index conversion
+    let clamped = make_safe_index(100);
+    let _ = print(f"Clamped index: {clamped}");
+
+    // Test valid pair
+    let pair: ValidPair = (3, 4);
+    let sum = sum_valid_pair(pair);
+    let _ = print(f"Sum of valid pair: {sum}");
+}

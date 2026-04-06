@@ -1,0 +1,17 @@
+fn main() {
+    print("=== Range Expressions Test ===");
+
+    // Test 1: Exclusive range
+    print("Test 1: Range 0..5");
+    for i in 0..5 {
+        print(f"i = {i}");
+    }
+
+    // Test 2: Inclusive range
+    print("Test 2: Range 0..=3");
+    for j in 0..=3 {
+        print(f"j = {j}");
+    }
+
+    print("=== Test Complete ===");
+}

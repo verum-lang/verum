@@ -1,0 +1,234 @@
+// Comprehensive Verum Metaprogramming (Macro) System Test
+// Tests meta definitions, meta calls, and meta fragments
+
+// ============================================================================
+// Test 1: Basic Meta Definition with Expression Fragment
+// ============================================================================
+
+meta simple_macro(x: expr) {
+    _ => x + 1
+}
+
+// ============================================================================
+// Test 2: Meta Definition with Multiple Fragment Types
+// ============================================================================
+
+meta typed_macro(name: ident, ty: type) {
+    _ => {
+        let name: ty = ty.default();
+        name
+    }
+}
+
+// ============================================================================
+// Test 3: Meta Definition with Statement Fragment
+// ============================================================================
+
+meta stmt_macro(s: stmt) {
+    _ => {
+        print("Before statement");
+        s;
+        print("After statement");
+    }
+}
+
+// ============================================================================
+// Test 4: Meta Definition with Pattern Fragment
+// ============================================================================
+
+meta match_helper(p: pattern, e: expr) {
+    _ => match e {
+        p => true,
+        _ => false
+    }
+}
+
+// ============================================================================
+// Test 5: Meta Definition with Path Fragment
+// ============================================================================
+
+meta call_path(p: path) {
+    _ => p()
+}
+
+// ============================================================================
+// Test 6: Meta Definition with Block Fragment
+// ============================================================================
+
+meta repeat_block(b: block, n: expr) {
+    _ => {
+        let mut i = 0;
+        while i < n {
+            b;
+            i = i + 1;
+        }
+    }
+}
+
+// ============================================================================
+// Test 7: Meta Definition with Item Fragment
+// ============================================================================
+
+meta make_item(i: item) {
+    _ => {
+        i
+    }
+}
+
+// ============================================================================
+// Test 8: Meta Definition with Token Tree Fragment
+// ============================================================================
+
+meta token_tree_macro(tt: tt) {
+    _ => tt
+}
+
+// ============================================================================
+// Test 9: Meta Definition with Multiple Rules (Pattern Matching)
+// ============================================================================
+
+meta conditional_macro(x: expr) {
+    0 => "zero",
+    1 => "one",
+    _ => "many"
+}
+
+// ============================================================================
+// Test 10: Meta Definition for Code Generation
+// ============================================================================
+
+meta make_getter(field: ident, ty: type) {
+    _ => fn field() -> ty {
+        self.field
+    }
+}
+
+// ============================================================================
+// Test 11: Complex Meta with Multiple Parameters
+// ============================================================================
+
+meta assert_eq(left: expr, right: expr) {
+    _ => {
+        let l = left;
+        let r = right;
+        if l != r {
+            print("Assertion failed: " + l.to_string() + " != " + r.to_string());
+        }
+    }
+}
+
+// ============================================================================
+// Test 12: Meta for Creating Type Definitions
+// ============================================================================
+
+meta define_wrapper(name: ident, inner: type) {
+    _ => type name is {
+        value: inner
+    };
+}
+
+// ============================================================================
+// Helper Functions for Testing
+// ============================================================================
+
+fn test_simple() {
+    print("Test 1: Simple macro expansion");
+    // TODO: Uncomment when parser supports meta calls
+    // let result = simple_macro!(5);
+    // print("simple_macro!(5) = " + result.to_string());
+}
+
+fn test_typed() {
+    print("Test 2: Typed macro with ident and type");
+    // TODO: Uncomment when parser supports meta calls
+    // typed_macro!(x, Int);
+    // print("Created variable x of type Int");
+}
+
+fn test_stmt() {
+    print("Test 3: Statement macro");
+    // TODO: Uncomment when parser supports meta calls
+    // stmt_macro!({ let y = 42; });
+}
+
+fn test_pattern() {
+    print("Test 4: Pattern matching macro");
+    // TODO: Uncomment when parser supports meta calls
+    // let matched = match_helper!(42, 42);
+    // print("Pattern matched: " + matched.to_string());
+}
+
+fn test_path() {
+    print("Test 5: Path macro");
+    // TODO: Uncomment when parser supports meta calls
+    // call_path!(test_simple);
+}
+
+fn test_block() {
+    print("Test 6: Block repeat macro");
+    // TODO: Uncomment when parser supports meta calls
+    // repeat_block!({ print("Repeated"); }, 3);
+}
+
+fn test_conditional() {
+    print("Test 7: Conditional macro with pattern matching");
+    // TODO: Uncomment when parser supports meta calls
+    // print("Result for 0: " + conditional_macro!(0));
+    // print("Result for 1: " + conditional_macro!(1));
+    // print("Result for 99: " + conditional_macro!(99));
+}
+
+fn test_assert() {
+    print("Test 8: Assert equality macro");
+    // TODO: Uncomment when parser supports meta calls
+    // assert_eq!(2 + 2, 4);
+    // assert_eq!(1 + 1, 3);  // Should print error
+}
+
+fn test_code_gen() {
+    print("Test 9: Code generation macro");
+    // TODO: Uncomment when parser supports meta calls
+    // This would generate a getter function
+    // make_getter!(x, Int);
+}
+
+fn test_wrapper() {
+    print("Test 10: Type wrapper macro");
+    // TODO: Uncomment when parser supports meta calls
+    // define_wrapper!(UserId, Int);
+    // let uid = UserId { value: 123 };
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+fn main() {
+    print("=== Verum Metaprogramming (Macro) System Test ===");
+    print("");
+
+    print("This test validates the parser's support for:");
+    print("1. Meta definitions with different fragment types");
+    print("2. Meta rules with pattern matching");
+    print("3. Meta calls (macro invocations)");
+    print("4. Compile-time code generation");
+    print("");
+
+    // Test that meta definitions parse correctly
+    print("Testing meta definition parsing...");
+
+    test_simple();
+    test_typed();
+    test_stmt();
+    test_pattern();
+    test_path();
+    test_block();
+    test_conditional();
+    test_assert();
+    test_code_gen();
+    test_wrapper();
+
+    print("");
+    print("Meta definition tests complete!");
+    print("Note: Meta calls are commented out pending full implementation");
+}

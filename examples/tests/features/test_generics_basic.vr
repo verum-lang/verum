@@ -1,0 +1,176 @@
+// Test: Basic Generic Types and Functions
+// Tests fundamental generic type definitions and generic functions
+
+// Simple generic types
+type Box<T> is { value: T };
+type Maybe<T> is Some(T) | None;
+type Result<T, E> is Ok(T) | Err(E);
+
+// Generic function: identity
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Generic function: first element selector
+fn first<T>(a: T, b: T) -> T {
+    a
+}
+
+// Generic function: second element selector
+fn second<T>(a: T, b: T) -> T {
+    b
+}
+
+// Generic function: box a value
+fn box_value<T>(val: T) -> Box<T> {
+    Box { value: val }
+}
+
+// Generic function: unbox a value
+fn unbox<T>(b: Box<T>) -> T {
+    b.value
+}
+
+// Generic function: map over Maybe
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None
+    }
+}
+
+// Generic function: unwrap_or for Maybe
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(x) => x,
+        None => default
+    }
+}
+
+// Generic function: is_some check
+fn is_some<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false
+    }
+}
+
+// Generic function: map over Result
+fn map_result<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(x) => Ok(f(x)),
+        Err(e) => Err(e)
+    }
+}
+
+// Generic function: is_ok check
+fn is_ok<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+fn main() {
+    let _ = print("=== Basic Generic Type Tests ===\n");
+
+    // Test 1: Identity function with different types
+    let _ = print("Test 1: Identity function");
+    let int_val = identity(42);
+    let float_val = identity(3.14);
+    let text_val = identity("hello");
+    let bool_val = identity(true);
+    let _ = print(f"identity(42) = {int_val}");
+    let _ = print(f"identity(3.14) = {float_val}");
+    let _ = print(f"identity(\"hello\") = {text_val}");
+    let _ = print(f"identity(true) = {bool_val}");
+
+    // Test 2: First and second selectors
+    let _ = print("\nTest 2: First/Second selectors");
+    let f1 = first(10, 20);
+    let s1 = second(10, 20);
+    let _ = print(f"first(10, 20) = {f1}");
+    let _ = print(f"second(10, 20) = {s1}");
+
+    let f2 = first("cat", "dog");
+    let s2 = second("cat", "dog");
+    let _ = print(f"first(\"cat\", \"dog\") = {f2}");
+    let _ = print(f"second(\"cat\", \"dog\") = {s2}");
+
+    // Test 3: Box type
+    let _ = print("\nTest 3: Box type");
+    let box1 = box_value(100);
+    let val1 = unbox(box1);
+    let _ = print(f"boxed 100, unboxed: {val1}");
+
+    let box2 = box_value("boxed text");
+    let val2 = unbox(box2);
+    let _ = print(f"boxed \"boxed text\", unboxed: {val2}");
+
+    // Test 4: Maybe type operations
+    let _ = print("\nTest 4: Maybe type");
+    let some_int: Maybe<Int> = Some(42);
+    let none_int: Maybe<Int> = None;
+
+    let check1 = is_some(some_int);
+    let check2 = is_some(none_int);
+    let _ = print(f"is_some(Some(42)) = {check1}");
+    let _ = print(f"is_some(None) = {check2}");
+
+    let unwrapped1 = unwrap_or(some_int, 0);
+    let unwrapped2 = unwrap_or(none_int, 0);
+    let _ = print(f"unwrap_or(Some(42), 0) = {unwrapped1}");
+    let _ = print(f"unwrap_or(None, 0) = {unwrapped2}");
+
+    // Test 5: Map over Maybe
+    let _ = print("\nTest 5: Map over Maybe");
+    let some_val: Maybe<Int> = Some(5);
+    let doubled = map_maybe(some_val, |x: Int| -> Int { x * 2 });
+    match doubled {
+        Some(v) => { let _ = print(f"map_maybe(Some(5), *2) = Some({v})"); },
+        None => { let _ = print("Got None"); }
+    }
+
+    let none_val: Maybe<Int> = None;
+    let doubled_none = map_maybe(none_val, |x: Int| -> Int { x * 2 });
+    match doubled_none {
+        Some(v) => { let _ = print(f"Got Some({v})"); },
+        None => { let _ = print("map_maybe(None, *2) = None"); }
+    }
+
+    // Test 6: Result type operations
+    let _ = print("\nTest 6: Result type");
+    let ok_val: Result<Int, Text> = Ok(100);
+    let err_val: Result<Int, Text> = Err("error occurred");
+
+    let check3 = is_ok(ok_val);
+    let check4 = is_ok(err_val);
+    let _ = print(f"is_ok(Ok(100)) = {check3}");
+    let _ = print(f"is_ok(Err(\"error occurred\")) = {check4}");
+
+    // Test 7: Map over Result
+    let _ = print("\nTest 7: Map over Result");
+    let ok_result: Result<Int, Text> = Ok(10);
+    let mapped_ok = map_result(ok_result, |x: Int| -> Int { x + 5 });
+    match mapped_ok {
+        Ok(v) => { let _ = print(f"map_result(Ok(10), +5) = Ok({v})"); },
+        Err(e) => { let _ = print(f"Got Err({e})"); }
+    }
+
+    let err_result: Result<Int, Text> = Err("failed");
+    let mapped_err = map_result(err_result, |x: Int| -> Int { x + 5 });
+    match mapped_err {
+        Ok(v) => { let _ = print(f"Got Ok({v})"); },
+        Err(e) => { let _ = print(f"map_result(Err(\"failed\"), +5) = Err(\"{e}\")"); }
+    }
+
+    // Test 8: Nested generics
+    let _ = print("\nTest 8: Nested generics");
+    let nested: Maybe<Box<Int>> = Some(Box { value: 999 });
+    match nested {
+        Some(b) => { let _ = print(f"Maybe<Box<Int>> contains: {b.value}"); },
+        None => { let _ = print("Got None"); }
+    }
+
+    let _ = print("\n=== All basic generic tests passed ===");
+}

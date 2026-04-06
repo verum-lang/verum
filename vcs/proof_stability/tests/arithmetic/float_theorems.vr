@@ -1,0 +1,479 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, arithmetic, float
+// @timeout: 15000
+// @expected-proof-time: <100ms
+
+/// Description: Tests SMT stability for floating-point arithmetic theorems
+/// Regression Detection: Float proofs are inherently more complex than integer proofs.
+/// Expected proof times are higher (50-100ms) but should remain deterministic.
+/// Non-determinism or proof times exceeding 200ms indicate SMT regression.
+
+// ============================================================================
+// Basic Float Properties
+// ============================================================================
+
+/// Float addition commutativity (exact for finite values)
+@verify(proof)
+fn float_add_commutative(a: Float, b: Float) -> Bool {
+    contract#"
+        requires !a.is_nan() && !b.is_nan();
+        requires a.is_finite() && b.is_finite();
+        ensures result == true;
+    "
+    a + b == b + a
+}
+
+/// Float multiplication commutativity (exact for finite values)
+@verify(proof)
+fn float_mul_commutative(a: Float, b: Float) -> Bool {
+    contract#"
+        requires !a.is_nan() && !b.is_nan();
+        requires a.is_finite() && b.is_finite();
+        ensures result == true;
+    "
+    a * b == b * a
+}
+
+/// Float identity for addition
+@verify(proof)
+fn float_add_identity(a: Float) -> Float {
+    contract#"
+        requires !a.is_nan();
+        ensures result == a;
+    "
+    a + 0.0
+}
+
+/// Float identity for multiplication
+@verify(proof)
+fn float_mul_identity(a: Float) -> Float {
+    contract#"
+        requires !a.is_nan();
+        ensures result == a;
+    "
+    a * 1.0
+}
+
+/// Float zero multiplication
+@verify(proof)
+fn float_mul_zero(a: Float) -> Float {
+    contract#"
+        requires a.is_finite();
+        ensures result == 0.0;
+    "
+    a * 0.0
+}
+
+// ============================================================================
+// Special Value Properties
+// ============================================================================
+
+/// NaN propagation in addition
+@verify(proof)
+fn nan_propagation_add(a: Float) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let nan = 0.0 / 0.0;
+    (a + nan).is_nan()
+}
+
+/// NaN propagation in multiplication
+@verify(proof)
+fn nan_propagation_mul(a: Float) -> Bool {
+    contract#"
+        requires a != 0.0;
+        ensures result == true;
+    "
+    let nan = 0.0 / 0.0;
+    (a * nan).is_nan()
+}
+
+/// Infinity sign preservation
+@verify(proof)
+fn infinity_add_finite(a: Float) -> Bool {
+    contract#"
+        requires a.is_finite();
+        ensures result == true;
+    "
+    let inf = 1.0 / 0.0;
+    (a + inf).is_infinite() && (a + inf) > 0.0
+}
+
+/// Infinity multiplication sign rules
+@verify(proof)
+fn infinity_mul_sign(a: Float{> 0.0}) -> Bool {
+    contract#"
+        requires a > 0.0;
+        ensures result == true;
+    "
+    let pos_inf = 1.0 / 0.0;
+    let neg_inf = -1.0 / 0.0;
+    (a * pos_inf) > 0.0 && (a * neg_inf) < 0.0
+}
+
+// ============================================================================
+// Comparison Properties
+// ============================================================================
+
+/// Float comparison transitivity
+@verify(proof)
+fn float_lt_transitive(a: Float, b: Float, c: Float) -> Bool {
+    contract#"
+        requires !a.is_nan() && !b.is_nan() && !c.is_nan();
+        requires a < b;
+        requires b < c;
+        ensures result == true;
+        ensures a < c;
+    "
+    a < c
+}
+
+/// Float equality reflexivity (except NaN)
+@verify(proof)
+fn float_eq_reflexive(a: Float) -> Bool {
+    contract#"
+        requires !a.is_nan();
+        ensures result == true;
+    "
+    a == a
+}
+
+/// NaN self-comparison
+@verify(proof)
+fn nan_not_equal_self() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let nan = 0.0 / 0.0;
+    nan != nan
+}
+
+// ============================================================================
+// Negation Properties
+// ============================================================================
+
+/// Float double negation
+@verify(proof)
+fn float_double_negation(a: Float) -> Bool {
+    contract#"
+        requires !a.is_nan();
+        ensures result == true;
+    "
+    -(-a) == a
+}
+
+/// Float negation and addition
+@verify(proof)
+fn float_negation_addition(a: Float) -> Float {
+    contract#"
+        requires a.is_finite();
+        ensures result == 0.0;
+    "
+    a + (-a)
+}
+
+/// Negation of zero
+@verify(proof)
+fn float_neg_zero_eq() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    // -0.0 and 0.0 compare equal in IEEE 754
+    -0.0 == 0.0
+}
+
+// ============================================================================
+// Division Properties
+// ============================================================================
+
+/// Division by one
+@verify(proof)
+fn float_div_by_one(a: Float) -> Float {
+    contract#"
+        requires !a.is_nan();
+        ensures result == a;
+    "
+    a / 1.0
+}
+
+/// Division of zero
+@verify(proof)
+fn float_zero_dividend(b: Float) -> Float {
+    contract#"
+        requires b != 0.0 && b.is_finite();
+        ensures result == 0.0;
+    "
+    0.0 / b
+}
+
+/// Division by zero produces infinity
+@verify(proof)
+fn float_div_by_zero_inf(a: Float{> 0.0}) -> Bool {
+    contract#"
+        requires a > 0.0;
+        ensures result == true;
+    "
+    let result = a / 0.0;
+    result.is_infinite() && result > 0.0
+}
+
+/// Zero divided by zero is NaN
+@verify(proof)
+fn float_zero_div_zero_nan() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    (0.0 / 0.0).is_nan()
+}
+
+// ============================================================================
+// Absolute Value Properties
+// ============================================================================
+
+/// Float absolute value non-negative
+@verify(proof)
+fn float_abs_non_negative(a: Float) -> Float{>= 0.0} {
+    contract#"
+        requires !a.is_nan();
+        ensures result >= 0.0;
+    "
+    if a >= 0.0 { a } else { -a }
+}
+
+/// Float absolute value of negative
+@verify(proof)
+fn float_abs_negative(a: Float{< 0.0}) -> Float {
+    contract#"
+        requires a < 0.0;
+        ensures result == -a;
+        ensures result > 0.0;
+    "
+    -a
+}
+
+// ============================================================================
+// Rounding Properties
+// ============================================================================
+
+/// Floor is less than or equal
+@verify(proof)
+fn floor_le_value(a: Float) -> Bool {
+    contract#"
+        requires a.is_finite();
+        ensures result == true;
+    "
+    a.floor() <= a
+}
+
+/// Ceiling is greater than or equal
+@verify(proof)
+fn ceil_ge_value(a: Float) -> Bool {
+    contract#"
+        requires a.is_finite();
+        ensures result == true;
+    "
+    a.ceil() >= a
+}
+
+/// Floor and ceiling bounds
+@verify(proof)
+fn floor_ceil_bounds(a: Float) -> Bool {
+    contract#"
+        requires a.is_finite();
+        ensures result == true;
+    "
+    a.floor() <= a && a <= a.ceil() && a.ceil() - a.floor() <= 1.0
+}
+
+/// Truncation towards zero
+@verify(proof)
+fn trunc_towards_zero(a: Float) -> Bool {
+    contract#"
+        requires a.is_finite();
+        ensures result == true;
+    "
+    let t = a.trunc();
+    if a >= 0.0 { t <= a } else { t >= a }
+}
+
+// ============================================================================
+// Square Root Properties
+// ============================================================================
+
+/// Square root of non-negative is non-negative
+@verify(proof)
+fn sqrt_non_negative(a: Float{>= 0.0}) -> Float{>= 0.0} {
+    contract#"
+        requires a >= 0.0;
+        ensures result >= 0.0;
+    "
+    a.sqrt()
+}
+
+/// Square root of zero
+@verify(proof)
+fn sqrt_zero() -> Float {
+    contract#"
+        ensures result == 0.0;
+    "
+    (0.0).sqrt()
+}
+
+/// Square root of one
+@verify(proof)
+fn sqrt_one() -> Float {
+    contract#"
+        ensures result == 1.0;
+    "
+    (1.0).sqrt()
+}
+
+/// Square root of negative is NaN
+@verify(proof)
+fn sqrt_negative_nan() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    ((-1.0).sqrt()).is_nan()
+}
+
+// ============================================================================
+// Power Properties
+// ============================================================================
+
+/// Power of zero exponent
+@verify(proof)
+fn float_pow_zero_exp(a: Float{> 0.0}) -> Float {
+    contract#"
+        requires a > 0.0;
+        ensures result == 1.0;
+    "
+    a.pow(0.0)
+}
+
+/// Power of one exponent
+@verify(proof)
+fn float_pow_one_exp(a: Float{> 0.0}) -> Float {
+    contract#"
+        requires a > 0.0;
+        ensures result == a;
+    "
+    a.pow(1.0)
+}
+
+/// Power base one
+@verify(proof)
+fn float_pow_one_base(n: Float) -> Float {
+    contract#"
+        requires n.is_finite();
+        ensures result == 1.0;
+    "
+    (1.0).pow(n)
+}
+
+// ============================================================================
+// Epsilon and Precision Properties
+// ============================================================================
+
+/// Machine epsilon property
+@verify(proof)
+fn epsilon_property() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let eps = Float.EPSILON;
+    1.0 + eps > 1.0 && 1.0 + (eps / 2.0) == 1.0
+}
+
+/// Minimum positive float
+@verify(proof)
+fn min_positive_float() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    Float.MIN_POSITIVE > 0.0 && Float.MIN_POSITIVE.is_finite()
+}
+
+// ============================================================================
+// Combined Float Theorems
+// ============================================================================
+
+/// Triangle inequality for absolute value
+@verify(proof)
+fn triangle_inequality(a: Float, b: Float) -> Bool {
+    contract#"
+        requires a.is_finite() && b.is_finite();
+        ensures result == true;
+    "
+    let abs_a = if a >= 0.0 { a } else { -a };
+    let abs_b = if b >= 0.0 { b } else { -b };
+    let abs_sum = if a + b >= 0.0 { a + b } else { -(a + b) };
+    abs_sum <= abs_a + abs_b
+}
+
+/// Cauchy-Schwarz for two values
+@verify(proof)
+fn cauchy_schwarz_simple(a: Float, b: Float) -> Bool {
+    contract#"
+        requires a.is_finite() && b.is_finite();
+        ensures result == true;
+    "
+    // |a * b| <= |a| * |b|
+    let abs_a = if a >= 0.0 { a } else { -a };
+    let abs_b = if b >= 0.0 { b } else { -b };
+    let abs_ab = if a * b >= 0.0 { a * b } else { -(a * b) };
+    abs_ab <= abs_a * abs_b
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Basic properties
+    assert(float_add_commutative(3.14, 2.71));
+    assert(float_mul_commutative(1.5, 2.5));
+    assert(float_add_identity(42.0) == 42.0);
+    assert(float_mul_identity(17.5) == 17.5);
+    assert(float_mul_zero(999.9) == 0.0);
+
+    // Special values
+    assert(nan_propagation_add(5.0));
+    assert(infinity_add_finite(100.0));
+
+    // Comparisons
+    assert(float_lt_transitive(1.0, 2.0, 3.0));
+    assert(float_eq_reflexive(3.14159));
+    assert(nan_not_equal_self());
+
+    // Negation
+    assert(float_double_negation(-5.5));
+    assert(float_negation_addition(42.0) == 0.0);
+
+    // Division
+    assert(float_div_by_one(7.7) == 7.7);
+    assert(float_zero_dividend(5.0) == 0.0);
+    assert(float_div_by_zero_inf(1.0));
+    assert(float_zero_div_zero_nan());
+
+    // Absolute value
+    assert(float_abs_non_negative(-3.14) >= 0.0);
+
+    // Rounding
+    assert(floor_le_value(3.7));
+    assert(ceil_ge_value(3.2));
+
+    // Square root
+    assert(sqrt_non_negative(4.0) >= 0.0);
+    assert(sqrt_zero() == 0.0);
+    assert(sqrt_one() == 1.0);
+
+    // Combined theorems
+    assert(triangle_inequality(3.0, 4.0));
+    assert(cauchy_schwarz_simple(2.0, 3.0));
+
+    println("All float theorems verified successfully!");
+}

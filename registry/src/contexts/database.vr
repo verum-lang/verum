@@ -1,0 +1,57 @@
+// Database protocol for Verum Registry
+mount core.base.{Result, Text, Int, Float, Maybe, Bool};
+mount core.collections.{List, Map};
+
+pub type DatabaseError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text)
+    | NotFound
+    | DuplicateKey(Text)
+    | TransactionFailed(Text);
+
+pub type QueryResult is {
+    rows: List<Map<Text, Text>>,
+    affected: Int,
+};
+
+/// Package search result from database queries
+pub type PackageSearchResult is {
+    name: Text,
+    version: Text,
+    description: Text,
+    downloads: Int,
+    score: Float,
+};
+
+pub context protocol Database {
+    // Parameterized queries (SQL injection safe)
+    async fn query_with(self, sql: Text, params: List<Text>) -> Result<List<Map<Text, Text>>, DatabaseError>;
+    async fn execute_with(self, sql: Text, params: List<Text>) -> Result<Int, DatabaseError>;
+    async fn fetch_one_with(self, sql: Text, params: List<Text>) -> Result<Map<Text, Text>, DatabaseError>;
+    async fn fetch_optional_with(self, sql: Text, params: List<Text>) -> Result<Maybe<Map<Text, Text>>, DatabaseError>;
+
+    // Legacy raw SQL methods (avoid using with user input)
+    async fn query(self, sql: Text) -> Result<List<Map<Text, Text>>, DatabaseError>;
+    async fn execute(self, sql: Text) -> Result<Int, DatabaseError>;
+    async fn fetch_one(self, sql: Text) -> Result<Map<Text, Text>, DatabaseError>;
+    async fn fetch_optional(self, sql: Text) -> Result<Maybe<Map<Text, Text>>, DatabaseError>;
+
+    async fn begin_transaction(self) -> Result<Transaction, DatabaseError>;
+    async fn get_trending(self, days: Int, limit: Int) -> Result<List<PackageSearchResult>, DatabaseError>;
+    async fn list_categories(self) -> Result<List<Text>, DatabaseError>;
+    async fn find_by_category(self, category: Text, offset: Int, limit: Int) -> Result<List<PackageSearchResult>, DatabaseError>;
+    async fn count_by_category(self, category: Text) -> Result<Int, DatabaseError>;
+
+    // Health check methods
+    async fn ping(self) -> Result<(), DatabaseError>;
+    async fn is_ready(self) -> Result<Bool, DatabaseError>;
+    async fn check_pool(self) -> Result<(), DatabaseError>;
+    async fn test_query(self) -> Result<(), DatabaseError>;
+}
+
+pub context protocol Transaction {
+    async fn query(self, sql: Text) -> Result<List<Map<Text, Text>>, DatabaseError>;
+    async fn execute(self, sql: Text) -> Result<Int, DatabaseError>;
+    async fn commit(self) -> Result<(), DatabaseError>;
+    async fn rollback(self) -> Result<(), DatabaseError>;
+}

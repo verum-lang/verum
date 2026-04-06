@@ -1,0 +1,11 @@
+type Box<T> is { value: T };
+
+fn main() {
+    // Test deeply nested generics
+    let triple: Box<Box<Box<Int>>> = Box { value: Box { value: Box { value: 42 } } };
+    let _ = println(f"Triple nested: {triple.value.value.value}");
+
+    // Test with type inference
+    let inferred = Box { value: Box { value: 100 } };
+    let _ = println(f"Inferred: {inferred.value.value}");
+}

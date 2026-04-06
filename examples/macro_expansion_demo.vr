@@ -1,0 +1,96 @@
+// Macro Expansion Demo
+//
+// This example demonstrates how the newly implemented macro expansion
+// phase (Pass 2) in the compiler works.
+
+// Example 1: Simple macro invocation
+// The macro_name! syntax triggers the MacroExpander visitor
+
+fn example_simple() {
+    // This will be detected by MacroExpander.visit_expr()
+    // and added to the expansions list
+    println!("Hello from macro!");
+
+    // The expansion process:
+    // 1. MacroExpander finds ExprKind.MacroCall { path: "println", args: ... }
+    // 2. Looks up "println" in MetaRegistry
+    // 3. Finds the expander meta function
+    // 4. Executes the meta function at compile-time
+    // 5. Inserts the generated code into the AST
+}
+
+// Example 2: Code generation macro
+// This would expand to multiple statements
+
+fn example_codegen() {
+    // vec! macro generates code like:
+    // {
+    //     let mut temp = Vec.new();
+    //     temp.push(1);
+    //     temp.push(2);
+    //     temp.push(3);
+    //     temp
+    // }
+    let numbers = vec![1, 2, 3];
+}
+
+// Example 3: Meta function that powers a macro
+
+meta fn stringify_expander(tokens: TokenStream) -> TokenStream {
+    // This meta function runs at compile-time during Pass 2
+    // It receives the macro arguments as a TokenStream
+    // and returns generated code as a TokenStream
+
+    let input = tokens.to_string();
+    quote! {
+        Text.from(#input)
+    }
+}
+
+// Macro definition that uses the meta function
+macro stringify = stringify_expander;
+
+// Usage:
+fn example_stringify() {
+    let s = stringify!(hello world);
+    // Expands to: Text.from("hello world")
+}
+
+// Example 4: Derive macro (future)
+// This demonstrates how derive macros would work
+
+// #[derive(Debug, Clone)]
+// type Point = {
+//     x: Float,
+//     y: Float,
+// };
+
+// The derive macro would:
+// 1. Be detected during AST traversal
+// 2. Execute the Debug and Clone meta functions
+// 3. Generate implement blocks for both protocols
+// 4. Insert into the module AST
+
+// Example 5: Cross-module macro resolution
+
+// In module "macros":
+// meta fn assert_eq_expander(tokens: TokenStream) -> TokenStream { ... }
+// macro assert_eq = assert_eq_expander;
+
+// In this module:
+// import macros.{assert_eq};
+//
+// fn test_equality() {
+//     assert_eq!(2 + 2, 4);
+//     // The MacroExpander will:
+//     // 1. Look for "assert_eq" in local module (not found)
+//     // 2. Check imported modules via dependency graph
+//     // 3. Find it in "macros" module
+//     // 4. Execute macros.assert_eq_expander
+// }
+
+// Implementation notes:
+// - The current implementation DETECTS all macro invocations
+// - It EXECUTES the meta functions at compile-time
+// - It LOGS the expansion results
+// - AST INSERTION is a placeholder (next step)

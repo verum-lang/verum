@@ -1,0 +1,17 @@
+// Test multiple defer statements
+// This test verifies that multiple defer statements execute in reverse order (LIFO)
+
+fn complex_operation() {
+    println("Opening resources")
+    defer println("Cleanup 1: Closing database")
+    defer println("Cleanup 2: Releasing lock")
+    defer println("Cleanup 3: Freeing memory")
+
+    println("Doing work")
+}
+
+fn main() {
+    println("Test: Multiple defer statements")
+    complex_operation()
+    println("After complex_operation")
+}

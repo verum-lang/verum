@@ -1,0 +1,443 @@
+// Fallback Pattern Implementation
+//
+// Provides graceful degradation by falling back to alternative operations
+// when the primary operation fails.
+//
+// Strategies:
+// - Static fallback: Return a predefined value
+// - Dynamic fallback: Execute alternative logic
+// - Cached fallback: Return stale data from cache
+// - Default fallback: Return safe default value
+// - Chain fallback: Try multiple alternatives in sequence
+//
+// Use Cases:
+// - Serve cached data when database is unavailable
+// - Use replica when primary fails
+// - Return default configuration when remote config service fails
+// - Degrade to read-only mode when writes fail
+
+mount core.base.{Result, Text, Bool, Maybe};
+mount core.collections.List;
+mount super.super.domain.errors.{RegistryError};
+
+/// Execute operation with a fallback handler
+///
+/// Tries the primary operation first. If it fails, executes the fallback.
+///
+/// # Type Parameters
+/// - T: The success type returned by both operations
+///
+/// # Parameters
+/// - primary: The primary operation to attempt
+/// - fallback: Function to execute if primary fails (receives the error)
+///
+/// # Returns
+/// - Ok(T): Either primary or fallback succeeded
+/// - Err(RegistryError): Both primary and fallback failed
+///
+/// # Example
+/// ```
+/// let result = with_fallback(
+///     || Database.get_user(id),
+///     |err| Cache.get_user(id)
+/// );
+/// ```
+pub fn with_fallback<T>(
+    primary: fn() -> Result<T, RegistryError>,
+    fallback: fn(RegistryError) -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    let primary_result = primary();
+
+    match primary_result {
+        Result.Ok(value) => {
+            // Primary succeeded, return result
+            Result.Ok(value)
+        },
+        Result.Err(primary_error) => {
+            // Primary failed, try fallback
+            let fallback_result = fallback(primary_error.clone());
+
+            match fallback_result {
+                Result.Ok(value) => {
+                    // Fallback succeeded
+                    Result.Ok(value)
+                },
+                Result.Err(fallback_error) => {
+                    // Both failed, return combined error
+                    Result.Err(RegistryError.fallback_failed(
+                        primary_error.to_string(),
+                        fallback_error.to_string()
+                    ))
+                }
+            }
+        }
+    }
+}
+
+/// Async version of with_fallback
+pub async fn with_fallback_async<T>(
+    primary: fn() -> Result<T, RegistryError>,
+    fallback: fn(RegistryError) -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    let primary_result = primary().await;
+
+    match primary_result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(primary_error) => {
+            let fallback_result = fallback(primary_error.clone()).await;
+
+            match fallback_result {
+                Result.Ok(value) => Result.Ok(value),
+                Result.Err(fallback_error) => {
+                    Result.Err(RegistryError.fallback_failed(
+                        primary_error.to_string(),
+                        fallback_error.to_string()
+                    ))
+                }
+            }
+        }
+    }
+}
+
+/// Execute operation with a static fallback value
+///
+/// Returns a predetermined value if the operation fails
+///
+/// # Example
+/// ```
+/// let config = with_static_fallback(
+///     || ConfigService.get("max_connections"),
+///     100  // Default value
+/// );
+/// ```
+pub fn with_static_fallback<T>(
+    operation: fn() -> Result<T, RegistryError>,
+    fallback_value: T
+) -> Result<T, RegistryError> {
+    with_fallback(
+        operation,
+        |_err| Result.Ok(fallback_value.clone())
+    )
+}
+
+/// Execute operation with multiple fallback levels
+///
+/// Tries each fallback in sequence until one succeeds or all fail
+///
+/// # Example
+/// ```
+/// let result = with_fallback_chain([
+///     || Database.get_user(id),        // Try primary database
+///     || ReplicaDb.get_user(id),       // Try replica
+///     || Cache.get_user(id),           // Try cache
+///     || Result.Ok(User.guest())       // Return guest user
+/// ]);
+/// ```
+pub fn with_fallback_chain<T>(
+    operations: List<fn() -> Result<T, RegistryError>>
+) -> Result<T, RegistryError> {
+    let mut errors = List.new();
+
+    for operation in operations {
+        let result = operation();
+
+        match result {
+            Result.Ok(value) => {
+                // Success - return immediately
+                return Result.Ok(value);
+            },
+            Result.Err(err) => {
+                // Failure - record error and try next
+                errors = errors.push(err);
+            }
+        }
+    }
+
+    // All operations failed
+    Result.Err(RegistryError.all_fallbacks_failed(
+        f"{errors.len()} operations failed"
+    ))
+}
+
+/// Async version of fallback chain
+pub async fn with_fallback_chain_async<T>(
+    operations: List<fn() -> Result<T, RegistryError>>
+) -> Result<T, RegistryError> {
+    let mut errors = List.new();
+
+    for operation in operations {
+        let result = operation().await;
+
+        match result {
+            Result.Ok(value) => {
+                return Result.Ok(value);
+            },
+            Result.Err(err) => {
+                errors = errors.push(err);
+            }
+        }
+    }
+
+    Result.Err(RegistryError.all_fallbacks_failed(
+        f"{errors.len()} operations failed"
+    ))
+}
+
+/// Conditional fallback based on error type
+///
+/// Only falls back for specific error types
+///
+/// # Example
+/// ```
+/// let result = with_conditional_fallback(
+///     || Database.get_package(name),
+///     |err| err.is_recoverable(),  // Only fallback for recoverable errors
+///     |err| Cache.get_package(name)
+/// );
+/// ```
+pub fn with_conditional_fallback<T>(
+    primary: fn() -> Result<T, RegistryError>,
+    should_fallback: fn(RegistryError) -> Bool,
+    fallback: fn(RegistryError) -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    let result = primary();
+
+    match result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(err) => {
+            if should_fallback(err.clone()) {
+                fallback(err)
+            } else {
+                Result.Err(err)
+            }
+        }
+    }
+}
+
+/// Fallback with timeout
+///
+/// Falls back if operation takes too long
+///
+/// # Example
+/// ```
+/// let result = with_timed_fallback(
+///     || SlowService.get_data(),
+///     1000,  // 1 second timeout
+///     |_| Cache.get_data()
+/// ).await;
+/// ```
+pub async fn with_timed_fallback<T>(
+    primary: fn() -> Result<T, RegistryError>,
+    timeout_ms: Int,
+    fallback: fn() -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    // Try primary with timeout
+    let result = with_timeout(primary, timeout_ms).await;
+
+    match result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(err) => {
+            // Timeout or failure, try fallback
+            fallback().await
+        }
+    }
+}
+
+/// Fallback strategy configuration
+pub type FallbackStrategy<T> is {
+    primary: fn() -> Result<T, RegistryError>,
+    fallbacks: List<FallbackLevel<T>>,
+    track_stats: Bool,
+};
+
+/// A single fallback level in the strategy
+pub type FallbackLevel<T> is {
+    name: Text,
+    operation: fn(RegistryError) -> Result<T, RegistryError>,
+    condition: fn(RegistryError) -> Bool,  // Should this fallback be tried?
+};
+
+implement<T> FallbackStrategy<T> {
+    /// Create a new fallback strategy
+    pub fn new(primary: fn() -> Result<T, RegistryError>) -> FallbackStrategy<T> {
+        FallbackStrategy {
+            primary: primary,
+            fallbacks: List.new(),
+            track_stats: true,
+        }
+    }
+
+    /// Add a fallback level
+    pub fn add_fallback(
+        mut self,
+        name: Text,
+        operation: fn(RegistryError) -> Result<T, RegistryError>,
+        condition: fn(RegistryError) -> Bool
+    ) -> FallbackStrategy<T> {
+        let level = FallbackLevel {
+            name: name,
+            operation: operation,
+            condition: condition,
+        };
+        self.fallbacks = self.fallbacks.push(level);
+        self
+    }
+
+    /// Execute the fallback strategy
+    pub fn execute(self) -> Result<T, RegistryError> {
+        let primary_result = (self.primary)();
+
+        match primary_result {
+            Result.Ok(value) => Result.Ok(value),
+            Result.Err(primary_error) => {
+                // Try each fallback level
+                self.try_fallbacks(primary_error)
+            }
+        }
+    }
+
+    /// Try each fallback level in sequence
+    fn try_fallbacks(self, error: RegistryError) -> Result<T, RegistryError> {
+        let mut current_error = error;
+
+        for level in self.fallbacks {
+            // Check if this fallback should be tried
+            if (level.condition)(current_error.clone()) {
+                let result = (level.operation)(current_error.clone());
+
+                match result {
+                    Result.Ok(value) => {
+                        return Result.Ok(value);
+                    },
+                    Result.Err(err) => {
+                        current_error = err;
+                        // Continue to next fallback
+                    }
+                }
+            }
+        }
+
+        // All fallbacks failed or were skipped
+        Result.Err(current_error)
+    }
+}
+
+/// Fallback statistics for monitoring
+pub type FallbackStats is {
+    total_attempts: Int,
+    primary_success: Int,
+    fallback_success: Int,
+    total_failures: Int,
+    fallback_usage_by_level: Map<Text, Int>,
+};
+
+implement FallbackStats {
+    pub fn new() -> FallbackStats {
+        FallbackStats {
+            total_attempts: 0,
+            primary_success: 0,
+            fallback_success: 0,
+            total_failures: 0,
+            fallback_usage_by_level: Map.new(),
+        }
+    }
+
+    pub fn record_primary_success(mut self) -> FallbackStats {
+        self.total_attempts = self.total_attempts + 1;
+        self.primary_success = self.primary_success + 1;
+        self
+    }
+
+    pub fn record_fallback_success(mut self, level: Text) -> FallbackStats {
+        self.total_attempts = self.total_attempts + 1;
+        self.fallback_success = self.fallback_success + 1;
+
+        let current = self.fallback_usage_by_level.get(level).unwrap_or(0);
+        self.fallback_usage_by_level = self.fallback_usage_by_level.insert(
+            level,
+            current + 1
+        );
+
+        self
+    }
+
+    pub fn record_failure(mut self) -> FallbackStats {
+        self.total_attempts = self.total_attempts + 1;
+        self.total_failures = self.total_failures + 1;
+        self
+    }
+
+    pub fn fallback_rate(self) -> Float {
+        if self.total_attempts == 0 {
+            0.0
+        } else {
+            self.fallback_success.to_float() / self.total_attempts.to_float()
+        }
+    }
+
+    pub fn success_rate(self) -> Float {
+        if self.total_attempts == 0 {
+            0.0
+        } else {
+            let total_success = self.primary_success + self.fallback_success;
+            total_success.to_float() / self.total_attempts.to_float()
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"FallbackStats[total={self.total_attempts}, primary={self.primary_success}, fallback={self.fallback_success}, failures={self.total_failures}, fallback_rate={self.fallback_rate():.1}%]"
+    }
+}
+
+// ============================================================================
+// Error Extensions
+// ============================================================================
+
+implement RegistryError {
+    pub fn fallback_failed(primary_error: Text, fallback_error: Text) -> RegistryError {
+        RegistryError.InternalError {
+            message: f"Primary failed: {primary_error}, Fallback failed: {fallback_error}"
+        }
+    }
+
+    pub fn all_fallbacks_failed(message: Text) -> RegistryError {
+        RegistryError.InternalError {
+            message: f"All fallbacks failed: {message}"
+        }
+    }
+}
+
+// ============================================================================
+// Common Fallback Patterns
+// ============================================================================
+
+/// Fallback to cache when database fails
+pub fn database_with_cache_fallback<T>(
+    db_operation: fn() -> Result<T, RegistryError>,
+    cache_operation: fn() -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    with_conditional_fallback(
+        db_operation,
+        |err| err.is_recoverable(),
+        |_| cache_operation()
+    )
+}
+
+/// Fallback to replica when primary fails
+pub fn primary_with_replica_fallback<T>(
+    primary_operation: fn() -> Result<T, RegistryError>,
+    replica_operation: fn() -> Result<T, RegistryError>
+) -> Result<T, RegistryError> {
+    with_fallback(
+        primary_operation,
+        |_err| replica_operation()
+    )
+}
+
+/// Fallback to default value when service fails
+pub fn service_with_default<T>(
+    service_operation: fn() -> Result<T, RegistryError>,
+    default_value: T
+) -> Result<T, RegistryError> {
+    with_static_fallback(service_operation, default_value)
+}

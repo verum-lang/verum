@@ -1,0 +1,18 @@
+// Test yield in loop
+fn counter() -> Int {
+    let mut i = 0;
+    loop {
+        if i >= 5 {
+            break;
+        }
+        yield i;
+        i = i + 1;
+    }
+    0
+}
+
+fn main() {
+    println("Testing yield in loop");
+    let result = counter();
+    println("Done");
+}

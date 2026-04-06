@@ -1,0 +1,83 @@
+module sys.context_ops;
+
+// =============================================================================
+// sys/context_ops.vr - Context System & TLS (replaces C verum_ctx_*/verum_tls_*)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/raw
+// =============================================================================
+//
+// Pure Verum implementation of the context system (dependency injection)
+// and TLS slot management. These compile through VBC → LLVM.
+//
+// =============================================================================
+
+module context_ops;
+
+mount super.raw.*;
+
+// =============================================================================
+// TLS Slots
+// =============================================================================
+
+/// Thread-local storage slot count.
+public let TLS_SLOT_COUNT: Int = 256;
+
+/// Read a thread-local storage slot.
+public fn tls_get(slot: Int) -> Int {
+    // TLS slots are stored in the ExecutionContext
+    // The raw intrinsic reads from the per-thread context
+    __ctx_get_raw(slot)
+}
+
+/// Write a thread-local storage slot.
+public fn tls_set(slot: Int, value: Int) {
+    __ctx_provide_raw(slot, value);
+}
+
+// =============================================================================
+// Context System (Dependency Injection)
+// =============================================================================
+
+/// Provide a context value for the given type ID.
+/// The value is available to all functions in the current scope
+/// that declare `using [TypeName]`.
+public fn context_provide(type_id: Int, value: Int) {
+    __ctx_provide_raw(type_id, value);
+}
+
+/// Retrieve a context value by type ID.
+/// Returns the value if found, 0 if not provided.
+public fn context_get(type_id: Int) -> Int {
+    __ctx_get_raw(type_id)
+}
+
+/// End a context scope (pop the provided value).
+public fn context_end(type_id: Int) {
+    __ctx_end_raw(type_id);
+}
+
+// =============================================================================
+// Defer Cleanup (RAII on Unwind)
+// =============================================================================
+
+/// Register a cleanup callback that will run on scope exit or exception.
+/// The callback takes an i64 argument (resource handle).
+public fn defer_register(cleanup_fn: fn(Int) -> Int, arg: Int) {
+    __defer_push_raw(cleanup_fn as Int, arg);
+}
+
+/// Execute and pop the most recent defer.
+public fn defer_execute() {
+    __defer_pop_raw();
+}
+
+/// Get current defer stack depth (for saving on scope entry).
+public fn defer_depth() -> Int {
+    __defer_depth_raw()
+}
+
+/// Run all defers down to a saved depth (for scope cleanup).
+public fn defer_run_to(depth: Int) {
+    __defer_run_to_raw(depth);
+}

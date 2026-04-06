@@ -1,0 +1,6 @@
+// Simple Tensor Test 3 - Verum types
+fn main() -> Int {
+    let vec1 = tensor<3>Float { 1.0 };
+    print("Tensor created successfully");
+    0
+}

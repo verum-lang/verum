@@ -1,0 +1,29 @@
+// Test: Record types and field access
+// This tests basic record functionality
+
+type Point is { x: Int, y: Int };
+
+type Person is { name: Text, age: Int };
+
+fn main() {
+    print(f"Testing records...");
+
+    // Test record construction
+    let p = Point { x: 10, y: 20 };
+    print(f"Created point");
+
+    // Test field access
+    let x_val = p.x;
+    let y_val = p.y;
+    print(f"Point: ({x_val}, {y_val})");
+
+    // Test another record type
+    let person = Person { name: "Alice", age: 30 };
+    print(f"Created person");
+
+    let name = person.name;
+    let age = person.age;
+    print(f"Person: {name}, age {age}");
+
+    print(f"Records test complete!");
+}

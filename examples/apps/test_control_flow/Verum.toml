@@ -1,0 +1,14 @@
+[package]
+name = "test_control_flow"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Comprehensive test of Verum control flow features"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []

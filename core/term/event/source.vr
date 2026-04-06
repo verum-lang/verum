@@ -1,0 +1,148 @@
+// =============================================================================
+// event/source.vr - Platform Event Source
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: core.sys, core.io, core.term.raw
+// =============================================================================
+//
+// Platform-specific event source using poll(2) on POSIX and
+// WaitForSingleObject on Windows. Provides poll_read() with timeout
+// for non-blocking terminal input reading.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
+// =============================================================================
+
+module source;
+
+mount core.sys.{FileDesc, OSError};
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount core.time.Duration;
+mount super.super.raw.RawTerminal;
+
+// =============================================================================
+// POSIX: poll(2) FFI
+// =============================================================================
+
+@cfg(not(target_os = "windows"))
+@ffi("libc")
+extern {
+    /// POSIX poll(2) — wait for events on file descriptors.
+    fn poll(fds: &mut PollFd, nfds: Int, timeout: Int) -> Int;
+}
+
+/// poll(2) file descriptor structure.
+@cfg(not(target_os = "windows"))
+type PollFd is {
+    fd: Int32,
+    events: Int16,
+    revents: Int16,
+};
+
+/// poll(2) event flags.
+@cfg(not(target_os = "windows"))
+const POLLIN: Int16 = 0x0001;
+@cfg(not(target_os = "windows"))
+const POLLPRI: Int16 = 0x0002;
+@cfg(not(target_os = "windows"))
+const POLLERR: Int16 = 0x0008;
+@cfg(not(target_os = "windows"))
+const POLLHUP: Int16 = 0x0010;
+@cfg(not(target_os = "windows"))
+const POLLNVAL: Int16 = 0x0020;
+
+// =============================================================================
+// poll_read — read from terminal with timeout
+// =============================================================================
+
+/// Read from a file descriptor with a timeout.
+/// Returns the number of bytes read, or 0 if the timeout expired.
+///
+/// Uses poll(2) on POSIX to wait for data availability before reading.
+@cfg(not(target_os = "windows"))
+public fn poll_read(fd: FileDesc, buf: &mut [Byte], timeout: Duration) -> Int {
+    let mut pfd = PollFd {
+        fd: fd.0 as Int32,
+        events: POLLIN,
+        revents: 0,
+    };
+
+    let timeout_ms = timeout.as_millis() as Int;
+    let result = poll(&mut pfd, 1, timeout_ms);
+
+    if result <= 0 {
+        // Timeout or error
+        return 0;
+    }
+
+    if (pfd.revents & POLLIN) != 0 {
+        // Data available — read it
+        mount super.super.raw.termios.read as raw_read;
+        let n = raw_read(fd.0, buf as &unsafe mut Byte, buf.len());
+        if n < 0 { 0 } else { n }
+    } else {
+        0
+    }
+}
+
+/// Read from terminal with timeout on Windows.
+/// Uses WaitForSingleObject with timeout.
+@cfg(target_os = "windows")
+public fn poll_read(fd: FileDesc, buf: &mut [Byte], timeout: Duration) -> Int {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, STD_INPUT_HANDLE, WaitForSingleObject,
+        ReadFile, WAIT_OBJECT_0,
+    };
+
+    let handle = GetStdHandle(STD_INPUT_HANDLE);
+    let timeout_ms = timeout.as_millis() as UInt32;
+    let wait_result = WaitForSingleObject(handle, timeout_ms);
+
+    if wait_result != WAIT_OBJECT_0 {
+        return 0;
+    }
+
+    let mut bytes_read: UInt32 = 0;
+    let ok = ReadFile(
+        handle,
+        buf as &unsafe mut Byte,
+        buf.len() as UInt32,
+        &mut bytes_read,
+        0 as &mut core.sys.windows.kernel32.Overlapped,
+    );
+    if ok { bytes_read as Int } else { 0 }
+}
+
+/// Poll a RawTerminal for readable data with a timeout.
+/// Returns the number of bytes read into buf, or 0 on timeout.
+public fn poll_terminal(terminal: &mut dyn RawTerminal, buf: &mut [Byte], timeout: Duration) -> Int {
+    // Use fd 0 (stdin) as the default terminal descriptor
+    poll_read(FileDesc(0), buf, timeout)
+}
+
+// =============================================================================
+// Blocking read helpers
+// =============================================================================
+
+/// Read at least one byte from a file descriptor, blocking indefinitely.
+@cfg(not(target_os = "windows"))
+public fn blocking_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
+    mount super.super.raw.termios.read as raw_read;
+    let n = raw_read(fd.0, buf as &unsafe mut Byte, buf.len());
+    if n < 0 {
+        Err(StreamError.from_errno())
+    } else {
+        Ok(n)
+    }
+}
+
+/// Check if data is available on a file descriptor (non-blocking poll with 0 timeout).
+@cfg(not(target_os = "windows"))
+public fn has_data(fd: FileDesc) -> Bool {
+    let mut pfd = PollFd {
+        fd: fd.0 as Int32,
+        events: POLLIN,
+        revents: 0,
+    };
+    let result = poll(&mut pfd, 1, 0);
+    result > 0 && (pfd.revents & POLLIN) != 0
+}

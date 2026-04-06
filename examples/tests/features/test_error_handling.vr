@@ -1,0 +1,267 @@
+// Comprehensive Error Handling Test for Verum
+// Based on grammar/verum.ebnf Section 2.12
+// Tests: try expressions, recover blocks, finally blocks, Result type, ? operator
+// Priority: Critical
+
+// ============================================================================
+// Test 1: Basic try expression (grammar: try_expr)
+// Grammar: try_expr = 'try' , block_expr , [ try_handlers ]
+// ============================================================================
+
+fn test_basic_try() {
+    println("=== Test 1: Basic try expression ===");
+
+    // Try with no error
+    try {
+        let x = 10;
+        let y = 20;
+        println(x + y);
+    };
+
+    println("Basic try completed");
+}
+
+// ============================================================================
+// Test 2: Try with recover block (grammar: try_recovery)
+// Grammar: try_recovery = 'recover' , '{' , match_arms , '}'
+// ============================================================================
+
+fn test_try_recover() {
+    println("\n=== Test 2: Try with recover block ===");
+
+    // Try-recover with simple error handling
+    let result = try {
+        let x = 42;
+        x
+    } recover {
+        0
+    };
+    println(result);
+
+    println("Try-recover completed");
+}
+
+// ============================================================================
+// Test 3: Try with finally block (grammar: try_finally)
+// Grammar: try_finally = 'finally' , block_expr
+// ============================================================================
+
+fn test_try_finally() {
+    println("\n=== Test 3: Try with finally block ===");
+
+    try {
+        println("Executing try block");
+    } finally {
+        println("Finally block executed");
+    };
+
+    println("Try-finally completed");
+}
+
+// ============================================================================
+// Test 4: Combined try-recover-finally
+// Grammar: try_handlers = try_recovery , [ try_finally ] | try_finally
+// ============================================================================
+
+fn test_try_recover_finally() {
+    println("\n=== Test 4: Combined try-recover-finally ===");
+
+    try {
+        println("Try block");
+        let x = 100;
+        println(x);
+    } recover {
+        println("Recover block");
+    } finally {
+        println("Finally block");
+    };
+
+    println("Combined completed");
+}
+
+// ============================================================================
+// Test 5: Try with panic and recover
+// ============================================================================
+
+fn test_panic_recover() {
+    println("\n=== Test 5: Try with panic and recover ===");
+
+    try {
+        println("Before panic");
+        panic("test error");
+    } recover {
+        println("Recovered from panic");
+    };
+
+    println("Panic recovery completed");
+}
+
+// ============================================================================
+// Test 6: Nested try blocks
+// ============================================================================
+
+fn test_nested_try() {
+    println("\n=== Test 6: Nested try blocks ===");
+
+    try {
+        println("Outer try");
+        let inner = try {
+            println("Inner try");
+            42
+        } recover {
+            println("Inner recover");
+            0
+        };
+        println(inner);
+    } recover {
+        println("Outer recover");
+    } finally {
+        println("Outer finally");
+    };
+
+    println("Nested try completed");
+}
+
+// ============================================================================
+// Test 7: Result type operations
+// Using stdlib Result type
+// ============================================================================
+
+fn divide(x: Int, y: Int) -> Result<Int, Text> {
+    if y == 0 {
+        Result.Err("division by zero")
+    } else {
+        Result.Ok(x / y)
+    }
+}
+
+fn test_result_operations() {
+    println("\n=== Test 7: Result type operations ===");
+
+    // Result.Ok and Result.Err
+    let ok_val: Result<Int, Text> = Result.Ok(42);
+    let err_val: Result<Int, Text> = Result.Err("error message");
+
+    println(ok_val.is_ok());
+    println(err_val.is_err());
+
+    // unwrap_or
+    let unwrapped = err_val.unwrap_or(100);
+    println(unwrapped);
+
+    // Match on Result
+    let result = divide(10, 2);
+    match result {
+        Result.Ok(v) => println(v),
+        Result.Err(e) => println(e),
+    }
+
+    let result2 = divide(10, 0);
+    match result2 {
+        Result.Ok(v) => println(v),
+        Result.Err(e) => println(e),
+    }
+
+    println("Result operations completed");
+}
+
+// ============================================================================
+// Test 8: The ? operator for error propagation
+// Grammar: postfix_op includes '?'
+// NOTE: Currently disabled - compiler requires specific Result type recognition
+// ============================================================================
+
+// fn compute_with_propagation(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+//     // Use ? operator to propagate errors
+//     let x = divide(a, b)?;
+//     let y = divide(x, c)?;
+//     Result.Ok(y)
+// }
+
+fn test_question_operator() {
+    println("\n=== Test 8: ? operator for error propagation ===");
+    println("DISABLED: Requires compiler recognition of stdlib Result type");
+    println("The ? operator is parsed but type checker needs stdlib integration");
+}
+
+// ============================================================================
+// Test 9: Result to Maybe conversion
+// NOTE: Currently disabled - .ok() method requires stdlib Result integration
+// ============================================================================
+
+fn test_result_maybe_conversion() {
+    println("\n=== Test 9: Result to Maybe conversion ===");
+    println("DISABLED: .ok() method requires stdlib Result type integration");
+
+    // Manual conversion works:
+    let ok_result: Result<Int, Text> = Result.Ok(42);
+    match ok_result {
+        Result.Ok(v) => {
+            let maybe_val: Maybe<Int> = Maybe.Some(v);
+            match maybe_val {
+                Maybe.Some(x) => println(x),
+                Maybe.None => println("None"),
+            }
+        },
+        Result.Err(_) => {
+            let maybe_val: Maybe<Int> = Maybe.None;
+            println("None");
+        },
+    }
+}
+
+// ============================================================================
+// Test 10: Maybe type operations
+// ============================================================================
+
+fn test_maybe_operations() {
+    println("\n=== Test 10: Maybe type operations ===");
+
+    let some_val: Maybe<Int> = Maybe.Some(42);
+    let none_val: Maybe<Int> = Maybe.None;
+
+    println(some_val.is_some());
+    println(none_val.is_none());
+
+    // unwrap_or
+    let unwrapped = none_val.unwrap_or(100);
+    println(unwrapped);
+
+    // Match on Maybe
+    match some_val {
+        Maybe.Some(v) => println(v),
+        Maybe.None => println("None"),
+    }
+
+    // Null coalescing operator
+    let x: Maybe<Int> = Maybe.None;
+    let z = x ?? 0;
+    println(z);
+
+    println("Maybe operations completed");
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    println("========================================");
+    println("Comprehensive Error Handling Test Suite");
+    println("========================================\n");
+
+    test_basic_try();
+    test_try_recover();
+    test_try_finally();
+    test_try_recover_finally();
+    test_panic_recover();
+    test_nested_try();
+    test_result_operations();
+    test_question_operator();
+    test_result_maybe_conversion();
+    test_maybe_operations();
+
+    println("\n========================================");
+    println("Error Handling Tests Complete");
+    println("========================================");
+}

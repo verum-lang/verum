@@ -1,0 +1,12 @@
+// Test: Calling context methods
+context Logger {
+    fn log(self, msg: Text)
+}
+
+fn log_message(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+fn main() {
+    // Don't call to avoid missing provide
+}

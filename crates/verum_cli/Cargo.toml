@@ -1,0 +1,106 @@
+[package]
+name = "verum_cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Production-grade CLI for the Verum programming language"
+keywords = ["verum", "cli", "compiler", "build-tool"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "verum_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "verum"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+colored = { workspace = true }
+indicatif = "0.18.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+walkdir = "2.5"
+notify = "8.2.0"
+semver = "1.0"
+tempfile = "3.14"
+sha2 = "0.10"
+blake3 = { workspace = true }
+bincode = "2.0.1"
+crossbeam-channel = "0.5"
+num_cpus = "1.17.0"
+is-terminal = "0.4"
+ctrlc = "3.4"
+
+# Package management
+reqwest = { version = "0.12", features = ["blocking", "json", "multipart", "stream"] }
+ed25519-dalek = { version = "2.2.0", features = ["serde"] }
+tar = "0.4"
+flate2 = "1.1.5"
+hex = "0.4"
+dirs = "6.0.0"
+petgraph = { workspace = true }  # For dependency graph
+tokio = { workspace = true, features = ["full"] }
+async-trait = "0.1"
+chrono = "0.4.42"
+rand = "0.9.2"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }  # For SBOM generation
+git2 = "0.20.3"  # For git dependency cloning
+
+# HTTP server for registry mirror
+hyper = { version = "1.8", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server", "service", "tokio"] }
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# For compilation
+verum_compiler = { workspace = true }
+verum_parser = { workspace = true }
+verum_types = { workspace = true }
+verum_codegen = { workspace = true }
+verum_cbgr = { workspace = true }
+verum_smt = { workspace = true, optional = true }
+verum_lexer = { workspace = true }
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+verum_lsp = { workspace = true }
+verum_interactive = { workspace = true, features = ["playbook"] }
+verum_diagnostics = { workspace = true }
+verum_dap = { workspace = true }
+verum_vbc = { workspace = true }
+verum_error = { workspace = true }
+verum_toolchain = { workspace = true }
+
+# TUI support for playbook
+ratatui = "0.30"
+crossterm = "0.29"
+
+# LSP support
+tower-lsp = "0.20"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.14"
+serial_test = "3.2.0"
+
+[features]
+default = ["parallel-compilation", "incremental"]
+parallel-compilation = []
+incremental = []
+profiling = []
+verification = ["verum_smt"]
+ipfs = []  # Enable IPFS support (tokio is now always included)

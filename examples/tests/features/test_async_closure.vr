@@ -1,0 +1,35 @@
+// Test: Async closures
+// Tests async closures with various signatures
+
+fn main() {
+    // Basic async closure
+    let closure = async |x: Int| -> Int {
+        x * 2
+    };
+
+    // Async closure with multiple parameters
+    let add_closure = async |a: Int, b: Int| -> Int {
+        a + b
+    };
+
+    // Async closure with text
+    let greet = async |name: Text| -> Text {
+        "Hello, " + name
+    };
+
+    // Async closure with no parameters
+    let get_value = async || -> Int {
+        42
+    };
+
+    // Async closure with computation
+    let compute = async |x: Int, y: Int| -> Int {
+        let sum = x + y;
+        let product = x * y;
+        sum + product
+    };
+
+    // Note: Actually calling these would require async context
+    // This test primarily validates parsing and type checking
+    println("Async closures defined successfully");
+}

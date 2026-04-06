@@ -1,0 +1,97 @@
+// Advanced Generics Test
+
+type Maybe<T> is Some(T) | None;
+type Result<T, E> is Ok(T) | Err(E);
+
+fn identity<T>(x: T) -> T { x }
+
+fn map_maybe<T, U>(m: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None
+    }
+}
+
+fn map_result<T, U, E>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(x) => Ok(f(x)),
+        Err(e) => Err(e)
+    }
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(x) => x,
+        None => default
+    }
+}
+
+fn and_then<T, U>(m: Maybe<T>, f: fn(T) -> Maybe<U>) -> Maybe<U> {
+    match m {
+        Some(x) => f(x),
+        None => None
+    }
+}
+
+fn main() {
+    print("=== Advanced Generics Test ===");
+
+    // Identity with different types
+    let i = identity(42);
+    let f = identity(3.14);
+    let s = identity("hello");
+    print(f"identity(42) = {i}");
+    print(f"identity(3.14) = {f}");
+    print(f"identity(hello) = {s}");
+
+    // Maybe operations
+    let some_val = Some(10);
+    let none_val: Maybe<Int> = None;
+
+    let doubled = map_maybe(some_val, |x: Int| -> Int { x * 2 });
+    let none_doubled = map_maybe(none_val, |x: Int| -> Int { x * 2 });
+
+    print(f"map_maybe(Some(10), double) = {unwrap_or(doubled, -1)}");
+    print(f"map_maybe(None, double) = {unwrap_or(none_doubled, -1)}");
+
+    // Chained Maybe with and_then
+    let safe_half = |x: Int| -> Maybe<Int> {
+        if x % 2 == 0 { Some(x / 2) } else { None }
+    };
+
+    let result1 = and_then(Some(20), safe_half);
+    let result2 = and_then(Some(15), safe_half);
+    print(f"and_then(Some(20), safe_half) = {unwrap_or(result1, -1)}");
+    print(f"and_then(Some(15), safe_half) = {unwrap_or(result2, -1)}");
+
+    // Result operations
+    let ok_val: Result<Int, Text> = Ok(100);
+    let err_val: Result<Int, Text> = Err("failed");
+
+    let ok_mapped = map_result(ok_val, |x: Int| -> Int { x + 1 });
+    let err_mapped = map_result(err_val, |x: Int| -> Int { x + 1 });
+
+    match ok_mapped {
+        Ok(v) => print(f"map_result(Ok(100), +1) = Ok({v})"),
+        Err(e) => print(f"map_result(Ok(100), +1) = Err({e})")
+    }
+
+    match err_mapped {
+        Ok(v) => print(f"map_result(Err, +1) = Ok({v})"),
+        Err(e) => print(f"map_result(Err, +1) = Err({e})")
+    }
+
+    // Nested generics
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    match nested {
+        Some(inner) => {
+            match inner {
+                Some(v) => print(f"Nested Some(Some({v}))"),
+                None => print("Nested Some(None)")
+            }
+        },
+        None => print("Nested None")
+    }
+
+    print("=== Done ===");
+}

@@ -1,0 +1,510 @@
+// =============================================================================
+// raw/termios.vr - POSIX termios implementation
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.sys, core.io, super (raw/mod.vr)
+// Platform: POSIX (Linux, macOS)
+// =============================================================================
+//
+// Full POSIX terminal implementation using termios(3).
+// Provides raw mode, alternate screen, mouse capture, cursor control,
+// and terminal size queries via ioctl(TIOCGWINSZ).
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.5
+// =============================================================================
+
+@cfg(not(target_os = "windows"))
+module termios;
+
+mount core.sys.{FileDesc, OSError};
+mount core.io.{Read, Write, IoResult, StreamError, IoErrorKind};
+mount super.{TerminalMode, TermiosState, TerminalSize, RawTerminal, CursorShape};
+mount super.escape.{EscapeWriter, ClearMode};
+
+// =============================================================================
+// FFI: POSIX termios and ioctl
+// =============================================================================
+
+@ffi("libc")
+extern {
+    /// Get terminal attributes
+    fn tcgetattr(fd: Int, termios: &mut [Byte; 60]) -> Int;
+
+    /// Set terminal attributes
+    fn tcsetattr(fd: Int, actions: Int, termios: &[Byte; 60]) -> Int;
+
+    /// Check if fd is a terminal
+    fn isatty(fd: Int) -> Int;
+
+    /// IO control
+    fn ioctl(fd: Int, request: UInt64, arg: &unsafe Byte) -> Int;
+
+    /// Write to file descriptor (low-level)
+    fn write(fd: Int, buf: &Byte, count: Int) -> Int;
+
+    /// Read from file descriptor (low-level)
+    fn read(fd: Int, buf: &unsafe mut Byte, count: Int) -> Int;
+}
+
+
+// =============================================================================
+// Termios constants
+// =============================================================================
+
+/// Apply changes immediately
+const TCSANOW: Int = 0;
+/// Apply after all output is transmitted
+const TCSADRAIN: Int = 1;
+/// Apply after output transmitted, flush pending input
+const TCSAFLUSH: Int = 2;
+
+// Ioctl request code for terminal window size
+@cfg(target_os = "linux")
+const TIOCGWINSZ: UInt64 = 0x5413;
+@cfg(target_os = "macos")
+const TIOCGWINSZ: UInt64 = 0x40087468;
+
+// =============================================================================
+// Termios byte offsets for field manipulation
+// =============================================================================
+// struct termios layout (Linux x86_64 / macOS):
+//   c_iflag:  offset 0,  4 bytes (input flags)
+//   c_oflag:  offset 4,  4 bytes (output flags)
+//   c_cflag:  offset 8,  4 bytes (control flags)
+//   c_lflag:  offset 12, 4 bytes (local flags)
+// Linux:
+//   c_line:   offset 16, 1 byte
+//   c_cc:     offset 17, 32 bytes (control chars)
+// macOS:
+//   c_cc:     offset 16, 20 bytes (control chars)
+//   c_ispeed: offset 36, 4 bytes
+//   c_ospeed: offset 40, 4 bytes
+
+const IFLAG_OFFSET: Int = 0;
+const OFLAG_OFFSET: Int = 4;
+const CFLAG_OFFSET: Int = 8;
+const LFLAG_OFFSET: Int = 12;
+
+// c_cc indices (POSIX standard)
+@cfg(target_os = "linux")
+const CC_OFFSET: Int = 17;
+@cfg(target_os = "macos")
+const CC_OFFSET: Int = 16;
+
+const VMIN_INDEX: Int = 6;   // Minimum bytes for noncanonical read
+const VTIME_INDEX: Int = 5;  // Timeout for noncanonical read
+
+// Input flags (c_iflag)
+const IGNBRK: UInt32  = 0o000001;
+const BRKINT: UInt32  = 0o000002;
+const PARMRK: UInt32  = 0o000010;
+const ISTRIP: UInt32  = 0o000040;
+const INLCR: UInt32   = 0o000100;
+const IGNCR: UInt32   = 0o000200;
+const ICRNL: UInt32   = 0o000400;
+const IXON: UInt32    = 0o002000;
+const IXOFF: UInt32   = 0o010000;
+const IXANY: UInt32   = 0o020000;
+const INPCK: UInt32   = 0o000020;
+
+// Output flags (c_oflag)
+const OPOST: UInt32 = 0o000001;
+
+// Control flags (c_cflag)
+const CSIZE: UInt32 = 0o000060;
+const CS8: UInt32   = 0o000060;
+const PARENB: UInt32 = 0o000400;
+
+// Local flags (c_lflag)
+const ECHO: UInt32   = 0o000010;
+const ECHONL: UInt32 = 0o000100;
+const ICANON: UInt32 = 0o000002;
+const ISIG: UInt32   = 0o000001;
+const IEXTEN: UInt32 = 0o100000;
+
+// =============================================================================
+// Winsize struct for ioctl TIOCGWINSZ
+// =============================================================================
+
+/// Terminal window size returned by ioctl(TIOCGWINSZ).
+type Winsize is {
+    ws_row: UInt16,
+    ws_col: UInt16,
+    ws_xpixel: UInt16,
+    ws_ypixel: UInt16,
+};
+
+// =============================================================================
+// PosixTerminal — POSIX implementation of RawTerminal
+// =============================================================================
+
+/// POSIX terminal using termios(3).
+/// Stores original terminal state for safe RAII restoration on drop.
+public type PosixTerminal is {
+    mode: TerminalMode,
+    write_buf: List<Byte>,
+};
+
+implement PosixTerminal {
+    /// Create a new PosixTerminal for stdin (fd 0).
+    /// Saves original termios state for later restoration.
+    public fn new() -> IoResult<PosixTerminal> {
+        let fd = FileDesc(0);
+        let mut state = TermiosState { data: [0; 60] };
+        let result = tcgetattr(fd.0, &mut state.data);
+        if result != 0 {
+            return Err(StreamError.from_errno());
+        }
+        Ok(PosixTerminal {
+            mode: TerminalMode {
+                original: state,
+                fd: fd,
+                is_raw: false,
+                is_alternate: false,
+            },
+            write_buf: List.new(),
+        })
+    }
+
+    /// Create a PosixTerminal for an arbitrary file descriptor.
+    public fn from_fd(fd: FileDesc) -> IoResult<PosixTerminal> {
+        let mut state = TermiosState { data: [0; 60] };
+        let result = tcgetattr(fd.0, &mut state.data);
+        if result != 0 {
+            return Err(StreamError.from_errno());
+        }
+        Ok(PosixTerminal {
+            mode: TerminalMode {
+                original: state,
+                fd: fd,
+                is_raw: false,
+                is_alternate: false,
+            },
+            write_buf: List.new(),
+        })
+    }
+
+    /// Flush the write buffer to the underlying fd.
+    public fn flush(&mut self) -> IoResult<()> {
+        if self.write_buf.len() == 0 {
+            return Ok(());
+        }
+        let total = self.write_buf.len();
+        let mut written = 0;
+        while written < total {
+            let n = write(
+                self.mode.fd.0,
+                &self.write_buf[written],
+                total - written,
+            );
+            if n < 0 {
+                return Err(StreamError.from_errno());
+            }
+            written = written + n;
+        }
+        self.write_buf.clear();
+        Ok(())
+    }
+
+    /// Write raw bytes to the write buffer.
+    public fn write_bytes(&mut self, data: &[Byte]) -> IoResult<Int> {
+        for i in 0..data.len() {
+            self.write_buf.push(data[i]);
+        }
+        Ok(data.len())
+    }
+
+    /// Write a string as bytes to the write buffer.
+    public fn write_str(&mut self, s: &Text) -> IoResult<()> {
+        let bytes = s.as_bytes();
+        for i in 0..bytes.len() {
+            self.write_buf.push(bytes[i]);
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// RawTerminal protocol implementation
+// =============================================================================
+
+implement RawTerminal for PosixTerminal {
+    fn enable_raw_mode(&mut self) -> IoResult<()> {
+        let mut raw = self.mode.original;
+        apply_raw_flags(&mut raw);
+        let result = tcsetattr(self.mode.fd.0, TCSAFLUSH, &raw.data);
+        if result != 0 {
+            return Err(StreamError.from_errno());
+        }
+        self.mode.is_raw = true;
+        Ok(())
+    }
+
+    fn disable_raw_mode(&mut self) -> IoResult<()> {
+        let result = tcsetattr(self.mode.fd.0, TCSAFLUSH, &self.mode.original.data);
+        if result != 0 {
+            return Err(StreamError.from_errno());
+        }
+        self.mode.is_raw = false;
+        Ok(())
+    }
+
+    fn enter_alternate_screen(&mut self) -> IoResult<()> {
+        // CSI ? 1049 h — enable alternate screen buffer
+        self.write_str("\x1b[?1049h")?;
+        self.flush()?;
+        self.mode.is_alternate = true;
+        Ok(())
+    }
+
+    fn leave_alternate_screen(&mut self) -> IoResult<()> {
+        // CSI ? 1049 l — disable alternate screen buffer
+        self.write_str("\x1b[?1049l")?;
+        self.flush()?;
+        self.mode.is_alternate = false;
+        Ok(())
+    }
+
+    fn size(&self) -> IoResult<TerminalSize> {
+        let mut ws = Winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        let result = ioctl(self.mode.fd.0, TIOCGWINSZ, &mut ws as &unsafe Byte);
+        if result != 0 {
+            return Err(StreamError.from_errno());
+        }
+        Ok(TerminalSize {
+            columns: ws.ws_col as Int,
+            rows: ws.ws_row as Int,
+            pixel_width: if ws.ws_xpixel > 0 { Some(ws.ws_xpixel as Int) } else { None },
+            pixel_height: if ws.ws_ypixel > 0 { Some(ws.ws_ypixel as Int) } else { None },
+        })
+    }
+
+    fn is_tty(&self) -> Bool {
+        isatty(self.mode.fd.0) == 1
+    }
+
+    fn set_mouse_capture(&mut self, enable: Bool) -> IoResult<()> {
+        if enable {
+            // Enable: normal tracking + any-event + SGR encoding
+            self.write_str("\x1b[?1000h")?;  // Normal tracking
+            self.write_str("\x1b[?1003h")?;  // Any-event tracking
+            self.write_str("\x1b[?1006h")?;  // SGR encoding
+        } else {
+            // Disable in reverse order
+            self.write_str("\x1b[?1006l")?;
+            self.write_str("\x1b[?1003l")?;
+            self.write_str("\x1b[?1000l")?;
+        }
+        self.flush()
+    }
+
+    fn set_focus_events(&mut self, enable: Bool) -> IoResult<()> {
+        if enable {
+            self.write_str("\x1b[?1004h")?;
+        } else {
+            self.write_str("\x1b[?1004l")?;
+        }
+        self.flush()
+    }
+
+    fn set_bracketed_paste(&mut self, enable: Bool) -> IoResult<()> {
+        if enable {
+            self.write_str("\x1b[?2004h")?;
+        } else {
+            self.write_str("\x1b[?2004l")?;
+        }
+        self.flush()
+    }
+
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> IoResult<()> {
+        let code = match shape {
+            BlinkingBlock => 1,
+            SteadyBlock => 2,
+            BlinkingUnderline => 3,
+            SteadyUnderline => 4,
+            BlinkingBar => 5,
+            SteadyBar => 6,
+        };
+        // CSI Ps SP q — DECSCUSR
+        self.write_str(f"\x1b[{code} q")?;
+        self.flush()
+    }
+
+    fn set_cursor_visible(&mut self, visible: Bool) -> IoResult<()> {
+        if visible {
+            self.write_str("\x1b[?25h")?;   // DECTCEM show
+        } else {
+            self.write_str("\x1b[?25l")?;   // DECTCEM hide
+        }
+        self.flush()
+    }
+}
+
+// =============================================================================
+// EscapeWriter implementation for PosixTerminal
+// =============================================================================
+
+implement EscapeWriter for PosixTerminal {
+    fn write_csi(&mut self, params: &[Int], final_byte: Byte) -> IoResult<()> {
+        self.write_str("\x1b[")?;
+        for i in 0..params.len() {
+            if i > 0 {
+                self.write_buf.push(';' as Byte);
+            }
+            let s = params[i].to_text();
+            let bytes = s.as_bytes();
+            for j in 0..bytes.len() {
+                self.write_buf.push(bytes[j]);
+            }
+        }
+        self.write_buf.push(final_byte);
+        Ok(())
+    }
+
+    fn write_osc(&mut self, code: Int, data: &Text) -> IoResult<()> {
+        // ESC ] code ; data ST
+        self.write_str(f"\x1b]{code};")?;
+        self.write_str(data)?;
+        self.write_str("\x1b\\")?;
+        Ok(())
+    }
+
+    fn write_dcs(&mut self, data: &Text) -> IoResult<()> {
+        // ESC P data ST
+        self.write_str("\x1bP")?;
+        self.write_str(data)?;
+        self.write_str("\x1b\\")?;
+        Ok(())
+    }
+
+    fn move_to(&mut self, col: Int, row: Int) -> IoResult<()> {
+        // CSI row ; col H (1-indexed)
+        self.write_str(f"\x1b[{row + 1};{col + 1}H")?;
+        Ok(())
+    }
+
+    fn clear(&mut self, mode: ClearMode) -> IoResult<()> {
+        match mode {
+            ClearMode.All => self.write_str("\x1b[2J")?,
+            ClearMode.Purge => self.write_str("\x1b[3J")?,
+            ClearMode.AfterCursor => self.write_str("\x1b[0J")?,
+            ClearMode.BeforeCursor => self.write_str("\x1b[1J")?,
+            ClearMode.CurrentLine => self.write_str("\x1b[2K")?,
+            ClearMode.UntilNewLine => self.write_str("\x1b[0K")?,
+        }
+        Ok(())
+    }
+
+    fn begin_sync(&mut self) -> IoResult<()> {
+        // Mode 2026: synchronized output begin
+        self.write_str("\x1b[?2026h")?;
+        Ok(())
+    }
+
+    fn end_sync(&mut self) -> IoResult<()> {
+        // Mode 2026: synchronized output end
+        self.write_str("\x1b[?2026l")?;
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Read / Write implementations for PosixTerminal
+// =============================================================================
+
+implement Read for PosixTerminal {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let n = read(self.mode.fd.0, buf as &unsafe mut Byte, buf.len());
+        if n < 0 {
+            Err(StreamError.from_errno())
+        } else {
+            Ok(n)
+        }
+    }
+}
+
+implement Write for PosixTerminal {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        self.write_bytes(buf)
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        self.flush()
+    }
+}
+
+// =============================================================================
+// Drop: RAII restoration
+// =============================================================================
+
+implement Drop for PosixTerminal {
+    fn drop(&mut self) {
+        if self.mode.is_alternate {
+            let _ = self.leave_alternate_screen();
+        }
+        if self.mode.is_raw {
+            let _ = self.disable_raw_mode();
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Apply raw mode flags to a termios state.
+/// Equivalent to cfmakeraw(3):
+///   - Disable ECHO, ICANON, ISIG, IEXTEN (local flags)
+///   - Disable IXON, ICRNL, BRKINT, INPCK, ISTRIP (input flags)
+///   - Disable OPOST (output flags)
+///   - Set CS8 (control flags), VMIN=1, VTIME=0
+fn apply_raw_flags(state: &mut TermiosState) {
+    // Read current flag values as UInt32 from byte arrays
+    let iflag = read_u32(&state.data, IFLAG_OFFSET);
+    let oflag = read_u32(&state.data, OFLAG_OFFSET);
+    let cflag = read_u32(&state.data, CFLAG_OFFSET);
+    let lflag = read_u32(&state.data, LFLAG_OFFSET);
+
+    // Input: disable special processing
+    let new_iflag = iflag & !(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+
+    // Output: disable post-processing
+    let new_oflag = oflag & !OPOST;
+
+    // Control: clear size bits, set CS8
+    let new_cflag = (cflag & !(CSIZE | PARENB)) | CS8;
+
+    // Local: disable echo, canonical mode, signals, extensions
+    let new_lflag = lflag & !(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+
+    // Write back modified flags
+    write_u32(&mut state.data, IFLAG_OFFSET, new_iflag);
+    write_u32(&mut state.data, OFLAG_OFFSET, new_oflag);
+    write_u32(&mut state.data, CFLAG_OFFSET, new_cflag);
+    write_u32(&mut state.data, LFLAG_OFFSET, new_lflag);
+
+    // Set VMIN=1 (minimum 1 byte for read), VTIME=0 (no timeout)
+    state.data[CC_OFFSET + VMIN_INDEX] = 1;
+    state.data[CC_OFFSET + VTIME_INDEX] = 0;
+}
+
+/// Read a little-endian UInt32 from a byte array at the given offset.
+fn read_u32(data: &[Byte; 60], offset: Int) -> UInt32 {
+    (data[offset] as UInt32)
+        | ((data[offset + 1] as UInt32) << 8)
+        | ((data[offset + 2] as UInt32) << 16)
+        | ((data[offset + 3] as UInt32) << 24)
+}
+
+/// Write a little-endian UInt32 to a byte array at the given offset.
+fn write_u32(data: &mut [Byte; 60], offset: Int, value: UInt32) {
+    data[offset] = (value & 0xFF) as Byte;
+    data[offset + 1] = ((value >> 8) & 0xFF) as Byte;
+    data[offset + 2] = ((value >> 16) & 0xFF) as Byte;
+    data[offset + 3] = ((value >> 24) & 0xFF) as Byte;
+}

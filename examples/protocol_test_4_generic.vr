@@ -1,0 +1,31 @@
+// Test 4: Protocol with generic types
+
+type Show is protocol {
+    fn show(self) -> Text;
+}
+
+type Box<T> is Box(T);
+
+implement Show for Int {
+    fn show(self) -> Text {
+        f"{self}"
+    }
+}
+
+implement<T: Show> Show for Box<T> {
+    fn show(self) -> Text {
+        match self {
+            Box(value) => f"Box({value.show()})"
+        }
+    }
+}
+
+fn main() {
+    print("Test 4: Protocol with generic types");
+    let num = 42;
+    print(num.show());
+
+    let boxed = Box(100);
+    print(boxed.show());
+    print("SUCCESS: Generic protocol implementation works");
+}

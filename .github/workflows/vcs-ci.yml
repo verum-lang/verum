@@ -1,0 +1,1131 @@
+# =============================================================================
+# Verum Compliance Suite (VCS) - Main CI Workflow
+# =============================================================================
+#
+# This is the primary CI workflow for VCS. It orchestrates all test levels,
+# differential testing, fuzzing, benchmarks, and reporting.
+#
+# Test Level Requirements (from VCS Spec Section 23.2):
+#   - L0 Critical:    100% pass - BLOCKING
+#   - L1 Core:        100% pass - BLOCKING
+#   - L2 Standard:    95%+ pass - BLOCKING
+#   - L3 Extended:    90%+ pass - Recommended
+#   - L4 Performance: Advisory only
+#   - Differential:   100% pass - BLOCKING
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# =============================================================================
+
+name: VCS CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+      - 'grammar/**'
+      - '.github/workflows/vcs-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+      - 'grammar/**'
+  schedule:
+    # Nightly full suite at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_levels:
+        description: 'Test levels to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - L0
+          - L1
+          - L2
+          - L3
+          - L4
+          - L0,L1
+          - L0,L1,L2
+      run_fuzz:
+        description: 'Run fuzz tests'
+        required: false
+        default: false
+        type: boolean
+      run_bench:
+        description: 'Run benchmarks'
+        required: false
+        default: false
+        type: boolean
+      run_differential:
+        description: 'Run differential tests'
+        required: false
+        default: true
+        type: boolean
+      fail_fast:
+        description: 'Stop on first failure'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VCS_PARALLEL: 8
+  VCS_TIMEOUT_DEFAULT: 30000
+  VCS_TIMEOUT_EXTENDED: 600000
+  VCS_CONFIG: vcs/config/vcs.toml
+
+# Cancel previous runs on same branch
+concurrency:
+  group: vcs-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # Build VCS Tools
+  # ==========================================================================
+  build:
+    name: Build VCS Tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      vtest_path: ${{ steps.build.outputs.vtest_path }}
+      vfuzz_path: ${{ steps.build.outputs.vfuzz_path }}
+      vbench_path: ${{ steps.build.outputs.vbench_path }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            llvm-14-dev \
+            libz3-dev \
+            clang-14 \
+            cmake \
+            pkg-config \
+            jq \
+            bc
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-build-v1"
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+            vcs/runner/vfuzz -> target
+            vcs/runner/vbench -> target
+
+      - name: Build vtest
+        id: build-vtest
+        run: |
+          cd vcs/runner/vtest
+          cargo build --release
+          echo "Built vtest successfully"
+
+      - name: Build vfuzz
+        id: build-vfuzz
+        run: |
+          cd vcs/runner/vfuzz
+          cargo build --release
+          echo "Built vfuzz successfully"
+
+      - name: Build vbench
+        id: build-vbench
+        run: |
+          cd vcs/runner/vbench
+          cargo build --release
+          echo "Built vbench successfully"
+
+      - name: Set output paths
+        id: build
+        run: |
+          echo "vtest_path=vcs/runner/vtest/target/release/vtest" >> $GITHUB_OUTPUT
+          echo "vfuzz_path=vcs/runner/vfuzz/target/release/vfuzz" >> $GITHUB_OUTPUT
+          echo "vbench_path=vcs/runner/vbench/target/release/vbench" >> $GITHUB_OUTPUT
+
+      - name: Upload VCS Tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-tools
+          path: |
+            vcs/runner/vtest/target/release/vtest
+            vcs/runner/vfuzz/target/release/vfuzz
+            vcs/runner/vbench/target/release/vbench
+          retention-days: 1
+
+  # ==========================================================================
+  # L0 Critical Tests - MUST pass 100%
+  # ==========================================================================
+  l0-critical:
+    name: L0 Critical Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      status: ${{ steps.test.outputs.status }}
+      total: ${{ steps.test.outputs.total }}
+      passed: ${{ steps.test.outputs.passed }}
+      failed: ${{ steps.test.outputs.failed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run L0 Critical Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format junit \
+            --output reports/l0-results.xml \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l0.log || true
+
+          # Also generate JSON for analysis
+          ./runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format json \
+            --output reports/l0-results.json \
+            --config config/vcs.toml 2>&1 || true
+
+          # Extract results
+          if [ -f "reports/l0-results.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/l0-results.json)
+            PASSED=$(jq -r '.summary.passed // 0' reports/l0-results.json)
+            FAILED=$(jq -r '.summary.failed // 0' reports/l0-results.json)
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l0-results.json)
+
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "passed=$PASSED" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED" >> $GITHUB_OUTPUT
+
+            echo "## L0 Critical Tests" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Pass Rate | ${PASS_RATE}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Required | 100% |" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$FAILED" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: PASSED**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: FAILED** - L0 Critical tests must pass 100%" >> $GITHUB_STEP_SUMMARY
+              echo "::error::L0 Critical tests failed - merge blocked"
+              exit 1
+            fi
+          else
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "::error::L0 test results not found"
+            exit 1
+          fi
+
+      - name: Upload L0 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l0-results
+          path: |
+            vcs/reports/l0-*
+          retention-days: 30
+
+      - name: Publish JUnit Report
+        uses: mikepenz/action-junit-report@v4
+        if: always() && hashFiles('vcs/reports/l0-results.xml') != ''
+        with:
+          report_paths: 'vcs/reports/l0-results.xml'
+          fail_on_failure: true
+          require_tests: true
+          check_name: 'L0 Critical Tests'
+
+  # ==========================================================================
+  # L1 Core Tests - MUST pass 100%
+  # ==========================================================================
+  l1-core:
+    name: L1 Core Tests
+    needs: [build, l0-critical]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      status: ${{ steps.test.outputs.status }}
+      total: ${{ steps.test.outputs.total }}
+      passed: ${{ steps.test.outputs.passed }}
+      failed: ${{ steps.test.outputs.failed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run L1 Core Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format junit \
+            --output reports/l1-results.xml \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l1.log || true
+
+          ./runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format json \
+            --output reports/l1-results.json \
+            --config config/vcs.toml 2>&1 || true
+
+          if [ -f "reports/l1-results.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/l1-results.json)
+            PASSED=$(jq -r '.summary.passed // 0' reports/l1-results.json)
+            FAILED=$(jq -r '.summary.failed // 0' reports/l1-results.json)
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l1-results.json)
+
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "passed=$PASSED" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED" >> $GITHUB_OUTPUT
+
+            echo "## L1 Core Tests" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Pass Rate | ${PASS_RATE}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Required | 100% |" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$FAILED" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: PASSED**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: FAILED** - L1 Core tests must pass 100%" >> $GITHUB_STEP_SUMMARY
+              echo "::error::L1 Core tests failed - merge blocked"
+              exit 1
+            fi
+          else
+            echo "status=error" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload L1 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l1-results
+          path: vcs/reports/l1-*
+          retention-days: 30
+
+      - name: Publish JUnit Report
+        uses: mikepenz/action-junit-report@v4
+        if: always() && hashFiles('vcs/reports/l1-results.xml') != ''
+        with:
+          report_paths: 'vcs/reports/l1-results.xml'
+          fail_on_failure: true
+          check_name: 'L1 Core Tests'
+
+  # ==========================================================================
+  # L2 Standard Tests - 95%+ pass required
+  # ==========================================================================
+  l2-standard:
+    name: L2 Standard Tests
+    needs: [build, l1-core]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      status: ${{ steps.test.outputs.status }}
+      pass_rate: ${{ steps.test.outputs.pass_rate }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run L2 Standard Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L2 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format json \
+            --output reports/l2-results.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l2.log || true
+
+          if [ -f "reports/l2-results.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/l2-results.json)
+            PASSED=$(jq -r '.summary.passed // 0' reports/l2-results.json)
+            FAILED=$(jq -r '.summary.failed // 0' reports/l2-results.json)
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l2-results.json)
+
+            echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+
+            echo "## L2 Standard Tests" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Pass Rate | ${PASS_RATE}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Required | 95%+ |" >> $GITHUB_STEP_SUMMARY
+
+            # Check 95% threshold
+            if (( $(echo "$PASS_RATE >= 95.0" | bc -l) )); then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: PASSED**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: FAILED** - L2 Standard tests must pass 95%+" >> $GITHUB_STEP_SUMMARY
+              echo "::error::L2 Standard tests below 95% threshold (${PASS_RATE}%) - merge blocked"
+              exit 1
+            fi
+          else
+            echo "status=error" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload L2 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l2-results
+          path: vcs/reports/l2-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L3 Extended Tests - 90%+ pass recommended (non-blocking)
+  # ==========================================================================
+  l3-extended:
+    name: L3 Extended Tests
+    needs: [build, l2-standard]
+    if: github.event_name == 'schedule' || github.event.inputs.test_levels == 'all' || contains(github.event.inputs.test_levels, 'L3')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    continue-on-error: true
+    outputs:
+      status: ${{ steps.test.outputs.status }}
+      pass_rate: ${{ steps.test.outputs.pass_rate }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run L3 Extended Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L3 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_EXTENDED \
+            --format json \
+            --output reports/l3-results.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l3.log || true
+
+          if [ -f "reports/l3-results.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/l3-results.json)
+            PASSED=$(jq -r '.summary.passed // 0' reports/l3-results.json)
+            FAILED=$(jq -r '.summary.failed // 0' reports/l3-results.json)
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l3-results.json)
+
+            echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+
+            echo "## L3 Extended Tests (Non-blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+            echo "| Pass Rate | ${PASS_RATE}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Recommended | 90%+ |" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$PASS_RATE >= 90.0" | bc -l) )); then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "**Status: PASSED**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=warning" >> $GITHUB_OUTPUT
+              echo "**Status: WARNING** - Below 90% threshold" >> $GITHUB_STEP_SUMMARY
+              echo "::warning::L3 Extended tests below 90% threshold (${PASS_RATE}%)"
+            fi
+          fi
+
+      - name: Upload L3 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l3-results
+          path: vcs/reports/l3-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L4 Performance Tests - Advisory only
+  # ==========================================================================
+  l4-performance:
+    name: L4 Performance Tests
+    needs: [build, l2-standard]
+    if: github.event_name == 'schedule' || github.event.inputs.test_levels == 'all' || contains(github.event.inputs.test_levels, 'L4')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run L4 Performance Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L4 \
+            --parallel 4 \
+            --timeout $VCS_TIMEOUT_EXTENDED \
+            --format json \
+            --output reports/l4-results.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l4.log || true
+
+          echo "## L4 Performance Tests (Advisory)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "reports/l4-results.json" ]; then
+            jq -r '.summary | "| Total | \(.total) |\n| Passed | \(.passed) |\n| Failed | \(.failed) |"' \
+              reports/l4-results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          fi
+
+      - name: Upload L4 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l4-results
+          path: vcs/reports/l4-*
+          retention-days: 30
+
+  # ==========================================================================
+  # Differential Tests - MUST pass 100%
+  # ==========================================================================
+  differential:
+    name: Differential Tests (Tier 0 vs Tier 3)
+    needs: [build, l1-core]
+    if: github.event.inputs.run_differential != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      status: ${{ steps.test.outputs.status }}
+      divergent: ${{ steps.test.outputs.divergent }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run Differential Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --differential \
+            --tier 0,3 \
+            --parallel $VCS_PARALLEL \
+            --timeout $VCS_TIMEOUT_DEFAULT \
+            --format json \
+            --output reports/differential-results.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/differential.log || true
+
+          if [ -f "reports/differential-results.json" ]; then
+            TOTAL=$(jq -r '.summary.total // 0' reports/differential-results.json)
+            EQUIVALENT=$(jq -r '.summary.equivalent // 0' reports/differential-results.json)
+            DIVERGENT=$(jq -r '.summary.divergent // 0' reports/differential-results.json)
+
+            echo "divergent=$DIVERGENT" >> $GITHUB_OUTPUT
+
+            echo "## Differential Tests (Tier 0 vs Tier 3)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Equivalent | $EQUIVALENT |" >> $GITHUB_STEP_SUMMARY
+            echo "| Divergent | $DIVERGENT |" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$DIVERGENT" -eq 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: PASSED** - All tiers produce equivalent results" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Status: FAILED** - Semantic divergence detected" >> $GITHUB_STEP_SUMMARY
+              echo "::error::Differential tests found $DIVERGENT divergence(s) - merge blocked"
+              exit 1
+            fi
+          else
+            echo "status=error" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload Differential Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: differential-results
+          path: vcs/reports/differential-*
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz Tests (Time-limited)
+  # ==========================================================================
+  fuzz:
+    name: Fuzz Tests (10 min)
+    needs: [build, l1-core]
+    if: github.event.inputs.run_fuzz == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq
+
+      - name: Run Fuzz Tests
+        id: fuzz
+        run: |
+          cd vcs
+          mkdir -p reports fuzz/crashes
+
+          ./runner/vfuzz/target/release/vfuzz run \
+            --duration 10m \
+            --parallel 4 \
+            --targets all \
+            --corpus fuzz/seeds \
+            --crashes fuzz/crashes \
+            --format json \
+            --output reports/fuzz-results.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/fuzz.log || true
+
+          if [ -f "reports/fuzz-results.json" ]; then
+            CRASHES=$(jq -r '.crashes // 0' reports/fuzz-results.json)
+            echo "crashes=$CRASHES" >> $GITHUB_OUTPUT
+
+            echo "## Fuzz Tests (10 min)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Crashes found: $CRASHES" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$CRASHES" -gt 0 ]; then
+              echo "::warning::Fuzzing found $CRASHES crash(es)"
+            fi
+          fi
+
+      - name: Upload Fuzz Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-results
+          path: |
+            vcs/reports/fuzz-*
+            vcs/fuzz/crashes/
+          retention-days: 30
+
+  # ==========================================================================
+  # Benchmarks
+  # ==========================================================================
+  bench:
+    name: Benchmarks
+    needs: [build, l2-standard]
+    if: github.event.inputs.run_bench == 'true' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download VCS Tools
+        uses: actions/download-artifact@v4
+        with:
+          name: vcs-tools
+          path: vcs/runner/
+
+      - name: Set permissions
+        run: chmod +x vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --suite all \
+            --iterations 100 \
+            --warmup 10 \
+            --format json \
+            --output reports/benchmark-results.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/benchmark.log || true
+
+          echo "## Benchmarks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "reports/benchmark-results.json" ]; then
+            # Extract key metrics
+            CBGR_CHECK=$(jq -r '.results["cbgr/tier0_check"].mean_ns // "N/A"' reports/benchmark-results.json)
+            COMPILE_THROUGHPUT=$(jq -r '.results["compilation/throughput"].loc_per_sec // "N/A"' reports/benchmark-results.json)
+
+            echo "| Metric | Value | Target |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| CBGR Check | ${CBGR_CHECK}ns | <15ns |" >> $GITHUB_STEP_SUMMARY
+            echo "| Compile Throughput | ${COMPILE_THROUGHPUT} LOC/s | >50K LOC/s |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: vcs/reports/benchmark-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Coverage Report
+  # ==========================================================================
+  coverage:
+    name: Code Coverage
+    needs: [build, l0-critical, l1-core, l2-standard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install grcov
+        run: cargo install grcov --locked
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests with coverage
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: "-Cinstrument-coverage"
+          LLVM_PROFILE_FILE: "vcs-%p-%m.profraw"
+        run: |
+          cd vcs/runner/vtest
+          cargo test --all-features
+
+      - name: Generate Coverage Report
+        run: |
+          cd vcs
+          mkdir -p reports/coverage
+
+          grcov . \
+            --binary-path ./runner/vtest/target/debug/ \
+            -s . \
+            -t lcov \
+            --branch \
+            --ignore-not-existing \
+            --ignore "/*" \
+            --ignore "target/*" \
+            -o reports/coverage/lcov.info || true
+
+      - name: Upload to Codecov
+        if: hashFiles('vcs/reports/coverage/lcov.info') != ''
+        uses: codecov/codecov-action@v4
+        with:
+          files: vcs/reports/coverage/lcov.info
+          flags: vcs
+          name: vcs-coverage
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: vcs/reports/coverage/
+          retention-days: 30
+
+  # ==========================================================================
+  # Generate Aggregate Report
+  # ==========================================================================
+  report:
+    name: Generate VCS Report
+    needs: [l0-critical, l1-core, l2-standard, differential]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-results'
+          path: all-results/
+          merge-multiple: false
+
+      - name: Generate Report
+        run: |
+          echo "# VCS CI Report" > vcs-report.md
+          echo "" >> vcs-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> vcs-report.md
+          echo "**Commit:** ${{ github.sha }}" >> vcs-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> vcs-report.md
+          echo "**Workflow:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> vcs-report.md
+          echo "" >> vcs-report.md
+
+          echo "## Test Results Summary" >> vcs-report.md
+          echo "" >> vcs-report.md
+          echo "| Level | Status | Required | Blocking |" >> vcs-report.md
+          echo "|-------|--------|----------|----------|" >> vcs-report.md
+          echo "| L0 Critical | ${{ needs.l0-critical.outputs.status || 'N/A' }} | 100% | Yes |" >> vcs-report.md
+          echo "| L1 Core | ${{ needs.l1-core.outputs.status || 'N/A' }} | 100% | Yes |" >> vcs-report.md
+          echo "| L2 Standard | ${{ needs.l2-standard.outputs.status || 'N/A' }} | 95%+ | Yes |" >> vcs-report.md
+          echo "| Differential | ${{ needs.differential.outputs.status || 'N/A' }} | 100% | Yes |" >> vcs-report.md
+          echo "" >> vcs-report.md
+
+          # Overall status
+          L0="${{ needs.l0-critical.result }}"
+          L1="${{ needs.l1-core.result }}"
+          L2="${{ needs.l2-standard.result }}"
+          DIFF="${{ needs.differential.result }}"
+
+          if [ "$L0" == "success" ] && [ "$L1" == "success" ] && [ "$L2" == "success" ] && [ "$DIFF" == "success" ]; then
+            echo "## Overall Status: PASSED" >> vcs-report.md
+            echo "" >> vcs-report.md
+            echo "All blocking tests passed. Ready for merge." >> vcs-report.md
+          else
+            echo "## Overall Status: FAILED" >> vcs-report.md
+            echo "" >> vcs-report.md
+            echo "One or more blocking tests failed. Please review and fix before merging." >> vcs-report.md
+          fi
+
+          cat vcs-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-report
+          path: vcs-report.md
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let report = '';
+            if (fs.existsSync('vcs-report.md')) {
+              report = fs.readFileSync('vcs-report.md', 'utf8');
+            } else {
+              report = 'VCS report generation failed.';
+            }
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.data.find(c =>
+              c.body.includes('VCS CI Report') &&
+              c.user.type === 'Bot'
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: report
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+  # ==========================================================================
+  # Final Status Gate
+  # ==========================================================================
+  vcs-gate:
+    name: VCS Status Gate
+    needs: [l0-critical, l1-core, l2-standard, differential]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check All Results
+        run: |
+          echo "## VCS Status Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          PASS=true
+
+          # Check L0
+          if [ "${{ needs.l0-critical.result }}" != "success" ]; then
+            echo "- L0 Critical: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L0 Critical: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check L1
+          if [ "${{ needs.l1-core.result }}" != "success" ]; then
+            echo "- L1 Core: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L1 Core: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check L2
+          if [ "${{ needs.l2-standard.result }}" != "success" ]; then
+            echo "- L2 Standard: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L2 Standard: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check Differential
+          if [ "${{ needs.differential.result }}" != "success" ] && [ "${{ needs.differential.result }}" != "skipped" ]; then
+            echo "- Differential: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- Differential: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PASS" == "true" ]; then
+            echo "### Result: PASSED - Ready for merge" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Result: FAILED - Merge blocked" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  # ==========================================================================
+  # Notify on Failure
+  # ==========================================================================
+  notify-failure:
+    name: Notify on Failure
+    needs: [vcs-gate]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          text: 'VCS CI failed on ${{ github.ref_name }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Issue on Main Branch Failure
+        if: github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `VCS CI Failure - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## VCS CI Failed on Main Branch
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Commit:** ${context.sha}
+            **Date:** ${new Date().toISOString()}
+
+            Please investigate and fix the failing tests.
+            `;
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'vcs-failure'
+            });
+
+            const existing = issues.data.find(i => i.title.startsWith('VCS CI Failure'));
+
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['vcs-failure', 'ci', 'high-priority']
+              });
+            }

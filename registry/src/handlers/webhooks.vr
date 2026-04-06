@@ -1,0 +1,656 @@
+// Verum Registry - Webhook Management Handlers
+//
+// HTTP handlers for webhook CRUD operations
+// Following industry standards from GitHub, npm, and Docker Hub
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text};
+mount core.time.unix_timestamp;
+
+// Import context protocols
+mount super.super.contexts.{Database, Auth, HttpClient, Logger};
+mount super.super.domain.errors.{RegistryError};
+mount super.super.domain.webhook.{Webhook, WebhookEvent};
+mount super.super.services.webhook_service.{
+    deliver_webhook,
+    serialize_webhook_payload,
+    create_test_payload,
+};
+
+// ============================================================================
+// DTOs for Webhook Operations
+// ============================================================================
+
+/// Webhook event types
+pub type WebhookEventDto is
+    | PackagePublished
+    | PackageYanked
+    | PackageUpdated
+    | PackageDeleted
+    | OwnerAdded
+    | OwnerRemoved;
+
+implement WebhookEventDto {
+    pub fn to_string(self) -> Text {
+        match self {
+            WebhookEventDto.PackagePublished => "package.published",
+            WebhookEventDto.PackageYanked => "package.yanked",
+            WebhookEventDto.PackageUpdated => "package.updated",
+            WebhookEventDto.PackageDeleted => "package.deleted",
+            WebhookEventDto.OwnerAdded => "owner.added",
+            WebhookEventDto.OwnerRemoved => "owner.removed",
+        }
+    }
+
+    pub fn from_string(s: Text) -> WebhookEventDto {
+        match s {
+            "package.published" => WebhookEventDto.PackagePublished,
+            "package.yanked" => WebhookEventDto.PackageYanked,
+            "package.updated" => WebhookEventDto.PackageUpdated,
+            "package.deleted" => WebhookEventDto.PackageDeleted,
+            "owner.added" => WebhookEventDto.OwnerAdded,
+            "owner.removed" => WebhookEventDto.OwnerRemoved,
+            _ => WebhookEventDto.PackagePublished,
+        }
+    }
+}
+
+/// Webhook representation
+pub type WebhookDto is {
+    id: Int,
+    name: Text,
+    url: Text,
+    events: List<Text>,
+    is_active: Bool,
+    created_at: Int,
+    last_triggered_at: Int,
+    secret: Text,
+};
+
+/// Request to create a new webhook
+pub type CreateWebhookRequestDto is {
+    name: Text,
+    url: Text,
+    events: List<Text>,
+    secret: Text,
+};
+
+/// Request to update a webhook
+pub type UpdateWebhookRequestDto is {
+    webhook_id: Int,
+    name: Maybe<Text>,
+    url: Maybe<Text>,
+    events: Maybe<List<Text>>,
+    is_active: Maybe<Bool>,
+};
+
+/// Response for webhook test
+pub type WebhookTestResponseDto is {
+    success: Bool,
+    status_code: Int,
+    response_time_ms: Int,
+    message: Text,
+    error_message: Maybe<Text>,
+};
+
+/// Generic webhook operation response
+pub type WebhookResponseDto is {
+    success: Bool,
+    message: Text,
+    webhook_id: Maybe<Int>,
+};
+
+implement WebhookResponseDto {
+    pub fn success(message: Text, webhook_id: Maybe<Int>) -> WebhookResponseDto {
+        WebhookResponseDto {
+            success: true,
+            message: message,
+            webhook_id: webhook_id,
+        }
+    }
+
+    pub fn error(message: Text) -> WebhookResponseDto {
+        WebhookResponseDto {
+            success: false,
+            message: message,
+            webhook_id: Maybe.None,
+        }
+    }
+}
+
+// ============================================================================
+// SQL Parameter Helpers
+// ============================================================================
+
+/// Create a list with 1 SQL parameter
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params
+}
+
+/// Create a list with 2 SQL parameters
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params
+}
+
+/// Create a list with 5 SQL parameters
+fn sql_params_5(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params.push(p4);
+    params.push(p5);
+    params
+}
+
+// ============================================================================
+// HTTP Handlers
+// ============================================================================
+
+/// Create a new webhook
+///
+/// POST /api/v1/webhooks
+///
+/// Creates a webhook that will be triggered on specified events.
+/// Webhooks are associated with the authenticated user.
+pub async fn create_webhook(
+    req: CreateWebhookRequestDto,
+    auth_token: Text
+) -> Result<WebhookDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Validate webhook name
+    if req.name.is_empty() {
+        return Result.Err(RegistryError.validation_error("name", "Webhook name cannot be empty"));
+    }
+
+    if req.name.len() > 100 {
+        return Result.Err(RegistryError.validation_error("name", "Webhook name too long (max 100 chars)"));
+    }
+
+    // Validate URL
+    if req.url.is_empty() {
+        return Result.Err(RegistryError.validation_error("url", "Webhook URL cannot be empty"));
+    }
+
+    if !is_valid_url(&req.url) {
+        return Result.Err(RegistryError.validation_error("url", "Invalid webhook URL format"));
+    }
+
+    // Validate events
+    if req.events.is_empty() {
+        return Result.Err(RegistryError.validation_error("events", "At least one event must be specified"));
+    }
+
+    // Validate secret (optional but recommended)
+    if !req.secret.is_empty() && req.secret.len() < 16 {
+        return Result.Err(RegistryError.validation_error("secret", "Secret must be at least 16 characters if provided"));
+    }
+
+    // Generate webhook ID
+    let webhook_id = generate_webhook_id();
+    let now = unix_timestamp();
+
+    // Convert events list to JSON string for storage
+    let events_json = events_to_json(&req.events);
+
+    // Insert webhook into database
+    Database.execute_with(
+        "INSERT INTO webhooks (id, user_id, name, url, events, secret, is_active, created_at) VALUES ($1, $2, $3, $4, $5)",
+        sql_params_5(f"{webhook_id}", auth_user.id.clone(), req.name.clone(), req.url.clone(), events_json)
+    ).await?;
+
+    // Return created webhook
+    Result.Ok(WebhookDto {
+        id: webhook_id,
+        name: req.name,
+        url: req.url,
+        events: req.events,
+        is_active: true,
+        created_at: now,
+        last_triggered_at: 0,
+        secret: req.secret,
+    })
+}
+
+/// List all webhooks for the authenticated user
+///
+/// GET /api/v1/webhooks
+///
+/// Returns all webhooks owned by the authenticated user.
+pub async fn list_webhooks(auth_token: Text) -> Result<List<WebhookDto>, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Fetch webhooks from database
+    let rows = Database.query_with(
+        "SELECT * FROM webhooks WHERE user_id = $1 ORDER BY created_at DESC",
+        sql_params_1(auth_user.id.clone())
+    ).await?;
+
+    // Convert rows to WebhookDto
+    let mut webhooks = List.new();
+    for row in rows {
+        let webhook_id = match row.get("id") {
+            Maybe.Some(id_str) => parse_id_from_text(&id_str),
+            Maybe.None => 0,
+        };
+
+        let name = match row.get("name") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let url = match row.get("url") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let events_json = match row.get("events") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "[]",
+        };
+
+        let secret = match row.get("secret") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let is_active = match row.get("is_active") {
+            Maybe.Some(v) => v == "true" || v == "1",
+            Maybe.None => true,
+        };
+
+        let created_at = match row.get("created_at") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let last_triggered_at = match row.get("last_triggered_at") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        webhooks.push(WebhookDto {
+            id: webhook_id,
+            name: name,
+            url: url,
+            events: json_to_events(&events_json),
+            is_active: is_active,
+            created_at: created_at,
+            last_triggered_at: last_triggered_at,
+            secret: secret,
+        });
+    }
+
+    Result.Ok(webhooks)
+}
+
+/// Update a webhook
+///
+/// PATCH /api/v1/webhooks/{webhook_id}
+///
+/// Updates webhook properties. Only the webhook owner can update it.
+pub async fn update_webhook(
+    req: UpdateWebhookRequestDto,
+    auth_token: Text
+) -> Result<WebhookDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Verify webhook exists and belongs to user
+    let webhook_row = match Database.fetch_optional_with(
+        "SELECT * FROM webhooks WHERE id = $1 AND user_id = $2",
+        sql_params_2(f"{req.webhook_id}", auth_user.id.clone())
+    ).await? {
+        Maybe.Some(row) => row,
+        Maybe.None => {
+            return Result.Err(RegistryError.validation_error("webhook_id", "Webhook not found or access denied"));
+        }
+    };
+
+    // Get current values
+    let current_name = match webhook_row.get("name") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    let current_url = match webhook_row.get("url") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    let current_events = match webhook_row.get("events") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "[]",
+    };
+
+    let current_is_active = match webhook_row.get("is_active") {
+        Maybe.Some(v) => v == "true" || v == "1",
+        Maybe.None => true,
+    };
+
+    // Apply updates
+    let new_name = match req.name {
+        Maybe.Some(n) => {
+            if n.is_empty() {
+                return Result.Err(RegistryError.validation_error("name", "Webhook name cannot be empty"));
+            }
+            if n.len() > 100 {
+                return Result.Err(RegistryError.validation_error("name", "Webhook name too long (max 100 chars)"));
+            }
+            n
+        }
+        Maybe.None => current_name.clone(),
+    };
+
+    let new_url = match req.url {
+        Maybe.Some(u) => {
+            if u.is_empty() {
+                return Result.Err(RegistryError.validation_error("url", "Webhook URL cannot be empty"));
+            }
+            if !is_valid_url(&u) {
+                return Result.Err(RegistryError.validation_error("url", "Invalid webhook URL format"));
+            }
+            u
+        }
+        Maybe.None => current_url.clone(),
+    };
+
+    let new_events_json = match req.events {
+        Maybe.Some(e) => {
+            if e.is_empty() {
+                return Result.Err(RegistryError.validation_error("events", "At least one event must be specified"));
+            }
+            events_to_json(&e)
+        }
+        Maybe.None => current_events.clone(),
+    };
+
+    let new_is_active = match req.is_active {
+        Maybe.Some(a) => a,
+        Maybe.None => current_is_active,
+    };
+
+    // Update webhook in database
+    Database.execute_with(
+        "UPDATE webhooks SET name = $1, url = $2, events = $3, is_active = $4 WHERE id = $5",
+        sql_params_5(new_name.clone(), new_url.clone(), new_events_json.clone(), if new_is_active { "1" } else { "0" }, f"{req.webhook_id}")
+    ).await?;
+
+    // Fetch updated webhook
+    let updated_row = Database.fetch_one_with(
+        "SELECT * FROM webhooks WHERE id = $1",
+        sql_params_1(f"{req.webhook_id}")
+    ).await?;
+
+    let created_at = match updated_row.get("created_at") {
+        Maybe.Some(v) => parse_id_from_text(&v),
+        Maybe.None => 0,
+    };
+
+    let last_triggered_at = match updated_row.get("last_triggered_at") {
+        Maybe.Some(v) => parse_id_from_text(&v),
+        Maybe.None => 0,
+    };
+
+    let secret = match updated_row.get("secret") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    Result.Ok(WebhookDto {
+        id: req.webhook_id,
+        name: new_name,
+        url: new_url,
+        events: json_to_events(&new_events_json),
+        is_active: new_is_active,
+        created_at: created_at,
+        last_triggered_at: last_triggered_at,
+        secret: secret,
+    })
+}
+
+/// Delete a webhook
+///
+/// DELETE /api/v1/webhooks/{webhook_id}
+///
+/// Permanently deletes a webhook. Only the webhook owner can delete it.
+pub async fn delete_webhook(
+    webhook_id: Int,
+    auth_token: Text
+) -> Result<WebhookResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Delete webhook if it belongs to user
+    let affected = Database.execute_with(
+        "DELETE FROM webhooks WHERE id = $1 AND user_id = $2",
+        sql_params_2(f"{webhook_id}", auth_user.id.clone())
+    ).await?;
+
+    if affected == 0 {
+        return Result.Err(RegistryError.validation_error("webhook_id", "Webhook not found or access denied"));
+    }
+
+    Result.Ok(WebhookResponseDto.success("Webhook deleted successfully", Maybe.None))
+}
+
+/// Test a webhook
+///
+/// POST /api/v1/webhooks/{webhook_id}/test
+///
+/// Sends a test payload to the webhook URL and returns the response.
+/// Useful for verifying webhook configuration.
+pub async fn test_webhook(
+    webhook_id: Int,
+    auth_token: Text
+) -> Result<WebhookTestResponseDto, RegistryError>
+    using [Database, Auth, HttpClient, Logger]
+{
+    // Verify authentication
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Fetch webhook from database
+    let webhook_row = match Database.fetch_optional_with(
+        "SELECT * FROM webhooks WHERE id = $1 AND user_id = $2",
+        sql_params_2(f"{webhook_id}", auth_user.id.clone())
+    ).await? {
+        Maybe.Some(row) => row,
+        Maybe.None => {
+            return Result.Err(RegistryError.validation_error("webhook_id", "Webhook not found or access denied"));
+        }
+    };
+
+    // Extract webhook details from row
+    let webhook_url = match webhook_row.get("url") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => return Result.Err(RegistryError.internal_error("Webhook missing URL")),
+    };
+
+    let webhook_secret = match webhook_row.get("secret") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    let webhook_name = match webhook_row.get("name") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "Unnamed Webhook",
+    };
+
+    let events_json = match webhook_row.get("events") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "[]",
+    };
+
+    // Construct Webhook domain object
+    let webhook = Webhook {
+        id: webhook_id,
+        user_id: auth_user.id.clone(),
+        name: webhook_name,
+        url: webhook_url,
+        events: json_to_events(&events_json),
+        secret: webhook_secret,
+        is_active: true,
+        created_at: 0,
+        last_triggered_at: 0,
+    };
+
+    // Create test payload
+    let test_payload = create_test_payload();
+    let payload_json = serialize_webhook_payload(&test_payload);
+
+    // Deliver the webhook using the delivery service
+    let result = deliver_webhook(
+        &webhook,
+        WebhookEvent.Test,
+        payload_json
+    ).await?;
+
+    // Update last_triggered_at in database
+    Database.execute_with(
+        "UPDATE webhooks SET last_triggered_at = $1 WHERE id = $2",
+        sql_params_2(f"{unix_timestamp()}", f"{webhook_id}")
+    ).await?;
+
+    // Build response
+    let response_message = if result.success {
+        "Webhook test completed successfully"
+    } else {
+        "Webhook test failed - check error message"
+    };
+
+    Result.Ok(WebhookTestResponseDto {
+        success: result.success,
+        status_code: result.status_code,
+        response_time_ms: result.response_time_ms,
+        message: response_message,
+        error_message: result.error_message,
+    })
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Validate URL format
+fn is_valid_url(url: &Text) -> Bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
+/// Convert events list to JSON string
+fn events_to_json(events: &List<Text>) -> Text {
+    // Simple JSON array serialization
+    let mut result = "[";
+    let mut first = true;
+
+    for event in events {
+        if !first {
+            result = result + ",";
+        }
+        result = result + "\"" + event.clone() + "\"";
+        first = false;
+    }
+
+    result + "]"
+}
+
+/// Parse JSON string to events list
+fn json_to_events(json: &Text) -> List<Text> {
+    // Simple JSON array parsing (production would use proper JSON parser)
+    let mut events = List.new();
+
+    // Remove brackets and quotes, split by comma
+    let cleaned = json.replace("[", "").replace("]", "").replace("\"", "");
+
+    if !cleaned.is_empty() {
+        let parts = cleaned.split(",");
+        for part in parts {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                events.push(trimmed);
+            }
+        }
+    }
+
+    events
+}
+
+/// Generate unique webhook ID
+fn generate_webhook_id() -> Int {
+    // Implementation would use proper ID generation
+    // For now, use timestamp-based ID
+    unix_timestamp() as Int
+}
+
+/// Parse text to integer with error handling
+fn parse_id_from_text(id_str: &Text) -> Int {
+    // Simple digit-by-digit parsing
+    let mut result = 0;
+    let mut is_negative = false;
+    let mut started = false;
+
+    for ch in id_str.chars() {
+        let ch_str = ch.to_string();
+
+        if ch_str == "-" && !started {
+            is_negative = true;
+            started = true;
+        } else if ch_str == "0" || ch_str == "1" || ch_str == "2" || ch_str == "3" ||
+                  ch_str == "4" || ch_str == "5" || ch_str == "6" || ch_str == "7" ||
+                  ch_str == "8" || ch_str == "9" {
+            started = true;
+            let digit = match ch_str {
+                "0" => 0,
+                "1" => 1,
+                "2" => 2,
+                "3" => 3,
+                "4" => 4,
+                "5" => 5,
+                "6" => 6,
+                "7" => 7,
+                "8" => 8,
+                "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_negative {
+        -result
+    } else {
+        result
+    }
+}

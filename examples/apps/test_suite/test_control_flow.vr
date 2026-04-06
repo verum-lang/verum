@@ -1,0 +1,51 @@
+// Test control flow constructs
+
+fn classify_number(n: Int) -> Text {
+    if n < 0 {
+        "negative"
+    } else if n == 0 {
+        "zero"
+    } else if n < 10 {
+        "small positive"
+    } else {
+        "large positive"
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn sum_to(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn main() {
+    let _ = print("Testing control flow...");
+
+    // If-else
+    let _ = print(f"classify(-5) = {classify_number(-5)}");
+    let _ = print(f"classify(0) = {classify_number(0)}");
+    let _ = print(f"classify(3) = {classify_number(3)}");
+    let _ = print(f"classify(100) = {classify_number(100)}");
+
+    // Recursion
+    let _ = print(f"factorial(5) = {factorial(5)}");
+    let _ = print(f"factorial(0) = {factorial(0)}");
+
+    // While loop
+    let _ = print(f"sum_to(10) = {sum_to(10)}");
+    let _ = print(f"sum_to(100) = {sum_to(100)}");
+
+    let _ = print("Done!");
+}

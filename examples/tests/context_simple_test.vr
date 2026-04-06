@@ -1,0 +1,12 @@
+// Simple context test without method calls
+
+type Logger is { name: Text };
+
+fn do_work(msg: Text) using Logger {
+    println(Logger.name);
+}
+
+fn main() {
+    provide Logger = Logger { name: "TestLogger" };
+    do_work("Working...");
+}

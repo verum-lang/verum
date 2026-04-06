@@ -1,0 +1,5 @@
+// Simple Tensor Test 2 - lowercase types
+fn main() -> Int {
+    let vec1 = tensor<3>f32 { 1.0 };
+    0
+}

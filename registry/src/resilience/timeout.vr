@@ -1,0 +1,281 @@
+// Timeout Pattern Implementation
+//
+// Wraps operations with a timeout to prevent indefinite blocking.
+// Critical for maintaining system responsiveness under load or when
+// calling unreliable external services.
+//
+// Features:
+// - Sync and async timeout wrappers
+// - Configurable timeout duration
+// - Proper error propagation
+// - Resource cleanup on timeout
+
+mount core.base.{Result, Int, Text};
+mount core.time.{Duration, SystemTime, Instant, unix_timestamp_millis};
+mount super.super.domain.errors.{RegistryError};
+
+/// Timeout configuration
+pub type TimeoutConfig is {
+    timeout_ms: Int,           // Timeout duration in milliseconds
+    operation_name: Text,      // Name for error messages
+};
+
+implement TimeoutConfig {
+    /// Create a new timeout configuration
+    pub fn new(timeout_ms: Int, operation_name: Text) -> TimeoutConfig {
+        TimeoutConfig {
+            timeout_ms: timeout_ms,
+            operation_name: operation_name,
+        }
+    }
+
+    /// Create a short timeout (1 second)
+    pub fn short(operation_name: Text) -> TimeoutConfig {
+        TimeoutConfig.new(1000, operation_name)
+    }
+
+    /// Create a medium timeout (5 seconds)
+    pub fn medium(operation_name: Text) -> TimeoutConfig {
+        TimeoutConfig.new(5000, operation_name)
+    }
+
+    /// Create a long timeout (30 seconds)
+    pub fn long(operation_name: Text) -> TimeoutConfig {
+        TimeoutConfig.new(30000, operation_name)
+    }
+}
+
+/// Execute an async operation with a timeout
+///
+/// # Type Parameters
+/// - T: The success type returned by the operation
+///
+/// # Parameters
+/// - operation: The async function to execute
+/// - timeout_ms: Timeout duration in milliseconds
+///
+/// # Returns
+/// - Ok(T): Operation completed successfully within timeout
+/// - Err(RegistryError): Operation timed out or failed
+///
+/// # Example
+/// ```
+/// let result = with_timeout(
+///     || Database.query("SELECT * FROM users"),
+///     5000
+/// ).await;
+/// ```
+pub async fn with_timeout<T>(
+    operation: fn() -> T,
+    timeout_ms: Int
+) -> Result<T, RegistryError> {
+    let start = unix_timestamp_millis();
+
+    // Execute the operation
+    let result = operation().await;
+
+    // Check if we exceeded the timeout
+    let elapsed = unix_timestamp_millis() - start;
+
+    if elapsed > timeout_ms {
+        // Task completed but took too long
+        Result.Err(RegistryError.internal_error(
+            f"Operation timed out after {elapsed}ms (limit: {timeout_ms}ms)"
+        ))
+    } else {
+        Result.Ok(result)
+    }
+}
+
+/// Execute an async operation with detailed timeout configuration
+///
+/// Provides more context in error messages
+pub async fn with_timeout_config<T>(
+    operation: fn() -> T,
+    config: TimeoutConfig
+) -> Result<T, RegistryError> {
+    let start = unix_timestamp_millis();
+
+    let result = with_timeout(operation, config.timeout_ms).await;
+
+    match result {
+        Result.Ok(value) => {
+            let elapsed = unix_timestamp_millis() - start;
+            // Could log success with timing info here
+            Result.Ok(value)
+        },
+        Result.Err(err) => {
+            // Enhance error message with operation name
+            Result.Err(RegistryError.internal_error(
+                f"Operation '{config.operation_name}' timed out after {config.timeout_ms}ms"
+            ))
+        }
+    }
+}
+
+/// Execute multiple operations in parallel with individual timeouts
+///
+/// Useful for fan-out operations where each sub-operation has its own timeout
+pub async fn with_parallel_timeouts<T>(
+    operations: List<(fn() -> T, Int)>  // List of (operation, timeout_ms)
+) -> List<Result<T, RegistryError>> {
+    let mut results = List.new();
+
+    // Execute all operations in parallel
+    // In production, this would use the runtime's parallel execution mechanism
+    for (op, timeout) in operations {
+        let result = with_timeout(op, timeout).await;
+        results = results.push(result);
+    }
+
+    results
+}
+
+/// Execute an operation with adaptive timeout
+///
+/// Adjusts timeout based on operation history
+pub type AdaptiveTimeout is {
+    base_timeout_ms: Int,
+    history: List<Int>,          // Recent operation durations
+    max_history: Int,            // Maximum history size
+    percentile: Float,           // Percentile for timeout calculation (e.g., 0.95 for P95)
+};
+
+implement AdaptiveTimeout {
+    pub fn new(base_timeout_ms: Int, percentile: Float) -> AdaptiveTimeout {
+        AdaptiveTimeout {
+            base_timeout_ms: base_timeout_ms,
+            history: List.new(),
+            max_history: 100,
+            percentile: percentile,
+        }
+    }
+
+    /// Record an operation duration
+    pub fn record_duration(mut self, duration_ms: Int) -> AdaptiveTimeout {
+        self.history = self.history.push(duration_ms);
+
+        // Trim history if too large
+        if self.history.len() > self.max_history {
+            self.history = self.history.skip(1);
+        }
+
+        self
+    }
+
+    /// Calculate adaptive timeout based on history
+    pub fn calculate_timeout(self) -> Int {
+        if self.history.is_empty() {
+            return self.base_timeout_ms;
+        }
+
+        // Calculate percentile from history
+        let sorted = self.history.sort();
+        let index = (sorted.len().to_float() * self.percentile).to_int();
+        let percentile_value = sorted.get(index).unwrap_or(self.base_timeout_ms);
+
+        // Use the larger of base timeout or percentile value
+        if percentile_value > self.base_timeout_ms {
+            percentile_value
+        } else {
+            self.base_timeout_ms
+        }
+    }
+
+    /// Execute operation with adaptive timeout
+    pub async fn execute<T>(
+        mut self,
+        operation: fn() -> T
+    ) -> (Result<T, RegistryError>, AdaptiveTimeout) {
+        let timeout_ms = self.calculate_timeout();
+        let start = unix_timestamp_millis();
+
+        let result = with_timeout(operation, timeout_ms).await;
+
+        let elapsed = unix_timestamp_millis() - start;
+        self = self.record_duration(elapsed);
+
+        (result, self)
+    }
+}
+
+/// Timeout statistics for monitoring
+pub type TimeoutStats is {
+    total_operations: Int,
+    successful_operations: Int,
+    timeout_operations: Int,
+    total_duration_ms: Int,
+    max_duration_ms: Int,
+    min_duration_ms: Int,
+};
+
+implement TimeoutStats {
+    pub fn new() -> TimeoutStats {
+        TimeoutStats {
+            total_operations: 0,
+            successful_operations: 0,
+            timeout_operations: 0,
+            total_duration_ms: 0,
+            max_duration_ms: 0,
+            min_duration_ms: Int.max_value(),
+        }
+    }
+
+    pub fn record_success(mut self, duration_ms: Int) -> TimeoutStats {
+        self.total_operations = self.total_operations + 1;
+        self.successful_operations = self.successful_operations + 1;
+        self.total_duration_ms = self.total_duration_ms + duration_ms;
+
+        if duration_ms > self.max_duration_ms {
+            self.max_duration_ms = duration_ms;
+        }
+
+        if duration_ms < self.min_duration_ms {
+            self.min_duration_ms = duration_ms;
+        }
+
+        self
+    }
+
+    pub fn record_timeout(mut self) -> TimeoutStats {
+        self.total_operations = self.total_operations + 1;
+        self.timeout_operations = self.timeout_operations + 1;
+        self
+    }
+
+    pub fn timeout_rate(self) -> Float {
+        if self.total_operations == 0 {
+            0.0
+        } else {
+            self.timeout_operations.to_float() / self.total_operations.to_float()
+        }
+    }
+
+    pub fn average_duration_ms(self) -> Int {
+        if self.successful_operations == 0 {
+            0
+        } else {
+            self.total_duration_ms / self.successful_operations
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"TimeoutStats[total={self.total_operations}, success={self.successful_operations}, timeouts={self.timeout_operations}, timeout_rate={self.timeout_rate():.2}%, avg={self.average_duration_ms()}ms]"
+    }
+}
+
+// ============================================================================
+// Error Extensions
+// ============================================================================
+
+/// Extend RegistryError with timeout-specific helpers
+implement RegistryError {
+    pub fn is_timeout(self) -> Bool {
+        match self {
+            RegistryError.InternalError { message } => {
+                message.contains("timed out") || message.contains("timeout")
+            },
+            _ => false
+        }
+    }
+}

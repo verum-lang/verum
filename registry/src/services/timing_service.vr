@@ -1,0 +1,73 @@
+// Verum Registry - Timing Service
+//
+// Request timing instrumentation and server uptime tracking
+
+mount core.time.{unix_timestamp, unix_timestamp_millis};
+mount core.base.{Result, Int};
+
+// ============================================================================
+// Server Uptime Tracking
+// ============================================================================
+
+/// Server start time (set once at startup)
+static mut SERVER_START_TIME: Int = 0;
+
+/// Initialize server start time (call once at startup)
+pub fn init_server_timing() {
+    SERVER_START_TIME = unix_timestamp();
+}
+
+/// Get server uptime in seconds
+pub fn get_uptime_seconds() -> Int {
+    unix_timestamp() - SERVER_START_TIME
+}
+
+// ============================================================================
+// Request Timer
+// ============================================================================
+
+/// Timer for measuring operation duration
+pub type Timer is {
+    start_ms: Int,
+};
+
+implement Timer {
+    /// Start a new timer
+    pub fn start() -> Timer {
+        Timer { start_ms: unix_timestamp_millis() }
+    }
+
+    /// Get elapsed time in milliseconds
+    pub fn elapsed_ms(self) -> Int {
+        unix_timestamp_millis() - self.start_ms
+    }
+
+    /// Stop and return elapsed time
+    pub fn stop(self) -> Int {
+        self.elapsed_ms()
+    }
+}
+
+// ============================================================================
+// Timing Utilities
+// ============================================================================
+
+/// Measure execution time of a function
+///
+/// Returns tuple of (result, elapsed_ms)
+pub fn measure<T>(operation: fn() -> T) -> (T, Int) {
+    let timer = Timer.start();
+    let result = operation();
+    let elapsed = timer.stop();
+    (result, elapsed)
+}
+
+/// Measure async execution time
+///
+/// Returns tuple of (result, elapsed_ms)
+pub async fn measure_async<T>(operation: fn() -> T) -> (T, Int) {
+    let timer = Timer.start();
+    let result = operation();
+    let elapsed = timer.stop();
+    (result, elapsed)
+}

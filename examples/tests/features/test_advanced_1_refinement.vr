@@ -1,0 +1,16 @@
+// Test 1: Refinement Types
+
+type PositiveInt is Int{it > 0};
+type NonEmptyText is Text{len(it) > 0};
+
+fn main() {
+    let _ = println("=== Testing Refinement Types ===");
+
+    let x: PositiveInt = 42;
+    let name: NonEmptyText = "Alice";
+
+    let _ = println(f"PositiveInt: {x}");
+    let _ = println(f"NonEmptyText: {name}");
+
+    let _ = println("=== PASSED ===");
+}

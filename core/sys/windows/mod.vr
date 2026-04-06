@@ -1,0 +1,436 @@
+module sys.windows;
+
+// =============================================================================
+// sys/windows/mod.vr - Windows system interface module
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: Windows x86_64
+// =============================================================================
+@cfg(target_os = "windows")
+//
+// This module provides the complete Windows V-LLSI (Verum Low-Level System
+// Interface) implementation for the bootstrap kernel.
+//
+// Architecture:
+// - ntstatus.vr: NT status codes and helpers
+// - ntdll.vr: NT Native API FFI (@extern("ntdll.dll"))
+// - kernel32.vr: Windows API FFI (@extern("kernel32.dll"))
+// - tls.vr: TLS bootstrap (ThreadControlBlock, TlsAlloc/TlsGetValue/TlsSetValue)
+// - io.vr: Completion-based IO (IOCP - I/O Completion Ports)
+// - thread.vr: Thread creation and synchronization
+// - time.vr: Time operations (QueryPerformanceCounter, GetTickCount64)
+//
+// Windows uses IAT imports via @extern("dll.dll") for API access.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+// =============================================================================
+// Module Declarations
+// =============================================================================
+
+/// NT status codes and helpers
+public module ntstatus;
+
+/// NT Native API FFI (ntdll.dll)
+public module ntdll;
+
+/// Windows API FFI (kernel32.dll)
+public module kernel32;
+
+/// Thread-Local Storage bootstrap
+public module tls;
+
+/// Asynchronous I/O (IOCP)
+public module io;
+
+/// Thread creation and synchronization
+public module thread;
+
+/// Time and clock operations
+public module time;
+
+// =============================================================================
+// NT Status Re-exports
+// =============================================================================
+
+public mount ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS,
+    STATUS_ACCESS_DENIED,
+    STATUS_INVALID_HANDLE,
+    STATUS_NO_MEMORY,
+    STATUS_INVALID_PARAMETER,
+    STATUS_PENDING,
+    STATUS_TIMEOUT,
+    STATUS_CANCELLED,
+    STATUS_NOT_SUPPORTED,
+    STATUS_END_OF_FILE,
+    STATUS_OBJECT_NAME_NOT_FOUND,
+    STATUS_OBJECT_PATH_NOT_FOUND,
+    STATUS_INSUFFICIENT_RESOURCES,
+    STATUS_NOT_IMPLEMENTED,
+    STATUS_BUFFER_OVERFLOW,
+    STATUS_BUFFER_TOO_SMALL,
+};
+
+// =============================================================================
+// NT Native API Re-exports
+// =============================================================================
+
+public mount ntdll.{
+    // Types
+    Handle,
+    ObjectAttributes,
+    IoStatusBlock,
+    UnicodeString,
+    LargeInteger,
+
+    // Memory constants
+    MEM_COMMIT,
+    MEM_RESERVE,
+    MEM_DECOMMIT,
+    MEM_RELEASE,
+    MEM_RESET,
+    PAGE_NOACCESS,
+    PAGE_READONLY,
+    PAGE_READWRITE,
+    PAGE_EXECUTE,
+    PAGE_EXECUTE_READ,
+    PAGE_EXECUTE_READWRITE,
+    PAGE_GUARD,
+
+    // File functions
+    NtCreateFile,
+    NtReadFile,
+    NtWriteFile,
+    NtClose,
+
+    // Memory functions
+    NtAllocateVirtualMemory,
+    NtFreeVirtualMemory,
+    NtProtectVirtualMemory,
+
+    // Process/Thread functions
+    NtQueryInformationProcess,
+    NtSetInformationThread,
+    NtDelayExecution,
+
+    // Synchronization functions
+    NtWaitForSingleObject,
+    NtWaitForMultipleObjects,
+    NtCreateEvent,
+    NtSetEvent,
+    NtResetEvent,
+    NtPulseEvent,
+    NtCreateMutant,
+    NtReleaseMutant,
+    NtCreateSemaphore,
+    NtReleaseSemaphore,
+};
+
+// =============================================================================
+// Kernel32 API Re-exports
+// =============================================================================
+
+public mount kernel32.{
+    // Error handling
+    GetLastError,
+    SetLastError,
+
+    // Console I/O
+    GetStdHandle,
+    WriteConsoleA,
+    ReadConsoleA,
+
+    // File I/O
+    CreateFileA,
+    CreateFileW,
+    ReadFile,
+    WriteFile,
+    CloseHandle,
+    FlushFileBuffers,
+
+    // Memory management
+    VirtualAlloc,
+    VirtualFree,
+    VirtualProtect,
+    HeapAlloc,
+    HeapFree,
+    GetProcessHeap,
+    mem_decommit,
+    mem_reset,
+    mem_recommit,
+
+    // Thread functions
+    CreateThread,
+    GetCurrentThread,
+    GetCurrentThreadId,
+    ExitThread,
+    TerminateThread,
+    SuspendThread,
+    ResumeThread,
+    SwitchToThread,
+    Sleep,
+    SleepEx,
+
+    // TLS functions
+    TlsAlloc,
+    TlsFree,
+    TlsGetValue,
+    TlsSetValue,
+    TLS_OUT_OF_INDEXES,
+
+    // Process functions
+    GetCurrentProcess,
+    GetCurrentProcessId,
+    ExitProcess,
+
+    // Synchronization
+    InitializeCriticalSection,
+    EnterCriticalSection,
+    LeaveCriticalSection,
+    TryEnterCriticalSection,
+    DeleteCriticalSection,
+    CreateEventA,
+    SetEvent,
+    ResetEvent,
+    WaitForSingleObject,
+    WaitForMultipleObjects,
+    CreateMutexA,
+    ReleaseMutex,
+    CreateSemaphoreA,
+    ReleaseSemaphore,
+    InitializeSRWLock,
+    AcquireSRWLockExclusive,
+    ReleaseSRWLockExclusive,
+    AcquireSRWLockShared,
+    ReleaseSRWLockShared,
+    TryAcquireSRWLockExclusive,
+    TryAcquireSRWLockShared,
+    InitializeConditionVariable,
+    SleepConditionVariableCS,
+    SleepConditionVariableSRW,
+    WakeConditionVariable,
+    WakeAllConditionVariable,
+
+    // IOCP functions
+    CreateIoCompletionPort,
+    GetQueuedCompletionStatus,
+    GetQueuedCompletionStatusEx,
+    PostQueuedCompletionStatus,
+    CancelIo,
+    CancelIoEx,
+
+    // Time functions
+    GetTickCount64,
+    QueryPerformanceCounter,
+    QueryPerformanceFrequency,
+    GetSystemTimeAsFileTime,
+
+    // System information
+    GetSystemInfo,
+
+    // Wait constants
+    WAIT_OBJECT_0,
+    WAIT_ABANDONED,
+    WAIT_TIMEOUT,
+    WAIT_FAILED,
+    INFINITE,
+
+    // Standard handles
+    STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE,
+    STD_ERROR_HANDLE,
+
+    // File constants
+    GENERIC_READ,
+    GENERIC_WRITE,
+    GENERIC_EXECUTE,
+    GENERIC_ALL,
+    FILE_SHARE_READ,
+    FILE_SHARE_WRITE,
+    FILE_SHARE_DELETE,
+    CREATE_NEW,
+    CREATE_ALWAYS,
+    OPEN_EXISTING,
+    OPEN_ALWAYS,
+    TRUNCATE_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    FILE_FLAG_OVERLAPPED,
+    INVALID_HANDLE_VALUE,
+
+    // Console API
+    GetConsoleMode,
+    SetConsoleMode,
+    GetConsoleScreenBufferInfo,
+    SetConsoleCursorPosition,
+    FillConsoleOutputCharacterW,
+    FillConsoleOutputAttribute,
+    SetConsoleTextAttribute,
+    SetConsoleTitleW,
+    GetNumberOfConsoleInputEvents,
+    ReadConsoleInputW,
+    SetConsoleCursorInfo,
+    ScrollConsoleScreenBufferW,
+    Coord,
+    SmallRect,
+    ConsoleScreenBufferInfo,
+
+    // Console mode constants
+    ENABLE_PROCESSED_INPUT,
+    ENABLE_LINE_INPUT,
+    ENABLE_ECHO_INPUT,
+    ENABLE_WINDOW_INPUT,
+    ENABLE_MOUSE_INPUT,
+    ENABLE_INSERT_MODE,
+    ENABLE_QUICK_EDIT_MODE,
+    ENABLE_EXTENDED_FLAGS,
+    ENABLE_VIRTUAL_TERMINAL_INPUT,
+    ENABLE_PROCESSED_OUTPUT,
+    ENABLE_WRAP_AT_EOL_OUTPUT,
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+    DISABLE_NEWLINE_AUTO_RETURN,
+
+    // Console event type constants
+    KEY_EVENT,
+    MOUSE_EVENT,
+    WINDOW_BUFFER_SIZE_EVENT,
+    FOCUS_EVENT,
+    MENU_EVENT,
+};
+
+// =============================================================================
+// TLS Re-exports
+// =============================================================================
+
+public mount tls.{
+    // Error types
+    TlsError,
+
+    // Types
+    ThreadControlBlock,
+    ContextEntry,
+    ContextSlots,
+
+    // Constants
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+    DEFAULT_STACK_SIZE,
+    GUARD_PAGE_SIZE,
+
+    // Initialization
+    init_tls_index,
+    init_main_thread_tls,
+    create_thread_tls,
+    cleanup_thread_tls,
+
+    // TCB access
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    get_errno,
+    set_errno,
+    get_tid_fast,
+    check_stack_guard,
+    is_tls_initialized,
+    get_user_data,
+    set_user_data,
+
+    // Context operations
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+    ctx_depth,
+};
+
+// =============================================================================
+// IO Re-exports
+// =============================================================================
+
+public mount io.{
+    // Error types
+    IoError,
+
+    // Types
+    IocpDriver,
+    OverlappedEntry,
+    IoOperation,
+    IoCompletionCallback,
+    FileReadOp,
+    FileWriteOp,
+    SocketAcceptOp,
+    SocketConnectOp,
+    SocketRecvOp,
+    SocketSendOp,
+
+    // Constants
+    MAX_IOCP_ENTRIES,
+};
+
+// =============================================================================
+// Thread Re-exports
+// =============================================================================
+
+public mount thread.{
+    // Error types
+    ThreadError,
+
+    // Types
+    Thread,
+    ThreadId,
+    ThreadFunc,
+    ThreadHandle,
+    Mutex,
+    Condvar,
+    SpinLock,
+    RwLock,
+    Semaphore,
+    Once,
+    OnceState,
+    Barrier,
+
+    // Constants
+    DEFAULT_THREAD_STACK_SIZE,
+
+    // Thread operations
+    thread_spawn,
+    thread_join,
+    thread_detach,
+    thread_yield,
+    thread_sleep_ms,
+    current_thread_id,
+};
+
+// =============================================================================
+// Time Re-exports
+// =============================================================================
+
+public mount time.{
+    // Types
+    Duration,
+    Instant,
+    Stopwatch,
+    PerfCounter,
+    DeadlineTimer,
+
+    // Constants
+    NANOS_PER_SEC,
+    NANOS_PER_MILLI,
+    NANOS_PER_MICRO,
+
+    // Functions
+    monotonic_nanos,
+    monotonic_micros,
+    monotonic_millis,
+    sleep,
+    sleep_ms,
+    sleep_us,
+    get_perf_freq,
+    perf_counter_to_nanos,
+};

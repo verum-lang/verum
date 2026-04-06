@@ -1,0 +1,12 @@
+fn check_positive(x: Float) -> Text {
+    match x {
+        n where n > 0.0 => "positive",
+        n where n < 0.0 => "negative",
+        _ => "zero"
+    }
+}
+
+fn main() {
+    let pos = check_positive(5.0);
+    let _ = print(f"Result: {pos}");
+}

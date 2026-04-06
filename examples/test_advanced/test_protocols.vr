@@ -1,0 +1,62 @@
+// Test: Protocol Definitions and Implementations
+// Tests protocol (trait/interface) system
+
+type Showable is protocol {
+    fn show(self) -> Text
+}
+
+type Comparable is protocol {
+    fn compare(self, other: Self) -> Int
+}
+
+// Record type for testing
+type Point is { x: Int, y: Int }
+
+type Circle is { center: Point, radius: Int }
+
+// Implement Showable for Point
+implement Showable for Point {
+    fn show(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Implement Comparable for Point
+implement Comparable for Point {
+    fn compare(self, other: Point) -> Int {
+        let self_dist = self.x * self.x + self.y * self.y
+        let other_dist = other.x * other.x + other.y * other.y
+        if self_dist < other_dist {
+            -1
+        } else if self_dist > other_dist {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+// Implement Showable for Circle
+implement Showable for Circle {
+    fn show(self) -> Text {
+        f"Circle(center={self.center.show()}, radius={self.radius})"
+    }
+}
+
+// Generic function with protocol constraint
+fn display<T: Showable>(item: T) -> Text {
+    item.show()
+}
+
+fn main() {
+    let p1 = Point { x: 10, y: 20 }
+    let p2 = Point { x: 5, y: 15 }
+    let c = Circle { center: p1, radius: 50 }
+
+    println(p1.show())
+    println(c.show())
+    println(f"Comparison: {p1.compare(p2)}")
+
+    // Test generic function
+    println(display(p1))
+}

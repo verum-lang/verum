@@ -1,0 +1,15 @@
+// Minimal negative bounds test
+// Priority: Debug
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+// Simple negative bound test
+fn consume<T>(value: T) where type T: !Clone {
+    print(f"Consumed");
+}
+
+fn main() {
+    print(f"Test");
+}

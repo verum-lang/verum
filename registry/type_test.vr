@@ -1,0 +1,28 @@
+// Test type definitions
+link core.base.{Text, Int};
+
+type SemVer is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+implement SemVer {
+    pub fn new(major: Int, minor: Int, patch: Int) -> SemVer {
+        SemVer {
+            major: major,
+            minor: minor,
+            patch: patch,
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"{self.major}.{self.minor}.{self.patch}"
+    }
+}
+
+fn main() {
+    print("Testing type definitions...");
+    let ver = SemVer.new(1, 2, 3);
+    print(f"Version: {ver.to_string()}");
+}

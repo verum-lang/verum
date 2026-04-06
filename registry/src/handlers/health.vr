@@ -1,0 +1,409 @@
+// Verum Registry - Health Check Handlers
+//
+// HTTP handlers for system health monitoring and status checks
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text};
+mount core.time.unix_timestamp;
+
+// Import context protocols
+mount super.super.contexts.{Database, Storage, Cache, Search, Auth, Metrics, Queue};
+mount super.super.domain.errors.{RegistryError};
+
+// Import concurrency utilities
+mount super.super.services.concurrency_service.{join2, join3, join5, with_timeout};
+
+// Import timing utilities
+mount super.super.services.timing_service.{Timer, get_uptime_seconds};
+
+// Import centralized DTOs
+mount super.super.dto.common.{
+    HealthStatusDto,
+    ComponentHealthDto,
+    HealthResponseDto,
+    MetricsResponseDto,
+};
+
+// ============================================================================
+// HTTP Handlers
+// ============================================================================
+
+/// Basic health check endpoint
+///
+/// GET /health
+///
+/// All health checks run concurrently for faster response time.
+pub async fn health_check() -> Result<HealthResponseDto, RegistryError>
+    using [Database, Storage, Search]
+{
+    let timer = Timer.start();
+
+    // Run all health checks concurrently
+    let (db_health, storage_health, search_health) = join3(
+        check_database_health(),
+        check_storage_health(),
+        check_search_health()
+    ).await?;
+
+    // Collect all component statuses
+    let mut components = List.new();
+    components.push(db_health);
+    components.push(storage_health);
+    components.push(search_health);
+
+    // Determine overall status
+    let overall_status = determine_overall_status(&components);
+
+    Result.Ok(HealthResponseDto {
+        status: overall_status,
+        version: "1.0.0",
+        uptime_seconds: get_uptime_seconds(),
+        components,
+        timestamp: unix_timestamp(),
+    })
+}
+
+/// Detailed health check (requires authentication)
+///
+/// GET /health/detailed
+///
+/// All health checks run concurrently with 5-second timeout per component.
+pub async fn detailed_health(auth_token: Text) -> Result<HealthResponseDto, RegistryError>
+    using [Auth, Database, Storage, Search, Cache, Queue]
+{
+    // Verify admin access
+    let user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+    if user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Run all comprehensive health checks concurrently with timeouts
+    let (db_health, storage_health, search_health, cache_health, queue_health) = join5(
+        with_timeout(check_database_health_detailed(), 5000),
+        with_timeout(check_storage_health_detailed(), 5000),
+        with_timeout(check_search_health_detailed(), 5000),
+        with_timeout(check_cache_health(), 5000),
+        with_timeout(check_queue_health(), 5000)
+    ).await?;
+
+    let mut components = List.new();
+    components.push(db_health);
+    components.push(storage_health);
+    components.push(search_health);
+    components.push(cache_health);
+    components.push(queue_health);
+
+    let overall_status = determine_overall_status(&components);
+
+    Result.Ok(HealthResponseDto {
+        status: overall_status,
+        version: "1.0.0",
+        uptime_seconds: get_uptime_seconds(),
+        components,
+        timestamp: unix_timestamp(),
+    })
+}
+
+/// Readiness check (for load balancers)
+///
+/// GET /health/ready
+///
+/// Checks critical services concurrently for fast response.
+pub async fn readiness_check() -> Result<Bool, RegistryError>
+    using [Database, Storage]
+{
+    // Check if critical services are ready (concurrent)
+    let (db_ready, storage_ready) = join2(
+        Database.is_ready(),
+        Storage.is_ready()
+    ).await?;
+
+    Result.Ok(db_ready && storage_ready)
+}
+
+/// Liveness check (for container orchestration)
+///
+/// GET /health/live
+pub async fn liveness_check() -> Result<Bool, RegistryError> {
+    // Simple check that the service is alive
+    Result.Ok(true)
+}
+
+/// Get system metrics
+///
+/// GET /health/metrics
+pub async fn get_metrics(auth_token: Text) -> Result<MetricsResponseDto, RegistryError>
+    using [Auth, Metrics]
+{
+    // Verify admin access
+    let user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+    if user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Collect metrics
+    let requests_total = Metrics.get_total_requests().await?;
+    let requests_per_second = Metrics.get_requests_per_second().await?;
+    let avg_response_time = Metrics.get_avg_response_time().await?;
+    let active_connections = Metrics.get_active_connections().await?;
+
+    Result.Ok(MetricsResponseDto {
+        requests_total,
+        requests_per_second,
+        avg_response_time_ms: avg_response_time,
+        active_connections,
+        memory_usage_mb: 0,  // System metrics not yet implemented
+        cpu_usage_percent: 0.0,  // System metrics not yet implemented
+    })
+}
+
+/// Ping endpoint (minimal overhead)
+///
+/// GET /ping
+pub async fn ping() -> Result<Text, RegistryError> {
+    Result.Ok("pong")
+}
+
+// ============================================================================
+// Health Check Functions
+// ============================================================================
+
+/// Check database connectivity and performance
+async fn check_database_health() -> ComponentHealthDto
+    using [Database]
+{
+    let timer = Timer.start();
+    let result = Database.ping().await;
+    let elapsed = timer.stop();
+
+    if result.is_ok() {
+        ComponentHealthDto {
+            name: "database",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.None,
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "database",
+            status: HealthStatusDto.Unhealthy,
+            message: Maybe.Some("Database ping failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Detailed database health check
+async fn check_database_health_detailed() -> ComponentHealthDto
+    using [Database]
+{
+    let timer = Timer.start();
+
+    // Check connection pool
+    let pool_status = Database.check_pool().await;
+
+    // Check query performance
+    let query_result = Database.test_query().await;
+
+    let elapsed = timer.stop();
+
+    // Both must succeed for healthy status
+    let is_healthy = pool_status.is_ok() && query_result.is_ok();
+
+    if is_healthy {
+        ComponentHealthDto {
+            name: "database",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.Some("Pool active, queries working"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "database",
+            status: HealthStatusDto.Unhealthy,
+            message: Maybe.Some("Database checks failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Check storage service health
+async fn check_storage_health() -> ComponentHealthDto
+    using [Storage]
+{
+    let timer = Timer.start();
+    let result = Storage.ping().await;
+    let elapsed = timer.stop();
+
+    if result.is_ok() {
+        ComponentHealthDto {
+            name: "storage",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.None,
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "storage",
+            status: HealthStatusDto.Unhealthy,
+            message: Maybe.Some("Storage ping failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Detailed storage health check
+async fn check_storage_health_detailed() -> ComponentHealthDto
+    using [Storage]
+{
+    let timer = Timer.start();
+
+    // Check storage availability
+    let available = Storage.check_available().await;
+
+    // Check disk space
+    let space = Storage.available_space_gb().await;
+
+    let elapsed = timer.stop();
+
+    // Both must succeed for healthy status
+    let is_available = available.is_ok();
+    let space_gb = match space {
+        Result.Ok(v) => v,
+        Result.Err(_) => 0.0,
+    };
+
+    if is_available && space_gb > 10.0 {
+        ComponentHealthDto {
+            name: "storage",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.Some("Storage available"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else if is_available && space_gb > 1.0 {
+        ComponentHealthDto {
+            name: "storage",
+            status: HealthStatusDto.Degraded,
+            message: Maybe.Some("Low disk space"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "storage",
+            status: HealthStatusDto.Unhealthy,
+            message: Maybe.Some("Storage checks failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Check search index health
+async fn check_search_health() -> ComponentHealthDto
+    using [Search]
+{
+    let timer = Timer.start();
+    let result = Search.ping().await;
+    let elapsed = timer.stop();
+
+    if result.is_ok() {
+        ComponentHealthDto {
+            name: "search",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.None,
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "search",
+            status: HealthStatusDto.Unhealthy,
+            message: Maybe.Some("Search ping failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Detailed search index health check
+async fn check_search_health_detailed() -> ComponentHealthDto
+    using [Search]
+{
+    // For now, same as basic check
+    check_search_health().await
+}
+
+/// Check cache health
+async fn check_cache_health() -> ComponentHealthDto
+    using [Cache]
+{
+    let timer = Timer.start();
+    let result = Cache.ping().await;
+    let elapsed = timer.stop();
+
+    if result.is_ok() {
+        ComponentHealthDto {
+            name: "cache",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.None,
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "cache",
+            status: HealthStatusDto.Degraded,  // Cache failure is not critical
+            message: Maybe.Some("Cache ping failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Check message queue health
+async fn check_queue_health() -> ComponentHealthDto
+    using [Queue]
+{
+    let timer = Timer.start();
+    let result = Queue.ping().await;
+    let elapsed = timer.stop();
+
+    if result.is_ok() {
+        ComponentHealthDto {
+            name: "queue",
+            status: HealthStatusDto.Healthy,
+            message: Maybe.None,
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    } else {
+        ComponentHealthDto {
+            name: "queue",
+            status: HealthStatusDto.Degraded,  // Queue failure is not critical
+            message: Maybe.Some("Queue ping failed"),
+            response_time_ms: Maybe.Some(elapsed),
+        }
+    }
+}
+
+/// Determine overall system status from components
+fn determine_overall_status(components: &List<ComponentHealthDto>) -> HealthStatusDto {
+    let mut has_unhealthy = false;
+    let mut has_degraded = false;
+
+    for component in components {
+        if component.status == HealthStatusDto.Unhealthy {
+            has_unhealthy = true;
+        } else if component.status == HealthStatusDto.Degraded {
+            has_degraded = true;
+        }
+    }
+
+    if has_unhealthy {
+        HealthStatusDto.Unhealthy
+    } else if has_degraded {
+        HealthStatusDto.Degraded
+    } else {
+        HealthStatusDto.Healthy
+    }
+}

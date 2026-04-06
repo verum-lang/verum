@@ -1,0 +1,64 @@
+// Conway's Game of Life Rules Demo
+// Demonstrates: variants, pattern matching, state transitions
+
+type CellState is Dead | Alive;
+
+fn cell_char(state: CellState) -> Text {
+    match state {
+        Dead => ".",
+        Alive => "#"
+    }
+}
+
+// Game rules
+fn next_state(current: CellState, neighbors: Float) -> CellState {
+    match current {
+        Alive => {
+            if neighbors == 2.0 || neighbors == 3.0 {
+                Alive
+            } else {
+                Dead
+            }
+        },
+        Dead => {
+            if neighbors == 3.0 {
+                Alive
+            } else {
+                Dead
+            }
+        }
+    }
+}
+
+fn main() {
+    let _ = print("=== Game of Life Rules ===");
+    let _ = print("");
+
+    let _ = print("Cell State Rules:");
+    let _ = print("  Live + <2 neighbors: dies (underpopulation)");
+    let _ = print("  Live + 2-3 neighbors: survives");
+    let _ = print("  Live + >3 neighbors: dies (overpopulation)");
+    let _ = print("  Dead + 3 neighbors: becomes alive");
+    let _ = print("");
+
+    let alive = Alive;
+    let dead = Dead;
+
+    let _ = print("Testing rules:");
+    let _ = print(f"Alive + 0 neighbors -> {cell_char(next_state(alive, 0.0))}");
+    let _ = print(f"Alive + 2 neighbors -> {cell_char(next_state(alive, 2.0))}");
+    let _ = print(f"Alive + 3 neighbors -> {cell_char(next_state(alive, 3.0))}");
+    let _ = print(f"Alive + 4 neighbors -> {cell_char(next_state(alive, 4.0))}");
+    let _ = print(f"Dead + 2 neighbors -> {cell_char(next_state(dead, 2.0))}");
+    let _ = print(f"Dead + 3 neighbors -> {cell_char(next_state(dead, 3.0))}");
+    let _ = print("");
+
+    let _ = print("Blinker Pattern (oscillates):");
+    let _ = print("  Step 0:    Step 1:");
+    let _ = print("    ...        .#.");
+    let _ = print("    ###        .#.");
+    let _ = print("    ...        .#.");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

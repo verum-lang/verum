@@ -1,0 +1,42 @@
+// Test if-else expressions
+
+fn abs(x: Float) -> Float {
+    if x < 0.0 {
+        0.0 - x
+    } else {
+        x
+    }
+}
+
+fn grade(score: Float) -> Text {
+    if score >= 90.0 {
+        "A"
+    } else if score >= 80.0 {
+        "B"
+    } else if score >= 70.0 {
+        "C"
+    } else if score >= 60.0 {
+        "D"
+    } else {
+        "F"
+    }
+}
+
+fn main() {
+    let _ = print("=== If-Else Tests ===");
+
+    // Simple if-else
+    let x = 5.0;
+    let result = if x > 0.0 { "positive" } else { "non-positive" };
+    let _ = print(f"5 is {result}");
+
+    // Nested if-else chain
+    let _ = print(f"Grade for 95: {grade(95.0)}");
+    let _ = print(f"Grade for 85: {grade(85.0)}");
+    let _ = print(f"Grade for 55: {grade(55.0)}");
+
+    // Abs function using if-else
+    let _ = print(f"abs(5) = {abs(5.0)}");
+
+    let _ = print("=== Done ===");
+}

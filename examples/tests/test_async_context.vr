@@ -1,0 +1,7 @@
+// Test: Async context declaration
+async context Database {
+    async fn query(self, sql: Text) -> Int
+    async fn execute(self, cmd: Text)
+}
+
+fn dummy() {}

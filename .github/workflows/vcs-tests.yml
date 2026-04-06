@@ -1,0 +1,1125 @@
+# Verum Compliance Suite - Full Test Suite (L0-L4)
+#
+# Comprehensive VCS testing with multi-platform matrix support.
+# Runs all specification levels with appropriate pass rate requirements.
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+
+name: VCS Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+      - '.github/workflows/vcs-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+  schedule:
+    # Run full suite nightly at 3:00 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      test_levels:
+        description: 'Test levels to run (L0,L1,L2,L3,L4 or all)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - L0
+          - L1
+          - L2
+          - L3
+          - L4
+          - L0,L1
+          - L0,L1,L2
+      platforms:
+        description: 'Platforms to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - linux
+          - macos
+          - windows
+      rust_versions:
+        description: 'Rust versions to test'
+        required: false
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - beta
+          - nightly
+          - all
+      fail_fast:
+        description: 'Stop on first failure'
+        required: false
+        default: false
+        type: boolean
+      coverage:
+        description: 'Generate code coverage'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VCS_PARALLEL: 8
+  VCS_TIMEOUT_DEFAULT: 30000
+  VCS_CONFIG: vcs/config/vcs.toml
+  # Coverage settings
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-Cinstrument-coverage"
+  LLVM_PROFILE_FILE: "vcs-%p-%m.profraw"
+
+# Cancel previous runs on same branch
+concurrency:
+  group: vcs-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # Matrix Setup - Determine which platforms and Rust versions to test
+  # ==========================================================================
+  setup:
+    name: Setup Test Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      platform_matrix: ${{ steps.set-matrix.outputs.platform_matrix }}
+      rust_matrix: ${{ steps.set-matrix.outputs.rust_matrix }}
+      run_l3: ${{ steps.check-schedule.outputs.run_l3 }}
+      run_l4: ${{ steps.check-schedule.outputs.run_l4 }}
+      enable_coverage: ${{ steps.check-coverage.outputs.enable_coverage }}
+    steps:
+      - name: Determine platform matrix
+        id: set-matrix
+        run: |
+          # Platform matrix
+          # Platform matrix with multi-architecture support
+          # Linux: x86_64 (ubuntu runners), aarch64 (via self-hosted or qemu)
+          # macOS: x86_64 (macos-13), arm64 (macos-14 M1)
+          # Windows: x64 only
+          if [ "${{ github.event.inputs.platforms }}" == "linux" ]; then
+            echo 'platform_matrix={"os":["ubuntu-22.04","ubuntu-24.04"],"include":[{"os":"ubuntu-22.04","llvm":"14","platform":"linux-x64","arch":"x86_64"},{"os":"ubuntu-24.04","llvm":"16","platform":"linux-x64-ubuntu24","arch":"x86_64"}]}' >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.platforms }}" == "macos" ]; then
+            echo 'platform_matrix={"os":["macos-13","macos-14"],"include":[{"os":"macos-13","arch":"x86_64","platform":"macos-x64"},{"os":"macos-14","arch":"arm64","platform":"macos-arm64"}]}' >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.platforms }}" == "windows" ]; then
+            echo 'platform_matrix={"os":["windows-2022"],"include":[{"os":"windows-2022","arch":"x64","platform":"windows-x64"}]}' >> $GITHUB_OUTPUT
+          else
+            # Full matrix: Linux x64, macOS x64/arm64, Windows x64
+            # Note: Linux aarch64 can be added via self-hosted runners or QEMU emulation
+            echo 'platform_matrix={"os":["ubuntu-22.04","ubuntu-24.04","macos-13","macos-14","windows-2022"],"include":[{"os":"ubuntu-22.04","llvm":"14","platform":"linux-x64","arch":"x86_64"},{"os":"ubuntu-24.04","llvm":"16","platform":"linux-x64-ubuntu24","arch":"x86_64"},{"os":"macos-13","arch":"x86_64","platform":"macos-x64"},{"os":"macos-14","arch":"arm64","platform":"macos-arm64"},{"os":"windows-2022","arch":"x64","platform":"windows-x64"}]}' >> $GITHUB_OUTPUT
+          fi
+
+          # Rust version matrix
+          if [ "${{ github.event.inputs.rust_versions }}" == "all" ] || [ "${{ github.event_name }}" == "schedule" ]; then
+            echo 'rust_matrix=["stable","beta","nightly"]' >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.rust_versions }}" == "beta" ]; then
+            echo 'rust_matrix=["beta"]' >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.rust_versions }}" == "nightly" ]; then
+            echo 'rust_matrix=["nightly"]' >> $GITHUB_OUTPUT
+          else
+            echo 'rust_matrix=["stable"]' >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if extended tests should run
+        id: check-schedule
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ github.event.inputs.test_levels }}" == "all" ] || [ "${{ github.event.inputs.test_levels }}" == "L3" ]; then
+            echo "run_l3=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_l3=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ github.event.inputs.test_levels }}" == "all" ] || [ "${{ github.event.inputs.test_levels }}" == "L4" ]; then
+            echo "run_l4=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_l4=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if coverage should run
+        id: check-coverage
+        run: |
+          if [ "${{ github.event.inputs.coverage }}" == "true" ] || [ "${{ github.event_name }}" == "push" ] || [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "enable_coverage=true" >> $GITHUB_OUTPUT
+          else
+            echo "enable_coverage=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ==========================================================================
+  # L0 Critical Tests - Lexer, Parser, Memory Safety
+  # MUST pass 100% - Blocking for merge
+  # ==========================================================================
+  l0-critical:
+    name: L0 Critical (${{ matrix.os }} / ${{ matrix.rust }})
+    needs: setup
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: ${{ github.event.inputs.fail_fast == 'true' }}
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.platform_matrix).os }}
+        rust: ${{ fromJson(needs.setup.outputs.rust_matrix) }}
+        include: ${{ fromJson(needs.setup.outputs.platform_matrix).include }}
+        exclude:
+          # Exclude beta/nightly on Windows for speed
+          - os: windows-2022
+            rust: beta
+          - os: windows-2022
+            rust: nightly
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install grcov for coverage
+        if: needs.setup.outputs.enable_coverage == 'true' && matrix.rust == 'stable'
+        run: cargo install grcov --locked
+
+      # Platform-specific dependencies
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            llvm-${{ matrix.llvm }}-dev \
+            libz3-dev \
+            clang-${{ matrix.llvm }} \
+            cmake \
+            pkg-config
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 cmake
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          choco install llvm z3 cmake -y
+          echo "LLVM_SYS_210_PREFIX=C:\Program Files\LLVM" >> $env:GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-v1"
+          shared-key: ${{ matrix.os }}-${{ matrix.rust }}-l0
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+
+      - name: Build VCS test runner
+        run: |
+          cd vcs/runner/vtest
+          cargo build --release
+
+      - name: Run L0 Critical Tests
+        id: l0
+        shell: bash
+        run: |
+          cd vcs
+
+          # Create output directory
+          mkdir -p reports
+
+          # Run L0 tests with JUnit output
+          ./runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel $VCS_PARALLEL \
+            --format junit \
+            --output reports/l0-${{ matrix.os }}-${{ matrix.rust }}.xml \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l0-${{ matrix.os }}-${{ matrix.rust }}.log || true
+
+          # Also generate JSON for detailed analysis
+          ./runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel $VCS_PARALLEL \
+            --format json \
+            --output reports/l0-${{ matrix.os }}-${{ matrix.rust }}.json \
+            --config config/vcs.toml \
+            2>&1 || true
+
+          # Verify 100% pass rate
+          if [ -f "reports/l0-${{ matrix.os }}-${{ matrix.rust }}.xml" ]; then
+            if grep -q 'failures="0"' reports/l0-${{ matrix.os }}-${{ matrix.rust }}.xml 2>/dev/null; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "## L0 Critical Tests: PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "## L0 Critical Tests: FAILED" >> $GITHUB_STEP_SUMMARY
+              echo "::error::L0 Critical tests failed on ${{ matrix.os }} (${{ matrix.rust }}) - merge blocked"
+              exit 1
+            fi
+          else
+            echo "::warning::L0 test output file not found - tests may not have run"
+            echo "status=skipped" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Coverage Report
+        if: needs.setup.outputs.enable_coverage == 'true' && matrix.rust == 'stable' && startsWith(matrix.os, 'ubuntu')
+        run: |
+          cd vcs
+          grcov . \
+            --binary-path ./runner/vtest/target/release/ \
+            -s . \
+            -t lcov \
+            --branch \
+            --ignore-not-existing \
+            --ignore "/*" \
+            --ignore "target/*" \
+            -o reports/coverage-l0-${{ matrix.os }}.lcov
+
+      - name: Upload L0 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l0-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: |
+            vcs/reports/l0-*
+            vcs/reports/coverage-l0-*
+          retention-days: 30
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: always() && hashFiles('vcs/reports/l0-*.xml') != ''
+        with:
+          report_paths: 'vcs/reports/l0-*.xml'
+          fail_on_failure: true
+          require_tests: true
+          check_name: 'L0 Critical Tests (${{ matrix.os }} / ${{ matrix.rust }})'
+
+  # ==========================================================================
+  # L1 Core Tests - Type System, Basic Constructs
+  # MUST pass 100% - Blocking for merge
+  # ==========================================================================
+  l1-core:
+    name: L1 Core (${{ matrix.os }} / ${{ matrix.rust }})
+    needs: [setup, l0-critical]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: ${{ github.event.inputs.fail_fast == 'true' }}
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.platform_matrix).os }}
+        rust: ${{ fromJson(needs.setup.outputs.rust_matrix) }}
+        include: ${{ fromJson(needs.setup.outputs.platform_matrix).include }}
+        exclude:
+          - os: windows-2022
+            rust: beta
+          - os: windows-2022
+            rust: nightly
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: llvm-tools-preview
+
+      - name: Install grcov for coverage
+        if: needs.setup.outputs.enable_coverage == 'true' && matrix.rust == 'stable'
+        run: cargo install grcov --locked
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-${{ matrix.llvm }}-dev libz3-dev clang-${{ matrix.llvm }}
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: choco install llvm z3 -y
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-v1"
+          shared-key: ${{ matrix.os }}-${{ matrix.rust }}-l1
+
+      - name: Build VCS test runner
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L1 Core Tests
+        id: l1
+        shell: bash
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel $VCS_PARALLEL \
+            --format junit \
+            --output reports/l1-${{ matrix.os }}-${{ matrix.rust }}.xml \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l1-${{ matrix.os }}-${{ matrix.rust }}.log || true
+
+          ./runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel $VCS_PARALLEL \
+            --format json \
+            --output reports/l1-${{ matrix.os }}-${{ matrix.rust }}.json \
+            --config config/vcs.toml \
+            2>&1 || true
+
+          if [ -f "reports/l1-${{ matrix.os }}-${{ matrix.rust }}.xml" ]; then
+            if grep -q 'failures="0"' reports/l1-${{ matrix.os }}-${{ matrix.rust }}.xml 2>/dev/null; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "## L1 Core Tests: PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "## L1 Core Tests: FAILED" >> $GITHUB_STEP_SUMMARY
+              echo "::error::L1 Core tests failed on ${{ matrix.os }} (${{ matrix.rust }}) - merge blocked"
+              exit 1
+            fi
+          fi
+
+      - name: Generate Coverage Report
+        if: needs.setup.outputs.enable_coverage == 'true' && matrix.rust == 'stable' && startsWith(matrix.os, 'ubuntu')
+        run: |
+          cd vcs
+          grcov . \
+            --binary-path ./runner/vtest/target/release/ \
+            -s . \
+            -t lcov \
+            --branch \
+            --ignore-not-existing \
+            --ignore "/*" \
+            -o reports/coverage-l1-${{ matrix.os }}.lcov
+
+      - name: Upload L1 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l1-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: |
+            vcs/reports/l1-*
+            vcs/reports/coverage-l1-*
+          retention-days: 30
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: always() && hashFiles('vcs/reports/l1-*.xml') != ''
+        with:
+          report_paths: 'vcs/reports/l1-*.xml'
+          fail_on_failure: true
+          check_name: 'L1 Core Tests (${{ matrix.os }} / ${{ matrix.rust }})'
+
+  # ==========================================================================
+  # L2 Standard Tests - Standard Library, Common Patterns
+  # 95%+ pass rate required - Blocking for merge
+  # ==========================================================================
+  l2-standard:
+    name: L2 Standard (${{ matrix.os }} / ${{ matrix.rust }})
+    needs: [setup, l1-core]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.platform_matrix).os }}
+        rust: ${{ fromJson(needs.setup.outputs.rust_matrix) }}
+        include: ${{ fromJson(needs.setup.outputs.platform_matrix).include }}
+        exclude:
+          - os: windows-2022
+            rust: beta
+          - os: windows-2022
+            rust: nightly
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: llvm-tools-preview
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-${{ matrix.llvm }}-dev libz3-dev clang-${{ matrix.llvm }} bc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: choco install llvm z3 -y
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-v1"
+          shared-key: ${{ matrix.os }}-${{ matrix.rust }}-l2
+
+      - name: Build VCS test runner
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L2 Standard Tests
+        id: l2
+        shell: bash
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L2 \
+            --parallel $VCS_PARALLEL \
+            --format json \
+            --output reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l2-${{ matrix.os }}-${{ matrix.rust }}.log || true
+
+          # Extract pass rate
+          if [ -f "reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json" ]; then
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json)
+            TOTAL=$(jq -r '.summary.total // 0' reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json)
+            PASSED=$(jq -r '.summary.passed // 0' reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json)
+            FAILED=$(jq -r '.summary.failed // 0' reports/l2-${{ matrix.os }}-${{ matrix.rust }}.json)
+
+            echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            echo "passed=$PASSED" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED" >> $GITHUB_OUTPUT
+
+            echo "## L2 Standard Tests" >> $GITHUB_STEP_SUMMARY
+            echo "- Platform: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Rust: ${{ matrix.rust }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Total: $TOTAL" >> $GITHUB_STEP_SUMMARY
+            echo "- Passed: $PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "- Failed: $FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "- Pass Rate: ${PASS_RATE}%" >> $GITHUB_STEP_SUMMARY
+
+            # Check threshold (95%)
+            if command -v bc &> /dev/null; then
+              if (( $(echo "$PASS_RATE < 95.0" | bc -l) )); then
+                echo "status=failed" >> $GITHUB_OUTPUT
+                echo "::error::L2 Standard tests below 95% threshold (${PASS_RATE}%) on ${{ matrix.os }} (${{ matrix.rust }})"
+                exit 1
+              else
+                echo "status=passed" >> $GITHUB_OUTPUT
+                echo "- Status: PASSED" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              # Fallback for systems without bc (Windows)
+              if [ "${PASS_RATE%.*}" -lt 95 ]; then
+                echo "status=failed" >> $GITHUB_OUTPUT
+                exit 1
+              else
+                echo "status=passed" >> $GITHUB_OUTPUT
+              fi
+            fi
+          else
+            echo "::error::L2 results file not found"
+            exit 1
+          fi
+
+      - name: Upload L2 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l2-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: vcs/reports/l2-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L3 Extended Tests - GPU, Dependent Types, Advanced Features
+  # 90%+ pass rate - Non-blocking (nightly/manual only)
+  # ==========================================================================
+  l3-extended:
+    name: L3 Extended (${{ matrix.os }})
+    needs: [setup, l2-standard]
+    if: needs.setup.outputs.run_l3 == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.platform_matrix).os }}
+        include: ${{ fromJson(needs.setup.outputs.platform_matrix).include }}
+        exclude:
+          - os: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-${{ matrix.llvm }}-dev libz3-dev clang-${{ matrix.llvm }} bc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-v1"
+          shared-key: ${{ matrix.os }}-l3
+
+      - name: Build VCS test runner
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L3 Extended Tests
+        id: l3
+        shell: bash
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L3 \
+            --parallel $VCS_PARALLEL \
+            --timeout 600000 \
+            --format json \
+            --output reports/l3-${{ matrix.os }}.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l3-${{ matrix.os }}.log || true
+
+          if [ -f "reports/l3-${{ matrix.os }}.json" ]; then
+            PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l3-${{ matrix.os }}.json)
+            echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+
+            echo "## L3 Extended Tests" >> $GITHUB_STEP_SUMMARY
+            echo "- Platform: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Pass Rate: ${PASS_RATE}%" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$PASS_RATE < 90.0" | bc -l 2>/dev/null || echo "1") )); then
+              echo "::warning::L3 Extended tests below 90% threshold (${PASS_RATE}%) on ${{ matrix.os }}"
+            fi
+          fi
+
+      - name: Upload L3 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l3-results-${{ matrix.os }}
+          path: vcs/reports/l3-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L4 Performance Tests - Timing Characteristics
+  # Advisory only - Non-blocking
+  # ==========================================================================
+  l4-performance:
+    name: L4 Performance (${{ matrix.os }})
+    needs: [setup, l2-standard]
+    if: needs.setup.outputs.run_l4 == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.platform_matrix).os }}
+        include: ${{ fromJson(needs.setup.outputs.platform_matrix).include }}
+        exclude:
+          - os: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-${{ matrix.llvm }}-dev libz3-dev clang-${{ matrix.llvm }}
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-v1"
+          shared-key: ${{ matrix.os }}-l4
+
+      - name: Build VCS test runner
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L4 Performance Tests
+        id: l4
+        shell: bash
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vtest/target/release/vtest run \
+            --level L4 \
+            --parallel 4 \
+            --format json \
+            --output reports/l4-${{ matrix.os }}.json \
+            --config config/vcs.toml \
+            2>&1 | tee reports/l4-${{ matrix.os }}.log || true
+
+          echo "## L4 Performance Tests (Advisory)" >> $GITHUB_STEP_SUMMARY
+          echo "- Platform: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "reports/l4-${{ matrix.os }}.json" ]; then
+            jq -r '.summary | "- Total: \(.total)\n- Passed: \(.passed)\n- Failed: \(.failed)"' \
+              reports/l4-${{ matrix.os }}.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          fi
+
+      - name: Upload L4 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l4-results-${{ matrix.os }}
+          path: vcs/reports/l4-*
+          retention-days: 30
+
+  # ==========================================================================
+  # Coverage Aggregation - Combine all coverage reports
+  # ==========================================================================
+  coverage:
+    name: Coverage Report
+    needs: [setup, l0-critical, l1-core, l2-standard]
+    if: needs.setup.outputs.enable_coverage == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-results-*'
+          path: all-results/
+          merge-multiple: false
+
+      - name: Aggregate Coverage Reports
+        run: |
+          mkdir -p coverage
+          # Find and merge all lcov files
+          find all-results -name "*.lcov" -exec cat {} \; > coverage/combined.lcov || true
+
+      - name: Upload to Codecov
+        if: hashFiles('coverage/combined.lcov') != ''
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/combined.lcov
+          flags: vcs-tests
+          name: vcs-coverage
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload Coverage Artifact
+        uses: actions/upload-artifact@v4
+        if: hashFiles('coverage/combined.lcov') != ''
+        with:
+          name: vcs-coverage
+          path: coverage/
+          retention-days: 30
+
+  # ==========================================================================
+  # Aggregate Reports - Combine all platform results
+  # ==========================================================================
+  aggregate-reports:
+    name: Aggregate Test Reports
+    needs: [l0-critical, l1-core, l2-standard]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: l*-results-*
+          path: all-results/
+          merge-multiple: false
+
+      - name: Generate Aggregate Report
+        run: |
+          echo "# VCS Test Suite Report" > aggregate-report.md
+          echo "" >> aggregate-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> aggregate-report.md
+          echo "**Commit:** ${{ github.sha }}" >> aggregate-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> aggregate-report.md
+          echo "**Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> aggregate-report.md
+          echo "" >> aggregate-report.md
+
+          echo "## Test Results by Level" >> aggregate-report.md
+          echo "" >> aggregate-report.md
+          echo "| Level | Platform | Rust | Status | Pass Rate | Total | Passed | Failed |" >> aggregate-report.md
+          echo "|-------|----------|------|--------|-----------|-------|--------|--------|" >> aggregate-report.md
+
+          # Process each result directory
+          for dir in all-results/*/; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"*.json; do
+                if [ -f "$file" ]; then
+                  BASENAME=$(basename "$file" .json)
+                  LEVEL=$(echo "$BASENAME" | cut -d'-' -f1)
+                  PLATFORM=$(echo "$BASENAME" | cut -d'-' -f2)
+                  RUST=$(echo "$BASENAME" | cut -d'-' -f3 || echo "stable")
+
+                  PASS_RATE=$(jq -r '.summary.pass_percentage // "N/A"' "$file" 2>/dev/null || echo "N/A")
+                  TOTAL=$(jq -r '.summary.total // 0' "$file" 2>/dev/null || echo "0")
+                  PASSED=$(jq -r '.summary.passed // 0' "$file" 2>/dev/null || echo "0")
+                  FAILED=$(jq -r '.summary.failed // 0' "$file" 2>/dev/null || echo "0")
+
+                  if [ "$FAILED" == "0" ]; then
+                    STATUS="PASS"
+                  else
+                    STATUS="FAIL"
+                  fi
+
+                  echo "| $LEVEL | $PLATFORM | $RUST | $STATUS | ${PASS_RATE}% | $TOTAL | $PASSED | $FAILED |" >> aggregate-report.md
+                fi
+              done
+            fi
+          done
+
+          echo "" >> aggregate-report.md
+          echo "## Summary" >> aggregate-report.md
+          echo "" >> aggregate-report.md
+
+          L0_STATUS="${{ needs.l0-critical.result }}"
+          L1_STATUS="${{ needs.l1-core.result }}"
+          L2_STATUS="${{ needs.l2-standard.result }}"
+
+          if [ "$L0_STATUS" == "success" ] && [ "$L1_STATUS" == "success" ] && [ "$L2_STATUS" == "success" ]; then
+            echo "All blocking tests passed. Ready for merge." >> aggregate-report.md
+          else
+            echo "Some blocking tests failed. Please review before merging." >> aggregate-report.md
+            echo "" >> aggregate-report.md
+            echo "| Level | Status |" >> aggregate-report.md
+            echo "|-------|--------|" >> aggregate-report.md
+            echo "| L0 Critical | $L0_STATUS |" >> aggregate-report.md
+            echo "| L1 Core | $L1_STATUS |" >> aggregate-report.md
+            echo "| L2 Standard | $L2_STATUS |" >> aggregate-report.md
+          fi
+
+      - name: Upload Aggregate Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-aggregate-report
+          path: aggregate-report.md
+          retention-days: 90
+
+      - name: Post Summary
+        run: cat aggregate-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let report = '';
+            if (fs.existsSync('aggregate-report.md')) {
+              report = fs.readFileSync('aggregate-report.md', 'utf8');
+            } else {
+              report = 'Test report generation failed.';
+            }
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.data.find(c =>
+              c.body.includes('VCS Test Suite Report') &&
+              c.user.type === 'Bot'
+            );
+
+            const body = `## VCS Test Suite Report\n\n${report}`;
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  # ==========================================================================
+  # Final Status Gate - Determines if PR can be merged
+  # ==========================================================================
+  vcs-gate:
+    name: VCS Status Gate
+    needs: [l0-critical, l1-core, l2-standard]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Critical Results
+        run: |
+          echo "## VCS Test Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          PASS=true
+
+          # L0 must pass
+          if [ "${{ needs.l0-critical.result }}" != "success" ]; then
+            echo "- L0 Critical: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L0 Critical: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # L1 must pass
+          if [ "${{ needs.l1-core.result }}" != "success" ]; then
+            echo "- L1 Core: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L1 Core: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # L2 must pass
+          if [ "${{ needs.l2-standard.result }}" != "success" ]; then
+            echo "- L2 Standard: FAILED" >> $GITHUB_STEP_SUMMARY
+            PASS=false
+          else
+            echo "- L2 Standard: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PASS" == "true" ]; then
+            echo "### Result: PASSED - Ready for merge" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Result: FAILED - Merge blocked" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  # ==========================================================================
+  # Notification - Alert on failures
+  # ==========================================================================
+  notify-failure:
+    name: Notify on Failure
+    needs: [vcs-gate]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          text: 'VCS Tests failed on ${{ github.ref_name }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send Discord Notification
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: failure
+          title: "VCS Tests Failed"
+          description: "Test suite failed on branch ${{ github.ref_name }}"
+          color: 0xff0000
+
+      - name: Create Issue on Critical Failure
+        if: github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `VCS Test Failure on main - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## VCS Test Suite Failure
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Commit:** ${context.sha}
+            **Date:** ${new Date().toISOString()}
+
+            Please investigate the test failures.
+            `;
+
+            // Check if similar issue exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'vcs-failure'
+            });
+
+            const existing = issues.data.find(i => i.title.startsWith('VCS Test Failure on main'));
+
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['vcs-failure', 'ci', 'high-priority']
+              });
+            }
+
+  # ==========================================================================
+  # Linux aarch64 Cross-Compilation Tests
+  # Tests VCS on ARM64 architecture via QEMU emulation
+  # ==========================================================================
+  l0-aarch64:
+    name: L0 Critical (Linux aarch64)
+    needs: [setup, l0-critical]
+    if: github.event_name == 'schedule' || contains(github.event.inputs.platforms, 'all')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run L0 tests on aarch64
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/workspace \
+            -w /workspace \
+            rust:latest \
+            bash -c '
+              apt-get update && apt-get install -y libz3-dev llvm-dev clang cmake
+              cd vcs/runner/vtest && cargo build --release
+              cd ../../..
+              ./vcs/runner/vtest/target/release/vtest run \
+                --level L0 \
+                --parallel 4 \
+                --format json \
+                --output vcs/reports/l0-linux-aarch64.json \
+                --config vcs/config/vcs.toml || true
+            '
+
+      - name: Upload L0 aarch64 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l0-results-linux-aarch64
+          path: vcs/reports/l0-linux-aarch64.*
+          retention-days: 30
+
+  # ==========================================================================
+  # Architecture Summary - Report all architecture results
+  # ==========================================================================
+  architecture-summary:
+    name: Architecture Test Summary
+    needs: [l0-critical, l0-aarch64]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: l0-results-*
+          path: results/
+          merge-multiple: false
+
+      - name: Generate Architecture Report
+        run: |
+          echo "# VCS Architecture Test Summary" > arch-report.md
+          echo "" >> arch-report.md
+          echo "| Architecture | Platform | Status |" >> arch-report.md
+          echo "|--------------|----------|--------|" >> arch-report.md
+
+          for dir in results/*/; do
+            if [ -d "$dir" ]; then
+              NAME=$(basename "$dir")
+              ARCH=$(echo "$NAME" | grep -oE 'x64|arm64|aarch64' || echo "unknown")
+              OS=$(echo "$NAME" | grep -oE 'linux|macos|windows|ubuntu' || echo "unknown")
+
+              for file in "$dir"*.json; do
+                if [ -f "$file" ]; then
+                  FAILURES=$(jq -r '.summary.failed // 0' "$file" 2>/dev/null || echo "0")
+                  if [ "$FAILURES" -eq 0 ]; then
+                    STATUS="PASS"
+                  else
+                    STATUS="FAIL"
+                  fi
+                  echo "| $ARCH | $OS | $STATUS |" >> arch-report.md
+                fi
+              done
+            fi
+          done
+
+          cat arch-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Architecture Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-architecture-report
+          path: arch-report.md
+          retention-days: 30

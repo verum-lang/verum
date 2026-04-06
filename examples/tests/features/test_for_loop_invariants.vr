@@ -1,0 +1,63 @@
+// Test: For loop with invariants
+// Tests for loops with invariant annotations
+
+fn test_while_with_invariants() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+
+    while i < 10
+        invariant sum >= 0
+        invariant i >= 0
+    {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    sum
+}
+
+fn test_multiple_invariants_while() -> Int {
+    let mut sum = 0;
+    let mut product = 1;
+    let mut i = 1;
+
+    while i < 5
+        invariant sum >= 0
+        invariant product > 0
+        invariant i >= 1
+    {
+        sum = sum + i;
+        product = product * 2;
+        i = i + 1;
+    }
+
+    sum + product
+}
+
+fn test_nested_while_invariants() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+
+    while i <= 5
+        invariant count >= 0
+        invariant i >= 0
+    {
+        count = count + 1;
+        i = i + 1;
+    }
+
+    count
+}
+
+fn main() -> Int {
+    let result1 = test_while_with_invariants();
+    println(f"While with invariants: {result1}");
+
+    let result2 = test_multiple_invariants_while();
+    println(f"Multiple invariants: {result2}");
+
+    let result3 = test_nested_while_invariants();
+    println(f"Nested invariants: {result3}");
+
+    result1 + result2 + result3
+}

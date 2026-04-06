@@ -1,0 +1,625 @@
+// =============================================================================
+// event/parser.vr - ANSI Input Sequence Parser (FSM)
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: types.vr, keys.vr
+// =============================================================================
+//
+// Finite state machine for parsing ANSI terminal input sequences into
+// structured Event values. Handles:
+//   - Printable ASCII and UTF-8 characters
+//   - Control characters (Ctrl+A..Z, Enter, Tab, Backspace)
+//   - CSI sequences (arrow keys, function keys, mouse, focus)
+//   - SS3 sequences (F1-F4, keypad)
+//   - OSC sequences (paste, etc.)
+//   - SGR mouse protocol parsing
+//
+// All 9 states of the parser DFA are defined here.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.2
+// =============================================================================
+
+module parser;
+
+mount super.types.{
+    Event, KeyEvent, KeyEventKind,
+    MouseEvent, MouseEventKind, MouseButton,
+};
+mount super.keys.{KeyCode, Modifiers};
+
+// =============================================================================
+// Parser State — DFA states
+// =============================================================================
+
+/// Parser state machine states.
+type ParserState is
+    | Ground                              // Initial state, waiting for input
+    | EscapeStart                         // Received ESC (0x1B)
+    | CsiEntry                            // Received ESC [
+    | CsiParam {                          // Collecting CSI parameters
+        params: List<Int>,
+        current: Int,
+        has_question: Bool,               // CSI ? prefix (private mode)
+        has_lt: Bool,                     // CSI < prefix (SGR mouse)
+    }
+    | CsiIntermediate                     // CSI intermediate bytes
+    | SsThree                             // Received ESC O (SS3)
+    | OscString {                         // Received ESC ] (OSC)
+        code: Int,
+        data: List<Byte>,
+        parsing_code: Bool,
+    }
+    | DcsEntry                            // Received ESC P (DCS)
+    | Utf8Sequence {                      // Collecting multi-byte UTF-8
+        bytes: [Byte; 4],
+        len: Int,
+        expected: Int,
+    };
+
+// =============================================================================
+// InputParser
+// =============================================================================
+
+/// ANSI input sequence parser.
+/// Feed bytes via feed(), extract events via next_event().
+public type InputParser is {
+    state: ParserState,
+    pending_events: Deque<Event>,
+};
+
+implement InputParser {
+    /// Create a new parser in the Ground state.
+    public fn new() -> InputParser {
+        InputParser {
+            state: ParserState.Ground,
+            pending_events: Deque.new(),
+        }
+    }
+
+    /// Feed a slice of bytes to the parser.
+    /// Returns the number of events recognized.
+    public fn feed(&mut self, data: &[Byte]) -> Int {
+        let count = 0;
+        for i in 0..data.len() {
+            count = count + self.process_byte(data[i]);
+        }
+        count
+    }
+
+    /// Extract the next recognized event, if any.
+    public fn next_event(&mut self) -> Maybe<Event> {
+        self.pending_events.pop_front()
+    }
+
+    /// Check if there are pending events.
+    public fn has_pending(&self) -> Bool {
+        self.pending_events.len() > 0
+    }
+
+    /// Reset the parser to Ground state, discarding partial sequences.
+    public fn reset(&mut self) {
+        self.state = ParserState.Ground;
+    }
+
+    // =========================================================================
+    // Core FSM: process one byte
+    // =========================================================================
+
+    /// Process a single byte through the state machine.
+    /// Returns 1 if an event was emitted, 0 otherwise.
+    fn process_byte(&mut self, byte: Byte) -> Int {
+        match (&self.state, byte) {
+            // =================================================================
+            // Ground state
+            // =================================================================
+            (Ground, 0x1B) => {
+                self.state = ParserState.EscapeStart;
+                0
+            }
+            (Ground, b) if b >= 0x20 && b < 0x7F => {
+                // Printable ASCII
+                self.emit_char(b as Char);
+                1
+            }
+            (Ground, b) if b >= 0x80 => {
+                // Start of UTF-8 multi-byte sequence
+                self.begin_utf8(b);
+                0
+            }
+            (Ground, 0x0D) => { self.emit_key(KeyCode.Enter, Modifiers.NONE); 1 }
+            (Ground, 0x0A) => { self.emit_key(KeyCode.Enter, Modifiers.NONE); 1 }
+            (Ground, 0x09) => { self.emit_key(KeyCode.Tab, Modifiers.NONE); 1 }
+            (Ground, 0x7F) => { self.emit_key(KeyCode.Backspace, Modifiers.NONE); 1 }
+            (Ground, 0x08) => { self.emit_key(KeyCode.Backspace, Modifiers.NONE); 1 }
+            (Ground, 0x00) => { self.emit_key(KeyCode.Null, Modifiers.CTRL); 1 }
+            (Ground, b) if b >= 1 && b <= 26 => {
+                // Ctrl+A (0x01) through Ctrl+Z (0x1A)
+                let ch = ((b - 1) + 'a' as Byte) as Char;
+                self.emit_key(KeyCode.Char(ch), Modifiers.CTRL);
+                1
+            }
+
+            // =================================================================
+            // Escape received — determine sequence type
+            // =================================================================
+            (EscapeStart, 0x5B) => {
+                // ESC [ -> CSI
+                self.state = ParserState.CsiEntry;
+                0
+            }
+            (EscapeStart, 0x4F) => {
+                // ESC O -> SS3
+                self.state = ParserState.SsThree;
+                0
+            }
+            (EscapeStart, 0x5D) => {
+                // ESC ] -> OSC
+                self.state = ParserState.OscString {
+                    code: 0,
+                    data: List.new(),
+                    parsing_code: true,
+                };
+                0
+            }
+            (EscapeStart, 0x50) => {
+                // ESC P -> DCS
+                self.state = ParserState.DcsEntry;
+                0
+            }
+            (EscapeStart, 0x1B) => {
+                // Double ESC -> emit Escape key, stay in EscapeStart
+                self.emit_key(KeyCode.Escape, Modifiers.NONE);
+                1
+            }
+            (EscapeStart, b) if b >= 0x20 && b < 0x7F => {
+                // Alt+char
+                self.emit_key(KeyCode.Char(b as Char), Modifiers.ALT);
+                self.state = ParserState.Ground;
+                1
+            }
+            (EscapeStart, _) => {
+                // Bare ESC (timeout or unknown)
+                self.emit_key(KeyCode.Escape, Modifiers.NONE);
+                self.state = ParserState.Ground;
+                1
+            }
+
+            // =================================================================
+            // CSI entry — check for ? or < prefix
+            // =================================================================
+            (CsiEntry, 0x3F) => {
+                // CSI ? prefix (private modes)
+                self.state = ParserState.CsiParam {
+                    params: List.new(),
+                    current: 0,
+                    has_question: true,
+                    has_lt: false,
+                };
+                0
+            }
+            (CsiEntry, 0x3C) => {
+                // CSI < prefix (SGR mouse)
+                self.state = ParserState.CsiParam {
+                    params: List.new(),
+                    current: 0,
+                    has_question: false,
+                    has_lt: true,
+                };
+                0
+            }
+            (CsiEntry, b) => {
+                self.state = ParserState.CsiParam {
+                    params: List.new(),
+                    current: 0,
+                    has_question: false,
+                    has_lt: false,
+                };
+                self.process_csi_byte(b)
+            }
+
+            // =================================================================
+            // CSI parameter collection
+            // =================================================================
+            (CsiParam { .. }, b) => self.process_csi_byte(b),
+
+            // =================================================================
+            // SS3 (function keys F1-F4, keypad)
+            // =================================================================
+            (SsThree, b) => {
+                self.parse_ss3(b);
+                self.state = ParserState.Ground;
+                1
+            }
+
+            // =================================================================
+            // OSC string collection
+            // =================================================================
+            (OscString { .. }, 0x07) => {
+                // BEL terminates OSC
+                self.complete_osc();
+                self.state = ParserState.Ground;
+                1
+            }
+            (OscString { .. }, 0x1B) => {
+                // ESC starts ST (ESC \)  — complete on next byte
+                self.complete_osc();
+                self.state = ParserState.Ground;
+                1
+            }
+            (OscString { ref mut code, ref mut data, ref mut parsing_code }, 0x3B) if *parsing_code => {
+                // Semicolon: switch from code to data
+                *parsing_code = false;
+                0
+            }
+            (OscString { ref mut code, parsing_code: true, .. }, b) if b >= '0' as Byte && b <= '9' as Byte => {
+                *code = *code * 10 + (b - '0' as Byte) as Int;
+                0
+            }
+            (OscString { ref mut data, .. }, b) => {
+                data.push(b);
+                0
+            }
+
+            // =================================================================
+            // DCS — just consume until ST for now
+            // =================================================================
+            (DcsEntry, 0x1B) => {
+                self.state = ParserState.Ground;
+                0
+            }
+            (DcsEntry, _) => { 0 }
+
+            // =================================================================
+            // UTF-8 continuation bytes
+            // =================================================================
+            (Utf8Sequence { ref mut bytes, ref mut len, expected }, b)
+                if b >= 0x80 && b <= 0xBF =>
+            {
+                bytes[*len] = b;
+                *len = *len + 1;
+                if *len == *expected {
+                    let ch = decode_utf8(&bytes, *expected);
+                    self.emit_key(KeyCode.Char(ch), Modifiers.NONE);
+                    self.state = ParserState.Ground;
+                    1
+                } else {
+                    0
+                }
+            }
+            (Utf8Sequence { .. }, _) => {
+                // Invalid continuation byte — discard and reset
+                self.state = ParserState.Ground;
+                0
+            }
+
+            // =================================================================
+            // Fallback: reset to Ground
+            // =================================================================
+            _ => {
+                self.state = ParserState.Ground;
+                0
+            }
+        }
+    }
+
+    // =========================================================================
+    // CSI parameter processing
+    // =========================================================================
+
+    fn process_csi_byte(&mut self, byte: Byte) -> Int {
+        match byte {
+            // Digit: accumulate current parameter
+            b if b >= '0' as Byte && b <= '9' as Byte => {
+                match &mut self.state {
+                    CsiParam { ref mut current, .. } => {
+                        *current = *current * 10 + (b - '0' as Byte) as Int;
+                    }
+                    _ => {}
+                }
+                0
+            }
+            // Semicolon: separator between parameters
+            0x3B => {
+                match &mut self.state {
+                    CsiParam { ref mut params, ref mut current, .. } => {
+                        params.push(*current);
+                        *current = 0;
+                    }
+                    _ => {}
+                }
+                0
+            }
+            // Final byte (0x40-0x7E): dispatch the CSI sequence
+            b if b >= 0x40 && b <= 0x7E => {
+                let result = match &self.state {
+                    CsiParam { ref params, current, has_lt, .. } => {
+                        let mut all_params = params.clone();
+                        all_params.push(*current);
+                        if *has_lt {
+                            self.parse_sgr_mouse(&all_params, b);
+                        } else {
+                            self.dispatch_csi(&all_params, b);
+                        }
+                        1
+                    }
+                    _ => 0,
+                };
+                self.state = ParserState.Ground;
+                result
+            }
+            // Intermediate byte — ignore for now
+            _ => 0,
+        }
+    }
+
+    // =========================================================================
+    // CSI dispatch: map final byte + params to events
+    // =========================================================================
+
+    fn dispatch_csi(&mut self, params: &List<Int>, final_byte: Byte) {
+        match final_byte {
+            // Arrow keys
+            0x41 => self.emit_key(KeyCode.Up, self.csi_modifiers(params)),
+            0x42 => self.emit_key(KeyCode.Down, self.csi_modifiers(params)),
+            0x43 => self.emit_key(KeyCode.Right, self.csi_modifiers(params)),
+            0x44 => self.emit_key(KeyCode.Left, self.csi_modifiers(params)),
+
+            // Home / End
+            0x48 => self.emit_key(KeyCode.Home, self.csi_modifiers(params)),
+            0x46 => self.emit_key(KeyCode.End, self.csi_modifiers(params)),
+
+            // BackTab (Shift+Tab)
+            0x5A => self.emit_key(KeyCode.BackTab, Modifiers.SHIFT),
+
+            // Tilde sequences (Insert, Delete, PageUp, PageDown, F5-F12)
+            0x7E => self.dispatch_csi_tilde(params),
+
+            // Focus events
+            0x49 => self.pending_events.push_back(Event.FocusGained),
+            0x4F => self.pending_events.push_back(Event.FocusLost),
+
+            // SGR mouse (M = press/motion, m = release)
+            0x4D => self.parse_sgr_mouse(params, final_byte),
+            0x6D => self.parse_sgr_mouse(params, final_byte),
+
+            // Cursor position report (CSI row ; col R) — ignore
+            0x52 => {}
+
+            // Unknown CSI — ignore
+            _ => {}
+        }
+    }
+
+    /// Dispatch CSI ~ sequences (Insert, Delete, PageUp, etc.).
+    fn dispatch_csi_tilde(&mut self, params: &List<Int>) {
+        let code = if params.len() > 0 { params[0] } else { 0 };
+        let mods = self.csi_modifiers(params);
+        match code {
+            1 => self.emit_key(KeyCode.Home, mods),
+            2 => self.emit_key(KeyCode.Insert, mods),
+            3 => self.emit_key(KeyCode.Delete, mods),
+            4 => self.emit_key(KeyCode.End, mods),
+            5 => self.emit_key(KeyCode.PageUp, mods),
+            6 => self.emit_key(KeyCode.PageDown, mods),
+            15 => self.emit_key(KeyCode.Fn(5), mods),
+            17 => self.emit_key(KeyCode.Fn(6), mods),
+            18 => self.emit_key(KeyCode.Fn(7), mods),
+            19 => self.emit_key(KeyCode.Fn(8), mods),
+            20 => self.emit_key(KeyCode.Fn(9), mods),
+            21 => self.emit_key(KeyCode.Fn(10), mods),
+            23 => self.emit_key(KeyCode.Fn(11), mods),
+            24 => self.emit_key(KeyCode.Fn(12), mods),
+            25 => self.emit_key(KeyCode.Fn(13), mods),
+            26 => self.emit_key(KeyCode.Fn(14), mods),
+            28 => self.emit_key(KeyCode.Fn(15), mods),
+            29 => self.emit_key(KeyCode.Fn(16), mods),
+            31 => self.emit_key(KeyCode.Fn(17), mods),
+            32 => self.emit_key(KeyCode.Fn(18), mods),
+            33 => self.emit_key(KeyCode.Fn(19), mods),
+            34 => self.emit_key(KeyCode.Fn(20), mods),
+            _ => {}
+        }
+    }
+
+    /// Extract modifier flags from CSI parameter index 1.
+    /// CSI convention: param[1] = modifier_value + 1
+    /// Bits: 1=Shift, 2=Alt, 4=Ctrl, 8=Super
+    fn csi_modifiers(&self, params: &List<Int>) -> Modifiers {
+        if params.len() >= 2 && params[1] > 1 {
+            let m = params[1] - 1;
+            Modifiers {
+                bits: ((m & 1) as UInt8)                // Shift
+                    | (((m >> 2) & 1) as UInt8) << 1    // Ctrl
+                    | (((m >> 1) & 1) as UInt8) << 2    // Alt
+                    | (((m >> 3) & 1) as UInt8) << 3    // Super
+            }
+        } else {
+            Modifiers.NONE
+        }
+    }
+
+    // =========================================================================
+    // SS3 parsing (F1-F4, keypad)
+    // =========================================================================
+
+    fn parse_ss3(&mut self, byte: Byte) {
+        let code = match byte {
+            0x50 => KeyCode.Fn(1),   // ESC O P
+            0x51 => KeyCode.Fn(2),   // ESC O Q
+            0x52 => KeyCode.Fn(3),   // ESC O R
+            0x53 => KeyCode.Fn(4),   // ESC O S
+            0x41 => KeyCode.Up,      // ESC O A (some terminals)
+            0x42 => KeyCode.Down,    // ESC O B
+            0x43 => KeyCode.Right,   // ESC O C
+            0x44 => KeyCode.Left,    // ESC O D
+            0x48 => KeyCode.Home,    // ESC O H
+            0x46 => KeyCode.End,     // ESC O F
+            _ => KeyCode.Null,
+        };
+        self.emit_key(code, Modifiers.NONE);
+    }
+
+    // =========================================================================
+    // SGR mouse parsing: CSI < Pb ; Px ; Py M/m
+    // =========================================================================
+
+    fn parse_sgr_mouse(&mut self, params: &List<Int>, final_byte: Byte) {
+        if params.len() < 3 { return; }
+        let pb = params[0];
+        let px = params[1] - 1;  // 1-indexed to 0-indexed
+        let py = params[2] - 1;
+
+        let button_bits = pb & 0b11;
+        let mods = Modifiers {
+            bits: (((pb >> 2) & 1) as UInt8) << 2    // Alt  (bit 3 of pb)
+                | (((pb >> 4) & 1) as UInt8) << 1    // Ctrl (bit 5 of pb)
+        };
+
+        let is_release = final_byte == 0x6D;  // 'm'
+        let is_motion = (pb & 32) != 0;
+        let is_scroll = (pb & 64) != 0;
+
+        let kind = if is_scroll {
+            match button_bits {
+                0 => MouseEventKind.ScrollUp,
+                1 => MouseEventKind.ScrollDown,
+                2 => MouseEventKind.ScrollLeft,
+                3 => MouseEventKind.ScrollRight,
+                _ => return,
+            }
+        } else if is_motion {
+            match button_bits {
+                0 => MouseEventKind.Drag(MouseButton.Left),
+                1 => MouseEventKind.Drag(MouseButton.Middle),
+                2 => MouseEventKind.Drag(MouseButton.Right),
+                3 => MouseEventKind.Moved,
+                _ => return,
+            }
+        } else if is_release {
+            let btn = match button_bits {
+                0 => MouseButton.Left,
+                1 => MouseButton.Middle,
+                2 => MouseButton.Right,
+                _ => return,
+            };
+            MouseEventKind.Up(btn)
+        } else {
+            let btn = match button_bits {
+                0 => MouseButton.Left,
+                1 => MouseButton.Middle,
+                2 => MouseButton.Right,
+                _ => return,
+            };
+            MouseEventKind.Down(btn)
+        };
+
+        self.pending_events.push_back(Event.Mouse(MouseEvent {
+            kind: kind,
+            column: px,
+            row: py,
+            modifiers: mods,
+        }));
+    }
+
+    // =========================================================================
+    // OSC completion
+    // =========================================================================
+
+    fn complete_osc(&mut self) {
+        match &self.state {
+            OscString { code, ref data, .. } => {
+                match *code {
+                    // OSC 52: clipboard content (base64 encoded)
+                    52 => {
+                        // Decode paste data — for now just convert bytes to text
+                        let text = bytes_to_text(data);
+                        self.pending_events.push_back(Event.Paste(text));
+                    }
+                    // Other OSC codes are informational; ignore for now
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // =========================================================================
+    // UTF-8 decoding
+    // =========================================================================
+
+    /// Start collecting a UTF-8 multi-byte sequence.
+    fn begin_utf8(&mut self, first_byte: Byte) {
+        let mut bytes: [Byte; 4] = [0; 4];
+        bytes[0] = first_byte;
+
+        let expected = if (first_byte & 0xE0) == 0xC0 {
+            2   // 110xxxxx -> 2-byte sequence
+        } else if (first_byte & 0xF0) == 0xE0 {
+            3   // 1110xxxx -> 3-byte sequence
+        } else if (first_byte & 0xF8) == 0xF0 {
+            4   // 11110xxx -> 4-byte sequence
+        } else {
+            // Invalid lead byte — emit replacement character
+            self.emit_char('\u{FFFD}');
+            return;
+        };
+
+        self.state = ParserState.Utf8Sequence {
+            bytes: bytes,
+            len: 1,
+            expected: expected,
+        };
+    }
+
+    // =========================================================================
+    // Event emission helpers
+    // =========================================================================
+
+    fn emit_key(&mut self, code: KeyCode, modifiers: Modifiers) {
+        self.pending_events.push_back(Event.Key(KeyEvent {
+            code: code,
+            modifiers: modifiers,
+            kind: KeyEventKind.Press,
+        }));
+    }
+
+    fn emit_char(&mut self, ch: Char) {
+        self.emit_key(KeyCode.Char(ch), Modifiers.NONE);
+    }
+}
+
+// =============================================================================
+// Utility functions
+// =============================================================================
+
+/// Decode a UTF-8 byte sequence into a single Char.
+fn decode_utf8(bytes: &[Byte; 4], len: Int) -> Char {
+    let cp = match len {
+        2 => {
+            ((bytes[0] & 0x1F) as Int) << 6
+                | (bytes[1] & 0x3F) as Int
+        }
+        3 => {
+            ((bytes[0] & 0x0F) as Int) << 12
+                | ((bytes[1] & 0x3F) as Int) << 6
+                | (bytes[2] & 0x3F) as Int
+        }
+        4 => {
+            ((bytes[0] & 0x07) as Int) << 18
+                | ((bytes[1] & 0x3F) as Int) << 12
+                | ((bytes[2] & 0x3F) as Int) << 6
+                | (bytes[3] & 0x3F) as Int
+        }
+        _ => 0xFFFD,  // Replacement character
+    };
+    cp as Char
+}
+
+/// Convert a List of bytes to Text (assuming UTF-8).
+fn bytes_to_text(data: &List<Byte>) -> Text {
+    let mut result = "";
+    for i in 0..data.len() {
+        result = result + (data[i] as Char).to_text();
+    }
+    result
+}

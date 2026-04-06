@@ -1,0 +1,5 @@
+fn main() {
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let result = stream [x * x for x in nums if x > 5];
+    println("Stream with map and filter");
+}

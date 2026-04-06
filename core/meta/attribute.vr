@@ -1,0 +1,611 @@
+// =============================================================================
+// attribute.vr - Attribute Representation and Processing
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Attributes
+//
+// Attributes in Verum use the `@` prefix and provide metadata for:
+// - Derive macros: `@derive(Clone, Debug)`
+// - Conditional compilation: `@cfg(target_os = "linux")`
+// - Compiler hints: `@inline`, `@cold`, `@repr(C)`
+// - Custom attributes: `@my_attribute(arg1, arg2)`
+//
+// =============================================================================
+
+module meta.attribute;
+
+mount core.{Text, List, Maybe};
+mount meta.span.{Span};
+mount meta.token.{TokenStream};
+
+// =============================================================================
+// Attribute
+// =============================================================================
+
+/// Attribute representation
+///
+/// Attributes can appear on:
+/// - Type definitions
+/// - Functions
+/// - Fields
+/// - Variants
+/// - Parameters
+/// - Modules
+/// - Items
+///
+/// ## Syntax Forms
+///
+/// ```verum
+/// @name                           // Simple attribute
+/// @name(args)                     // With arguments
+/// @name = value                   // With value
+/// @name(key = value, ...)         // Named arguments
+/// ```
+public type Attribute is {
+    /// Attribute name (without @)
+    name: Text,
+
+    /// Attribute style
+    style: AttributeStyle,
+
+    /// Attribute arguments
+    args: List<AttributeArg>,
+
+    /// Raw token stream of arguments
+    tokens: TokenStream,
+
+    /// Source span
+    span: Span,
+};
+
+implement Attribute {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Create simple attribute (no args)
+    public fn simple(name: Text) -> Self {
+        Self {
+            name,
+            style: AttributeStyle.Word,
+            args: List.new(),
+            tokens: TokenStream.empty(),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create attribute with single value
+    public fn with_value(name: Text, value: AttributeValue) -> Self {
+        Self {
+            name,
+            style: AttributeStyle.Value,
+            args: List.of(AttributeArg {
+                name: None,
+                value,
+                span: Span.call_site(),
+            }),
+            tokens: TokenStream.empty(),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create attribute with arguments
+    public fn with_args(name: Text, args: List<AttributeArg>) -> Self {
+        Self {
+            name,
+            style: AttributeStyle.Call,
+            args,
+            tokens: TokenStream.empty(),
+            span: Span.call_site(),
+        }
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Check if attribute has no arguments
+    public fn is_simple(&self) -> Bool {
+        self.style == AttributeStyle.Word
+    }
+
+    /// Check if attribute has arguments
+    public fn has_args(&self) -> Bool {
+        !self.args.is_empty()
+    }
+
+    /// Get number of arguments
+    public fn arg_count(&self) -> Int {
+        self.args.len()
+    }
+
+    /// Check if specific named argument exists
+    public fn has_arg(&self, name: Text) -> Bool {
+        self.args.iter().any(|a| a.name == Some(name))
+    }
+
+    // =========================================================================
+    // Argument Access
+    // =========================================================================
+
+    /// Get first argument value
+    public fn first_arg(&self) -> Maybe<&AttributeArg> {
+        self.args.first()
+    }
+
+    /// Get argument by index
+    public fn get_arg(&self, index: Int) -> Maybe<&AttributeArg> {
+        self.args.get(index)
+    }
+
+    /// Get argument by name
+    public fn get_named_arg(&self, name: Text) -> Maybe<&AttributeArg> {
+        self.args.iter().find(|a| a.name == Some(name))
+    }
+
+    /// Get all positional arguments (unnamed)
+    public fn positional_args(&self) -> List<&AttributeArg> {
+        self.args.iter().filter(|a| a.name.is_none()).collect()
+    }
+
+    /// Get all named arguments
+    public fn named_args(&self) -> List<&AttributeArg> {
+        self.args.iter().filter(|a| a.name.is_some()).collect()
+    }
+
+    // =========================================================================
+    // Value Extraction
+    // =========================================================================
+
+    /// Get single string value
+    ///
+    /// For `@attr("value")` or `@attr = "value"`
+    public fn as_string(&self) -> Maybe<Text> {
+        self.first_arg().and_then(|a| a.as_string())
+    }
+
+    /// Get single integer value
+    public fn as_int(&self) -> Maybe<Int> {
+        self.first_arg().and_then(|a| a.as_int())
+    }
+
+    /// Get single boolean value
+    public fn as_bool(&self) -> Maybe<Bool> {
+        self.first_arg().and_then(|a| a.as_bool())
+    }
+
+    /// Get list of identifiers
+    ///
+    /// For `@attr(A, B, C)`
+    public fn as_ident_list(&self) -> List<Text> {
+        self.args.iter()
+            .filter_map(|a| a.as_ident())
+            .collect()
+    }
+
+    /// Parse attribute as key-value pairs
+    ///
+    /// For `@attr(key1 = "value1", key2 = 42)`
+    public fn as_key_values(&self) -> List<(Text, AttributeValue)> {
+        self.args.iter()
+            .filter_map(|a| {
+                a.name.clone().map(|n| (n, a.value.clone()))
+            })
+            .collect()
+    }
+
+    // =========================================================================
+    // Common Attribute Checks
+    // =========================================================================
+
+    /// Check if this is @cfg attribute
+    public fn is_cfg(&self) -> Bool {
+        self.name == "cfg"
+    }
+
+    /// Check if this is @derive attribute
+    public fn is_derive(&self) -> Bool {
+        self.name == "derive"
+    }
+
+    /// Check if this is @repr attribute
+    public fn is_repr(&self) -> Bool {
+        self.name == "repr"
+    }
+
+    /// Check if this is @inline attribute
+    public fn is_inline(&self) -> Bool {
+        self.name == "inline"
+    }
+
+    /// Check if this is @deprecated attribute
+    public fn is_deprecated(&self) -> Bool {
+        self.name == "deprecated"
+    }
+
+    /// Check if this is a doc comment attribute
+    public fn is_doc(&self) -> Bool {
+        self.name == "doc"
+    }
+
+    /// Check if attribute is compiler-known
+    public fn is_builtin(&self) -> Bool {
+        BUILTIN_ATTRIBUTES.contains(&self.name.as_str())
+    }
+}
+
+/// Built-in attribute names
+const BUILTIN_ATTRIBUTES: &[&str] = &[
+    "cfg", "cfg_attr",
+    "derive",
+    "repr", "align", "packed",
+    "inline", "cold", "hot",
+    "must_use", "allow", "warn", "deny", "forbid",
+    "deprecated", "doc",
+    "test", "bench", "ignore",
+    "entry", "no_mangle", "export_name", "link_name",
+    "intrinsic", "compiler_intrinsic", "compiler_provided", "compiler_type",
+    "transparent", "non_exhaustive",
+];
+
+// =============================================================================
+// AttributeStyle
+// =============================================================================
+
+/// Attribute syntax style
+@repr(UInt8)
+public type AttributeStyle is
+    /// Simple word: `@inline`
+    | Word
+    /// With value: `@inline = always`
+    | Value
+    /// Function call: `@derive(Clone, Debug)`
+    | Call;
+
+// =============================================================================
+// AttributeArg
+// =============================================================================
+
+/// Single attribute argument
+public type AttributeArg is {
+    /// Argument name (for named args)
+    name: Maybe<Text>,
+
+    /// Argument value
+    value: AttributeValue,
+
+    /// Source span
+    span: Span,
+};
+
+implement AttributeArg {
+    /// Create positional argument
+    public fn positional(value: AttributeValue) -> Self {
+        Self {
+            name: None,
+            value,
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create named argument
+    public fn named(name: Text, value: AttributeValue) -> Self {
+        Self {
+            name: Some(name),
+            value,
+            span: Span.call_site(),
+        }
+    }
+
+    /// Check if this is a named argument
+    public fn is_named(&self) -> Bool {
+        self.name.is_some()
+    }
+
+    /// Get as string value
+    public fn as_string(&self) -> Maybe<Text> {
+        match &self.value {
+            AttributeValue.String(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    /// Get as integer value
+    public fn as_int(&self) -> Maybe<Int> {
+        match &self.value {
+            AttributeValue.Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Get as boolean value
+    public fn as_bool(&self) -> Maybe<Bool> {
+        match &self.value {
+            AttributeValue.Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Get as identifier
+    public fn as_ident(&self) -> Maybe<Text> {
+        match &self.value {
+            AttributeValue.Ident(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// AttributeValue
+// =============================================================================
+
+/// Attribute argument value
+@repr(UInt8)
+public type AttributeValue is
+    /// Identifier: `Clone`, `target_os`
+    | Ident(Text)
+    /// String literal: `"linux"`, `"deprecated"`
+    | String(Text)
+    /// Integer literal: `42`, `0xFF`
+    | Int(Int)
+    /// Float literal: `3.14`
+    | Float(Float64)
+    /// Boolean: `true`, `false`
+    | Bool(Bool)
+    /// Nested attribute: `cfg(unix)`
+    | Nested(List<AttributeArg>)
+    /// Binary expression: `target_os = "linux"`
+    | Eq { left: Text, right: Heap<AttributeValue> }
+    /// Raw tokens (for complex cases)
+    | Tokens(TokenStream);
+
+implement AttributeValue {
+    /// Create identifier value
+    public fn ident(name: Text) -> Self {
+        AttributeValue.Ident(name)
+    }
+
+    /// Create string value
+    public fn string(s: Text) -> Self {
+        AttributeValue.String(s)
+    }
+
+    /// Create integer value
+    public fn int(i: Int) -> Self {
+        AttributeValue.Int(i)
+    }
+
+    /// Create boolean value
+    public fn bool(b: Bool) -> Self {
+        AttributeValue.Bool(b)
+    }
+
+    /// Check if value is an identifier
+    public fn is_ident(&self) -> Bool {
+        match self {
+            Ident(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Get as identifier string
+    public fn as_ident(&self) -> Maybe<Text> {
+        match self {
+            Ident(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    /// Get as string
+    public fn as_string(&self) -> Maybe<Text> {
+        match self {
+            String(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// CfgPredicate
+// =============================================================================
+
+/// Conditional compilation predicate
+///
+/// Represents the condition in `@cfg(...)` attributes.
+@repr(UInt8)
+public type CfgPredicate is
+    /// Simple predicate: `@cfg(unix)`
+    | Simple(Text)
+    /// Key-value: `@cfg(target_os = "linux")`
+    | KeyValue { key: Text, value: Text }
+    /// All predicates: `@cfg(all(unix, feature = "foo"))`
+    | All(List<CfgPredicate>)
+    /// Any predicate: `@cfg(any(windows, target_os = "macos"))`
+    | Any(List<CfgPredicate>)
+    /// Not predicate: `@cfg(not(windows))`
+    | Not(Heap<CfgPredicate>);
+
+implement CfgPredicate {
+    /// Evaluate predicate against configuration
+    @compiler_intrinsic
+    public fn evaluate(&self) -> Bool;
+
+    /// Parse from attribute
+    public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_cfg() {
+            return None;
+        }
+
+        Self.parse_args(&attr.args)
+    }
+
+    /// Parse from arguments
+    fn parse_args(args: &List<AttributeArg>) -> Maybe<Self> {
+        if args.len() == 1 {
+            Self.parse_value(&args[0].value)
+        } else {
+            None
+        }
+    }
+
+    fn parse_value(value: &AttributeValue) -> Maybe<Self> {
+        match value {
+            AttributeValue.Ident(name) => Some(CfgPredicate.Simple(name.clone())),
+            AttributeValue.Eq { left, right } => {
+                match right.as_ref() {
+                    AttributeValue.String(s) => Some(CfgPredicate.KeyValue {
+                        key: left.clone(),
+                        value: s.clone(),
+                    }),
+                    _ => None,
+                }
+            }
+            AttributeValue.Nested(args) if args.len() > 0 => {
+                if let Some(first) = args.first() {
+                    if let Some(name) = first.value.as_ident() {
+                        match name.as_str() {
+                            "all" => {
+                                let preds = args.iter()
+                                    .skip(1)
+                                    .filter_map(|a| Self.parse_value(&a.value))
+                                    .collect();
+                                Some(CfgPredicate.All(preds))
+                            }
+                            "any" => {
+                                let preds = args.iter()
+                                    .skip(1)
+                                    .filter_map(|a| Self.parse_value(&a.value))
+                                    .collect();
+                                Some(CfgPredicate.Any(preds))
+                            }
+                            "not" => {
+                                if args.len() == 2 {
+                                    Self.parse_value(&args[1].value)
+                                        .map(|p| CfgPredicate.Not(Heap.new(p)))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// DeriveInfo
+// =============================================================================
+
+/// Parsed @derive attribute
+public type DeriveInfo is {
+    /// Derive macro names
+    derives: List<Text>,
+
+    /// Source span
+    span: Span,
+};
+
+implement DeriveInfo {
+    /// Parse from @derive attribute
+    public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_derive() {
+            return None;
+        }
+
+        let derives = attr.as_ident_list();
+        if derives.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            derives,
+            span: attr.span,
+        })
+    }
+
+    /// Check if derives specific macro
+    public fn derives(&self, name: Text) -> Bool {
+        self.derives.contains(&name)
+    }
+}
+
+// =============================================================================
+// ReprInfo
+// =============================================================================
+
+/// Parsed @repr attribute
+public type ReprInfo is {
+    /// Representation kind
+    kind: ReprKind,
+
+    /// Alignment (if specified)
+    align: Maybe<Int>,
+
+    /// Whether packed
+    packed: Bool,
+
+    /// Source span
+    span: Span,
+};
+
+/// Representation kind
+@repr(UInt8)
+public type ReprKind is
+    /// Default (Verum) representation
+    | Verum
+    /// C-compatible representation
+    | C
+    /// Transparent (single-field wrapper)
+    | Transparent
+    /// Specific integer type for enum discriminant
+    | Int(Text);
+
+implement ReprInfo {
+    /// Parse from @repr attribute
+    public fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_repr() {
+            return None;
+        }
+
+        let mut kind = ReprKind.Verum;
+        let mut align = None;
+        let mut packed = false;
+
+        for arg in attr.args.iter() {
+            match arg.value.as_ident() {
+                Some("C") => kind = ReprKind.C,
+                Some("transparent") => kind = ReprKind.Transparent,
+                Some("packed") => packed = true,
+                Some(int_type) if is_int_repr(int_type) => kind = ReprKind.Int(int_type.to_string()),
+                _ => {}
+            }
+
+            if arg.name == Some("align".to_string()) {
+                if let Some(n) = arg.as_int() {
+                    align = Some(n);
+                }
+            }
+        }
+
+        Some(Self { kind, align, packed, span: attr.span })
+    }
+}
+
+fn is_int_repr(s: &str) -> Bool {
+    match s {
+        "Int8" | "Int16" | "Int32" | "Int64" |
+        "UInt8" | "UInt16" | "UInt32" | "UInt64" |
+        "ISize" | "USize" => true,
+        _ => false,
+    }
+}

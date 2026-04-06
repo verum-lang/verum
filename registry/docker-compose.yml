@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  registry:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://verum:verum@postgres:5432/registry
+      STORAGE_PATH: /data/packages
+      REDIS_URL: redis://redis:6379
+      SEARCH_URL: http://meilisearch:7700
+      REGISTRY_HOST: 0.0.0.0:8080
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      meilisearch:
+        condition: service_started
+    volumes:
+      - package-data:/data/packages
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: verum
+      POSTGRES_PASSWORD: verum
+      POSTGRES_DB: registry
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verum -d registry"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    environment:
+      MEILI_MASTER_KEY: verum-search-key
+      MEILI_ENV: production
+    volumes:
+      - search-data:/meili_data
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  package-data:
+  redis-data:
+  search-data:

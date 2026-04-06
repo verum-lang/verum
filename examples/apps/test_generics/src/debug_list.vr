@@ -1,0 +1,29 @@
+// Debug list issue
+
+type MyList<T> is
+    | Nil
+    | Cons(T, MyList<T>);
+
+fn list_length<T>(list: MyList<T>) -> Int {
+    match list {
+        Nil => {
+            print("Matched Nil");
+            0
+        },
+        Cons(x, xs) => {
+            print("Matched Cons with value: " + x.to_string());
+            let rest_len = list_length(xs);
+            print("Rest length: " + rest_len.to_string());
+            1 + rest_len
+        }
+    }
+}
+
+fn main() {
+    print("Creating list [1,2,3]");
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+
+    print("Calling list_length");
+    let len = list_length(list);
+    print("Final length: " + len.to_string());
+}

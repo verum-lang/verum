@@ -1,0 +1,66 @@
+// Test: Basic FFI block declarations
+// Tests FFI boundary declarations with various function signatures
+
+// Test 1: Simple FFI block with pure functions
+ffi MathLib {
+    @extern("C")
+    fn sqrt(x: f64) -> f64;
+    requires x >= 0.0;
+    ensures result >= 0.0;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+
+    @extern("C")
+    fn pow(base: f64, exp: f64) -> f64;
+    requires true;
+    ensures true;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+// Test 2: FFI with different return types
+ffi IntOperations {
+    @extern("C")
+    fn abs(x: i32) -> i32;
+    requires true;
+    ensures result >= 0;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+// Test 3: FFI with pointer parameters
+ffi StringOps {
+    @extern("C")
+    fn strlen(s: *const u8) -> usize;
+    requires s != 0;
+    ensures result >= 0;
+    memory_effects = Reads([s]);
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+// Test 4: Use FFI functions in safe code
+fn test_ffi_calls() {
+    // Test calling pure math function
+    let result1 = MathLib.sqrt(16.0);
+    print("sqrt(16.0) = ");
+    print(result1);
+
+    // Test calling abs
+    let result2 = IntOperations.abs(-42);
+    print("abs(-42) = ");
+    print(result2);
+}
+
+fn main() {
+    print("=== FFI Basic Test ===");
+    test_ffi_calls();
+    print("FFI basic test PASS");
+}

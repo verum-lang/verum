@@ -1,0 +1,442 @@
+// Verum Registry - Package Handlers (Updated with Repository Pattern)
+//
+// HTTP handlers for package operations using Repository pattern
+// This demonstrates the Dependency Inversion Principle (DIP):
+// - Handlers depend on Repository abstractions (protocols)
+// - NOT on concrete Database implementation
+//
+// Benefits:
+// - Testability: Can mock repositories for unit tests
+// - Flexibility: Can swap storage implementations
+// - Separation of Concerns: Domain logic decoupled from infrastructure
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int};
+
+// Import repository protocols (NOT Database context)
+mount super.super.domain.repositories.{PackageRepository, PackageVersionRepository};
+
+// Import Storage and Auth contexts (still needed for file storage and authentication)
+mount super.super.contexts.{Storage, Auth};
+mount super.super.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.dto.package_dto.{
+    PackageVersionDto,
+    PublishRequestDto,
+    PublishResponseDto,
+    YankRequestDto,
+    YankResponseDto,
+    PackageListResponseDto,
+    PackageVersionsResponseDto,
+    UpdatePackageMetadataDto,
+    UpdatePackageResponseDto,
+    DownloadArtifactResponseDto,
+    PackageStatsDto,
+};
+
+// Import domain types
+mount super.super.domain.version.{SemVer};
+mount super.super.domain.package.{Package, PackageVersion};
+mount super.super.domain.refinements.{ValidatedPackageName};
+
+// Import validation service
+mount super.super.services.validation_service.{
+    validate_publish_request,
+    validate_pagination,
+    validate_not_empty,
+};
+
+// ============================================================================
+// HTTP Handlers - Using Repository Pattern
+// ============================================================================
+
+/// Get a specific package version
+///
+/// BEFORE (Direct Database access):
+/// ```verum
+/// pub async fn get_package(name: Text, version: Text) -> Result<PackageVersionDto, RegistryError>
+///     using [Database, Storage]
+/// {
+///     Database.fetch_one(f"SELECT * FROM packages WHERE id = '{package_id}'").await?;
+///     // ...
+/// }
+/// ```
+///
+/// AFTER (Repository pattern):
+/// ```verum
+/// pub async fn get_package(name: Text, version: Text) -> Result<PackageVersionDto, RegistryError>
+///     using [PackageVersionRepository, Storage]
+/// {
+///     let pkg_name = ValidatedPackageName.try_from(name)?;
+///     let semver = SemVer.parse(version)?;
+///     let maybe_version = PackageVersionRepository.get_version(pkg_name, semver).await?;
+///     // ...
+/// }
+/// ```
+///
+/// GET /api/v1/packages/{name}/{version}
+pub async fn get_package(name: Text, version: Text) -> Result<PackageVersionDto, RegistryError>
+    using [PackageVersionRepository, Storage]
+{
+    // Validate inputs
+    validate_not_empty(&name, "name")?;
+    validate_not_empty(&version, "version")?;
+
+    // Parse and validate domain types
+    let pkg_name = match ValidatedPackageName.try_from(name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    let semver = match SemVer.parse(version.clone()) {
+        Result.Ok(v) => v,
+        Result.Err(err) => return Result.Err(RegistryError.invalid_version(version, err)),
+    };
+
+    // Use repository to fetch version
+    let maybe_version = PackageVersionRepository.get_version(pkg_name.clone(), semver).await?;
+
+    match maybe_version {
+        Maybe.Some(pkg_version) => {
+            // Get download URL from storage
+            let url = Storage.get_url(f"packages/{name}-{version}.tar.gz").await?;
+
+            // Convert domain entity to DTO
+            let dto = PackageVersionDto {
+                version: pkg_version.version.to_string(),
+                description: pkg_version.description.clone(),
+                dependencies: List.new(), // Would convert pkg_version.dependencies
+                published_at: pkg_version.published_at.to_string(),
+                published_by: pkg_version.published_by.clone(),
+                checksum: pkg_version.checksum.clone(),
+                download_url: url,
+            };
+
+            Result.Ok(dto)
+        },
+        Maybe.None => {
+            Result.Err(RegistryError.version_not_found(name, version))
+        }
+    }
+}
+
+/// Publish a new package version
+///
+/// BEFORE: Direct Database.execute()
+/// AFTER: Uses PackageRepository.save() and PackageVersionRepository.save()
+///
+/// POST /api/v1/packages
+pub async fn publish_package(req: PublishRequestDto, token: Text) -> Result<PublishResponseDto, RegistryError>
+    using [PackageRepository, PackageVersionRepository, Storage, Auth]
+{
+    // Verify authentication
+    let user = match Auth.verify_token(token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Check permissions
+    if user.role != "publisher" && user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Insufficient permissions"));
+    }
+
+    // Validate request
+    validate_publish_request(&req)?;
+
+    // Parse package name
+    let pkg_name = match ValidatedPackageName.try_from(req.name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    // Parse version
+    let version = match SemVer.parse(req.version.clone()) {
+        Result.Ok(v) => v,
+        Result.Err(err) => return Result.Err(RegistryError.invalid_version(req.version, err)),
+    };
+
+    // Check if version already exists using repository
+    if PackageVersionRepository.exists(pkg_name.clone(), version.clone()).await? {
+        return Result.Err(RegistryError.package_already_exists(req.name.clone()));
+    }
+
+    // Store tarball
+    let package_id = f"{req.name}-{req.version}";
+    Storage.store(f"packages/{package_id}.tar.gz", req.tarball).await?;
+
+    // Create domain entities
+    let package = Package.new(pkg_name.clone(), user.username.clone())
+        .with_description(req.description.clone())
+        .add_version(version.clone());
+
+    let package_version = PackageVersion.new(pkg_name.clone(), version, user.username.clone());
+
+    // Save using repositories
+    PackageRepository.save(package).await?;
+    PackageVersionRepository.save(package_version).await?;
+
+    // Return success response
+    Result.Ok(PublishResponseDto.success(req.name, req.version))
+}
+
+/// Yank a package version
+///
+/// BEFORE: Database.execute("UPDATE packages SET yanked = true ...")
+/// AFTER: PackageVersionRepository.yank_version(name, version)
+///
+/// DELETE /api/v1/packages/{name}/{version}
+pub async fn yank_package(req: YankRequestDto, token: Text) -> Result<YankResponseDto, RegistryError>
+    using [PackageVersionRepository, Auth]
+{
+    // Verify authentication
+    let user = match Auth.verify_token(token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Only admins can yank packages
+    if user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Insufficient permissions"));
+    }
+
+    // Parse inputs
+    let pkg_name = match ValidatedPackageName.try_from(req.name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    let version = match SemVer.parse(req.version.clone()) {
+        Result.Ok(v) => v,
+        Result.Err(err) => return Result.Err(RegistryError.invalid_version(req.version, err)),
+    };
+
+    // Yank using repository
+    PackageVersionRepository.yank_version(pkg_name, version).await?;
+
+    // Return success response
+    Result.Ok(YankResponseDto.success(req.name, req.version))
+}
+
+/// List packages with pagination
+///
+/// BEFORE: Database.fetch_all(...)
+/// AFTER: PackageRepository.list_all(offset, limit)
+///
+/// GET /api/v1/packages?page=1&limit=20
+pub async fn list_packages(page: Int, limit: Int) -> Result<PackageListResponseDto, RegistryError>
+    using [PackageRepository]
+{
+    // Validate pagination
+    validate_pagination(page, limit)?;
+
+    // Calculate offset
+    let offset = (page - 1) * limit;
+
+    // Fetch packages using repository
+    let packages = PackageRepository.list_all(offset, limit).await?;
+
+    // Get total count
+    let total = PackageRepository.count().await?;
+
+    // Convert to DTOs (simplified for demo)
+    let package_dtos = List.new(); // Would convert packages to DTOs
+
+    Result.Ok(PackageListResponseDto {
+        packages: package_dtos,
+        total: total,
+        page: page,
+        limit: limit,
+    })
+}
+
+/// List all versions of a package
+///
+/// BEFORE: Database.query("SELECT version, ... FROM package_versions WHERE ...")
+/// AFTER: PackageVersionRepository.get_all_versions(name)
+///
+/// GET /api/v1/packages/{name}/versions
+pub async fn list_package_versions(name: Text) -> Result<PackageVersionsResponseDto, RegistryError>
+    using [PackageVersionRepository]
+{
+    // Validate input
+    validate_not_empty(&name, "name")?;
+
+    // Parse package name
+    let pkg_name = match ValidatedPackageName.try_from(name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    // Fetch versions using repository
+    let versions = PackageVersionRepository.get_all_versions(pkg_name).await?;
+
+    // Check if package exists (no versions means package doesn't exist)
+    if versions.len() == 0 {
+        return Result.Err(RegistryError.package_not_found(name));
+    }
+
+    // Convert to version summaries (simplified)
+    let version_dtos = List.new(); // Would convert versions to VersionSummaryDto
+
+    Result.Ok(PackageVersionsResponseDto.new(version_dtos, versions.len()))
+}
+
+/// Update package metadata
+///
+/// BEFORE: Database.execute("UPDATE packages SET description = ..., ...")
+/// AFTER: PackageRepository.update_metadata(package)
+///
+/// PUT /api/v1/packages/{name}
+pub async fn update_package_metadata(
+    name: Text,
+    req: UpdatePackageMetadataDto,
+    token: Text
+) -> Result<UpdatePackageResponseDto, RegistryError>
+    using [PackageRepository, Auth]
+{
+    // Verify authentication
+    let user = match Auth.verify_token(token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    // Validate input
+    validate_not_empty(&name, "name")?;
+
+    // Parse package name
+    let pkg_name = match ValidatedPackageName.try_from(name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    // Fetch package using repository
+    let maybe_package = PackageRepository.get_by_name(pkg_name.clone()).await?;
+
+    match maybe_package {
+        Maybe.Some(package) => {
+            // Check permissions
+            if package.owner != user.username && user.role != "admin" {
+                return Result.Err(RegistryError.unauthorized("Only package owner or admin can update metadata"));
+            }
+
+            // Update package with new metadata
+            let updated_package = package.with_description(req.description.clone());
+            // ... update other fields
+
+            // Save using repository
+            PackageRepository.update_metadata(updated_package).await?;
+
+            Result.Ok(UpdatePackageResponseDto.success(name))
+        },
+        Maybe.None => {
+            Result.Err(RegistryError.package_not_found(name))
+        }
+    }
+}
+
+/// Download package artifact
+///
+/// BEFORE: Multiple Database queries
+/// AFTER: PackageVersionRepository.get_version() + increment_downloads()
+///
+/// GET /api/v1/packages/{name}/{version}/download
+pub async fn download_package_artifact(
+    name: Text,
+    version: Text
+) -> Result<DownloadArtifactResponseDto, RegistryError>
+    using [PackageRepository, PackageVersionRepository, Storage]
+{
+    // Validate inputs
+    validate_not_empty(&name, "name")?;
+    validate_not_empty(&version, "version")?;
+
+    // Parse inputs
+    let pkg_name = match ValidatedPackageName.try_from(name.clone()) {
+        Result.Ok(n) => n,
+        Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+    };
+
+    let semver = match SemVer.parse(version.clone()) {
+        Result.Ok(v) => v,
+        Result.Err(err) => return Result.Err(RegistryError.invalid_version(version, err)),
+    };
+
+    // Fetch version using repository
+    let maybe_version = PackageVersionRepository.get_version(pkg_name.clone(), semver).await?;
+
+    match maybe_version {
+        Maybe.Some(pkg_version) => {
+            // Check if yanked
+            if PackageVersionRepository.is_yanked(pkg_name.clone(), pkg_version.version.clone()).await? {
+                return Result.Err(RegistryError.validation_error("version", "This version has been yanked"));
+            }
+
+            // Get download URL from storage
+            let download_url = Storage.get_url(f"packages/{name}-{version}.tar.gz").await?;
+
+            // Increment download counters using repositories
+            PackageRepository.increment_downloads(pkg_name).await?;
+            // Note: Would need to add increment_downloads to PackageVersionRepository protocol
+
+            Result.Ok(DownloadArtifactResponseDto.new(
+                download_url,
+                pkg_version.checksum,
+                version
+            ))
+        },
+        Maybe.None => {
+            Result.Err(RegistryError.version_not_found(name, version))
+        }
+    }
+}
+
+// ============================================================================
+// Key Differences Summary
+// ============================================================================
+
+// BEFORE (Direct Database Access):
+// - Handlers depend on Database context
+// - SQL queries embedded in handler code
+// - Hard to test (need real database)
+// - Tight coupling to PostgreSQL
+//
+// Example:
+// pub async fn get_package(...) using [Database, Storage] {
+//     Database.fetch_one(f"SELECT * FROM packages WHERE id = '{package_id}'").await?;
+// }
+
+// AFTER (Repository Pattern):
+// - Handlers depend on Repository protocols
+// - No SQL in handler code
+// - Easy to test (mock repositories)
+// - Can swap storage implementations
+//
+// Example:
+// pub async fn get_package(...) using [PackageRepository, Storage] {
+//     PackageRepository.get_by_name(name).await?;
+// }
+
+// ============================================================================
+// Testing Benefits
+// ============================================================================
+
+// With repositories, you can create mock implementations for testing:
+//
+// pub type MockPackageRepository is {
+//     packages: List<Package>
+// };
+//
+// implement PackageRepository for MockPackageRepository {
+//     async fn get_by_name(name: PackageName) -> Result<Maybe<Package>, RegistryError> {
+//         // Return test data from in-memory list
+//         Result.Ok(self.packages.find(|p| p.name == name))
+//     }
+// }
+//
+// Then in tests:
+// let mock_repo = MockPackageRepository { packages: test_packages };
+// provide [PackageRepository = mock_repo] {
+//     let result = get_package("test-package", "1.0.0").await;
+//     assert!(result.is_ok());
+// }

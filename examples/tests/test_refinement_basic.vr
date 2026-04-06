@@ -1,0 +1,6 @@
+// Test basic refinement parsing - inline syntax only
+// Syntax: Type{> 0}
+
+fn main() -> Int {
+    42
+}

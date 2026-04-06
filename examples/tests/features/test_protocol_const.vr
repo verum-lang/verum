@@ -1,0 +1,13 @@
+// Test protocol with const
+
+type Sized is protocol {
+    const SIZE: Int;
+
+    fn size(&self) -> Int {
+        2
+    }
+};
+
+fn main() {
+    print("Protocol const test");
+}

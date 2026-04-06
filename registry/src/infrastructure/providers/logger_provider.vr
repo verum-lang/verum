@@ -1,0 +1,140 @@
+// Stdout Logger Provider
+//
+// Implements the Logger context protocol with structured JSON output to stdout.
+// Each log line is a JSON object with timestamp, level, message, and fields.
+
+mount core.base.Text;
+mount core.collections.Map;
+mount core.time.{unix_timestamp, format_iso8601};
+mount core.io.{print, eprintln};
+
+mount crate.contexts.logger.{Logger, LogLevel, LogContext};
+
+// ============================================================================
+// StdoutLoggerProvider
+// ============================================================================
+
+pub type StdoutLoggerProvider is {
+    fields: Map<Text, Text>,
+    min_level: Int,
+};
+
+implement StdoutLoggerProvider {
+    pub fn new() -> StdoutLoggerProvider {
+        StdoutLoggerProvider {
+            fields: Map.new(),
+            min_level: 2,  // Info
+        }
+    }
+
+    fn level_value(level: LogLevel) -> Int {
+        match level {
+            LogLevel.Trace => 0,
+            LogLevel.Debug => 1,
+            LogLevel.Info => 2,
+            LogLevel.Warn => 3,
+            LogLevel.Error => 4,
+            LogLevel.Fatal => 5,
+        }
+    }
+
+    fn level_name(level: LogLevel) -> Text {
+        match level {
+            LogLevel.Trace => "TRACE",
+            LogLevel.Debug => "DEBUG",
+            LogLevel.Info => "INFO",
+            LogLevel.Warn => "WARN",
+            LogLevel.Error => "ERROR",
+            LogLevel.Fatal => "FATAL",
+        }
+    }
+
+    fn emit(self, level: LogLevel, message: Text) {
+        if StdoutLoggerProvider.level_value(level) < self.min_level {
+            return;
+        }
+
+        let ts = format_iso8601(unix_timestamp());
+        let lvl = StdoutLoggerProvider.level_name(level);
+        let fields_str = self.format_fields();
+
+        let line = f"{{\"ts\":\"{ts}\",\"level\":\"{lvl}\",\"msg\":\"{message}\"{fields_str}}}";
+
+        match level {
+            LogLevel.Error => eprintln(line),
+            LogLevel.Fatal => eprintln(line),
+            _ => print(line),
+        }
+    }
+
+    fn format_fields(self) -> Text {
+        let mut parts = "";
+        for key in self.fields.keys() {
+            match self.fields.get(key) {
+                Maybe.Some(val) => {
+                    parts = f"{parts},\"{key}\":\"{val}\"";
+                },
+                Maybe.None => {},
+            }
+        }
+        parts
+    }
+}
+
+implement Logger for StdoutLoggerProvider {
+    fn trace(self, message: Text) -> () {
+        self.emit(LogLevel.Trace, message);
+    }
+
+    fn debug(self, message: Text) -> () {
+        self.emit(LogLevel.Debug, message);
+    }
+
+    fn info(self, message: Text) -> () {
+        self.emit(LogLevel.Info, message);
+    }
+
+    fn warn(self, message: Text) -> () {
+        self.emit(LogLevel.Warn, message);
+    }
+
+    fn error(self, message: Text) -> () {
+        self.emit(LogLevel.Error, message);
+    }
+
+    fn fatal(self, message: Text) -> () {
+        self.emit(LogLevel.Fatal, message);
+    }
+
+    fn with_field(self, key: Text, value: Text) -> Logger {
+        let mut new_fields = self.fields.clone();
+        new_fields.insert(key, value);
+        StdoutLoggerProvider {
+            fields: new_fields,
+            min_level: self.min_level,
+        }
+    }
+
+    fn with_fields(self, fields: Map<Text, Text>) -> Logger {
+        let mut merged = self.fields.clone();
+        for key in fields.keys() {
+            match fields.get(key) {
+                Maybe.Some(val) => merged.insert(key.clone(), val.clone()),
+                Maybe.None => {},
+            }
+        }
+        StdoutLoggerProvider {
+            fields: merged,
+            min_level: self.min_level,
+        }
+    }
+
+    fn log(self, level: LogLevel, message: Text) -> () {
+        self.emit(level, message);
+    }
+
+    fn log_with_context(self, ctx: LogContext, message: Text) -> () {
+        let enriched = self.with_fields(ctx.fields);
+        enriched.emit(ctx.level, message);
+    }
+}

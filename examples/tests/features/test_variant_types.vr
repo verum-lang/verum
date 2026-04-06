@@ -1,0 +1,349 @@
+// Comprehensive test for variant types (sum types / enums)
+// Tests major variant type features that currently work in Verum
+
+// ============================================================================
+// Test 1: Simple variant types (unit variants) - INLINE SYNTAX
+// ============================================================================
+type Color is Red | Green | Blue;
+
+fn color_to_text(c: Color) -> Text {
+    match c {
+        Red => "Red",
+        Green => "Green",
+        Blue => "Blue"
+    }
+}
+
+fn is_red(c: Color) -> Bool {
+    match c {
+        Red => true,
+        _ => false
+    }
+}
+
+fn classify_color(c: Color) -> Text {
+    match c {
+        Red => "Primary color (additive)",
+        Green => "Primary color (additive)",
+        Blue => "Primary color (additive)"
+    }
+}
+
+// ============================================================================
+// Test 2: Variants with tuple data - INLINE SYNTAX
+// ============================================================================
+type Maybe<T> is Some(T) | None;
+
+fn unwrap_or<T>(maybe: Maybe<T>, default: T) -> T {
+    match maybe {
+        Some(val) => val,
+        None => default
+    }
+}
+
+fn is_some<T>(maybe: Maybe<T>) -> Bool {
+    match maybe {
+        Some(_) => true,
+        None => false
+    }
+}
+
+fn map_maybe<T>(maybe: Maybe<T>, f: fn(T) -> T) -> Maybe<T> {
+    match maybe {
+        Some(val) => Some(f(val)),
+        None => None
+    }
+}
+
+// ============================================================================
+// Test 3: Two-parameter generic variants
+// ============================================================================
+type Result<T, E> is Ok(T) | Err(E);
+
+fn result_to_maybe<T, E>(result: Result<T, E>) -> Maybe<T> {
+    match result {
+        Ok(val) => Some(val),
+        Err(_) => None
+    }
+}
+
+fn is_ok<T, E>(result: Result<T, E>) -> Bool {
+    match result {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+// ============================================================================
+// Test 4: Pattern matching variations
+// ============================================================================
+fn categorize_maybe(maybe: Maybe<Int>) -> Text {
+    match maybe {
+        Some(x) where x > 100 => "large value",
+        Some(x) where x > 0 => "positive value",
+        Some(x) where x == 0 => "zero",
+        Some(x) where x < 0 => "negative value",
+        None => "no value",
+        _ => "unknown"
+    }
+}
+
+// ============================================================================
+// Test 5: Functions returning variants
+// ============================================================================
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    match b {
+        x where x == 0 => Err("Division by zero"),
+        _ => Ok(a / b)
+    }
+}
+
+fn find_color(name: Text) -> Maybe<Color> {
+    match name {
+        "red" => Some(Red),
+        "green" => Some(Green),
+        "blue" => Some(Blue),
+        _ => None
+    }
+}
+
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    match b {
+        x where x == 0 => None,
+        _ => Some(a / b)
+    }
+}
+
+// ============================================================================
+// Test 6: Nested pattern matching
+// ============================================================================
+type NestedResult is
+    | Ok1(Result<Int, Text>)
+    | Err1(Text);
+
+fn process_nested(nr: NestedResult) -> Text {
+    match nr {
+        Ok1(inner) => {
+            match inner {
+                Ok(val) => f"Double success: {val}",
+                Err(msg) => f"Inner error: {msg}"
+            }
+        },
+        Err1(msg) => f"Outer error: {msg}"
+    }
+}
+
+// ============================================================================
+// Test 7: Guard patterns with where
+// ============================================================================
+fn classify_number(n: Int) -> Text {
+    match n {
+        x where x < 0 => "negative",
+        x where x == 0 => "zero",
+        x where x > 0 && x <= 10 => "small positive",
+        x where x > 10 && x <= 100 => "medium positive",
+        x where x > 100 => "large positive",
+        _ => "unknown"
+    }
+}
+
+fn process_result_with_guards(result: Result<Int, Text>) -> Text {
+    match result {
+        Ok(val) where val > 100 => f"Large success: {val}",
+        Ok(val) where val > 0 => f"Success: {val}",
+        Ok(val) => f"Success (zero or negative): {val}",
+        Err(msg) => f"Error: {msg}"
+    }
+}
+
+// ============================================================================
+// Test 8: OR patterns
+// ============================================================================
+fn is_primary_color(c: Color) -> Bool {
+    match c {
+        Red | Green | Blue => true
+    }
+}
+
+fn is_success_or_small_error<T, E>(result: Result<T, E>) -> Bool {
+    match result {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+// ============================================================================
+// Test 9: Wildcard patterns
+// ============================================================================
+fn has_value<T>(maybe: Maybe<T>) -> Bool {
+    match maybe {
+        Some(_) => true,
+        _ => false
+    }
+}
+
+fn get_error_or_default<T, E>(result: Result<T, E>, default_error: E) -> E {
+    match result {
+        Ok(_) => default_error,
+        Err(e) => e
+    }
+}
+
+// ============================================================================
+// Test 10: Simple container type (non-recursive)
+// ============================================================================
+type Container is
+    | Empty
+    | Single(Int)
+    | Pair(Int, Int);
+
+fn count_items(container: Container) -> Int {
+    match container {
+        Empty => 0,
+        Single(_) => 1,
+        Pair(_, _) => 2
+    }
+}
+
+fn describe_container(container: Container) -> Text {
+    match container {
+        Empty => "Empty container",
+        Single(x) => f"Single item: {x}",
+        Pair(x, y) => f"Pair of items: {x} and {y}"
+    }
+}
+
+// ============================================================================
+// Main test function
+// ============================================================================
+fn main() {
+    let _ = print("=== Comprehensive Variant Type Tests ===");
+    let _ = print("");
+
+    // Test 1: Simple variant types
+    let _ = print("Test 1: Simple variant types (unit variants)");
+    let red: Color = Red;
+    let green: Color = Green;
+    let blue: Color = Blue;
+    let _ = print(f"  Red as text: {color_to_text(red)}");
+    let _ = print(f"  Is red red? {is_red(red)}");
+    let _ = print(f"  Is green red? {is_red(green)}");
+    let _ = print(f"  Color classification: {classify_color(blue)}");
+    let _ = print("");
+
+    // Test 2: Maybe<T> generic variant
+    let _ = print("Test 2: Generic variants - Maybe<T>");
+    let some_int: Maybe<Int> = Some(42);
+    let none_int: Maybe<Int> = None;
+    let _ = print(f"  Some(42) unwrapped with default 0: {unwrap_or(some_int, 0)}");
+    let _ = print(f"  None unwrapped with default 99: {unwrap_or(none_int, 99)}");
+    let _ = print(f"  Is Some(42) some? {is_some(some_int)}");
+    let _ = print(f"  Is None some? {is_some(none_int)}");
+    let _ = print("");
+
+    // Test 3: Result<T, E> generic variant
+    let _ = print("Test 3: Generic variants - Result<T, E>");
+    let ok_result: Result<Int, Text> = Ok(100);
+    let err_result: Result<Int, Text> = Err("Something failed");
+    let _ = print(f"  Result Ok(100) to Maybe: {is_some(result_to_maybe(ok_result))}");
+    let _ = print(f"  Result Err(...) to Maybe: {is_some(result_to_maybe(err_result))}");
+    let _ = print(f"  Is Ok(100) ok? {is_ok(ok_result)}");
+    let _ = print(f"  Is Err(...) ok? {is_ok(err_result)}");
+    let _ = print("");
+
+    // Test 4: Pattern matching with guards
+    let _ = print("Test 4: Pattern matching with guards");
+    let large_val: Maybe<Int> = Some(150);
+    let small_val: Maybe<Int> = Some(5);
+    let zero_val: Maybe<Int> = Some(0);
+    let neg_val: Maybe<Int> = Some(-10);
+    let no_val: Maybe<Int> = None;
+    let _ = print(f"  Categorize Some(150): {categorize_maybe(large_val)}");
+    let _ = print(f"  Categorize Some(5): {categorize_maybe(small_val)}");
+    let _ = print(f"  Categorize Some(0): {categorize_maybe(zero_val)}");
+    let _ = print(f"  Categorize Some(-10): {categorize_maybe(neg_val)}");
+    let _ = print(f"  Categorize None: {categorize_maybe(no_val)}");
+    let _ = print("");
+
+    // Test 5: Functions returning variants
+    let _ = print("Test 5: Functions returning variants");
+    let div_ok = divide(10, 2);
+    let div_err = divide(10, 0);
+    match div_ok {
+        Ok(val) => { let _ = print(f"  10 / 2 = {val}"); },
+        Err(msg) => { let _ = print(f"  Error: {msg}"); }
+    }
+    match div_err {
+        Ok(val) => { let _ = print(f"  10 / 0 = {val}"); },
+        Err(msg) => { let _ = print(f"  Error: {msg}"); }
+    }
+
+    let color_found = find_color("red");
+    let color_not_found = find_color("purple");
+    let _ = print(f"  Find 'red': {is_some(color_found)}");
+    let _ = print(f"  Find 'purple': {is_some(color_not_found)}");
+
+    let safe1 = safe_divide(20, 4);
+    let safe2 = safe_divide(20, 0);
+    let _ = print(f"  Safe divide 20/4: {unwrap_or(safe1, -1)}");
+    let _ = print(f"  Safe divide 20/0: {unwrap_or(safe2, -1)}");
+    let _ = print("");
+
+    // Test 6: Nested pattern matching
+    let _ = print("Test 6: Nested pattern matching");
+    let nr1: NestedResult = Ok1(Ok(42));
+    let nr2: NestedResult = Ok1(Err("inner fail"));
+    let nr3: NestedResult = Err1("outer fail");
+    let _ = print(f"  Nested result 1: {process_nested(nr1)}");
+    let _ = print(f"  Nested result 2: {process_nested(nr2)}");
+    let _ = print(f"  Nested result 3: {process_nested(nr3)}");
+    let _ = print("");
+
+    // Test 7: Guard patterns with where
+    let _ = print("Test 7: Guard patterns with where");
+    let _ = print(f"  Classify -5: {classify_number(-5)}");
+    let _ = print(f"  Classify 0: {classify_number(0)}");
+    let _ = print(f"  Classify 7: {classify_number(7)}");
+    let _ = print(f"  Classify 50: {classify_number(50)}");
+    let _ = print(f"  Classify 200: {classify_number(200)}");
+
+    let result1: Result<Int, Text> = Ok(150);
+    let result2: Result<Int, Text> = Ok(50);
+    let result3: Result<Int, Text> = Ok(-10);
+    let result4: Result<Int, Text> = Err("network error");
+    let _ = print(f"  Process Ok(150): {process_result_with_guards(result1)}");
+    let _ = print(f"  Process Ok(50): {process_result_with_guards(result2)}");
+    let _ = print(f"  Process Ok(-10): {process_result_with_guards(result3)}");
+    let _ = print(f"  Process Err: {process_result_with_guards(result4)}");
+    let _ = print("");
+
+    // Test 8: OR patterns
+    let _ = print("Test 8: OR patterns");
+    let _ = print(f"  Is Red primary? {is_primary_color(Red)}");
+    let _ = print(f"  Is Green primary? {is_primary_color(Green)}");
+    let _ = print(f"  Is Blue primary? {is_primary_color(Blue)}");
+    let _ = print("");
+
+    // Test 9: Wildcard patterns
+    let _ = print("Test 9: Wildcard patterns");
+    let some_val: Maybe<Int> = Some(999);
+    let none_val2: Maybe<Int> = None;
+    let _ = print(f"  Has value Some(999)? {has_value(some_val)}");
+    let _ = print(f"  Has value None? {has_value(none_val2)}");
+    let _ = print("");
+
+    // Test 10: Container type
+    let _ = print("Test 10: Simple container type");
+    let empty: Container = Empty;
+    let single: Container = Single(42);
+    let pair: Container = Pair(10, 20);
+    let _ = print(f"  Empty count: {count_items(empty)}");
+    let _ = print(f"  Single count: {count_items(single)}");
+    let _ = print(f"  Pair count: {count_items(pair)}");
+    let _ = print(f"  Describe empty: {describe_container(empty)}");
+    let _ = print(f"  Describe single: {describe_container(single)}");
+    let _ = print(f"  Describe pair: {describe_container(pair)}");
+    let _ = print("");
+
+    let _ = print("=== All variant type tests completed successfully ===");
+}

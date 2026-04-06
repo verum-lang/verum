@@ -1,0 +1,46 @@
+// Demonstration of Verum's safe interpolated strings
+// Spec: 05-syntax-grammar.md#1.4.2
+
+fn main() {
+    let user_id = 42;
+    let name = "Alice";
+    let age = 30;
+    let table = "users";
+
+    // SQL interpolation - prevents SQL injection
+    let query = sql"SELECT * FROM users WHERE id = {user_id}";
+    // Desugars to: SQL.query("SELECT * FROM users WHERE id = ?", [user_id])
+
+    // HTML interpolation - prevents XSS attacks
+    let html = html"<h1>Welcome, {name}!</h1>";
+    // Desugars to: HTML.escape("<h1>Welcome, {}!</h1>", [name])
+
+    // URI interpolation - properly encodes URL components
+    let api_url = uri"https://api.example.com/users/{user_id}/profile";
+    // Desugars to: URI.encode("https://api.example.com/users/{}/profile", [user_id])
+
+    // JSON interpolation - ensures valid JSON structure
+    let user_json = json"{\"name\": {name}, \"age\": {age}}";
+    // Desugars to: JSON.template("{\"name\": {}, \"age\": {}}", [name, age])
+
+    // XML interpolation - prevents XML injection
+    let user_xml = xml"<user id='{user_id}'>{name}</user>";
+    // Desugars to: XML.escape("<user id='{}'>{}</user>", [user_id, name])
+
+    // GraphQL interpolation - validates GraphQL syntax
+    let gql_query = gql"query {{ user(id: {user_id}) {{ name, email }} }}";
+    // Desugars to: GraphQL.query("query { user(id: {}) { name, email } }", [user_id])
+
+    // Standard format string - general purpose formatting
+    let greeting = f"Hello {name}, you are {age} years old!";
+    // Uses standard string formatting
+
+    // Multiple interpolations in SQL
+    let complex_query = sql"SELECT * FROM {table} WHERE name = {name} AND age > {age}";
+
+    // Escaped braces - use {{ and }} for literal braces
+    let escaped = f"Use {{double}} braces to show literal {{}} in output";
+
+    println(greeting);
+    println(f"User query: {query}");
+}

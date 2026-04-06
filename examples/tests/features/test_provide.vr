@@ -1,0 +1,52 @@
+// Test provide statement for context provisioning
+// According to grammar: provide_stmt = "provide" IDENT "=" expr ";"
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+}
+
+context Config {
+    fn get(key: Text) -> Text;
+}
+
+// Mock implementation type for Logger
+type ConsoleLogger = {
+    prefix: Text
+}
+
+// Mock implementation type for Config
+type AppConfig = {
+    env: Text
+}
+
+// Function that uses Logger context
+fn log_message(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+// Function that uses multiple contexts
+fn app_function(key: Text) using [Logger, Config] {
+    Logger.log("Getting config");
+    let value = Config.get(key);
+    Logger.log("Config retrieved");
+}
+
+// Test provide statement
+fn main() {
+    // Test basic provide
+    provide Logger = ConsoleLogger { prefix: "APP" };
+    log_message("Hello from Verum");
+
+    // Test multiple provides
+    provide Config = AppConfig { env: "production" };
+    app_function("database_url");
+
+    // Test nested scope with provide
+    {
+        provide Logger = ConsoleLogger { prefix: "NESTED" };
+        log_message("Nested context");
+    }
+
+    log_message("Back to outer context");
+}

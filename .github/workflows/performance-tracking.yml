@@ -1,0 +1,880 @@
+# =============================================================================
+# Verum Compliance Suite (VCS) - Performance Tracking
+# =============================================================================
+#
+# Tracks performance metrics over time and maintains historical data for
+# trend analysis and regression detection.
+#
+# Key Metrics Tracked (from CLAUDE.md):
+#   - CBGR check: < 15ns
+#   - Type inference: < 100ms / 10K LOC
+#   - Compilation: > 50K LOC/sec
+#   - Runtime: 0.85-0.95x native C
+#   - Memory overhead: < 5%
+#
+# Reference: VCS Spec Section 23.6 - Performance Tracking
+# =============================================================================
+
+name: VCS Performance Tracking
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'vcs/runner/vbench/**'
+  schedule:
+    # Daily performance snapshot at 3:00 AM UTC
+    - cron: '0 3 * * *'
+    # Weekly comprehensive benchmark on Sunday at 6:00 AM UTC
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      comprehensive:
+        description: 'Run comprehensive benchmark suite'
+        required: false
+        default: false
+        type: boolean
+      publish_baseline:
+        description: 'Publish results as new baseline'
+        required: false
+        default: false
+        type: boolean
+      compare_with:
+        description: 'Compare with specific commit/tag'
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C target-cpu=native"
+
+# Only one benchmark run at a time
+concurrency:
+  group: performance-tracking
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Configuration
+  # ==========================================================================
+  configure:
+    name: Configure Benchmark Run
+    runs-on: ubuntu-latest
+    outputs:
+      comprehensive: ${{ steps.config.outputs.comprehensive }}
+      iterations: ${{ steps.config.outputs.iterations }}
+      warmup: ${{ steps.config.outputs.warmup }}
+      publish_baseline: ${{ steps.config.outputs.publish_baseline }}
+      compare_with: ${{ steps.config.outputs.compare_with }}
+
+    steps:
+      - name: Determine Configuration
+        id: config
+        run: |
+          DAY_OF_WEEK=$(date +%u)
+
+          # Weekly comprehensive on Sunday or manual trigger
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.comprehensive }}" == "true" ]; then
+            COMPREHENSIVE=true
+          elif [ "${{ github.event_name }}" == "schedule" ] && [ "$DAY_OF_WEEK" == "7" ]; then
+            COMPREHENSIVE=true
+          else
+            COMPREHENSIVE=false
+          fi
+
+          echo "comprehensive=$COMPREHENSIVE" >> $GITHUB_OUTPUT
+
+          if [ "$COMPREHENSIVE" == "true" ]; then
+            echo "iterations=500" >> $GITHUB_OUTPUT
+            echo "warmup=50" >> $GITHUB_OUTPUT
+          else
+            echo "iterations=100" >> $GITHUB_OUTPUT
+            echo "warmup=10" >> $GITHUB_OUTPUT
+          fi
+
+          # Baseline publishing
+          if [ "${{ github.event.inputs.publish_baseline }}" == "true" ]; then
+            echo "publish_baseline=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "publish_baseline=true" >> $GITHUB_OUTPUT
+          else
+            echo "publish_baseline=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "compare_with=${{ github.event.inputs.compare_with || '' }}" >> $GITHUB_OUTPUT
+
+  # ==========================================================================
+  # Build Benchmark Runner
+  # ==========================================================================
+  build:
+    name: Build Benchmark Runner
+    needs: configure
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 cmake
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "perf-track-v1"
+
+      - name: Build vbench
+        run: |
+          cd vcs/runner/vbench
+          cargo build --release
+
+      - name: Upload vbench
+        uses: actions/upload-artifact@v4
+        with:
+          name: vbench-binary
+          path: vcs/runner/vbench/target/release/vbench
+          retention-days: 1
+
+  # ==========================================================================
+  # Fetch Historical Data
+  # ==========================================================================
+  fetch-history:
+    name: Fetch Historical Data
+    runs-on: ubuntu-latest
+    outputs:
+      has_history: ${{ steps.check.outputs.has_history }}
+      history_entries: ${{ steps.check.outputs.history_entries }}
+
+    steps:
+      - name: Restore history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: history/
+          key: perf-history-${{ github.sha }}
+          restore-keys: |
+            perf-history-
+
+      - name: Download baseline artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: performance-tracking.yml
+          name: perf-baseline
+          path: baseline/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Check for existing data
+        id: check
+        run: |
+          if [ -f "history/benchmark-history.json" ]; then
+            ENTRIES=$(jq '. | length' history/benchmark-history.json)
+            echo "has_history=true" >> $GITHUB_OUTPUT
+            echo "history_entries=$ENTRIES" >> $GITHUB_OUTPUT
+            echo "Found $ENTRIES historical entries"
+          else
+            mkdir -p history
+            echo "[]" > history/benchmark-history.json
+            echo "has_history=false" >> $GITHUB_OUTPUT
+            echo "history_entries=0" >> $GITHUB_OUTPUT
+            echo "No historical data found"
+          fi
+
+      - name: Upload history for later jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-history-input
+          path: |
+            history/
+            baseline/
+          retention-days: 1
+
+  # ==========================================================================
+  # CBGR Benchmarks - Linux
+  # ==========================================================================
+  bench-cbgr-linux:
+    name: CBGR Benchmarks (Linux)
+    needs: [configure, build, fetch-history]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download vbench
+        uses: actions/download-artifact@v4
+        with:
+          name: vbench-binary
+          path: vbench/
+
+      - name: Set permissions
+        run: chmod +x vbench/vbench
+
+      - name: Download baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: perf-history-input
+          path: input/
+        continue-on-error: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run CBGR Benchmarks
+        id: bench
+        run: |
+          mkdir -p reports
+
+          ./vbench/vbench run \
+            --category cbgr \
+            --iterations ${{ needs.configure.outputs.iterations }} \
+            --warm-up ${{ needs.configure.outputs.warmup }} \
+            --format json \
+            --output reports/cbgr-linux-x64.json \
+            --config vcs/config/thresholds.toml \
+            2>&1 | tee reports/cbgr-linux.log
+
+          if [ -f "reports/cbgr-linux-x64.json" ]; then
+            # Extract key metrics
+            TIER0=$(jq -r '.results["cbgr/tier0_check"].mean_ns // 0' reports/cbgr-linux-x64.json)
+            TIER1=$(jq -r '.results["cbgr/tier1_check"].mean_ns // 0' reports/cbgr-linux-x64.json)
+            THIN_REF=$(jq -r '.results["cbgr/thin_ref_size"].value // 0' reports/cbgr-linux-x64.json)
+            FAT_REF=$(jq -r '.results["cbgr/fat_ref_size"].value // 0' reports/cbgr-linux-x64.json)
+
+            echo "tier0_check=$TIER0" >> $GITHUB_OUTPUT
+            echo "tier1_check=$TIER1" >> $GITHUB_OUTPUT
+            echo "thin_ref_size=$THIN_REF" >> $GITHUB_OUTPUT
+
+            # Validate against targets
+            echo "## CBGR Performance (Linux x64)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$TIER0 <= 15" | bc -l) )); then
+              echo "| Tier 0 Check | ${TIER0}ns | <15ns | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Tier 0 Check | ${TIER0}ns | <15ns | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| Tier 1 Check | ${TIER1}ns | ~0ns | - |" >> $GITHUB_STEP_SUMMARY
+            echo "| ThinRef Size | ${THIN_REF} bytes | 16 bytes | $([ \"$THIN_REF\" == \"16\" ] && echo 'PASS' || echo 'WARN') |" >> $GITHUB_STEP_SUMMARY
+            echo "| FatRef Size | ${FAT_REF} bytes | 24 bytes | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload CBGR results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-cbgr-linux-x64
+          path: reports/cbgr-*
+          retention-days: 90
+
+  # ==========================================================================
+  # CBGR Benchmarks - macOS
+  # ==========================================================================
+  bench-cbgr-macos:
+    name: CBGR Benchmarks (macOS)
+    needs: [configure, build, fetch-history]
+    if: needs.configure.outputs.comprehensive == 'true'
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Build vbench
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Run CBGR Benchmarks
+        run: |
+          mkdir -p reports
+
+          ./vcs/runner/vbench/target/release/vbench run \
+            --category cbgr \
+            --iterations ${{ needs.configure.outputs.iterations }} \
+            --warm-up ${{ needs.configure.outputs.warmup }} \
+            --format json \
+            --output reports/cbgr-macos-arm64.json \
+            --config vcs/config/thresholds.toml
+
+      - name: Upload CBGR results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-cbgr-macos-arm64
+          path: reports/cbgr-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Compilation Benchmarks
+  # ==========================================================================
+  bench-compilation:
+    name: Compilation Benchmarks
+    needs: [configure, build, fetch-history]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download vbench
+        uses: actions/download-artifact@v4
+        with:
+          name: vbench-binary
+          path: vbench/
+
+      - name: Set permissions
+        run: chmod +x vbench/vbench
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run Compilation Benchmarks
+        id: bench
+        run: |
+          mkdir -p reports
+
+          ./vbench/vbench run \
+            --category compilation \
+            --iterations ${{ needs.configure.outputs.iterations }} \
+            --warm-up ${{ needs.configure.outputs.warmup }} \
+            --format json \
+            --output reports/compilation-linux-x64.json \
+            --config vcs/config/thresholds.toml \
+            2>&1 | tee reports/compilation.log
+
+          if [ -f "reports/compilation-linux-x64.json" ]; then
+            THROUGHPUT=$(jq -r '.results["compilation/throughput"].loc_per_sec // 0' reports/compilation-linux-x64.json)
+            LEXER=$(jq -r '.results["compilation/lexer"].mb_per_sec // 0' reports/compilation-linux-x64.json)
+            PARSER=$(jq -r '.results["compilation/parser"].loc_per_sec // 0' reports/compilation-linux-x64.json)
+
+            echo "throughput=$THROUGHPUT" >> $GITHUB_OUTPUT
+
+            echo "## Compilation Performance (Linux x64)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$THROUGHPUT >= 50000" | bc -l) )); then
+              echo "| Overall Throughput | ${THROUGHPUT} LOC/s | >50K LOC/s | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Overall Throughput | ${THROUGHPUT} LOC/s | >50K LOC/s | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| Lexer | ${LEXER} MB/s | - | - |" >> $GITHUB_STEP_SUMMARY
+            echo "| Parser | ${PARSER} LOC/s | - | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Compilation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-compilation-linux-x64
+          path: reports/compilation-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Type Inference Benchmarks
+  # ==========================================================================
+  bench-type-inference:
+    name: Type Inference Benchmarks
+    needs: [configure, build, fetch-history]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download vbench
+        uses: actions/download-artifact@v4
+        with:
+          name: vbench-binary
+          path: vbench/
+
+      - name: Set permissions
+        run: chmod +x vbench/vbench
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Run Type Inference Benchmarks
+        id: bench
+        run: |
+          mkdir -p reports
+
+          ./vbench/vbench run \
+            --category type_inference \
+            --iterations ${{ needs.configure.outputs.iterations }} \
+            --warm-up ${{ needs.configure.outputs.warmup }} \
+            --format json \
+            --output reports/types-linux-x64.json \
+            --config vcs/config/thresholds.toml \
+            2>&1 | tee reports/types.log
+
+          if [ -f "reports/types-linux-x64.json" ]; then
+            LOC_10K=$(jq -r '.results["type_inference/10k_loc"].mean_ms // 0' reports/types-linux-x64.json)
+
+            echo "loc_10k=$LOC_10K" >> $GITHUB_OUTPUT
+
+            echo "## Type Inference Performance (Linux x64)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$LOC_10K <= 100" | bc -l) )); then
+              echo "| 10K LOC Inference | ${LOC_10K}ms | <100ms | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| 10K LOC Inference | ${LOC_10K}ms | <100ms | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Type Inference results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-types-linux-x64
+          path: reports/types-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Runtime Benchmarks (Comprehensive only)
+  # ==========================================================================
+  bench-runtime:
+    name: Runtime Benchmarks
+    needs: [configure, build, fetch-history]
+    if: needs.configure.outputs.comprehensive == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download vbench
+        uses: actions/download-artifact@v4
+        with:
+          name: vbench-binary
+          path: vbench/
+
+      - name: Set permissions
+        run: chmod +x vbench/vbench
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 gcc jq bc
+
+      - name: Run Runtime Benchmarks
+        id: bench
+        run: |
+          mkdir -p reports
+
+          ./vbench/vbench run \
+            --category runtime \
+            --iterations ${{ needs.configure.outputs.iterations }} \
+            --warm-up ${{ needs.configure.outputs.warmup }} \
+            --format json \
+            --output reports/runtime-linux-x64.json \
+            --config vcs/config/thresholds.toml \
+            2>&1 | tee reports/runtime.log
+
+          if [ -f "reports/runtime-linux-x64.json" ]; then
+            VS_C=$(jq -r '.results["runtime/vs_native_c"].ratio // 0' reports/runtime-linux-x64.json)
+
+            echo "## Runtime Performance (Linux x64)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$VS_C >= 0.85 && $VS_C <= 1.0" | bc -l) )); then
+              echo "| vs Native C | ${VS_C}x | 0.85-0.95x | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| vs Native C | ${VS_C}x | 0.85-0.95x | WARN |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Runtime results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-runtime-linux-x64
+          path: reports/runtime-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Memory Benchmarks (Comprehensive only)
+  # ==========================================================================
+  bench-memory:
+    name: Memory Benchmarks
+    needs: [configure, build, fetch-history]
+    if: needs.configure.outputs.comprehensive == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download vbench
+        uses: actions/download-artifact@v4
+        with:
+          name: vbench-binary
+          path: vbench/
+
+      - name: Set permissions
+        run: chmod +x vbench/vbench
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq bc valgrind
+
+      - name: Run Memory Benchmarks
+        id: bench
+        run: |
+          mkdir -p reports
+
+          ./vbench/vbench run \
+            --category memory \
+            --iterations 50 \
+            --warm-up 5 \
+            --format json \
+            --output reports/memory-linux-x64.json \
+            --config vcs/config/thresholds.toml \
+            2>&1 | tee reports/memory.log
+
+          if [ -f "reports/memory-linux-x64.json" ]; then
+            OVERHEAD=$(jq -r '.results["memory/overhead_percent"].value // 0' reports/memory-linux-x64.json)
+
+            echo "## Memory Performance (Linux x64)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$OVERHEAD <= 5" | bc -l) )); then
+              echo "| Memory Overhead | ${OVERHEAD}% | <5% | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Memory Overhead | ${OVERHEAD}% | <5% | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Memory results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-memory-linux-x64
+          path: reports/memory-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Aggregate and Store History
+  # ==========================================================================
+  aggregate-history:
+    name: Aggregate and Store History
+    needs: [configure, fetch-history, bench-cbgr-linux, bench-compilation, bench-type-inference]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      regression_detected: ${{ steps.analyze.outputs.regression_detected }}
+      regression_count: ${{ steps.analyze.outputs.regression_count }}
+
+    steps:
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: all-results/
+          merge-multiple: false
+
+      - name: Download historical data
+        uses: actions/download-artifact@v4
+        with:
+          name: perf-history-input
+          path: input/
+        continue-on-error: true
+
+      - name: Aggregate Results
+        id: aggregate
+        run: |
+          mkdir -p history
+
+          # Start with existing history or empty array
+          if [ -f "input/history/benchmark-history.json" ]; then
+            cp input/history/benchmark-history.json history/
+          else
+            echo "[]" > history/benchmark-history.json
+          fi
+
+          # Create new entry
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          NEW_ENTRY=$(cat <<EOF
+          {
+            "timestamp": "$TIMESTAMP",
+            "commit": "${{ github.sha }}",
+            "ref": "${{ github.ref_name }}",
+            "comprehensive": ${{ needs.configure.outputs.comprehensive }},
+            "results": {}
+          }
+          EOF
+          )
+
+          # Add results from each category
+          for dir in all-results/bench-*/; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"*.json; do
+                if [ -f "$file" ]; then
+                  CATEGORY=$(basename "$file" .json | sed 's/-linux-x64//' | sed 's/-macos-arm64//')
+                  PLATFORM=$(basename "$file" .json | grep -oP '(linux-x64|macos-arm64)' || echo "unknown")
+                  RESULTS=$(jq '.results // {}' "$file")
+
+                  NEW_ENTRY=$(echo "$NEW_ENTRY" | jq --argjson results "$RESULTS" --arg cat "${CATEGORY}_${PLATFORM}" '.results[$cat] = $results')
+                fi
+              done
+            fi
+          done
+
+          # Append to history (keep last 180 entries - ~6 months of daily data)
+          jq --argjson new_entry "$NEW_ENTRY" '. + [$new_entry] | .[-180:]' history/benchmark-history.json > history/benchmark-history.tmp
+          mv history/benchmark-history.tmp history/benchmark-history.json
+
+          ENTRY_COUNT=$(jq '. | length' history/benchmark-history.json)
+          echo "History now contains $ENTRY_COUNT entries"
+
+      - name: Analyze Trends
+        id: analyze
+        run: |
+          if [ ! -f "history/benchmark-history.json" ]; then
+            echo "regression_detected=false" >> $GITHUB_OUTPUT
+            echo "regression_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          ENTRY_COUNT=$(jq '. | length' history/benchmark-history.json)
+
+          if [ "$ENTRY_COUNT" -lt 2 ]; then
+            echo "Not enough data for trend analysis"
+            echo "regression_detected=false" >> $GITHUB_OUTPUT
+            echo "regression_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Compare latest with previous entry
+          LATEST=$(jq '.[-1]' history/benchmark-history.json)
+          PREVIOUS=$(jq '.[-2]' history/benchmark-history.json)
+
+          REGRESSION_COUNT=0
+
+          # Check CBGR tier0 check
+          LATEST_CBGR=$(echo "$LATEST" | jq -r '.results.cbgr_linux["cbgr/tier0_check"].mean_ns // 0')
+          PREV_CBGR=$(echo "$PREVIOUS" | jq -r '.results.cbgr_linux["cbgr/tier0_check"].mean_ns // 0')
+
+          if (( $(echo "$PREV_CBGR > 0" | bc -l) )); then
+            CHANGE=$(echo "scale=2; (($LATEST_CBGR - $PREV_CBGR) / $PREV_CBGR) * 100" | bc)
+            if (( $(echo "$CHANGE > 10" | bc -l) )); then
+              echo "::warning::CBGR tier0 check regressed by ${CHANGE}%"
+              REGRESSION_COUNT=$((REGRESSION_COUNT + 1))
+            fi
+          fi
+
+          # Check compilation throughput
+          LATEST_COMPILE=$(echo "$LATEST" | jq -r '.results.compilation_linux["compilation/throughput"].loc_per_sec // 0')
+          PREV_COMPILE=$(echo "$PREVIOUS" | jq -r '.results.compilation_linux["compilation/throughput"].loc_per_sec // 0')
+
+          if (( $(echo "$PREV_COMPILE > 0" | bc -l) )); then
+            CHANGE=$(echo "scale=2; (($PREV_COMPILE - $LATEST_COMPILE) / $PREV_COMPILE) * 100" | bc)
+            if (( $(echo "$CHANGE > 10" | bc -l) )); then
+              echo "::warning::Compilation throughput regressed by ${CHANGE}%"
+              REGRESSION_COUNT=$((REGRESSION_COUNT + 1))
+            fi
+          fi
+
+          if [ $REGRESSION_COUNT -gt 0 ]; then
+            echo "regression_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "regression_detected=false" >> $GITHUB_OUTPUT
+          fi
+          echo "regression_count=$REGRESSION_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Generate Trend Report
+        run: |
+          echo "# VCS Performance Tracking Report" > trend-report.md
+          echo "" >> trend-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> trend-report.md
+          echo "**Commit:** ${{ github.sha }}" >> trend-report.md
+          echo "**Comprehensive:** ${{ needs.configure.outputs.comprehensive }}" >> trend-report.md
+          echo "" >> trend-report.md
+
+          ENTRY_COUNT=$(jq '. | length' history/benchmark-history.json)
+          echo "## Historical Data" >> trend-report.md
+          echo "" >> trend-report.md
+          echo "Total entries: $ENTRY_COUNT" >> trend-report.md
+          echo "" >> trend-report.md
+
+          if [ "$ENTRY_COUNT" -ge 2 ]; then
+            echo "## Recent Trend (Last 7 entries)" >> trend-report.md
+            echo "" >> trend-report.md
+            echo "| Date | CBGR (ns) | Compile (LOC/s) | Types (ms) |" >> trend-report.md
+            echo "|------|-----------|-----------------|------------|" >> trend-report.md
+
+            jq -r '.[-7:] | .[] | "| \(.timestamp | split("T")[0]) | \(.results.cbgr_linux["cbgr/tier0_check"].mean_ns // "N/A") | \(.results.compilation_linux["compilation/throughput"].loc_per_sec // "N/A") | \(.results.types_linux["type_inference/10k_loc"].mean_ms // "N/A") |"' \
+              history/benchmark-history.json >> trend-report.md 2>/dev/null || true
+          fi
+
+          echo "" >> trend-report.md
+
+          if [ "${{ steps.analyze.outputs.regression_detected }}" == "true" ]; then
+            echo "## Warning: Regressions Detected" >> trend-report.md
+            echo "" >> trend-report.md
+            echo "Found ${{ steps.analyze.outputs.regression_count }} regression(s) compared to previous run." >> trend-report.md
+          else
+            echo "## Status: No Regressions" >> trend-report.md
+            echo "" >> trend-report.md
+            echo "Performance is stable compared to previous run." >> trend-report.md
+          fi
+
+          cat trend-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Save history cache
+        uses: actions/cache/save@v4
+        with:
+          path: history/
+          key: perf-history-${{ github.sha }}
+
+      - name: Upload trend report
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-trend-report
+          path: trend-report.md
+          retention-days: 90
+
+      - name: Upload historical data
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-history
+          path: history/
+          retention-days: 365
+
+  # ==========================================================================
+  # Publish Baseline
+  # ==========================================================================
+  publish-baseline:
+    name: Publish Baseline
+    needs: [configure, aggregate-history]
+    if: needs.configure.outputs.publish_baseline == 'true' && needs.aggregate-history.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: results/
+          merge-multiple: false
+
+      - name: Prepare baseline
+        run: |
+          mkdir -p baseline
+
+          for dir in results/bench-*/; do
+            for file in "$dir"*.json; do
+              if [ -f "$file" ]; then
+                cp "$file" baseline/
+              fi
+            done
+          done
+
+          echo "{\"commit\":\"${{ github.sha }}\",\"date\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}" > baseline/metadata.json
+
+      - name: Upload baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline
+          path: baseline/
+          retention-days: 365
+
+  # ==========================================================================
+  # Notify on Regression
+  # ==========================================================================
+  notify-regression:
+    name: Notify on Regression
+    needs: [aggregate-history]
+    if: needs.aggregate-history.outputs.regression_detected == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,workflow
+          text: 'VCS Performance regression detected - ${{ needs.aggregate-history.outputs.regression_count }} metric(s) degraded'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Performance Regression Detected - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Performance Regression Detected
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Commit:** ${context.sha}
+            **Regressions:** ${{ needs.aggregate-history.outputs.regression_count }}
+
+            One or more performance metrics have regressed beyond the 10% threshold.
+
+            ### Action Required
+            1. Review the trend report artifact
+            2. Identify the cause of the regression
+            3. Either fix the issue or document why the regression is acceptable
+
+            ### Performance Targets (from CLAUDE.md)
+            - CBGR check: < 15ns
+            - Type inference: < 100ms / 10K LOC
+            - Compilation: > 50K LOC/sec
+            - Runtime: 0.85-0.95x native C
+            - Memory overhead: < 5%
+            `;
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'performance-regression'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['performance-regression', 'needs-investigation']
+              });
+            }

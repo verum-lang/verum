@@ -1,0 +1,8 @@
+type Color is
+    | Red
+    | Rgb { r: Int, g: Int, b: Int };
+
+fn main() {
+    let c2 = Color.Rgb { r: 255, g: 128, b: 0 };
+    print(f"Record variant created!");
+}

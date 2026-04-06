@@ -1,0 +1,37 @@
+// Test variant types (enums)
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int);
+
+fn describe_color(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Rgb(r, g, b) => f"rgb({r}, {g}, {b})"
+    }
+}
+
+fn main() {
+    let some_val: Maybe<Int> = Some(42)
+    let none_val: Maybe<Int> = None
+    
+    match some_val {
+        Some(x) => print(f"Got value: {x}"),
+        None => print("No value")
+    }
+    
+    let color = Rgb(255, 128, 0)
+    let desc = describe_color(color)
+    print(f"Color: {desc}")
+}

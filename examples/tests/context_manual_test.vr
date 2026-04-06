@@ -1,0 +1,17 @@
+// Manual context test - directly use values without context declaration
+
+type Logger is { prefix: Text };
+
+fn log(logger: Logger, msg: Text) {
+    println(logger.prefix);
+    println(msg);
+}
+
+fn do_work_manual(msg: Text, logger: Logger) {
+    log(logger, msg);
+}
+
+fn main() {
+    let logger = Logger { prefix: "[LOG]" };
+    do_work_manual("Working...", logger);
+}

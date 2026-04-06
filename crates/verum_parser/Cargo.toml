@@ -1,0 +1,21 @@
+[package]
+name = "verum_parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+verum_ast = { workspace = true }
+verum_common = { workspace = true }
+verum_fast_parser = { workspace = true }
+verum_lexer = { workspace = true }
+verum_diagnostics = { workspace = true }
+verum_syntax = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }

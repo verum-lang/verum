@@ -1,0 +1,21 @@
+// Test 6: Nested async/await
+// Tests nested async functions calling each other
+
+async fn inner_async(n: Int) -> Int {
+    n + 1
+}
+
+async fn middle_async(n: Int) -> Int {
+    let result = inner_async(n).await;
+    result * 2
+}
+
+async fn outer_async(n: Int) -> Int {
+    let result = middle_async(n).await;
+    result + 10
+}
+
+fn main() {
+    let result = outer_async(5).await;
+    print(result);
+}

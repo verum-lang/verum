@@ -1,0 +1,207 @@
+// Comprehensive Error Handling Tests for Verum
+// Testing try/recover/finally blocks and Result type with ? operator
+
+// Define Result type
+type Result<T, E> = variant {
+    Ok(T),
+    Err(E)
+}
+
+// Test 1: Basic Result type creation
+fn test_result_ok() -> Result<Int, Text> {
+    Ok(42)
+}
+
+fn test_result_err() -> Result<Int, Text> {
+    Err("error message")
+}
+
+// Test 2: Pattern matching on Result
+fn test_result_match() -> Int {
+    let result = test_result_ok();
+    match result {
+        Ok(value) => value,
+        Err(msg) => 0
+    }
+}
+
+// Test 3: Pattern matching on error
+fn test_result_error_match() -> Int {
+    let result = test_result_err();
+    match result {
+        Ok(value) => value,
+        Err(msg) => -1
+    }
+}
+
+// Test 4: Function that conditionally returns Result
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Test 5: Using ? operator to propagate errors
+fn test_question_operator() -> Result<Int, Text> {
+    let result = divide(10, 2)?;
+    Ok(result)
+}
+
+// Test 6: Using ? operator with error
+fn test_question_operator_error() -> Result<Int, Text> {
+    let result = divide(10, 0)?;
+    Ok(result)
+}
+
+// Test 7: Chaining operations with ?
+fn test_chained_operations() -> Result<Int, Text> {
+    let a = divide(100, 10)?;
+    let b = divide(a, 2)?;
+    let c = divide(b, 5)?;
+    Ok(c)
+}
+
+// Test 8: Try-recover block with successful operation
+fn test_try_recover_success() -> Int {
+    let result = try {
+        let x = divide(10, 2)?;
+        x
+    } recover {
+        0
+    };
+    result
+}
+
+// Test 9: Try-recover block with error
+fn test_try_recover_error() -> Int {
+    let result = try {
+        let x = divide(10, 0)?;
+        x
+    } recover {
+        999
+    };
+    result
+}
+
+// Test 10: Try-finally block
+fn test_try_finally_success() -> Int {
+    let result = try {
+        42
+    } finally {
+        0
+    };
+    result
+}
+
+// Test 11: Nested try-recover blocks
+fn test_nested_try() -> Int {
+    let result = try {
+        let inner = try {
+            divide(10, 0)?
+        } recover {
+            10
+        };
+        inner + 5
+    } recover {
+        0
+    };
+    result
+}
+
+// Test 12: Multiple operations in try block
+fn test_try_multiple_ops() -> Int {
+    let result = try {
+        let a = divide(100, 10)?;
+        let b = divide(a, 2)?;
+        let c = a + b;
+        c
+    } recover {
+        -1
+    };
+    result
+}
+
+// Test 13: Try with successful division chain
+fn test_division_chain_success() -> Int {
+    let result = try {
+        let step1 = divide(100, 10)?;
+        let step2 = divide(step1, 5)?;
+        step2
+    } recover {
+        -1
+    };
+    result
+}
+
+// Test 14: Try with division by zero
+fn test_division_chain_error() -> Int {
+    let result = try {
+        let step1 = divide(100, 10)?;
+        let step2 = divide(step1, 0)?;
+        step2
+    } recover {
+        -1
+    };
+    result
+}
+
+// Test 15: Try-recover with pattern in recover (if supported)
+fn test_try_recover_pattern() -> Int {
+    let result = try {
+        divide(10, 0)?
+    } recover {
+        777
+    };
+    result
+}
+
+// Main test runner
+fn main() -> Int {
+    // Test Result creation
+    let t1 = test_result_match();
+
+    let t2 = test_result_error_match();
+
+    // Test division
+    let t3 = match divide(20, 4) {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    let t4 = match divide(10, 0) {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    // Test ? operator
+    let t5 = match test_question_operator() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    let t6 = match test_question_operator_error() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    // Test chained operations
+    let t7 = match test_chained_operations() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    // Test try-recover
+    let t8 = test_try_recover_success();
+    let t9 = test_try_recover_error();
+    let t10 = test_try_finally_success();
+    let t11 = test_nested_try();
+    let t12 = test_try_multiple_ops();
+    let t13 = test_division_chain_success();
+    let t14 = test_division_chain_error();
+    let t15 = test_try_recover_pattern();
+
+    // Return 0 for success
+    0
+}

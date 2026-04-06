@@ -1,0 +1,48 @@
+// Test advanced closure functionality
+
+fn main() {
+    // Test 1: Closure returning closure
+    print("=== Test 1: Higher-order closures ===");
+    let make_adder = |x: Int| |y: Int| x + y;
+    let add_five = make_adder(5);
+    print(f"make_adder(5)(3) = {add_five(3)}");
+
+    // Test 2: Closure with mutable capture
+    print("\n=== Test 2: Mutable capture ===");
+    let mut counter = 0;
+    let increment = || {
+        counter = counter + 1;
+        counter
+    };
+    print(f"First call: {increment()}");
+    print(f"Second call: {increment()}");
+    print(f"Counter value: {counter}");
+
+    // Test 3: Closure as function parameter
+    print("\n=== Test 3: Closure as parameter ===");
+    let apply_twice = |f: fn(Int) -> Int, x: Int| f(f(x));
+    let double = |n: Int| n * 2;
+    print(f"apply_twice(double, 3) = {apply_twice(double, 3)}");
+
+    // Test 4: Closure with complex capture
+    print("\n=== Test 4: Multiple captures ===");
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let complex = |x: Int| (x + a) * b + c;
+    print(f"complex(5) = {complex(5)}");
+
+    // Test 5: Closure with block body
+    print("\n=== Test 5: Block body closure ===");
+    let compute = |x: Int| {
+        let temp = x * 2;
+        let result = temp + 10;
+        result
+    };
+    print(f"compute(7) = {compute(7)}");
+
+    // Test 6: No-parameter closure
+    print("\n=== Test 6: No-parameter closure ===");
+    let get_constant = || 42;
+    print(f"get_constant() = {get_constant()}");
+}

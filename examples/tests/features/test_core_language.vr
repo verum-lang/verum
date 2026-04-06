@@ -1,0 +1,173 @@
+// Comprehensive Core Language Test Suite
+// Tests basic language constructs for production readiness
+
+// 1. Basic Type Definitions
+type UserId is Int;
+type Email is Text;
+
+// 2. Record Types
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Color is | Red | Green | Blue;
+
+type Maybe<T> is | Some(T) | None;
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+// 3. Simple Functions
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(x: Float, y: Float) -> Float {
+    x * y
+}
+
+// 4. Pattern Matching on Variants
+fn describe_color(c: Color) -> Text {
+    match c {
+        Red => "It is red",
+        Green => "It is green",
+        Blue => "It is blue"
+    }
+}
+
+// 5. Pattern Matching on Maybe
+fn unwrap_or_default(m: Maybe<Int>, default: Int) -> Int {
+    match m {
+        Some(value) => value,
+        None => default
+    }
+}
+
+// 6. Pattern Matching on Result
+fn get_value_or_error(r: Result<Int, Text>) -> Text {
+    match r {
+        Ok(v) => f"Value: {v}",
+        Err(e) => f"Error: {e}"
+    }
+}
+
+// 7. Conditional Expressions
+fn abs(x: Int) -> Int {
+    if x >= 0 { x } else { -x }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// 8. Loop Constructs
+fn count_to_n(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// 9. Array Operations (using fixed-size arrays)
+fn sum_array(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+    a + b + c + d + e
+}
+
+// 10. Record Construction and Access
+fn create_point(x: Float, y: Float) -> Point {
+    Point { x: x, y: y }
+}
+
+fn distance_from_origin(p: Point) -> Float {
+    let x2 = p.x * p.x;
+    let y2 = p.y * p.y;
+    // Note: sqrt not available in interpreter, use square approximation
+    x2 + y2
+}
+
+// 11. Higher-Order Functions
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+
+// 12. Closures
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+// Main entry point for testing
+fn main() {
+    let _ = print("=== Verum Core Language Tests ===");
+    let _ = print("");
+
+    // Test 1: Basic arithmetic
+    let _ = print("Test 1: Basic arithmetic");
+    let sum = add(10, 20);
+    let _ = print(f"  add(10, 20) = {sum}");
+
+    // Test 2: Float arithmetic
+    let _ = print("Test 2: Float arithmetic");
+    let product = multiply(3.5, 2.0);
+    let _ = print(f"  multiply(3.5, 2.0) = {product}");
+
+    // Test 3: Pattern matching on Color
+    let _ = print("Test 3: Color pattern matching");
+    let color = Green;
+    let desc = describe_color(color);
+    let _ = print(f"  describe_color(Green) = {desc}");
+
+    // Test 4: Maybe handling
+    let _ = print("Test 4: Maybe handling");
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    let _ = print(f"  unwrap_or_default(Some(42), 0) = {unwrap_or_default(some_val, 0)}");
+    let _ = print(f"  unwrap_or_default(None, 0) = {unwrap_or_default(none_val, 0)}");
+
+    // Test 5: Result handling
+    let _ = print("Test 5: Result handling");
+    let ok_result: Result<Int, Text> = Ok(100);
+    let err_result: Result<Int, Text> = Err("Something went wrong");
+    let _ = print(f"  get_value_or_error(Ok(100)) = {get_value_or_error(ok_result)}");
+    let _ = print(f"  get_value_or_error(Err(...)) = {get_value_or_error(err_result)}");
+
+    // Test 6: Conditionals
+    let _ = print("Test 6: Conditionals");
+    let _ = print(f"  abs(-5) = {abs(-5)}");
+    let _ = print(f"  max(10, 25) = {max(10, 25)}");
+
+    // Test 7: Loops
+    let _ = print("Test 7: Loops");
+    let _ = print(f"  count_to_n(5) = {count_to_n(5)}");
+    let _ = print(f"  factorial(5) = {factorial(5)}");
+
+    // Test 8: Array operations
+    let _ = print("Test 8: Array operations");
+    let _ = print(f"  sum_array(1,2,3,4,5) = {sum_array(1, 2, 3, 4, 5)}");
+
+    // Test 9: Records
+    let _ = print("Test 9: Records");
+    let p = create_point(3.0, 4.0);
+    let _ = print(f"  Point created: x={p.x}, y={p.y}");
+    let _ = print(f"  distance_from_origin^2 = {distance_from_origin(p)}");
+
+    // Test 10: Higher-order functions
+    let _ = print("Test 10: Higher-order functions");
+    let _ = print(f"  apply_twice(double, 5) = {apply_twice(double, 5)}");
+
+    // Test 11: Closures
+    let _ = print("Test 11: Closures");
+    let add5 = make_adder(5);
+    let _ = print(f"  make_adder(5)(10) = {add5(10)}");
+
+    let _ = print("");
+    let _ = print("=== All Tests Complete ===");
+}

@@ -1,0 +1,16 @@
+// Nested if early return test
+
+fn nested_if_return(n: Int) -> Int {
+    if n > 0 {
+        if n > 10 {
+            return 100;
+        }
+    }
+    n
+}
+
+fn main() {
+    print(f"nested_if_return(-5) = {nested_if_return(-5)}");
+    print(f"nested_if_return(5) = {nested_if_return(5)}");
+    print(f"nested_if_return(15) = {nested_if_return(15)}");
+}

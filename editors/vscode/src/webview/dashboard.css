@@ -1,0 +1,423 @@
+:root {
+    --vscode-font-family: var(--vscode-editor-font-family);
+    --vscode-font-size: var(--vscode-editor-font-size);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+}
+
+.dashboard {
+    padding: 16px;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    transition: background-color 0.2s;
+}
+
+.btn-primary {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.btn-primary:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.btn-secondary {
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+}
+
+.btn-secondary:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.btn-small {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.empty-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+}
+
+.empty-state h2 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.empty-state p {
+    margin: 0 0 24px 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Sections */
+section {
+    margin-bottom: 32px;
+}
+
+section h2 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.empty-message {
+    padding: 24px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+    border-radius: 4px;
+}
+
+/* Metric Cards */
+.metric-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+}
+
+.metric-card {
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.metric-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--vscode-textLink-foreground);
+    margin-bottom: 12px;
+}
+
+.metric-sublabel {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    margin-top: 8px;
+}
+
+.metric-breakdown {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--vscode-panel-border);
+}
+
+.breakdown-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.breakdown-item span:first-child {
+    color: var(--vscode-descriptionForeground);
+}
+
+.breakdown-item span:last-child {
+    font-weight: 500;
+}
+
+/* Hot Spots Table */
+.hotspots-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.hotspots-table thead {
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.hotspots-table th {
+    padding: 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.hotspots-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.hotspot-row:hover {
+    background-color: var(--vscode-list-hoverBackground);
+    cursor: pointer;
+}
+
+.function-name {
+    font-weight: 500;
+    font-family: var(--vscode-editor-font-family);
+}
+
+.file-path {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge-verification {
+    background-color: var(--vscode-inputValidation-warningBackground);
+    color: var(--vscode-inputValidation-warningForeground);
+}
+
+.badge-cbgr {
+    background-color: var(--vscode-inputValidation-infoBackground);
+    color: var(--vscode-inputValidation-infoForeground);
+}
+
+.badge-codegen {
+    background-color: var(--vscode-editorInfo-background);
+    color: var(--vscode-editorInfo-foreground);
+}
+
+.badge-high {
+    background-color: var(--vscode-errorForeground);
+    color: var(--vscode-editor-background);
+}
+
+.badge-medium {
+    background-color: var(--vscode-editorWarning-foreground);
+    color: var(--vscode-editor-background);
+}
+
+.badge-low {
+    background-color: var(--vscode-editorInfo-foreground);
+    color: var(--vscode-editor-background);
+}
+
+/* Progress Bar */
+.progress-bar {
+    position: relative;
+    width: 100px;
+    height: 20px;
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--vscode-progressBar-background);
+    transition: width 0.3s ease;
+}
+
+.progress-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+/* Recommendations */
+.recommendations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.recommendation {
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.recommendation.high-priority {
+    border-left: 4px solid var(--vscode-errorForeground);
+}
+
+.recommendation-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.recommendation-icon {
+    font-size: 24px;
+}
+
+.recommendation-header h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.recommendation-body p {
+    margin: 0 0 16px 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+.recommendation-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+}
+
+.impact-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Code Changes */
+.code-change {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+}
+
+.code-before,
+.code-after {
+    background-color: var(--vscode-textCodeBlock-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.code-label {
+    padding: 6px 12px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+}
+
+.code-change pre {
+    margin: 0;
+    padding: 12px;
+    overflow-x: auto;
+}
+
+.code-change code {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Codicon support */
+.codicon {
+    font-family: codicon;
+    font-size: 16px;
+    vertical-align: middle;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--vscode-scrollbarSlider-background);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .metric-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .code-change {
+        grid-template-columns: 1fr;
+    }
+
+    .hotspots-table {
+        font-size: 12px;
+    }
+
+    .hotspots-table th,
+    .hotspots-table td {
+        padding: 8px;
+    }
+}

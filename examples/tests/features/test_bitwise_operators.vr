@@ -1,0 +1,74 @@
+// Test: Bitwise operators
+// Grammar: bitwise_and = '&', bitwise_or = '|', bitwise_xor = '^'
+// Grammar: shift_left = '<<', shift_right = '>>'
+// Grammar: bitwise_not = '~'
+
+fn main() -> Int {
+    println("=== Bitwise Operators Test ===");
+
+    // Bitwise AND
+    let a = 12;  // 1100 in binary
+    let b = 10;  // 1010 in binary
+    let and_result = a & b;  // Expected: 8 (1000)
+    println(f"{a} & {b} = {and_result}");
+
+    // Bitwise OR
+    let or_result = a | b;  // Expected: 14 (1110)
+    println(f"{a} | {b} = {or_result}");
+
+    // Bitwise XOR
+    let xor_result = a ^ b;  // Expected: 6 (0110)
+    println(f"{a} ^ {b} = {xor_result}");
+
+    // Bitwise NOT
+    let c = 5;  // 0101 in binary
+    let not_result = ~c;
+    println(f"~{c} = {not_result}");
+
+    // Left shift
+    let d = 3;  // 0011 in binary
+    let left_shift = d << 2;  // Expected: 12 (1100)
+    println(f"{d} << 2 = {left_shift}");
+
+    // Right shift
+    let e = 16;  // 10000 in binary
+    let right_shift = e >> 2;  // Expected: 4 (0100)
+    println(f"{e} >> 2 = {right_shift}");
+
+    // Complex bitwise expressions
+    let f = 15;  // 1111 in binary
+    let g = 7;   // 0111 in binary
+    let complex1 = (f & g) | (f ^ g);
+    println(f"({f} & {g}) | ({f} ^ {g}) = {complex1}");
+
+    // Bitwise with shifts
+    let h = 1;
+    let complex2 = (h << 4) | (h << 2);  // Expected: 20 (10100)
+    println(f"({h} << 4) | ({h} << 2) = {complex2}");
+
+    // Chained operations
+    let i = 255;  // 11111111 in binary
+    let j = 15;   // 00001111 in binary
+    let k = 240;  // 11110000 in binary
+    let chained = i & j | k;
+    println(f"{i} & {j} | {k} = {chained}");
+
+    // Masking operations
+    let value = 42;
+    let mask = 15;  // Lower 4 bits mask
+    let masked = value & mask;
+    println(f"{value} & {mask} (masking) = {masked}");
+
+    // Setting bits
+    let original = 8;   // 1000
+    let set_bit = original | 4;  // 1100 (set bit 2)
+    println(f"{original} | 4 (set bit) = {set_bit}");
+
+    // Toggling bits
+    let toggle = 12;  // 1100
+    let toggled = toggle ^ 6;  // 1010 (toggle bits 1 and 2)
+    println(f"{toggle} ^ 6 (toggle bits) = {toggled}");
+
+    // Return sum of some results
+    and_result + or_result + xor_result
+}

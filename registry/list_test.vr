@@ -1,0 +1,9 @@
+// Test List operations
+link std.collections.List;
+link core.base.Int;
+
+fn main() {
+    print("Testing List operations...");
+    let list = List.new();
+    print("List created successfully!");
+}

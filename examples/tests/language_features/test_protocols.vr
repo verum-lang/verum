@@ -1,0 +1,40 @@
+// Simple Protocol Test
+
+// Protocol definition
+type Printable is protocol {
+    fn to_text(self) -> Text;
+};
+
+// A simple Point type
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// Implement Printable for Point
+implement Printable for Point {
+    fn to_text(self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+// Function using protocol
+fn show<T: Printable>(item: T) {
+    let _ = print(item.to_text());
+}
+
+fn main() {
+    let _ = print("=== Protocol Test ===");
+
+    let p = Point { x: 3.0, y: 4.0 };
+
+    // Direct method call
+    let _ = print("Point as text: ");
+    let _ = print(p.to_text());
+
+    // Generic function call
+    let _ = print("Via show function: ");
+    show(p);
+
+    let _ = print("=== Done ===");
+}

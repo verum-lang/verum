@@ -1,0 +1,291 @@
+// Circuit Breaker Pattern Implementation
+//
+// The circuit breaker pattern prevents cascading failures by stopping requests
+// to a failing service and allowing it time to recover.
+//
+// States:
+// - Closed: Normal operation, requests pass through
+// - Open: Service is failing, reject all requests immediately
+// - HalfOpen: Testing if service has recovered
+//
+// State Transitions:
+// Closed -> Open: After failure_threshold consecutive failures
+// Open -> HalfOpen: After timeout_ms elapsed since last failure
+// HalfOpen -> Closed: After success_threshold consecutive successes
+// HalfOpen -> Open: On any failure
+
+mount core.base.{Text, Int, Bool};
+mount core.time.{SystemTime, Duration};
+
+/// Circuit breaker state machine
+pub type CircuitState is
+    | Closed      // Normal operation
+    | Open        // Failing, reject requests
+    | HalfOpen;   // Testing recovery
+
+/// Circuit breaker configuration and state
+pub type CircuitBreaker is {
+    state: CircuitState,
+    failure_count: Int,
+    success_count: Int,
+    last_failure_time: Int,      // Unix timestamp in milliseconds
+    failure_threshold: Int,      // Open after N failures
+    success_threshold: Int,      // Close after N successes in HalfOpen
+    timeout_ms: Int,             // Time in Open before trying HalfOpen
+};
+
+implement CircuitBreaker {
+    /// Create a new circuit breaker with the given thresholds
+    ///
+    /// # Parameters
+    /// - failure_threshold: Number of consecutive failures before opening
+    /// - success_threshold: Number of consecutive successes to close from half-open
+    /// - timeout_ms: Milliseconds to wait in open state before trying half-open
+    ///
+    /// # Example
+    /// ```
+    /// let cb = CircuitBreaker.new(5, 3, 30000);  // Open after 5 failures, close after 3 successes, 30s timeout
+    /// ```
+    pub fn new(failure_threshold: Int, success_threshold: Int, timeout_ms: Int) -> CircuitBreaker {
+        CircuitBreaker {
+            state: CircuitState.Closed,
+            failure_count: 0,
+            success_count: 0,
+            last_failure_time: 0,
+            failure_threshold: failure_threshold,
+            success_threshold: success_threshold,
+            timeout_ms: timeout_ms,
+        }
+    }
+
+    /// Check if the circuit breaker should allow a request
+    ///
+    /// Returns true if request should proceed, false if it should be rejected
+    pub fn should_allow(self) -> Bool
+        requires { true }
+        ensures {
+            match self.state {
+                CircuitState.Closed => result == true,
+                CircuitState.Open => result == (SystemTime.now_ms() - self.last_failure_time >= self.timeout_ms),
+                CircuitState.HalfOpen => result == true,
+            }
+        }
+    {
+        match self.state {
+            CircuitState.Closed => {
+                // Always allow requests when closed
+                true
+            },
+            CircuitState.Open => {
+                // Check if timeout has elapsed
+                let now = SystemTime.now_ms();
+                let elapsed = now - self.last_failure_time;
+
+                if elapsed >= self.timeout_ms {
+                    // Timeout elapsed, transition to half-open
+                    // Note: This is read-only check, actual transition happens in try_reset
+                    true
+                } else {
+                    // Still in timeout period, reject request
+                    false
+                }
+            },
+            CircuitState.HalfOpen => {
+                // Allow limited requests to test recovery
+                true
+            }
+        }
+    }
+
+    /// Record a successful operation
+    ///
+    /// Updates state machine based on current state and success counts
+    pub fn record_success(mut self) -> CircuitBreaker
+        requires { true }
+        ensures {
+            // In Closed state, failure count is reset
+            (self.state == CircuitState.Closed) => (result.failure_count == 0),
+            // In HalfOpen state, may transition to Closed if success_threshold reached
+            (self.state == CircuitState.HalfOpen && self.success_count + 1 >= self.success_threshold) => (result.state == CircuitState.Closed),
+        }
+    {
+        match self.state {
+            CircuitState.Closed => {
+                // Reset failure count on success
+                self.failure_count = 0;
+                self
+            },
+            CircuitState.Open => {
+                // Should not happen, but reset if it does
+                self
+            },
+            CircuitState.HalfOpen => {
+                // Increment success count
+                self.success_count = self.success_count + 1;
+
+                // Check if we should close the circuit
+                if self.success_count >= self.success_threshold {
+                    self.state = CircuitState.Closed;
+                    self.success_count = 0;
+                    self.failure_count = 0;
+                }
+
+                self
+            }
+        }
+    }
+
+    /// Record a failed operation
+    ///
+    /// Updates state machine based on current state and failure counts
+    pub fn record_failure(mut self) -> CircuitBreaker
+        requires { true }
+        ensures {
+            // Timestamp is always updated
+            result.last_failure_time > self.last_failure_time,
+            // In Closed state, may transition to Open if failure_threshold reached
+            (self.state == CircuitState.Closed && self.failure_count + 1 >= self.failure_threshold) => (result.state == CircuitState.Open),
+            // In HalfOpen state, always transitions to Open
+            (self.state == CircuitState.HalfOpen) => (result.state == CircuitState.Open),
+        }
+    {
+        let now = SystemTime.now_ms();
+        self.last_failure_time = now;
+
+        match self.state {
+            CircuitState.Closed => {
+                // Increment failure count
+                self.failure_count = self.failure_count + 1;
+
+                // Check if we should open the circuit
+                if self.failure_count >= self.failure_threshold {
+                    self.state = CircuitState.Open;
+                    self.success_count = 0;
+                }
+
+                self
+            },
+            CircuitState.Open => {
+                // Already open, just update timestamp
+                self
+            },
+            CircuitState.HalfOpen => {
+                // Any failure in half-open immediately reopens
+                self.state = CircuitState.Open;
+                self.success_count = 0;
+                self.failure_count = self.failure_count + 1;
+
+                self
+            }
+        }
+    }
+
+    /// Get the current state of the circuit breaker
+    pub fn get_state(self) -> CircuitState {
+        self.state
+    }
+
+    /// Try to reset the circuit breaker from Open to HalfOpen if timeout elapsed
+    ///
+    /// This should be called before checking should_allow to properly transition states
+    pub fn try_reset(mut self) -> CircuitBreaker {
+        match self.state {
+            CircuitState.Open => {
+                let now = SystemTime.now_ms();
+                let elapsed = now - self.last_failure_time;
+
+                if elapsed >= self.timeout_ms {
+                    // Transition to half-open to test recovery
+                    self.state = CircuitState.HalfOpen;
+                    self.success_count = 0;
+                }
+
+                self
+            },
+            _ => self
+        }
+    }
+
+    /// Get human-readable state description
+    pub fn state_description(self) -> Text {
+        match self.state {
+            CircuitState.Closed => "Closed - Normal operation",
+            CircuitState.Open => "Open - Rejecting requests (service degraded)",
+            CircuitState.HalfOpen => "Half-Open - Testing recovery"
+        }
+    }
+
+    /// Get circuit breaker metrics
+    pub fn metrics(self) -> CircuitBreakerMetrics {
+        CircuitBreakerMetrics {
+            state: self.state,
+            failure_count: self.failure_count,
+            success_count: self.success_count,
+            time_since_last_failure_ms: if self.last_failure_time > 0 {
+                SystemTime.now_ms() - self.last_failure_time
+            } else {
+                0
+            },
+        }
+    }
+}
+
+/// Circuit breaker metrics for monitoring
+pub type CircuitBreakerMetrics is {
+    state: CircuitState,
+    failure_count: Int,
+    success_count: Int,
+    time_since_last_failure_ms: Int,
+};
+
+implement CircuitBreakerMetrics {
+    pub fn to_string(self) -> Text {
+        let state_text = match self.state {
+            CircuitState.Closed => "CLOSED",
+            CircuitState.Open => "OPEN",
+            CircuitState.HalfOpen => "HALF_OPEN"
+        };
+
+        f"CircuitBreaker[state={state_text}, failures={self.failure_count}, successes={self.success_count}, last_failure={self.time_since_last_failure_ms}ms ago]"
+    }
+}
+
+/// Helper function to execute an operation with circuit breaker protection
+///
+/// # Example
+/// ```
+/// let cb = CircuitBreaker.new(5, 3, 30000);
+/// let result = execute_with_circuit_breaker(
+///     cb,
+///     || Database.query("SELECT * FROM users"),
+///     || Result.Err(RegistryError.service_unavailable("Circuit breaker open"))
+/// );
+/// ```
+pub fn execute_with_circuit_breaker<T>(
+    mut breaker: CircuitBreaker,
+    operation: fn() -> Result<T, RegistryError>,
+    on_circuit_open: fn() -> Result<T, RegistryError>
+) -> (Result<T, RegistryError>, CircuitBreaker) {
+    // Try to reset circuit breaker if timeout elapsed
+    breaker = breaker.try_reset();
+
+    // Check if we should allow the request
+    if !breaker.should_allow() {
+        return (on_circuit_open(), breaker);
+    }
+
+    // Execute the operation
+    let result = operation();
+
+    // Update circuit breaker based on result
+    match result {
+        Result.Ok(_) => {
+            breaker = breaker.record_success();
+            (result, breaker)
+        },
+        Result.Err(_) => {
+            breaker = breaker.record_failure();
+            (result, breaker)
+        }
+    }
+}

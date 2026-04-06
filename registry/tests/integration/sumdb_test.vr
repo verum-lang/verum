@@ -1,0 +1,237 @@
+// Verum Registry - Sumdb (Transparent Log) Integration Tests
+//
+// @test: integration
+// @tags: sumdb, merkle, checksum, transparency
+//
+// Tests for the transparent checksum log:
+// - Append and lookup entries
+// - Signed tree heads
+// - Merkle inclusion proofs
+// - Checksum verification against sumdb records
+
+module tests.integration.sumdb_test;
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+    setup_test_db,
+    cleanup_test_db,
+};
+
+// Import sumdb service and types
+mount super.super.src.services.sumdb_service.{
+    SumdbService,
+    SumdbEntry,
+    TreeHead,
+    InclusionProof,
+    LookupResult,
+    VerifyResult,
+};
+
+// ============================================================================
+// Append and Lookup Tests
+// ============================================================================
+
+@test
+fn test_append_and_lookup() -> Int {
+    setup_test_db();
+
+    // Append a new entry
+    let append_result = SumdbService.append(
+        "test-package",
+        "1.0.0",
+        "sha256:abc123def456",
+    ).await;
+    assert_ok(&append_result);
+
+    let entry_id = append_result.unwrap();
+    assert(&entry_id >= 0);
+
+    // Lookup the entry by package and version
+    let lookup_result = SumdbService.lookup("test-package", "1.0.0").await;
+    assert_ok(&lookup_result);
+
+    match lookup_result.unwrap() {
+        LookupResult.Found(entry) => {
+            assert_eq(&entry.package, &"test-package");
+            assert_eq(&entry.version, &"1.0.0");
+            assert_eq(&entry.checksum, &"sha256:abc123def456");
+            assert_ne(&entry.hash, &"");
+            assert_eq(&entry.entry_id, &entry_id);
+        },
+        LookupResult.NotFound => panic("Expected to find appended entry"),
+    }
+
+    // Lookup non-existent entry
+    let missing = SumdbService.lookup("nonexistent", "0.0.0").await;
+    assert_ok(&missing);
+
+    match missing.unwrap() {
+        LookupResult.NotFound => {},
+        LookupResult.Found(_) => panic("Expected NotFound for non-existent package"),
+    }
+
+    // Append multiple versions and verify each
+    let versions = ["1.0.1", "1.1.0", "2.0.0"];
+    for ver in versions {
+        let res = SumdbService.append(
+            "test-package",
+            ver,
+            f"sha256:hash-{ver}",
+        ).await;
+        assert_ok(&res);
+    }
+
+    // Each version should be independently lookupable
+    for ver in versions {
+        let lk = SumdbService.lookup("test-package", ver).await;
+        assert_ok(&lk);
+        match lk.unwrap() {
+            LookupResult.Found(e) => {
+                assert_eq(&e.version, &ver);
+            },
+            LookupResult.NotFound => panic(f"Expected entry for version {ver}"),
+        }
+    }
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Tree Head Signature Tests
+// ============================================================================
+
+@test
+fn test_tree_head_signature() -> Int {
+    setup_test_db();
+
+    // Initially empty tree
+    let initial_head = SumdbService.get_tree_head().await;
+    assert_ok(&initial_head);
+
+    let head0 = initial_head.unwrap();
+    assert_eq(&head0.tree_size, &0);
+
+    // Append entries and verify tree head updates
+    SumdbService.append("pkg-a", "1.0.0", "sha256:aaa").await;
+    let head1 = SumdbService.get_tree_head().await.unwrap();
+    assert_eq(&head1.tree_size, &1);
+    assert_ne(&head1.root_hash, &"");
+    assert_ne(&head1.signature, &"");
+
+    // Add another entry
+    SumdbService.append("pkg-b", "1.0.0", "sha256:bbb").await;
+    let head2 = SumdbService.get_tree_head().await.unwrap();
+    assert_eq(&head2.tree_size, &2);
+
+    // Root hash should change with new entries
+    assert_ne(&head1.root_hash, &head2.root_hash);
+
+    // Signature should be non-empty (signed tree head)
+    assert_ne(&head2.signature, &"");
+
+    // Tree size should only grow (append-only)
+    assert(&head2.tree_size > head1.tree_size);
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Inclusion Proof Tests
+// ============================================================================
+
+@test
+fn test_inclusion_proof() -> Int {
+    setup_test_db();
+
+    // Build a tree with multiple entries
+    let mut entry_ids = List.new();
+    for i in 0..8 {
+        let id = SumdbService.append(
+            f"proof-pkg-{i}",
+            "1.0.0",
+            f"sha256:hash{i}",
+        ).await.unwrap();
+        entry_ids.push(id);
+    }
+
+    // Generate inclusion proof for entry 0
+    let proof_result = SumdbService.prove_inclusion(entry_ids[0]).await;
+    assert_ok(&proof_result);
+
+    let proof = proof_result.unwrap();
+    assert_eq(&proof.entry_index, &entry_ids[0]);
+    assert(&proof.tree_size >= 8);
+    assert(&proof.proof_hashes.len() > 0);
+
+    // Generate inclusion proof for last entry
+    let last_idx = entry_ids.len() - 1;
+    let proof_last = SumdbService.prove_inclusion(entry_ids[last_idx]).await;
+    assert_ok(&proof_last);
+
+    let pl = proof_last.unwrap();
+    assert_eq(&pl.entry_index, &entry_ids[last_idx]);
+    assert(&pl.proof_hashes.len() > 0);
+
+    // Proof for non-existent entry should fail
+    let bad_proof = SumdbService.prove_inclusion(999999).await;
+    assert_err(&bad_proof);
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Checksum Verification Tests
+// ============================================================================
+
+@test
+fn test_checksum_verification() -> Int {
+    setup_test_db();
+
+    let checksum = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    SumdbService.append("verified-pkg", "1.0.0", checksum).await;
+
+    // Correct checksum should verify as Valid
+    let valid = SumdbService.verify("verified-pkg", "1.0.0", checksum).await;
+    assert_ok(&valid);
+    match valid.unwrap() {
+        VerifyResult.Valid => {},
+        VerifyResult.Invalid { expected, actual } => {
+            panic(f"Expected Valid but got Invalid: expected={expected}, actual={actual}");
+        },
+        VerifyResult.Missing => panic("Expected Valid but got Missing"),
+    }
+
+    // Wrong checksum should verify as Invalid
+    let wrong = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    let invalid = SumdbService.verify("verified-pkg", "1.0.0", wrong).await;
+    assert_ok(&invalid);
+    match invalid.unwrap() {
+        VerifyResult.Invalid { expected, actual } => {
+            assert_eq(&expected, &checksum);
+            assert_eq(&actual, &wrong);
+        },
+        VerifyResult.Valid => panic("Expected Invalid for wrong checksum"),
+        VerifyResult.Missing => panic("Expected Invalid but got Missing"),
+    }
+
+    // Non-existent package should verify as Missing
+    let missing = SumdbService.verify("no-such-pkg", "1.0.0", checksum).await;
+    assert_ok(&missing);
+    match missing.unwrap() {
+        VerifyResult.Missing => {},
+        _ => panic("Expected Missing for non-existent package"),
+    }
+
+    cleanup_test_db();
+    0
+}

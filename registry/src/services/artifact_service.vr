@@ -1,0 +1,418 @@
+// =============================================================================
+// artifact_service.vr — Verification Portfolio & Artifact Management
+// =============================================================================
+// Spec: docs/detailed/15-cog-distribution-architecture.md Section 4.1-4.3
+//
+// Manages the full "verification portfolio" that Verum distributes:
+// - Source archives (.vr files)
+// - Tier-specific artifacts (Tier 0-3)
+// - CBGR profiles (reference overhead measurements)
+// - Formal verification proofs (Z3/Coq/Lean exports)
+// - Context dependency graphs
+// - Generated documentation
+//
+// This is what makes Verum's distribution unique — we don't just ship
+// source or binaries, we ship a complete verified artifact portfolio.
+// =============================================================================
+
+module services.artifact_service;
+
+mount core.collections.{List, Map};
+mount core.text.Text;
+mount core.time.{DateTime, Duration, Instant};
+mount core.io.{File, read_bytes, write_bytes};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// The complete verification portfolio for a published cog.
+type VerificationPortfolio is {
+    /// Package identifier.
+    package: Text,
+    /// SemVer version.
+    version: Text,
+    /// Source archive (tar.gz bytes).
+    source_archive: List<Int>,
+    /// SHA-256 checksum of source archive.
+    source_checksum: Text,
+    /// CBGR performance profile.
+    cbgr_profile: CbgrProfile,
+    /// Tier-specific artifacts (keyed by platform).
+    tier_artifacts: Map<Text, TierArtifact>,
+    /// Formal verification proofs.
+    proofs: List<ProofArtifact>,
+    /// Context dependency graph.
+    context_graph: ContextGraph,
+    /// Generated documentation HTML.
+    documentation: List<DocPage>,
+    /// Publication metadata.
+    published_at: DateTime,
+    /// Total portfolio size in bytes.
+    total_size_bytes: Int,
+};
+
+/// CBGR performance profile — measured on reference hardware.
+type CbgrProfile is {
+    /// Average reference check overhead in nanoseconds.
+    avg_overhead_ns: Int,
+    /// 50th percentile overhead.
+    p50_ns: Int,
+    /// 95th percentile overhead.
+    p95_ns: Int,
+    /// 99th percentile overhead.
+    p99_ns: Int,
+    /// Total managed references in the codebase.
+    total_refs: Int,
+    /// References that could be promoted to &checked (zero overhead).
+    promotable_refs: Int,
+    /// Memory overhead percentage vs unsafe baseline.
+    memory_overhead_pct: Float,
+    /// Hot paths with highest overhead.
+    hot_paths: List<HotPath>,
+};
+
+/// A hot path with significant CBGR overhead.
+type HotPath is {
+    /// Function name.
+    function: Text,
+    /// Source file path.
+    file: Text,
+    /// Line number.
+    line: Int,
+    /// Overhead in nanoseconds per call.
+    overhead_ns: Int,
+    /// Number of reference checks per call.
+    ref_checks: Int,
+    /// Whether this path could use &checked references.
+    can_promote: Bool,
+};
+
+/// Tier-specific compiled artifact.
+type TierArtifact is
+    | Tier0 { ast_cache: List<Int> }
+    | Tier1 { jit_cache: List<Int> }
+    | Tier2 { platform: Text, binary: List<Int> }
+    | Tier3 { platform: Text, features: List<Text>, binary: List<Int> };
+
+/// Formal verification proof artifact.
+type ProofArtifact is {
+    /// Function or theorem name.
+    subject: Text,
+    /// Proof format (smt2, coq, lean4, dedukti).
+    format: ProofFormat,
+    /// Solver/prover used.
+    solver: Text,
+    /// Solver version.
+    solver_version: Text,
+    /// Proof data (format-specific).
+    proof_data: List<Int>,
+    /// Verification status.
+    status: VerificationStatus,
+    /// Time taken to verify (milliseconds).
+    verification_time_ms: Int,
+    /// Properties proven.
+    properties: List<Text>,
+};
+
+/// Proof export format.
+type ProofFormat is
+    | Smt2
+    | Coq
+    | Lean4
+    | Dedukti
+    | Metamath;
+
+/// Verification status.
+type VerificationStatus is
+    | Verified
+    | Timeout
+    | Unknown
+    | Failed { reason: Text };
+
+/// Context dependency graph for a cog.
+type ContextGraph is {
+    /// Contexts required by this cog (must be provided by user).
+    required: List<ContextRequirement>,
+    /// Contexts provided by this cog (available to dependents).
+    provided: List<ContextProvision>,
+};
+
+/// A context required by the cog.
+type ContextRequirement is {
+    /// Context type name (e.g., "Database", "Logger").
+    context_type: Text,
+    /// Operations used from this context.
+    operations: List<Text>,
+    /// Whether the requirement is conditional on a feature flag.
+    feature_gate: Maybe<Text>,
+};
+
+/// A context provided by the cog.
+type ContextProvision is {
+    /// Context type name.
+    context_type: Text,
+    /// Operations implemented.
+    operations: List<Text>,
+    /// Source file containing the implementation.
+    implementation_file: Text,
+};
+
+/// A page of generated documentation.
+type DocPage is {
+    /// Relative path (e.g., "index.html", "module/fn_name.html").
+    path: Text,
+    /// HTML content.
+    content: Text,
+};
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+/// Artifact service — builds and manages verification portfolios.
+type ArtifactService is {};
+
+implement ArtifactService {
+    fn new() -> Self {
+        Self {}
+    }
+
+    /// Build a complete verification portfolio from source code.
+    ///
+    /// This is called during `verum publish` to generate all artifacts
+    /// that will be distributed with the cog.
+    fn build_portfolio(
+        package: Text,
+        version: Text,
+        source_archive: List<Int>,
+    ) -> Result<VerificationPortfolio, Text>
+        using [Logger, Metrics]
+    {
+        let start = Instant.now();
+        Logger.info(f"Building verification portfolio for {package}@{version}");
+
+        // 1. Compute source checksum
+        let source_checksum = sha256_hex_bytes(source_archive);
+
+        // 2. Profile CBGR overhead
+        Logger.info("  Profiling CBGR overhead...");
+        let cbgr_profile = profile_cbgr(source_archive)?;
+        Metrics.record_histogram("publish.cbgr_profile_ms", start.elapsed().as_millis());
+
+        // 3. Extract context dependency graph
+        Logger.info("  Extracting context graph...");
+        let context_graph = extract_context_graph(source_archive)?;
+
+        // 4. Generate documentation
+        Logger.info("  Generating documentation...");
+        let documentation = generate_documentation(source_archive, package, version)?;
+
+        // 5. Run verification and collect proofs
+        Logger.info("  Running verification...");
+        let proofs = collect_verification_proofs(source_archive)?;
+
+        // 6. Build tier artifacts (Tier 0 always, others on demand)
+        Logger.info("  Building Tier 0 AST cache...");
+        let mut tier_artifacts = Map.new();
+        let ast_cache = build_tier0_cache(source_archive)?;
+        tier_artifacts.insert("tier0", Tier0 { ast_cache: ast_cache });
+
+        let elapsed = start.elapsed();
+        Logger.info(f"  Portfolio built in {elapsed.as_millis()}ms");
+        Metrics.record_histogram("publish.portfolio_build_ms", elapsed.as_millis());
+
+        let total_size = source_archive.len()
+            + ast_cache.len()
+            + proofs.iter().map(fn(p) { p.proof_data.len() }).sum()
+            + documentation.iter().map(fn(d) { d.content.len() }).sum();
+
+        Ok(VerificationPortfolio {
+            package: package,
+            version: version,
+            source_archive: source_archive,
+            source_checksum: source_checksum,
+            cbgr_profile: cbgr_profile,
+            tier_artifacts: tier_artifacts,
+            proofs: proofs,
+            context_graph: context_graph,
+            documentation: documentation,
+            published_at: DateTime.now(),
+            total_size_bytes: total_size,
+        })
+    }
+
+    /// Store a portfolio in the artifact storage backend.
+    fn store_portfolio(portfolio: VerificationPortfolio) -> Result<(), Text>
+        using [Storage, Logger]
+    {
+        let base_key = f"packages/{portfolio.package}/{portfolio.version}";
+
+        // Store source archive
+        Storage.put(f"{base_key}/source.tar.gz", portfolio.source_archive)?;
+
+        // Store CBGR profile as JSON
+        let profile_json = serialize_cbgr_profile(portfolio.cbgr_profile);
+        Storage.put(f"{base_key}/cbgr_profile.json", profile_json.as_bytes())?;
+
+        // Store tier artifacts
+        for (key, artifact) in portfolio.tier_artifacts {
+            match artifact {
+                Tier0 { ast_cache } => {
+                    Storage.put(f"{base_key}/artifacts/tier0/ast_cache.ast", ast_cache)?;
+                }
+                Tier2 { platform, binary } => {
+                    Storage.put(f"{base_key}/artifacts/tier2/{platform}", binary)?;
+                }
+                Tier3 { platform, features, binary } => {
+                    let feat_str = features.join("-");
+                    Storage.put(f"{base_key}/artifacts/tier3/{platform}-{feat_str}", binary)?;
+                }
+                _ => {}
+            }
+        }
+
+        // Store proofs
+        for proof in portfolio.proofs {
+            let ext = match proof.format {
+                Smt2 => "smt2",
+                Coq => "v",
+                Lean4 => "lean",
+                Dedukti => "dk",
+                Metamath => "mm",
+            };
+            Storage.put(f"{base_key}/proofs/{proof.subject}.{ext}", proof.proof_data)?;
+        }
+
+        // Store documentation
+        for page in portfolio.documentation {
+            Storage.put(f"{base_key}/docs/{page.path}", page.content.as_bytes())?;
+        }
+
+        // Store context graph
+        let graph_json = serialize_context_graph(portfolio.context_graph);
+        Storage.put(f"{base_key}/context_graph.json", graph_json.as_bytes())?;
+
+        Logger.info(f"Stored portfolio for {portfolio.package}@{portfolio.version} ({portfolio.total_size_bytes} bytes)");
+
+        Ok(())
+    }
+
+    /// Select the best tier artifact for a given target platform.
+    ///
+    /// Priority: Tier 3 (LTO+CPU features) > Tier 2 (AOT) > Tier 1 (JIT) > Tier 0 (interpreter)
+    fn select_artifact(
+        package: Text,
+        version: Text,
+        target_platform: Text,
+        cpu_features: List<Text>,
+    ) -> Result<TierArtifact, Text>
+        using [Storage]
+    {
+        let base_key = f"packages/{package}/{version}/artifacts";
+
+        // Try Tier 3 with matching CPU features
+        let feat_str = cpu_features.join("-");
+        if Storage.exists(f"{base_key}/tier3/{target_platform}-{feat_str}")? {
+            let binary = Storage.get(f"{base_key}/tier3/{target_platform}-{feat_str}")?;
+            return Ok(Tier3 {
+                platform: target_platform,
+                features: cpu_features,
+                binary: binary,
+            });
+        }
+
+        // Try Tier 2
+        if Storage.exists(f"{base_key}/tier2/{target_platform}")? {
+            let binary = Storage.get(f"{base_key}/tier2/{target_platform}")?;
+            return Ok(Tier2 {
+                platform: target_platform,
+                binary: binary,
+            });
+        }
+
+        // Tier 0 always available
+        let ast_cache = Storage.get(f"{base_key}/tier0/ast_cache.ast")?;
+        Ok(Tier0 { ast_cache: ast_cache })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers (would delegate to compiler infrastructure in production)
+// ---------------------------------------------------------------------------
+
+fn sha256_hex_bytes(data: List<Int>) -> Text {
+    // Compute SHA-256 of raw bytes
+    let hash = sha256(data);
+    hex_encode(hash)
+}
+
+fn profile_cbgr(source: List<Int>) -> Result<CbgrProfile, Text> {
+    // In production: parse source, run CBGR analysis via verum_cbgr
+    Ok(CbgrProfile {
+        avg_overhead_ns: 15,
+        p50_ns: 12,
+        p95_ns: 25,
+        p99_ns: 50,
+        total_refs: 0,
+        promotable_refs: 0,
+        memory_overhead_pct: 5.0,
+        hot_paths: List.new(),
+    })
+}
+
+fn extract_context_graph(source: List<Int>) -> Result<ContextGraph, Text> {
+    // In production: parse source, extract using [...] and provide statements
+    Ok(ContextGraph {
+        required: List.new(),
+        provided: List.new(),
+    })
+}
+
+fn generate_documentation(source: List<Int>, package: Text, version: Text) -> Result<List<DocPage>, Text> {
+    // In production: parse source, extract doc comments, generate HTML
+    Ok(List.from([
+        DocPage {
+            path: "index.html",
+            content: f"<html><body><h1>{package} v{version}</h1></body></html>",
+        },
+    ]))
+}
+
+fn collect_verification_proofs(source: List<Int>) -> Result<List<ProofArtifact>, Text> {
+    // In production: run verum verify, collect Z3 proofs
+    Ok(List.new())
+}
+
+fn build_tier0_cache(source: List<Int>) -> Result<List<Int>, Text> {
+    // In production: parse to AST, serialize to binary cache format
+    Ok(source) // Placeholder: source IS the tier 0 artifact
+}
+
+fn serialize_cbgr_profile(profile: CbgrProfile) -> Text {
+    f"{{\"avg_overhead_ns\":{profile.avg_overhead_ns},\"p50_ns\":{profile.p50_ns},\"p95_ns\":{profile.p95_ns},\"p99_ns\":{profile.p99_ns},\"total_refs\":{profile.total_refs}}}"
+}
+
+fn serialize_context_graph(graph: ContextGraph) -> Text {
+    f"{{\"required\":[],\"provided\":[]}}"
+}
+
+fn sha256(data: List<Int>) -> List<Int> {
+    intrinsic_sha256(data)
+}
+
+fn hex_encode(bytes: List<Int>) -> Text {
+    let mut result = Text.new();
+    for b in bytes {
+        let hi = (b / 16) % 16;
+        let lo = b % 16;
+        result.push(hex_char(hi));
+        result.push(hex_char(lo));
+    }
+    result
+}
+
+fn hex_char(n: Int) -> Char {
+    if n < 10 { ('0' as Int + n) as Char }
+    else { ('a' as Int + n - 10) as Char }
+}

@@ -1,0 +1,41 @@
+// Step 6: Test generic impl blocks
+
+type Container<T> is protocol {
+    fn get(&self) -> T;
+    fn size(&self) -> Int;
+}
+
+type Box<T> is {
+    value: T
+}
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+implement<T> Container<T> for Box<T> {
+    fn get(&self) -> T {
+        self.value
+    }
+
+    fn size(&self) -> Int {
+        1
+    }
+}
+
+implement<A, B> Container<Pair<A, B>> for Pair<A, B> {
+    fn get(&self) -> Pair<A, B> {
+        self
+    }
+
+    fn size(&self) -> Int {
+        2
+    }
+}
+
+fn main() -> Int {
+    let b = Box { value: 42 };
+    let p = Pair { first: 10, second: 20 };
+    b.size()
+}

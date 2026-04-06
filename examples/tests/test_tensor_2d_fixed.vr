@@ -1,0 +1,49 @@
+// Test: 2D Tensor Literals (Fixed Syntax)
+// Syntax: tensor<rows, cols>Type { expression }
+// For 2D: expression is typically an array of arrays
+
+fn main() -> Int {
+    print("=== 2D Tensor Tests ===");
+
+    // Test 1: Simple 2x3 matrix with scalar init
+    let matrix1 = tensor<2, 3>Float { 0.0 };
+    print("matrix1: 2x3 scalar init");
+
+    // Test 2: 2x3 matrix with nested arrays
+    let matrix2 = tensor<2, 3>Float {
+        [[1.0, 2.0, 3.0],
+         [4.0, 5.0, 6.0]]
+    };
+    print("matrix2: 2x3 nested arrays");
+
+    // Test 3: 3x3 identity-like matrix
+    let matrix3 = tensor<3, 3>Int {
+        [[1, 0, 0],
+         [0, 1, 0],
+         [0, 0, 1]]
+    };
+    print("matrix3: 3x3 int matrix");
+
+    // Test 4: 4x2 matrix
+    let matrix4 = tensor<4, 2>Float {
+        [[1.1, 2.2],
+         [3.3, 4.4],
+         [5.5, 6.6],
+         [7.7, 8.8]]
+    };
+    print("matrix4: 4x2 float matrix");
+
+    // Test 5: 1x1 matrix (edge case)
+    let matrix5 = tensor<1, 1>Float { [[42.0]] };
+    print("matrix5: 1x1 matrix");
+
+    // Test 6: 2x5 matrix
+    let matrix6 = tensor<2, 5>Int {
+        [[1, 2, 3, 4, 5],
+         [6, 7, 8, 9, 10]]
+    };
+    print("matrix6: 2x5 int matrix");
+
+    print("All 2D tensor tests passed");
+    0
+}

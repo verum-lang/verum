@@ -1,0 +1,751 @@
+module sys;
+
+// =============================================================================
+// sys/mod.vr - System-level primitives module
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// This module provides low-level system interface primitives for the
+// V-LLSI (Verum Low-Level System Interface) bootstrap kernel.
+//
+// Platform-specific implementations:
+// - linux/  - Linux x86_64 direct syscalls
+// - darwin/ - macOS libSystem.B.dylib FFI (stable API)
+// - windows/- Windows kernel32/ntdll bindings (IAT imports)
+//
+// IMPORTANT: macOS does NOT support stable syscalls. All Darwin system
+// calls go through libSystem FFI. See docs/architecture/new-arch-spec.md
+// Section 5.4 for details.
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// =============================================================================
+
+// Export common types
+public module common;
+
+// Export runtime initialization module
+public module init;
+
+// Export unified I/O engine interface
+public module io_engine;
+
+// Export raw syscall intrinsics (platform-independent bridge)
+public module raw;          // Raw OS intrinsic declarations
+public module file_ops;     // File operations (pure Verum)
+public module time_ops;     // Time operations (pure Verum)
+public module net_ops;      // TCP/UDP operations (pure Verum)
+public module context_ops;  // Context system & TLS (pure Verum)
+public module process_ops;  // Process management (pure Verum)
+
+// Export low-level hardware interface modules
+public module bitfield;   // Bitfield manipulation support
+public module mmio;       // Memory-mapped I/O and volatile access
+public module interrupt;  // Interrupt handling infrastructure
+
+// Embedded/bare-metal support (no heap, no threads, no async)
+@cfg(runtime = "embedded")
+public module embedded;   // Stack allocator, ring buffer, panic handler
+
+// No-runtime mode (async→sync stubs, no-op mutex)
+@cfg(runtime = "none")
+public module no_runtime;
+@cfg(runtime = "embedded")
+public module no_runtime;
+
+// Platform-specific modules
+@cfg(target_os = "linux")
+public module linux;
+
+@cfg(target_os = "macos")
+public module darwin;
+
+@cfg(target_os = "windows")
+public module windows;
+
+// =============================================================================
+// Re-export common types at module level
+// =============================================================================
+
+public mount .common.{
+    OSError,
+    FileDesc,
+    IOVec,
+    MemProt,
+    MapFlags,
+    MemoryOrdering,
+    // Page size constants
+    PAGE_SIZE,
+    PageSize,
+    page_align_up,
+    page_align_down,
+    is_page_aligned,
+    // Cross-platform memory allocation
+    os_alloc,
+    os_free,
+    get_thread_id,
+    // Cross-platform context system (V-LLSI)
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    ContextError,
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_has,
+    ctx_clear,
+    ctx_push_frame,
+    ctx_pop_frame,
+    // Runtime initialization (low-level)
+    is_runtime_initialized,
+    init_runtime,
+    cleanup_runtime,
+};
+
+// Export unified I/O engine protocol
+public mount .io_engine.{
+    IOEngine,
+    IoError,
+    CompletionOp,
+    CompletionResult,
+    Duration as IoDuration,
+    TimeSpec,
+    Fd,
+    ValidFd,
+    SocketAddr,
+    create_io_engine,
+};
+
+// Export initialization entry point
+public mount .init.{
+    // Initialization functions
+    verum_init,
+    verum_shutdown,
+    is_initialized,
+    // Error types
+    InitError,
+    // Panic handling
+    PanicInfo,
+    panic_impl,
+    set_panic_handler,
+    // Thread initialization
+    init_thread,
+    cleanup_thread,
+};
+
+// =============================================================================
+// Low-Level Hardware Interface Exports
+// =============================================================================
+
+// Bitfield manipulation
+public mount .bitfield.{
+    BitfieldElement,
+    Bitfield,
+    extract_bits,
+    insert_bits,
+    set_bits,
+    clear_bits,
+    test_bit,
+    set_bit,
+    clear_bit,
+    toggle_bit,
+    verify_byte_alignment,
+    verify_field_width,
+    verify_enum_fits,
+};
+
+// Memory-mapped I/O
+public mount .mmio.{
+    AccessMode,
+    BarrierKind,
+    Register,
+    MemoryRegion,
+    MemoryFlags,
+    volatile_load,
+    volatile_store,
+    volatile_load_acquire,
+    volatile_store_release,
+    barrier,
+    dmb,
+    dsb,
+    isb,
+};
+
+// Interrupt handling
+public mount .interrupt.{
+    ExceptionFrame,
+    CriticalSection,
+    InterruptCell,
+    CpuContext,
+    IdtEntry,
+    disable_interrupts,
+    restore_interrupts,
+    enable_interrupts,
+    context_switch,
+};
+
+// =============================================================================
+// Embedded Runtime Exports
+// =============================================================================
+
+@cfg(runtime = "embedded")
+public mount .embedded.{
+    StackAllocator,
+    RingBuffer,
+    PanicAction,
+    set_panic_action,
+    embedded_panic,
+};
+
+@cfg(runtime = "none")
+public mount .no_runtime.{
+    block_on,
+    spawn_sync,
+    SyncChannel,
+    NoOpMutex,
+};
+
+@cfg(runtime = "embedded")
+public mount .no_runtime.{
+    block_on,
+    spawn_sync,
+    SyncChannel,
+    NoOpMutex,
+};
+
+// =============================================================================
+// Linux: Direct syscalls for maximum performance
+// =============================================================================
+
+@cfg(target_os = "linux")
+public mount .linux.syscall.{
+    syscall_raw,
+    read,
+    write,
+    close,
+    mmap,
+    munmap,
+    getpid,
+    gettid,
+    exit,
+    exit_group,
+    nanosleep,
+    getrandom,
+    futex_wait,
+    futex_wake,
+    clock_gettime,
+    Timespec,
+};
+
+@cfg(target_os = "linux")
+public mount .linux.errno;
+
+// Re-export Linux TLS bootstrap
+@cfg(target_os = "linux")
+public mount .linux.tls.{
+    init_main_thread_tls,
+    ThreadControlBlock,
+    ContextSlots,
+    TlsError,
+    get_context_slots,
+    set_context_slots,
+};
+
+// Re-export Linux io_uring/epoll
+@cfg(target_os = "linux")
+public mount .linux.io.{
+    IoUringDriver,
+    EpollDriver,
+    IoDriver,
+    IoError,
+    create_io_driver,
+    is_io_uring_available,
+};
+
+// Re-export Linux thread primitives
+@cfg(target_os = "linux")
+public mount .linux.thread.{
+    Thread,
+    spawn as spawn_thread,
+    Mutex,
+    Condvar,
+    SpinLock,
+};
+
+// Re-export Linux memory operations
+@cfg(target_os = "linux")
+public mount .linux.mem.{
+    mprotect,
+    madvise,
+    mremap,
+    PAGE_SIZE,
+    page_align_up,
+};
+
+// Re-export Linux time operations
+@cfg(target_os = "linux")
+public mount .linux.time.{
+    Duration,
+    Instant,
+    monotonic_nanos as linux_monotonic_nanos,
+    sleep,
+    sleep_ms,
+};
+
+// =============================================================================
+// macOS: libSystem FFI for stable API
+// =============================================================================
+
+// Core I/O functions
+@cfg(target_os = "macos")
+public mount .darwin.{
+    read,
+    write,
+    close,
+    mmap,
+    munmap,
+    getpid,
+    gettid,
+    nanosleep,
+    clock_gettime,
+    monotonic_nanos,
+    getentropy,
+    kqueue,
+    errno,
+    set_errno,
+};
+
+// Errno constants
+@cfg(target_os = "macos")
+public mount .darwin.errno as errno_constants;
+
+// Re-export Darwin Mach primitives
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // Mach VM
+    vm_allocate,
+    vm_deallocate,
+    vm_protect,
+    // Mach semaphores
+    semaphore_create,
+    semaphore_destroy,
+    semaphore_signal,
+    semaphore_wait,
+    // Mach time
+    sleep_until,
+    // Mach ports
+    current_task,
+    current_thread,
+    host_self,
+};
+
+// Re-export Darwin types
+@cfg(target_os = "macos")
+public mount .darwin.{
+    Timespec,
+    Timeval,
+    KEvent,
+    KEvent64,
+    MachPort,
+    KernReturn,
+    VmAddress,
+    VmSize,
+    VmProt as MachVmProt,
+    SemaphoreT,
+};
+
+// Re-export Darwin constants
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // kqueue
+    EVFILT_READ, EVFILT_WRITE, EVFILT_TIMER, EVFILT_USER,
+    EV_ADD, EV_DELETE, EV_ENABLE, EV_DISABLE, EV_ONESHOT, EV_CLEAR,
+    NOTE_TRIGGER, NOTE_SECONDS, NOTE_NSECONDS,
+    // Mach
+    KERN_SUCCESS, KERN_INVALID_ADDRESS, KERN_FAILURE,
+    VM_PROT_NONE, VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+    VM_FLAGS_ANYWHERE,
+    SYNC_POLICY_FIFO,
+    // Clock
+    CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
+    // Memory mapping
+    MAP_ANON, MAP_PRIVATE, MAP_JIT,
+    PROT_READ, PROT_WRITE, PROT_EXEC,
+};
+
+// =============================================================================
+// macOS: TLS Context System
+// =============================================================================
+
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // TLS Types
+    TlsError,
+    ThreadControlBlock,
+    ContextSlots,
+    ContextEntry,
+    // TLS Initialization
+    init_tls_key,
+    init_main_thread_tls,
+    create_thread_tls,
+    cleanup_thread_tls,
+    // TCB access
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    // Context operations
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+    ctx_depth,
+    // TLS utilities
+    is_tls_initialized,
+    get_tid_fast,
+    get_errno,
+    tls_set_errno,
+    check_stack_guard,
+    get_user_data,
+    set_user_data,
+    // Constants
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+};
+
+// =============================================================================
+// macOS: I/O Driver (kqueue)
+// =============================================================================
+
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // I/O Types
+    IoError,
+    IoOpKind,
+    IoToken,
+    IoOp,
+    IoCqe,
+    KqueueDriver,
+    KqueueEventIter,
+    IoDriver,
+    // I/O Functions
+    create_io_driver,
+    is_kqueue_available,
+    // I/O Constants
+    MAX_EVENTS,
+    DEFAULT_TIMEOUT_NS,
+};
+
+// =============================================================================
+// macOS: Thread Primitives
+// =============================================================================
+
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // Thread Types
+    ThreadError,
+    Thread,
+    ThreadFn,
+    Mutex,
+    Condvar,
+    SpinLock,
+    Once,
+    // Thread Functions
+    spawn,
+    current_thread as darwin_current_thread,
+    current_tid,
+    // Once Constants
+    ONCE_INIT,
+    ONCE_RUNNING,
+    ONCE_COMPLETE,
+};
+
+// =============================================================================
+// macOS: Time Operations
+// =============================================================================
+
+@cfg(target_os = "macos")
+public mount .darwin.{
+    // Time Types
+    Duration,
+    Instant,
+    Stopwatch,
+    PerfCounter,
+    DeadlineTimer,
+    // Clock Functions
+    time_monotonic_nanos,
+    monotonic_raw_nanos,
+    realtime_nanos,
+    unix_timestamp,
+    thread_cputime_nanos,
+    process_cputime_nanos,
+    // Sleep Functions
+    sleep,
+    sleep_ms,
+    sleep_us,
+    time_sleep_until,
+    sleep_until_mach,
+    // Timing Utilities
+    time_it,
+    // Clock IDs
+    CLOCK_REALTIME_ID,
+    CLOCK_MONOTONIC_ID,
+    CLOCK_MONOTONIC_RAW_ID,
+    CLOCK_PROCESS_CPUTIME,
+    CLOCK_THREAD_CPUTIME,
+};
+
+// =============================================================================
+// Windows: kernel32/ntdll bindings via IAT imports
+// =============================================================================
+
+// Core API functions
+@cfg(target_os = "windows")
+public mount .windows.{
+    // Error handling
+    GetLastError,
+    SetLastError,
+
+    // Handle operations
+    CloseHandle,
+
+    // Console I/O
+    GetStdHandle,
+    WriteConsoleA,
+    ReadConsoleA,
+    STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE,
+    STD_ERROR_HANDLE,
+
+    // Memory management
+    VirtualAlloc,
+    VirtualFree,
+    VirtualProtect,
+
+    // Process/Thread
+    GetCurrentProcess,
+    GetCurrentProcessId,
+    GetCurrentThread,
+    GetCurrentThreadId,
+    ExitProcess,
+    Sleep,
+
+    // IOCP
+    CreateIoCompletionPort,
+    GetQueuedCompletionStatus,
+    GetQueuedCompletionStatusEx,
+    PostQueuedCompletionStatus,
+
+    // Time
+    GetTickCount64,
+    QueryPerformanceCounter,
+    QueryPerformanceFrequency,
+
+    // Wait
+    WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
+    WAIT_FAILED,
+    INFINITE,
+};
+
+// NT types
+@cfg(target_os = "windows")
+public mount .windows.{
+    Handle,
+    NtStatus,
+    ObjectAttributes,
+    IoStatusBlock,
+    UnicodeString,
+    LargeInteger,
+};
+
+// NT status codes
+@cfg(target_os = "windows")
+public mount .windows.{
+    STATUS_SUCCESS,
+    STATUS_ACCESS_DENIED,
+    STATUS_INVALID_HANDLE,
+    STATUS_NO_MEMORY,
+    STATUS_PENDING,
+    STATUS_TIMEOUT,
+};
+
+// Memory constants
+@cfg(target_os = "windows")
+public mount .windows.{
+    MEM_COMMIT,
+    MEM_RESERVE,
+    MEM_RELEASE,
+    PAGE_NOACCESS,
+    PAGE_READONLY,
+    PAGE_READWRITE,
+    PAGE_EXECUTE,
+    PAGE_EXECUTE_READ,
+    PAGE_EXECUTE_READWRITE,
+    PAGE_GUARD,
+};
+
+// =============================================================================
+// Windows: TLS Context System
+// =============================================================================
+
+@cfg(target_os = "windows")
+public mount .windows.{
+    // TLS Types
+    TlsError,
+    ThreadControlBlock,
+    ContextSlots,
+    ContextEntry,
+    // TLS Initialization
+    init_tls_index,
+    init_main_thread_tls,
+    create_thread_tls,
+    cleanup_thread_tls,
+    // TCB access
+    get_current_tcb,
+    get_context_slots,
+    set_context_slots,
+    // Context operations
+    ctx_get,
+    ctx_get_mut,
+    ctx_set,
+    ctx_clear,
+    ctx_push,
+    ctx_pop,
+    ctx_depth,
+    // TLS utilities
+    is_tls_initialized,
+    get_tid_fast,
+    get_errno,
+    set_errno,
+    check_stack_guard,
+    get_user_data,
+    set_user_data,
+    // Constants
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+};
+
+// =============================================================================
+// Windows: I/O Driver (IOCP)
+// =============================================================================
+
+@cfg(target_os = "windows")
+public mount .windows.{
+    // I/O Types
+    IoError,
+    IocpDriver,
+    OverlappedEntry,
+    IoOperation,
+    // I/O Constants
+    MAX_IOCP_ENTRIES,
+};
+
+// =============================================================================
+// Windows: Thread Primitives
+// =============================================================================
+
+@cfg(target_os = "windows")
+public mount .windows.{
+    // Thread Types
+    ThreadError,
+    Thread,
+    ThreadId,
+    ThreadFunc,
+    Mutex,
+    Condvar,
+    SpinLock,
+    RwLock,
+    Semaphore,
+    Once,
+    Barrier,
+    // Thread Functions
+    thread_spawn,
+    thread_join,
+    thread_detach,
+    thread_yield,
+    thread_sleep_ms,
+    current_thread_id,
+    // Once Constants
+    ONCE_NOT_STARTED,
+    ONCE_RUNNING,
+    ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Windows: Time Operations
+// =============================================================================
+
+@cfg(target_os = "windows")
+public mount .windows.{
+    // Time Types
+    Duration,
+    Instant,
+    Stopwatch,
+    PerfCounter,
+    DeadlineTimer,
+    // Time Functions
+    monotonic_nanos,
+    monotonic_micros,
+    monotonic_millis,
+    sleep,
+    sleep_ms,
+    sleep_us,
+    get_perf_freq,
+    perf_counter_to_nanos,
+    // Constants
+    NANOS_PER_SEC,
+    NANOS_PER_MILLI,
+    NANOS_PER_MICRO,
+};
+
+// =============================================================================
+// Cross-platform utilities
+// =============================================================================
+
+/// Get number of CPU cores (platform-independent).
+/// Delegates to the core.intrinsics.runtime.time intrinsic.
+public fn num_cpus() -> Int {
+    core.intrinsics.num_cpus()
+}
+
+/// Get monotonic time in nanoseconds (platform-independent).
+public fn monotonic_nanos() -> UInt64 {
+    monotonic_time_ns()
+}
+
+/// Get monotonic time in milliseconds (platform-independent).
+public fn monotonic_millis() -> UInt64 {
+    monotonic_time_ns() / 1_000_000
+}
+
+/// Get page size (platform-independent)
+public fn page_size() -> Int {
+    @cfg(target_os = "linux")
+    { return 4096; }  // Standard Linux page size
+
+    @cfg(target_os = "macos")
+    { return darwin.libsystem.getpagesize(); }
+
+    // Fallback for all other platforms
+    4096
+}
+
+/// Get monotonic time in nanoseconds (platform-independent)
+public fn monotonic_time_ns() -> UInt64 {
+    @cfg(target_os = "linux")
+    {
+        let mut ts = linux.syscall.Timespec { tv_sec: 0, tv_nsec: 0 };
+        linux.syscall.clock_gettime(1, &mut ts);  // CLOCK_MONOTONIC = 1
+        return (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64);
+    }
+
+    @cfg(target_os = "macos")
+    { return darwin.time.monotonic_nanos(); }
+
+    // Fallback
+    0 as UInt64
+}

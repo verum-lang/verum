@@ -1,0 +1,16 @@
+// Test: Just context parsing - no usage
+context Logger {
+    fn log(self, msg: Text)
+}
+
+context Database {
+    fn query(self, sql: Text) -> Int
+}
+
+context group WebStack {
+    Logger,
+    Database
+}
+
+// Empty function to avoid main requirement
+fn dummy() {}

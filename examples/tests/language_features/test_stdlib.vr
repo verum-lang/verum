@@ -1,0 +1,13 @@
+// Standard Library Import Test
+
+link std.io.print;
+link std.math.sqrt;
+
+fn main() {
+    print("Testing stdlib imports...");
+
+    let x = sqrt(16.0);
+    print(f"sqrt(16) = {x}");
+
+    print("Stdlib test complete!");
+}

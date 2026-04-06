@@ -1,0 +1,17 @@
+// Test categorize function step by step
+
+fn categorize(n: Float) -> Text {
+    match n {
+        x where x < 0.0 => "negative",
+        x where x == 0.0 => "zero",
+        x where x > 0.0 => "positive",
+        _ => "unknown"
+    }
+}
+
+fn main() {
+    let _ = print("=== Categorize Test ===");
+    let result = categorize(5.0);
+    let _ = print(f"Result: {result}");
+    let _ = print("=== Done ===");
+}

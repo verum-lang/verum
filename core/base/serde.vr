@@ -1,0 +1,320 @@
+// =============================================================================
+// serde.vr - Serialization and Deserialization protocols
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: protocols.vr, result.vr, maybe.vr
+// =============================================================================
+//
+// Provides the standard Serialize and Deserialize protocols for converting
+// Verum values to and from external formats (JSON, MessagePack, CBOR, etc.).
+//
+// The design follows a visitor pattern where Serializer/Deserializer
+// implementations drive the format, while Serialize/Deserialize
+// implementations describe the data structure.
+//
+// # Usage
+//
+// ```verum
+// @derive(Serialize, Deserialize)
+// type Point is { x: Float, y: Float };
+//
+// // Serialize to JSON
+// let json = Json.serialize(&point)?;
+//
+// // Deserialize from JSON
+// let point: Point = Json.deserialize(&json)?;
+// ```
+//
+// =============================================================================
+
+module core.base.serde;
+
+mount core.base.protocols.{
+    Debug, Display, Clone, Eq, Describable, ErrorSource,
+    Formatter, FormatError,
+};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Serialization Error
+// =============================================================================
+
+/// Error type for serialization/deserialization failures.
+public type SerdeError is {
+    message: Text,
+};
+
+implement SerdeError {
+    /// Create a new serialization error.
+    public fn new(message: Text) -> SerdeError {
+        SerdeError { message: message }
+    }
+
+    /// Create an error for an unexpected type.
+    public fn unexpected_type(expected: &Text, found: &Text) -> SerdeError {
+        SerdeError {
+            message: f"expected {expected}, found {found}",
+        }
+    }
+
+    /// Create an error for a missing field.
+    public fn missing_field(name: &Text) -> SerdeError {
+        SerdeError {
+            message: f"missing field: {name}",
+        }
+    }
+
+    /// Create an error for an unknown field.
+    public fn unknown_field(name: &Text) -> SerdeError {
+        SerdeError {
+            message: f"unknown field: {name}",
+        }
+    }
+}
+
+implement Debug for SerdeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("SerdeError { message: ")?;
+        self.message.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement Display for SerdeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+implement Describable for SerdeError {
+    fn description(&self) -> Text {
+        self.message.clone()
+    }
+}
+
+implement Clone for SerdeError {
+    fn clone(&self) -> SerdeError {
+        SerdeError { message: self.message.clone() }
+    }
+}
+
+implement Eq for SerdeError {
+    fn eq(&self, other: &SerdeError) -> Bool {
+        self.message == other.message
+    }
+}
+
+// =============================================================================
+// Serialize Protocol
+// =============================================================================
+
+/// Protocol for types that can be serialized to an external format.
+///
+/// Implementations describe how to break a value down into its components
+/// using the Serializer interface. The format (JSON, binary, etc.) is
+/// determined by the Serializer implementation.
+///
+/// # Deriving
+///
+/// Most types can derive Serialize automatically:
+/// ```verum
+/// @derive(Serialize)
+/// type Config is { host: Text, port: Int };
+/// ```
+public type Serialize is protocol {
+    /// Serialize this value using the given serializer.
+    fn serialize<S: Serializer>(&self, serializer: &mut S) -> Result<S.Ok, S.Error>;
+};
+
+// =============================================================================
+// Deserialize Protocol
+// =============================================================================
+
+/// Protocol for types that can be deserialized from an external format.
+///
+/// Implementations describe how to reconstruct a value from its components
+/// using the Deserializer interface.
+///
+/// # Deriving
+///
+/// Most types can derive Deserialize automatically:
+/// ```verum
+/// @derive(Deserialize)
+/// type Config is { host: Text, port: Int };
+/// ```
+public type Deserialize is protocol {
+    /// Deserialize a value using the given deserializer.
+    fn deserialize<D: Deserializer>(deserializer: &mut D) -> Result<Self, D.Error>;
+};
+
+// =============================================================================
+// Serializer Protocol
+// =============================================================================
+
+/// Protocol for format-specific serialization drivers.
+///
+/// A Serializer receives calls describing a value's structure and produces
+/// the serialized output in the target format.
+///
+/// # Implementors
+///
+/// Serializer is implemented by format libraries:
+/// - `JsonSerializer` - JSON output
+/// - `MsgpackSerializer` - MessagePack binary
+/// - `CborSerializer` - CBOR binary
+public type Serializer is protocol {
+    /// The output type on success.
+    type Ok;
+    /// The error type on failure.
+    type Error;
+
+    /// Serialize an integer value.
+    fn serialize_int(&mut self, v: Int) -> Result<Self.Ok, Self.Error>;
+
+    /// Serialize a floating-point value.
+    fn serialize_float(&mut self, v: Float) -> Result<Self.Ok, Self.Error>;
+
+    /// Serialize a boolean value.
+    fn serialize_bool(&mut self, v: Bool) -> Result<Self.Ok, Self.Error>;
+
+    /// Serialize a text value.
+    fn serialize_text(&mut self, v: &Text) -> Result<Self.Ok, Self.Error>;
+
+    /// Serialize a None/null value.
+    fn serialize_none(&mut self) -> Result<Self.Ok, Self.Error>;
+
+    /// Serialize a Some value.
+    fn serialize_some<T: Serialize>(&mut self, value: &T) -> Result<Self.Ok, Self.Error>;
+
+    /// Begin serializing a list of known length.
+    /// Returns a ListSerializer for writing elements.
+    fn serialize_list(&mut self, len: Int) -> Result<ListSerializer<Self>, Self.Error>;
+
+    /// Begin serializing a map of known length.
+    /// Returns a MapSerializer for writing key-value pairs.
+    fn serialize_map(&mut self, len: Int) -> Result<MapSerializer<Self>, Self.Error>;
+
+    /// Begin serializing a named record (struct) of known length.
+    /// Returns a RecordSerializer for writing fields.
+    fn serialize_record(&mut self, name: &Text, len: Int) -> Result<RecordSerializer<Self>, Self.Error>;
+};
+
+// =============================================================================
+// Deserializer Protocol
+// =============================================================================
+
+/// Protocol for format-specific deserialization drivers.
+///
+/// A Deserializer reads from the serialized format and produces values
+/// of the requested types.
+///
+/// # Implementors
+///
+/// Deserializer is implemented by format libraries:
+/// - `JsonDeserializer` - JSON input
+/// - `MsgpackDeserializer` - MessagePack binary
+/// - `CborDeserializer` - CBOR binary
+public type Deserializer is protocol {
+    /// The error type on failure.
+    type Error;
+
+    /// Deserialize an integer value.
+    fn deserialize_int(&mut self) -> Result<Int, Self.Error>;
+
+    /// Deserialize a floating-point value.
+    fn deserialize_float(&mut self) -> Result<Float, Self.Error>;
+
+    /// Deserialize a boolean value.
+    fn deserialize_bool(&mut self) -> Result<Bool, Self.Error>;
+
+    /// Deserialize a text value.
+    fn deserialize_text(&mut self) -> Result<Text, Self.Error>;
+
+    /// Deserialize an optional value.
+    fn deserialize_option<T: Deserialize>(&mut self) -> Result<Maybe<T>, Self.Error>;
+
+    /// Deserialize a list of values.
+    fn deserialize_list<T: Deserialize>(&mut self) -> Result<List<T>, Self.Error>;
+
+    /// Deserialize a map of key-value pairs.
+    fn deserialize_map<K: Deserialize, V: Deserialize>(&mut self) -> Result<Map<K, V>, Self.Error>;
+};
+
+// =============================================================================
+// Compound Serializer Types
+// =============================================================================
+
+/// Serializer state for writing list elements.
+public type ListSerializer<S: Serializer> is {
+    /// The underlying serializer.
+    inner: &mut S,
+    /// Number of elements remaining.
+    remaining: Int,
+};
+
+implement<S: Serializer> ListSerializer<S> {
+    /// Serialize the next element in the list.
+    public fn serialize_element<T: Serialize>(&mut self, value: &T) -> Result<(), S.Error> {
+        value.serialize(self.inner)?;
+        self.remaining = self.remaining - 1;
+        Ok(())
+    }
+
+    /// Finish serializing the list.
+    public fn end(self) -> Result<S.Ok, S.Error> {
+        // Format-specific finalization handled by serializer
+        self.inner.serialize_none()
+    }
+}
+
+/// Serializer state for writing map entries.
+public type MapSerializer<S: Serializer> is {
+    /// The underlying serializer.
+    inner: &mut S,
+    /// Number of entries remaining.
+    remaining: Int,
+};
+
+implement<S: Serializer> MapSerializer<S> {
+    /// Serialize the next key in the map.
+    public fn serialize_key<K: Serialize>(&mut self, key: &K) -> Result<(), S.Error> {
+        key.serialize(self.inner)?;
+        Ok(())
+    }
+
+    /// Serialize the next value in the map.
+    public fn serialize_value<V: Serialize>(&mut self, value: &V) -> Result<(), S.Error> {
+        value.serialize(self.inner)?;
+        self.remaining = self.remaining - 1;
+        Ok(())
+    }
+
+    /// Finish serializing the map.
+    public fn end(self) -> Result<S.Ok, S.Error> {
+        self.inner.serialize_none()
+    }
+}
+
+/// Serializer state for writing record (struct) fields.
+public type RecordSerializer<S: Serializer> is {
+    /// The underlying serializer.
+    inner: &mut S,
+    /// Number of fields remaining.
+    remaining: Int,
+};
+
+implement<S: Serializer> RecordSerializer<S> {
+    /// Serialize a named field.
+    public fn serialize_field<T: Serialize>(&mut self, name: &Text, value: &T) -> Result<(), S.Error> {
+        self.inner.serialize_text(name)?;
+        value.serialize(self.inner)?;
+        self.remaining = self.remaining - 1;
+        Ok(())
+    }
+
+    /// Finish serializing the record.
+    public fn end(self) -> Result<S.Ok, S.Error> {
+        self.inner.serialize_none()
+    }
+}

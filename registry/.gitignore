@@ -1,0 +1,34 @@
+# Verum Build artifacts
+/target/
+*.ll
+*.bc
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Tier-specific outputs
+/target/tier0/
+/target/tier1/
+/target/tier2/
+/target/tier3/
+/target/cbgr-profile/
+/target/verify-cache/
+
+# Cache
+.verum_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Lock file (commit for libraries, ignore for binaries)
+# verum.lock

@@ -1,0 +1,129 @@
+// Test: Field access through three-tier references
+// Tests accessing struct fields through managed, checked, and unsafe references
+
+struct Point {
+    x: Int,
+    y: Int
+}
+
+struct Person {
+    name: Text,
+    age: Int
+}
+
+// Test managed reference field access
+fn get_x_managed(p: &Point) -> Int {
+    p.x
+}
+
+fn get_name_managed(person: &Person) -> Text {
+    person.name
+}
+
+// Test checked reference field access
+fn get_x_checked(p: &checked Point) -> Int {
+    p.x
+}
+
+fn get_name_checked(person: &checked Person) -> Text {
+    person.name
+}
+
+// Test unsafe reference field access
+fn get_x_unsafe(p: &unsafe Point) -> Int {
+    p.x
+}
+
+fn get_name_unsafe(person: &unsafe Person) -> Text {
+    person.name
+}
+
+// Test mutable reference field access
+fn update_point_managed(p: &mut Point) -> Unit {
+    p.x = 100;
+    p.y = 200;
+}
+
+fn update_point_checked(p: &checked mut Point) -> Unit {
+    p.x = 300;
+    p.y = 400;
+}
+
+fn update_point_unsafe(p: &unsafe mut Point) -> Unit {
+    p.x = 500;
+    p.y = 600;
+}
+
+// Test nested struct field access
+struct Container {
+    point: Point,
+    value: Int
+}
+
+fn get_nested_x(c: &Container) -> Int {
+    c.point.x
+}
+
+fn get_nested_x_checked(c: &checked Container) -> Int {
+    c.point.x
+}
+
+fn get_nested_x_unsafe(c: &unsafe Container) -> Int {
+    c.point.x
+}
+
+fn main() -> Int {
+    // Test immutable references
+    let point = Point { x: 10, y: 20 };
+
+    let x1 = get_x_managed(&point);
+    println(f"Managed ref x: {x1}");
+
+    let x2 = get_x_checked(&checked point);
+    println(f"Checked ref x: {x2}");
+
+    let x3 = get_x_unsafe(&unsafe point);
+    println(f"Unsafe ref x: {x3}");
+
+    // Test with Person struct
+    let person = Person { name: "Alice", age: 30 };
+
+    let name1 = get_name_managed(&person);
+    println(f"Managed ref name: {name1}");
+
+    let name2 = get_name_checked(&checked person);
+    println(f"Checked ref name: {name2}");
+
+    let name3 = get_name_unsafe(&unsafe person);
+    println(f"Unsafe ref name: {name3}");
+
+    // Test mutable references
+    let mut mut_point = Point { x: 1, y: 2 };
+
+    update_point_managed(&mut mut_point);
+    println(f"After managed update: x={mut_point.x}, y={mut_point.y}");
+
+    update_point_checked(&checked mut mut_point);
+    println(f"After checked update: x={mut_point.x}, y={mut_point.y}");
+
+    update_point_unsafe(&unsafe mut mut_point);
+    println(f"After unsafe update: x={mut_point.x}, y={mut_point.y}");
+
+    // Test nested field access
+    let container = Container {
+        point: Point { x: 99, y: 88 },
+        value: 77
+    };
+
+    let nx1 = get_nested_x(&container);
+    println(f"Nested managed: {nx1}");
+
+    let nx2 = get_nested_x_checked(&checked container);
+    println(f"Nested checked: {nx2}");
+
+    let nx3 = get_nested_x_unsafe(&unsafe container);
+    println(f"Nested unsafe: {nx3}");
+
+    // Return sum for verification
+    x1 + x2 + x3 + mut_point.x + nx1
+}

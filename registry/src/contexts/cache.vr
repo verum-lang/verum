@@ -1,0 +1,31 @@
+// Cache protocol for registry caching
+mount core.base.{Result, Text, Int};
+mount core.collections.List;
+
+pub type CacheError is
+    | CacheMiss(Text)
+    | SerializationFailed(Text)
+    | DeserializationFailed(Text)
+    | EvictionFailed(Text)
+    | ConnectionFailed(Text);
+
+pub type CacheEntry is {
+    key: Text,
+    value: List<Int>,
+    ttl: Maybe<Int>,
+    created_at: Text,
+};
+
+pub context protocol Cache {
+    async fn get(self, key: Text) -> Result<Maybe<List<Int>>, CacheError>;
+    async fn set(self, key: Text, value: List<Int>) -> Result<(), CacheError>;
+    async fn set_with_ttl(self, key: Text, value: List<Int>, ttl: Int) -> Result<(), CacheError>;
+    async fn delete(self, key: Text) -> Result<(), CacheError>;
+    async fn exists(self, key: Text) -> Result<Bool, CacheError>;
+    async fn invalidate_pattern(self, pattern: Text) -> Result<Int, CacheError>;
+    async fn clear(self) -> Result<(), CacheError>;
+    async fn ttl(self, key: Text) -> Result<Maybe<Int>, CacheError>;
+
+    // Health check methods
+    async fn ping(self) -> Result<(), CacheError>;
+}

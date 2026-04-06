@@ -1,0 +1,138 @@
+// Router parameter extraction demonstration
+//
+// This example demonstrates the path parameter extraction functionality
+// implemented in the verum-registry router.
+
+link core.base.{Text, Bool};
+link std.collections.Map;
+link super.src.server.router.{extract_params, matches_route};
+
+/// Demonstrate parameter extraction with various patterns
+pub fn main() {
+    print("=== Verum Registry Router - Parameter Extraction Demo ===\n");
+
+    // Example 1: Single parameter
+    demo_single_param();
+
+    // Example 2: Multiple parameters
+    demo_multiple_params();
+
+    // Example 3: Complex route with three parameters
+    demo_complex_route();
+
+    // Example 4: Route matching
+    demo_route_matching();
+
+    print("\n=== Demo Complete ===");
+}
+
+fn demo_single_param() {
+    print("--- Single Parameter Extraction ---");
+    let pattern = "/api/packages/{name}";
+    let path = "/api/packages/verum-core";
+
+    print(f"Pattern: {pattern}");
+    print(f"Path:    {path}");
+
+    let params = extract_params(&pattern, &path);
+
+    match params.get("name") {
+        Maybe.Some(value) => {
+            print(f"Extracted: name = {value}");
+        },
+        Maybe.None => {
+            print("Error: Failed to extract parameter");
+        },
+    }
+    print("");
+}
+
+fn demo_multiple_params() {
+    print("--- Multiple Parameter Extraction ---");
+    let pattern = "/api/packages/{name}/versions/{version}";
+    let path = "/api/packages/verum-core/versions/0.1.0";
+
+    print(f"Pattern: {pattern}");
+    print(f"Path:    {path}");
+
+    let params = extract_params(&pattern, &path);
+
+    match params.get("name") {
+        Maybe.Some(name) => {
+            match params.get("version") {
+                Maybe.Some(version) => {
+                    print(f"Extracted: name = {name}, version = {version}");
+                },
+                Maybe.None => {
+                    print("Error: Failed to extract version");
+                },
+            }
+        },
+        Maybe.None => {
+            print("Error: Failed to extract name");
+        },
+    }
+    print("");
+}
+
+fn demo_complex_route() {
+    print("--- Complex Route (Three Parameters) ---");
+    let pattern = "/api/packages/{name}/versions/{version}/download/{format}";
+    let path = "/api/packages/verum-std/versions/1.2.3/download/tar.gz";
+
+    print(f"Pattern: {pattern}");
+    print(f"Path:    {path}");
+
+    let params = extract_params(&pattern, &path);
+
+    print(f"Extracted {params.len()} parameters:");
+    match params.get("name") {
+        Maybe.Some(value) => print(f"  - name: {value}"),
+        Maybe.None => {},
+    }
+    match params.get("version") {
+        Maybe.Some(value) => print(f"  - version: {value}"),
+        Maybe.None => {},
+    }
+    match params.get("format") {
+        Maybe.Some(value) => print(f"  - format: {value}"),
+        Maybe.None => {},
+    }
+    print("");
+}
+
+fn demo_route_matching() {
+    print("--- Route Matching Examples ---");
+
+    // Example 1: Exact match
+    let pattern1 = "/health";
+    let path1 = "/health";
+    let matches1 = matches_route(&pattern1, &path1);
+    print(f"Pattern: {pattern1}");
+    print(f"Path:    {path1}");
+    print(f"Matches: {matches1}\n");
+
+    // Example 2: Parameter match
+    let pattern2 = "/api/users/{username}";
+    let path2 = "/api/users/admin";
+    let matches2 = matches_route(&pattern2, &path2);
+    print(f"Pattern: {pattern2}");
+    print(f"Path:    {path2}");
+    print(f"Matches: {matches2}\n");
+
+    // Example 3: No match (different structure)
+    let pattern3 = "/api/packages/{name}";
+    let path3 = "/api/users/admin";
+    let matches3 = matches_route(&pattern3, &path3);
+    print(f"Pattern: {pattern3}");
+    print(f"Path:    {path3}");
+    print(f"Matches: {matches3}\n");
+
+    // Example 4: No match (length mismatch)
+    let pattern4 = "/api/packages/{name}";
+    let path4 = "/api/packages/verum-core/versions";
+    let matches4 = matches_route(&pattern4, &path4);
+    print(f"Pattern: {pattern4}");
+    print(f"Path:    {path4}");
+    print(f"Matches: {matches4}");
+}

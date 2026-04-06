@@ -1,0 +1,237 @@
+module sys.linux.auxv;
+
+// =============================================================================
+// sys/linux/auxv.vr - Auxiliary Vector Access (no libc)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// Platform: Linux (all architectures)
+//
+// This module provides direct access to the auxiliary vector passed by the
+// Linux kernel at program startup. No libc dependency.
+//
+// # Stack Layout at _start
+//
+// The kernel passes the following on the stack:
+// ```
+// [argc]              <- rsp at entry
+// [argv[0]]
+// [argv[1]]
+// ...
+// [NULL]              <- end of argv
+// [environ[0]]
+// [environ[1]]
+// ...
+// [NULL]              <- end of environ
+// [auxv[0].type]      <- auxiliary vector starts here
+// [auxv[0].value]
+// [auxv[1].type]
+// [auxv[1].value]
+// ...
+// [AT_NULL (0)]       <- end marker
+// [0]
+// ```
+//
+// # Usage
+//
+// ```verum
+// mount core.sys.linux.auxv.{init_auxv, getauxval, AT_HWCAP};
+//
+// // Called once at startup with argv pointer
+// init_auxv(argv);
+//
+// // Later, query auxiliary values
+// let hwcap = getauxval(AT_HWCAP);
+// ```
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+module core.sys.linux.auxv;
+
+// =============================================================================
+// Auxiliary Vector Types
+// =============================================================================
+
+/// Auxiliary vector entry type
+public type AuxvEntry is {
+    type_: UInt64,
+    value: UInt64,
+};
+
+// =============================================================================
+// Auxiliary Vector Constants (from Linux elf.h)
+// =============================================================================
+
+/// Null entry - marks end of auxv
+public const AT_NULL: UInt64 = 0;
+
+/// Entry point of program
+public const AT_ENTRY: UInt64 = 9;
+
+/// Real UID
+public const AT_UID: UInt64 = 11;
+
+/// Effective UID
+public const AT_EUID: UInt64 = 12;
+
+/// Real GID
+public const AT_GID: UInt64 = 13;
+
+/// Effective GID
+public const AT_EGID: UInt64 = 14;
+
+/// Processor hardware capabilities (HWCAP)
+public const AT_HWCAP: UInt64 = 16;
+
+/// System page size
+public const AT_PAGESZ: UInt64 = 6;
+
+/// Frequency of times() increments
+public const AT_CLKTCK: UInt64 = 17;
+
+/// Secure mode boolean
+public const AT_SECURE: UInt64 = 23;
+
+/// String identifying platform
+public const AT_PLATFORM: UInt64 = 15;
+
+/// Address of 16 random bytes
+public const AT_RANDOM: UInt64 = 25;
+
+/// Extension of AT_HWCAP
+public const AT_HWCAP2: UInt64 = 26;
+
+/// Filename of executed program
+public const AT_EXECFN: UInt64 = 31;
+
+/// vDSO base address
+public const AT_SYSINFO_EHDR: UInt64 = 33;
+
+// =============================================================================
+// Auxiliary Vector Storage
+// =============================================================================
+
+/// Cached pointer to the auxiliary vector
+/// Initialized once at program startup by init_auxv()
+static mut AUXV_PTR: *const AuxvEntry = null;
+
+// =============================================================================
+// Initialization
+// =============================================================================
+
+/// Initialize auxiliary vector access from argv pointer.
+///
+/// This function locates the auxiliary vector by walking past argv and environ.
+/// Must be called once at program startup before any getauxval() calls.
+///
+/// # Arguments
+/// * `argv` - Pointer to argv array (from kernel stack)
+///
+/// # Safety
+/// This must be called exactly once during program initialization.
+/// The argv pointer must be valid and point to the kernel-provided stack.
+public fn init_auxv(argv: &&Byte) {
+    unsafe {
+        // Start at argv
+        let mut ptr = argv as *const *const Byte;
+
+        // Skip past argv entries until NULL terminator
+        while !(*ptr).is_null() {
+            ptr = ptr.offset(1);
+        }
+
+        // Skip the NULL terminator of argv
+        ptr = ptr.offset(1);
+
+        // Now we're at environ - skip past environ entries until NULL
+        while !(*ptr).is_null() {
+            ptr = ptr.offset(1);
+        }
+
+        // Skip the NULL terminator of environ
+        ptr = ptr.offset(1);
+
+        // Now ptr points to the auxiliary vector
+        AUXV_PTR = ptr as *const AuxvEntry;
+    }
+}
+
+// =============================================================================
+// Auxiliary Vector Access
+// =============================================================================
+
+/// Get a value from the auxiliary vector.
+///
+/// Returns the value associated with the given type, or 0 if not found.
+/// This is the no-libc equivalent of libc's getauxval().
+///
+/// # Arguments
+/// * `type_` - The auxiliary vector type (AT_* constant)
+///
+/// # Returns
+/// The value for the given type, or 0 if not found or not initialized.
+///
+/// # Example
+/// ```verum
+/// let hwcap = getauxval(AT_HWCAP);
+/// let page_size = getauxval(AT_PAGESZ);
+/// ```
+public fn getauxval(type_: UInt64) -> UInt64 {
+    unsafe {
+        if AUXV_PTR.is_null() {
+            return 0;
+        }
+
+        let mut entry = AUXV_PTR;
+
+        // Walk the auxiliary vector
+        while (*entry).type_ != AT_NULL {
+            if (*entry).type_ == type_ {
+                return (*entry).value;
+            }
+            entry = entry.offset(1);
+        }
+
+        // Type not found
+        0
+    }
+}
+
+/// Check if auxiliary vector has been initialized.
+public fn is_auxv_initialized() -> Bool {
+    unsafe { !AUXV_PTR.is_null() }
+}
+
+/// Get the page size from auxiliary vector.
+/// Returns 4096 as fallback if not available.
+public fn page_size() -> USize {
+    let size = getauxval(AT_PAGESZ);
+    if size == 0 { 4096 } else { size as USize }
+}
+
+/// Get hardware capabilities (HWCAP).
+public fn hwcap() -> UInt64 {
+    getauxval(AT_HWCAP)
+}
+
+/// Get extended hardware capabilities (HWCAP2).
+public fn hwcap2() -> UInt64 {
+    getauxval(AT_HWCAP2)
+}
+
+/// Check if running in secure mode (setuid/setgid).
+public fn is_secure() -> Bool {
+    getauxval(AT_SECURE) != 0
+}
+
+/// Get vDSO base address (for fast syscalls).
+public fn vdso_base() -> UInt64 {
+    getauxval(AT_SYSINFO_EHDR)
+}
+
+/// Get pointer to 16 random bytes provided by kernel.
+/// Useful for stack canaries and address randomization.
+public fn random_bytes() -> *const Byte {
+    getauxval(AT_RANDOM) as *const Byte
+}

@@ -1,0 +1,17 @@
+// Test basic implement block - function style
+type Counter is {
+    value: Int
+};
+
+implement Counter {
+    fn create(v: Int) -> Counter {
+        Counter { value: v }
+    }
+}
+
+fn main() {
+    let _ = print("Testing implement blocks...");
+    let c = Counter.create(42);
+    let _ = print(f"Created counter with value: {c.value}");
+    let _ = print("Done!");
+}

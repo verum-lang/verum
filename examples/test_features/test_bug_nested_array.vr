@@ -1,0 +1,22 @@
+// Test nested array-to-list coercion
+// This tests the fix for the bug where [[1, 2], [3, 4]] doesn't coerce to List<List<Int>>
+
+fn main() {
+    // Test case 1: 2D array to List<List<Int>>
+    let matrix: List<List<Int>> = [[1, 2], [3, 4]];
+    print(f"Matrix: {matrix}");
+
+    // Test case 2: 3D array to List<List<List<Int>>>
+    let cube: List<List<List<Int>>> = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    print(f"Cube: {cube}");
+
+    // Test case 3: Simple 1D array (should still work)
+    let simple: List<Int> = [1, 2, 3, 4, 5];
+    print(f"Simple: {simple}");
+
+    // Test case 4: More 2D arrays with uniform sizes
+    let square: List<List<Int>> = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    print(f"Square: {square}");
+
+    print("All tests passed!");
+}

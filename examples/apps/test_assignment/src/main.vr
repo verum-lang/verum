@@ -1,0 +1,252 @@
+// Test assignment operations in Verum interpreter
+// This file tests:
+// 1. Field assignment (record.field = value)
+// 2. Index assignment (list[index] = value, map[key] = value)
+// 3. Tuple element assignment (tuple.0 = value)
+// 4. Chained assignments (a.b.c = value, a[0].b = value)
+
+// Type declarations
+type Point {
+    x: Int,
+    y: Int
+}
+
+type Container {
+    point: Point,
+    values: List<Int>,
+    tuple: (Int, Int)
+}
+
+fn test_field_assignment() {
+    println("=== Testing Field Assignment ===")
+
+    // Simple field assignment
+    let mut point = Point { x: 10, y: 20 }
+    println("Initial point: x={}, y={}", point.x, point.y)
+
+    point.x = 100
+    point.y = 200
+    println("After assignment: x={}, y={}", point.x, point.y)
+
+    // Verify values changed
+    if point.x == 100 && point.y == 200 {
+        println("✓ Simple field assignment works")
+    }
+}
+
+fn test_chained_field_assignment() {
+    println("\n=== Testing Chained Field Assignment ===")
+
+    let mut container = Container {
+        point: Point { x: 1, y: 2 },
+        values: [10, 20, 30],
+        tuple: (5, 6)
+    }
+
+    println("Initial nested point: x={}, y={}", container.point.x, container.point.y)
+
+    // Chained field assignment: container.point.x = value
+    container.point.x = 999
+    container.point.y = 888
+
+    println("After chained assignment: x={}, y={}", container.point.x, container.point.y)
+
+    if container.point.x == 999 && container.point.y == 888 {
+        println("✓ Chained field assignment works")
+    }
+}
+
+fn test_list_index_assignment() {
+    println("\n=== Testing List Index Assignment ===")
+
+    let mut numbers = [1, 2, 3, 4, 5]
+    println("Initial list: {:?}", numbers)
+
+    // Simple index assignment
+    numbers[0] = 100
+    numbers[2] = 300
+    numbers[4] = 500
+
+    println("After assignment: {:?}", numbers)
+
+    if numbers[0] == 100 && numbers[2] == 300 && numbers[4] == 500 {
+        println("✓ List index assignment works")
+    }
+}
+
+fn test_map_index_assignment() {
+    println("\n=== Testing Map Index Assignment ===")
+
+    let mut scores = { "alice": 100, "bob": 200 }
+    println("Initial map: alice={}, bob={}", scores["alice"], scores["bob"])
+
+    // Map key assignment (update existing)
+    scores["alice"] = 150
+
+    // Map key assignment (add new)
+    scores["charlie"] = 300
+
+    println("After assignment: alice={}, charlie={}", scores["alice"], scores["charlie"])
+
+    if scores["alice"] == 150 && scores["charlie"] == 300 {
+        println("✓ Map index assignment works")
+    }
+}
+
+fn test_tuple_index_assignment() {
+    println("\n=== Testing Tuple Index Assignment ===")
+
+    let mut pair = (10, 20)
+    println("Initial tuple: ({}, {})", pair.0, pair.1)
+
+    // Tuple element assignment
+    pair.0 = 100
+    pair.1 = 200
+
+    println("After assignment: ({}, {})", pair.0, pair.1)
+
+    if pair.0 == 100 && pair.1 == 200 {
+        println("✓ Tuple index assignment works")
+    }
+}
+
+fn test_nested_list_assignment() {
+    println("\n=== Testing Nested List Assignment ===")
+
+    let mut matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    println("Initial matrix[1][1]: {}", matrix[1][1])
+
+    // Nested index assignment: matrix[i][j] = value
+    matrix[1][1] = 999
+
+    println("After assignment matrix[1][1]: {}", matrix[1][1])
+
+    if matrix[1][1] == 999 {
+        println("✓ Nested list assignment works")
+    }
+}
+
+fn test_record_field_list_assignment() {
+    println("\n=== Testing Record Field List Assignment ===")
+
+    let mut container = Container {
+        point: Point { x: 1, y: 2 },
+        values: [10, 20, 30],
+        tuple: (5, 6)
+    }
+
+    println("Initial container.values[1]: {}", container.values[1])
+
+    // Record field with list index: container.values[1] = value
+    container.values[1] = 777
+
+    println("After assignment container.values[1]: {}", container.values[1])
+
+    if container.values[1] == 777 {
+        println("✓ Record field list assignment works")
+    }
+}
+
+fn test_record_field_tuple_assignment() {
+    println("\n=== Testing Record Field Tuple Assignment ===")
+
+    let mut container = Container {
+        point: Point { x: 1, y: 2 },
+        values: [10, 20, 30],
+        tuple: (5, 6)
+    }
+
+    println("Initial container.tuple: ({}, {})", container.tuple.0, container.tuple.1)
+
+    // Record field with tuple index: container.tuple.0 = value
+    container.tuple.0 = 555
+    container.tuple.1 = 666
+
+    println("After assignment container.tuple: ({}, {})", container.tuple.0, container.tuple.1)
+
+    if container.tuple.0 == 555 && container.tuple.1 == 666 {
+        println("✓ Record field tuple assignment works")
+    }
+}
+
+fn test_list_of_records_field_assignment() {
+    println("\n=== Testing List of Records Field Assignment ===")
+
+    let mut points = [
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+        Point { x: 5, y: 6 }
+    ]
+
+    println("Initial points[1]: x={}, y={}", points[1].x, points[1].y)
+
+    // List index with field: points[1].x = value
+    points[1].x = 333
+    points[1].y = 444
+
+    println("After assignment points[1]: x={}, y={}", points[1].x, points[1].y)
+
+    if points[1].x == 333 && points[1].y == 444 {
+        println("✓ List of records field assignment works")
+    }
+}
+
+fn test_list_of_tuples_element_assignment() {
+    println("\n=== Testing List of Tuples Element Assignment ===")
+
+    let mut pairs = [(1, 2), (3, 4), (5, 6)]
+
+    println("Initial pairs[2]: ({}, {})", pairs[2].0, pairs[2].1)
+
+    // List index with tuple element: pairs[2].0 = value
+    pairs[2].0 = 111
+    pairs[2].1 = 222
+
+    println("After assignment pairs[2]: ({}, {})", pairs[2].0, pairs[2].1)
+
+    if pairs[2].0 == 111 && pairs[2].1 == 222 {
+        println("✓ List of tuples element assignment works")
+    }
+}
+
+fn test_compound_assignment() {
+    println("\n=== Testing Compound Assignment ===")
+
+    let mut x = 10
+    println("Initial x: {}", x)
+
+    // Compound assignments
+    x += 5
+    println("After x += 5: {}", x)
+
+    x -= 3
+    println("After x -= 3: {}", x)
+
+    x *= 2
+    println("After x *= 2: {}", x)
+
+    x /= 4
+    println("After x /= 4: {}", x)
+
+    if x == 6 {
+        println("✓ Compound assignment works")
+    }
+}
+
+fn main() {
+    println("Starting Assignment Operations Tests\n")
+
+    test_field_assignment()
+    test_chained_field_assignment()
+    test_list_index_assignment()
+    test_map_index_assignment()
+    test_tuple_index_assignment()
+    test_nested_list_assignment()
+    test_record_field_list_assignment()
+    test_record_field_tuple_assignment()
+    test_list_of_records_field_assignment()
+    test_list_of_tuples_element_assignment()
+    test_compound_assignment()
+
+    println("\n=== All Assignment Tests Complete ===")
+}

@@ -1,0 +1,36 @@
+// Step 4: Test nested generics
+
+type Box<T> is {
+    value: T
+}
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+type Maybe<T> is
+  | Just(T)
+  | Nothing
+
+fn nest_box<T>(x: T) -> Box<Box<T>> {
+    Box { value: Box { value: x } }
+}
+
+fn pair_of_boxes<A, B>(a: A, b: B) -> Pair<Box<A>, Box<B>> {
+    Pair {
+        first: Box { value: a },
+        second: Box { value: b }
+    }
+}
+
+fn maybe_box<T>(x: T) -> Maybe<Box<T>> {
+    Just(Box { value: x })
+}
+
+fn main() -> Int {
+    let nb = nest_box(42);
+    let pob = pair_of_boxes(10, 20);
+    let mb = maybe_box(99);
+    nb.value.value
+}

@@ -1,0 +1,16 @@
+// Comprehensive FFI System Test Application
+
+ffi LibMath {
+    @extern("C")
+    fn sqrt(x: Float) -> Float;
+    requires x >= 0.0;
+    ensures result >= 0.0;
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+fn main() -> Int {
+    0
+}

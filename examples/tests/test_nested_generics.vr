@@ -1,0 +1,6 @@
+type Box<T> is { value: T };
+
+fn main() {
+    let nested: Box<Box<Int>> = Box { value: Box { value: 42 } };
+    let _ = println(f"Inner: {nested.value.value}");
+}

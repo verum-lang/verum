@@ -1,0 +1,241 @@
+// =============================================================================
+// mem/capability.vr - Capability-Based Access Control
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// This module defines capability flags for CBGR access control.
+// Capabilities are monotonically attenuated - once removed, they cannot
+// be restored without creating a new reference.
+//
+// # Capability Model
+//
+// References carry capability flags (16 bits) that control operations:
+// - Read:     Can read data through reference
+// - Write:    Can write data through reference
+// - Execute:  Can execute (function pointers)
+// - Delegate: Can create sub-references
+// - Revoke:   Can invalidate this reference
+// - Borrowed: Non-owning reference
+// - Mutable:  Can obtain &mut
+// - NoEscape: Reference cannot escape current scope
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.3
+// =============================================================================
+
+// =============================================================================
+// Capability Flags (bit positions)
+// =============================================================================
+
+/// Can read data through reference.
+
+module core.mem.capability;
+public const CAP_READ: UInt16 = 1 << 0;
+
+/// Can write data through reference.
+public const CAP_WRITE: UInt16 = 1 << 1;
+
+/// Can execute (function pointers, closures).
+public const CAP_EXECUTE: UInt16 = 1 << 2;
+
+/// Can create sub-references (delegation).
+public const CAP_DELEGATE: UInt16 = 1 << 3;
+
+/// Can revoke/invalidate this reference.
+public const CAP_REVOKE: UInt16 = 1 << 4;
+
+/// Non-owning borrowed reference.
+public const CAP_BORROWED: UInt16 = 1 << 5;
+
+/// Can obtain mutable access.
+public const CAP_MUTABLE: UInt16 = 1 << 6;
+
+/// Reference cannot escape current scope (enables optimizations).
+public const CAP_NO_ESCAPE: UInt16 = 1 << 7;
+
+// =============================================================================
+// Capability Presets
+// =============================================================================
+
+/// All capabilities enabled.
+public const CAP_ALL: UInt16 = 0x00FF;
+
+/// Read-only access.
+public const CAP_READ_ONLY: UInt16 = CAP_READ;
+
+/// Read-write access.
+public const CAP_READ_WRITE: UInt16 = CAP_READ | CAP_WRITE;
+
+/// Full ownership (can read, write, delegate, revoke).
+public const CAP_OWNED: UInt16 = CAP_READ | CAP_WRITE | CAP_DELEGATE | CAP_REVOKE | CAP_MUTABLE;
+
+/// Borrowed immutable reference.
+public const CAP_BORROW_SHARED: UInt16 = CAP_READ | CAP_BORROWED;
+
+/// Borrowed mutable reference.
+public const CAP_BORROW_MUT: UInt16 = CAP_READ | CAP_WRITE | CAP_BORROWED | CAP_MUTABLE;
+
+/// Executable reference (function pointer).
+public const CAP_EXECUTABLE: UInt16 = CAP_READ | CAP_EXECUTE;
+
+// =============================================================================
+// Capability Type (for type-safe operations)
+// =============================================================================
+
+/// Type-safe capability wrapper.
+public type Capability is
+    | Read
+    | Write
+    | Execute
+    | Delegate
+    | Revoke
+    | Borrowed
+    | Mutable
+    | NoEscape
+    ;
+
+implement Capability {
+    /// Get the bit value for this capability.
+    public fn to_bit(&self) -> UInt16 {
+        match self {
+            Read => CAP_READ,
+            Write => CAP_WRITE,
+            Execute => CAP_EXECUTE,
+            Delegate => CAP_DELEGATE,
+            Revoke => CAP_REVOKE,
+            Borrowed => CAP_BORROWED,
+            Mutable => CAP_MUTABLE,
+            NoEscape => CAP_NO_ESCAPE,
+        }
+    }
+
+    /// Check if capability is present in flags.
+    public fn is_present(&self, flags: UInt16) -> Bool {
+        (flags & self.to_bit()) != 0
+    }
+}
+
+// =============================================================================
+// Capability Operations
+// =============================================================================
+
+/// Check if a capability is present in a flag set.
+@inline
+public fn has_capability(flags: UInt16, cap: UInt16) -> Bool {
+    (flags & cap) != 0
+}
+
+/// Check if all required capabilities are present.
+@inline
+public fn has_all_capabilities(flags: UInt16, required: UInt16) -> Bool {
+    (flags & required) == required
+}
+
+/// Attenuate capabilities (remove bits).
+/// Once capabilities are removed, they cannot be restored.
+@inline
+public fn attenuate(flags: UInt16, mask: UInt16) -> UInt16 {
+    flags & mask
+}
+
+/// Remove specific capabilities.
+@inline
+public fn remove_capability(flags: UInt16, to_remove: UInt16) -> UInt16 {
+    flags & !to_remove
+}
+
+/// Check if delegation is allowed.
+@inline
+public fn can_delegate(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_DELEGATE)
+}
+
+/// Check if revocation is allowed.
+@inline
+public fn can_revoke(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_REVOKE)
+}
+
+/// Check if reference is borrowed.
+@inline
+public fn is_borrowed(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_BORROWED)
+}
+
+/// Check if mutable access is allowed.
+@inline
+public fn can_mutate(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_MUTABLE) && has_capability(flags, CAP_WRITE)
+}
+
+/// Check if execution is allowed.
+@inline
+public fn can_execute(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_EXECUTE)
+}
+
+/// Delegate capabilities to a sub-reference.
+/// Returns None if delegation is not allowed or requested caps exceed available.
+public fn delegate_capability(parent_caps: UInt16, requested: UInt16) -> Maybe<UInt16> {
+    // Must have Delegate capability
+    if !can_delegate(parent_caps) {
+        return None;
+    }
+
+    // Can only delegate capabilities that parent has
+    if !has_all_capabilities(parent_caps, requested) {
+        return None;
+    }
+
+    // New reference does not inherit Delegate by default
+    // unless explicitly requested
+    Some(requested & !CAP_DELEGATE | (requested & CAP_DELEGATE))
+}
+
+/// Revoke capabilities from a reference.
+/// Returns None if revocation is not allowed.
+public fn revoke_capability(caps: UInt16, to_revoke: UInt16) -> Maybe<UInt16> {
+    if !can_revoke(caps) {
+        return None;
+    }
+
+    Some(caps & !to_revoke)
+}
+
+/// Create capabilities for owned heap allocation.
+public fn owned_capabilities() -> UInt16 {
+    CAP_OWNED
+}
+
+/// Create capabilities for shared borrow.
+public fn shared_borrow_capabilities() -> UInt16 {
+    CAP_BORROW_SHARED
+}
+
+/// Create capabilities for mutable borrow.
+public fn mutable_borrow_capabilities() -> UInt16 {
+    CAP_BORROW_MUT
+}
+
+// =============================================================================
+// Capability Validation
+// =============================================================================
+
+/// Validate read access.
+@inline
+public fn validate_read(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_READ)
+}
+
+/// Validate write access.
+@inline
+public fn validate_write(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_WRITE) && has_capability(flags, CAP_MUTABLE)
+}
+
+/// Validate execute access.
+@inline
+public fn validate_execute(flags: UInt16) -> Bool {
+    has_capability(flags, CAP_EXECUTE)
+}

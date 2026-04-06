@@ -1,0 +1,151 @@
+// =============================================================================
+// tabs.vr - Horizontal tab bar widget
+// =============================================================================
+module tabs;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.Block;
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+/// Tabs — horizontal tab bar with selection indicator.
+/// Titles are stored as Lines, supporting styled tab labels.
+/// The divider is a Span, allowing styled separators.
+/// Padding is specified as integer column counts.
+public type Tabs is {
+    titles: List<Line>,
+    selected: Int,
+    block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    divider: Span,
+    padding_left: Int,
+    padding_right: Int,
+};
+
+implement Tabs {
+    /// Create tabs from a list of plain text titles.
+    /// Each text is converted to a Line via Line.raw().
+    public fn new(titles: List<Text>) -> Tabs {
+        let mut lines = List.new();
+        for t in &titles {
+            lines.push(Line.raw(t.clone()));
+        }
+        Tabs {
+            titles: lines,
+            selected: 0,
+            block: None,
+            style: Style.DEFAULT,
+            highlight_style: Style.new().bold().reversed(),
+            divider: Span.raw(" | "),
+            padding_left: 1,
+            padding_right: 1,
+        }
+    }
+
+    /// Create tabs from pre-styled Line titles.
+    public fn from_lines(titles: List<Line>) -> Tabs {
+        Tabs {
+            titles: titles,
+            selected: 0,
+            block: None,
+            style: Style.DEFAULT,
+            highlight_style: Style.new().bold().reversed(),
+            divider: Span.raw(" | "),
+            padding_left: 1,
+            padding_right: 1,
+        }
+    }
+
+    // Builder API
+    public fn select(self, index: Int) -> Tabs {
+        Tabs { selected: index, ..self }
+    }
+
+    public fn block(self, block: Block) -> Tabs {
+        Tabs { block: Some(block), ..self }
+    }
+
+    public fn style(self, style: Style) -> Tabs {
+        Tabs { style: style, ..self }
+    }
+
+    public fn highlight_style(self, style: Style) -> Tabs {
+        Tabs { highlight_style: style, ..self }
+    }
+
+    /// Set the divider text (creates an unstyled Span).
+    public fn divider(self, div: Text) -> Tabs {
+        Tabs { divider: Span.raw(div), ..self }
+    }
+
+    /// Set the divider as a styled Span.
+    public fn divider_span(self, span: Span) -> Tabs {
+        Tabs { divider: span, ..self }
+    }
+
+    /// Set left and right padding (number of spaces).
+    public fn padding(self, left: Int, right: Int) -> Tabs {
+        Tabs { padding_left: left, padding_right: right, ..self }
+    }
+}
+
+implement Widget for Tabs {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let tab_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if tab_area.width < 1 || tab_area.height < 1 { return; }
+
+        buf.set_style(tab_area, self.style);
+
+        let mut x = tab_area.x;
+        let y = tab_area.y;
+
+        for i in 0..self.titles.len() {
+            if x >= tab_area.right() { break; }
+
+            let tab_style = if i == self.selected {
+                self.highlight_style
+            } else {
+                self.style
+            };
+
+            // Left padding as spaces
+            let mut pad = 0;
+            while pad < self.padding_left && x < tab_area.right() {
+                buf.get_mut(x, y).set_char(" ", tab_style);
+                x = x + 1;
+                pad = pad + 1;
+            }
+
+            // Render each span in the title line
+            for span in &self.titles[i].spans {
+                let combined = tab_style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined);
+                if x >= tab_area.right() { break; }
+            }
+
+            // Right padding as spaces
+            pad = 0;
+            while pad < self.padding_right && x < tab_area.right() {
+                buf.get_mut(x, y).set_char(" ", tab_style);
+                x = x + 1;
+                pad = pad + 1;
+            }
+
+            // Divider between tabs (not after last)
+            if i < self.titles.len() - 1 {
+                x = buf.set_string(x, y, &self.divider.content, self.divider.style);
+            }
+        }
+    }
+}

@@ -1,0 +1,9 @@
+// Test: Nested type alias with refinement
+type Natural is Int{>= 0};
+type PositiveNatural is Natural{> 0};
+
+fn main() {
+    let n: Natural = 10;
+    let p: PositiveNatural = 5;
+    n + p
+}

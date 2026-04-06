@@ -1,0 +1,45 @@
+// Test: Power operator
+// Grammar: power_op = '**'
+// Grammar: power_expr = unary_expr , { '**' , unary_expr }
+
+fn main() -> Int {
+    // Basic power operations
+    let result1 = 2 ** 8;
+    println(f"2 ** 8 = {result1}");
+
+    let result2 = 3 ** 4;
+    println(f"3 ** 4 = {result2}");
+
+    let result3 = 5 ** 2;
+    println(f"5 ** 2 = {result3}");
+
+    // Power with variables
+    let base = 4;
+    let exponent = 3;
+    let result4 = base ** exponent;
+    println(f"{base} ** {exponent} = {result4}");
+
+    // Chained power operations (right associative)
+    let result5 = 2 ** 2 ** 3;
+    println(f"2 ** 2 ** 3 = {result5}");
+
+    // Power with negative result
+    let result6 = (-2) ** 2;
+    println(f"(-2) ** 2 = {result6}");
+
+    // Power of 0 and 1
+    let result7 = 10 ** 0;
+    println(f"10 ** 0 = {result7}");
+
+    let result8 = 10 ** 1;
+    println(f"10 ** 1 = {result8}");
+
+    // Combined with other operations
+    let result9 = 2 ** 3 + 1;
+    println(f"2 ** 3 + 1 = {result9}");
+
+    let result10 = (2 + 1) ** 3;
+    println(f"(2 + 1) ** 3 = {result10}");
+
+    result1 + result2 + result3
+}

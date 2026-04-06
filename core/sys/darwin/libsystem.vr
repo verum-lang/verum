@@ -1,0 +1,1889 @@
+module sys.darwin.libsystem;
+
+// =============================================================================
+// sys/darwin/libsystem.vr - macOS libSystem.B.dylib FFI bindings
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+//
+// CRITICAL: macOS DOES NOT support stable syscalls.
+// All system operations MUST go through libSystem.B.dylib.
+//
+// Apple explicitly states that syscall numbers are private implementation
+// details and may change between OS versions without notice.
+//
+// This module provides FFI bindings to libSystem for stable system access.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount super.super.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
+
+// =============================================================================
+// libSystem.B.dylib FFI Declarations
+// =============================================================================
+
+@ffi("libSystem.B.dylib")
+extern {
+    // =========================================================================
+    // File I/O
+    // =========================================================================
+
+    /// Read from file descriptor
+    public fn read(fd: Int, buf: &unsafe Byte, nbyte: Int) -> Int;
+
+    /// Write to file descriptor
+    public fn write(fd: Int, buf: &Byte, nbyte: Int) -> Int;
+
+    /// Open file
+    public fn open(path: &Byte, oflag: Int, mode: Int) -> Int;
+
+    /// Close file descriptor
+    public fn close(fd: Int) -> Int;
+
+    /// Read at offset (does not change file position)
+    fn pread(fd: Int, buf: &unsafe Byte, nbyte: Int, offset: Int) -> Int;
+
+    /// Write at offset (does not change file position)
+    fn pwrite(fd: Int, buf: &Byte, nbyte: Int, offset: Int) -> Int;
+
+    /// Reposition file offset
+    fn lseek(fd: Int, offset: Int, whence: Int) -> Int;
+
+    /// Duplicate file descriptor
+    fn dup(fd: Int) -> Int;
+
+    /// Duplicate file descriptor to specific number
+    fn dup2(oldfd: Int, newfd: Int) -> Int;
+
+    /// Create pipe (fds[0]=read end, fds[1]=write end)
+    fn pipe(fds: &mut Int) -> Int;
+
+    /// File control operations
+    fn fcntl(fd: Int, cmd: Int, arg: Int) -> Int;
+
+    /// Synchronize file to disk
+    fn fsync(fd: Int) -> Int;
+
+    /// Synchronize file data to disk
+    fn fdatasync(fd: Int) -> Int;
+
+    /// Truncate file to length
+    fn ftruncate(fd: Int, length: Int) -> Int;
+
+    /// Get file status
+    fn fstat(fd: Int, buf: &unsafe Stat) -> Int;
+
+    /// Get file status (path)
+    fn stat(path: &Byte, buf: &unsafe Stat) -> Int;
+
+    /// Get file status (symlink)
+    fn lstat(path: &Byte, buf: &unsafe Stat) -> Int;
+
+    /// Scatter read
+    fn readv(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
+
+    /// Gather write
+    fn writev(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
+
+    // =========================================================================
+    // Memory Management
+    // =========================================================================
+
+    /// Map memory
+    @ffi_name("mmap")
+    public fn mmap_ffi(addr: Int, len: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int;
+
+    /// Unmap memory
+    public fn munmap(addr: Int, len: Int) -> Int;
+
+    /// Change memory protection
+    public fn mprotect(addr: Int, len: Int, prot: Int) -> Int;
+
+    /// Memory advise
+    public fn madvise(addr: Int, len: Int, advice: Int) -> Int;
+
+    /// Lock memory
+    fn mlock(addr: Int, len: Int) -> Int;
+
+    /// Unlock memory
+    fn munlock(addr: Int, len: Int) -> Int;
+
+    /// Synchronize memory to storage
+    fn msync(addr: Int, len: Int, flags: Int) -> Int;
+
+    /// Get page size
+    fn getpagesize() -> Int;
+
+    // =========================================================================
+    // Process Control
+    // =========================================================================
+
+    /// Get process ID
+    fn getpid() -> Int;
+
+    /// Get parent process ID
+    fn getppid() -> Int;
+
+    /// Get user ID
+    fn getuid() -> Int;
+
+    /// Get effective user ID
+    fn geteuid() -> Int;
+
+    /// Get group ID
+    fn getgid() -> Int;
+
+    /// Get effective group ID
+    fn getegid() -> Int;
+
+    /// Exit process
+    fn exit(status: Int) -> !;
+
+    /// Exit process (alternate)
+    fn _exit(status: Int) -> !;
+
+    /// Fork process
+    fn fork() -> Int;
+
+    /// Execute program (absolute path)
+    fn execve(path: &Byte, argv: &(&Byte), envp: &(&Byte)) -> Int;
+
+    /// Execute program (search PATH)
+    fn execvp(file: &Byte, argv: &(&Byte)) -> Int;
+
+    /// Wait for child process
+    fn waitpid(pid: Int, status: &mut Int, options: Int) -> Int;
+
+    /// Send signal
+    fn kill(pid: Int, sig: Int) -> Int;
+
+    // =========================================================================
+    // kqueue - Event Notification
+    // =========================================================================
+
+    /// Create kqueue
+    public fn kqueue() -> Int;
+
+    /// Register/poll events
+    public fn kevent(
+        kq: Int,
+        changelist: &KEvent,
+        nchanges: Int,
+        eventlist: &unsafe KEvent,
+        nevents: Int,
+        timeout: &Timespec,
+    ) -> Int;
+
+    /// kevent64 (extended)
+    public fn kevent64(
+        kq: Int,
+        changelist: &KEvent64,
+        nchanges: Int,
+        eventlist: &unsafe KEvent64,
+        nevents: Int,
+        flags: USize,
+        timeout: &Timespec,
+    ) -> Int;
+
+    // =========================================================================
+    // pthread - Threading
+    // =========================================================================
+
+    /// Get current thread
+    public fn pthread_self() -> PthreadT;
+
+    /// Create thread
+    public fn pthread_create(
+        thread: &mut PthreadT,
+        attr: &PthreadAttr,
+        start_routine: fn(&unsafe Byte) -> &unsafe Byte,
+        arg: &unsafe Byte,
+    ) -> Int;
+
+    /// Join thread
+    public fn pthread_join(thread: PthreadT, value_ptr: &mut (&unsafe Byte)) -> Int;
+
+    /// Detach thread
+    public fn pthread_detach(thread: PthreadT) -> Int;
+
+    /// Exit thread
+    public fn pthread_exit(value_ptr: &unsafe Byte) -> !;
+
+    /// Initialize mutex
+    public fn pthread_mutex_init(mutex: &mut PthreadMutex, attr: &PthreadMutexAttr) -> Int;
+
+    /// Destroy mutex
+    public fn pthread_mutex_destroy(mutex: &mut PthreadMutex) -> Int;
+
+    /// Lock mutex
+    public fn pthread_mutex_lock(mutex: &mut PthreadMutex) -> Int;
+
+    /// Try lock mutex
+    public fn pthread_mutex_trylock(mutex: &mut PthreadMutex) -> Int;
+
+    /// Unlock mutex
+    public fn pthread_mutex_unlock(mutex: &mut PthreadMutex) -> Int;
+
+    /// Initialize condition variable
+    public fn pthread_cond_init(cond: &mut PthreadCond, attr: &PthreadCondAttr) -> Int;
+
+    /// Destroy condition variable
+    public fn pthread_cond_destroy(cond: &mut PthreadCond) -> Int;
+
+    /// Wait on condition variable
+    public fn pthread_cond_wait(cond: &mut PthreadCond, mutex: &mut PthreadMutex) -> Int;
+
+    /// Timed wait on condition variable
+    public fn pthread_cond_timedwait(
+        cond: &mut PthreadCond,
+        mutex: &mut PthreadMutex,
+        abstime: &Timespec,
+    ) -> Int;
+
+    /// Signal condition variable
+    public fn pthread_cond_signal(cond: &mut PthreadCond) -> Int;
+
+    /// Broadcast condition variable
+    public fn pthread_cond_broadcast(cond: &mut PthreadCond) -> Int;
+
+    // =========================================================================
+    // Low-level ulock (futex equivalent on macOS/XNU)
+    // =========================================================================
+
+    /// Wait on address if value matches (futex equivalent).
+    /// operation: UL_COMPARE_AND_WAIT (1) | ULF_NO_ERRNO (0x01000000)
+    /// addr: pointer to 32-bit word to compare
+    /// value: expected value (compared as uint64_t, lower 32 bits used)
+    /// timeout_us: timeout in microseconds (0 = infinite)
+    /// Returns: 0 on success, negative errno on error (-ETIMEDOUT, -EFAULT, -EINTR)
+    public fn __ulock_wait(operation: UInt32, addr: &unsafe Byte, value: UInt64, timeout_us: UInt32) -> Int;
+
+    /// Wake threads waiting on address (futex wake equivalent).
+    /// operation: UL_COMPARE_AND_WAIT (1) | ULF_WAKE_ALL (0x100) for all
+    /// addr: pointer to word being waited on
+    /// wake_value: not used for UL_COMPARE_AND_WAIT, pass 0
+    /// Returns: 0 on success, negative errno on error
+    public fn __ulock_wake(operation: UInt32, addr: &unsafe Byte, wake_value: UInt64) -> Int;
+
+    /// TLS key create
+    public fn pthread_key_create(key: &mut PthreadKey, destructor: fn(&unsafe Byte)) -> Int;
+
+    /// TLS key delete
+    public fn pthread_key_delete(key: PthreadKey) -> Int;
+
+    /// TLS get specific
+    public fn pthread_getspecific(key: PthreadKey) -> &unsafe Byte;
+
+    /// TLS set specific
+    public fn pthread_setspecific(key: PthreadKey, value: &unsafe Byte) -> Int;
+
+    /// Get thread ID (macOS extension)
+    public fn pthread_threadid_np(thread: PthreadT, thread_id: &mut UInt64) -> Int;
+
+    // =========================================================================
+    // Time
+    // =========================================================================
+
+    /// Get time of day
+    public fn gettimeofday(tv: &mut Timeval, tz: &unsafe Byte) -> Int;
+
+    /// Get clock time (POSIX)
+    public fn clock_gettime(clk_id: Int, tp: &mut Timespec) -> Int;
+
+    /// Sleep (nanoseconds)
+    public fn nanosleep(rqtp: &Timespec, rmtp: &mut Timespec) -> Int;
+
+    /// Get monotonic time (mach)
+    public fn mach_absolute_time() -> UInt64;
+
+    /// Get time base info (mach)
+    public fn mach_timebase_info(info: &mut MachTimebaseInfo) -> Int;
+
+    // =========================================================================
+    // Sockets
+    // =========================================================================
+
+    /// Create socket
+    fn socket(domain: Int, socket_type: Int, protocol: Int) -> Int;
+
+    /// Bind socket
+    fn bind(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int;
+
+    /// Listen on socket
+    fn listen(sockfd: Int, backlog: Int) -> Int;
+
+    /// Accept connection
+    fn accept(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+
+    /// Connect socket
+    fn connect(sockfd: Int, addr: &unsafe Byte, addrlen: Int) -> Int;
+
+    /// Send data
+    fn send(sockfd: Int, buf: &Byte, len: Int, flags: Int) -> Int;
+
+    /// Receive data
+    fn recv(sockfd: Int, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+
+    /// Send to address
+    fn sendto(
+        sockfd: Int,
+        buf: &Byte,
+        len: Int,
+        flags: Int,
+        dest_addr: &unsafe Byte,
+        addrlen: Int,
+    ) -> Int;
+
+    /// Receive from address
+    @ffi_name("recvfrom")
+    fn recvfrom_ffi(
+        sockfd: Int,
+        buf: &unsafe Byte,
+        len: Int,
+        flags: Int,
+        src_addr: &unsafe Byte,
+        addrlen: &mut Int,
+    ) -> Int;
+
+    /// Get socket option
+    fn getsockopt(sockfd: Int, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int;
+
+    /// Set socket option
+    fn setsockopt(sockfd: Int, level: Int, optname: Int, optval: &Byte, optlen: Int) -> Int;
+
+    /// Shutdown socket
+    fn shutdown(sockfd: Int, how: Int) -> Int;
+
+    /// Get socket name (local address)
+    fn getsockname(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+
+    /// Get peer name (remote address)
+    fn getpeername(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int;
+
+    // =========================================================================
+    // Directory Operations
+    // =========================================================================
+
+    /// Create directory
+    fn mkdir(path: &Byte, mode: Int) -> Int;
+
+    /// Remove directory
+    fn rmdir(path: &Byte) -> Int;
+
+    /// Change current directory
+    fn chdir(path: &Byte) -> Int;
+
+    /// Get current directory
+    fn getcwd(buf: &unsafe Byte, size: Int) -> &Byte;
+
+    /// Open directory
+    public fn opendir(name: &Byte) -> &unsafe DIR;
+
+    /// Read directory entry
+    public fn readdir(dirp: &DIR) -> &Dirent;
+
+    /// Close directory
+    public fn closedir(dirp: &DIR) -> Int;
+
+    // =========================================================================
+    // Filesystem Operations
+    // =========================================================================
+
+    /// Remove a file
+    fn unlink(path: &Byte) -> Int;
+
+    /// Create a hard link
+    fn link(src: &Byte, dst: &Byte) -> Int;
+
+    /// Rename a file or directory
+    @ffi_name("rename")
+    fn rename_ffi(oldpath: &Byte, newpath: &Byte) -> Int;
+
+    /// Create a symbolic link
+    @ffi_name("symlink")
+    fn symlink_ffi(src: &Byte, dst: &Byte) -> Int;
+
+    /// Read a symbolic link
+    fn readlink(path: &Byte, buf: &unsafe Byte, bufsize: Int) -> Int;
+
+    /// Change file mode
+    fn chmod(path: &Byte, mode: Int) -> Int;
+
+    // =========================================================================
+    // Environment Variables
+    // =========================================================================
+
+    /// Get environment variable (returns null if not set)
+    fn getenv(name: &Byte) -> &Byte;
+
+    /// Set environment variable (overwrite: 1 to replace existing, 0 to preserve)
+    fn setenv(name: &Byte, value: &Byte, overwrite: Int) -> Int;
+
+    /// Remove environment variable
+    fn unsetenv(name: &Byte) -> Int;
+
+    // =========================================================================
+    // Command Line Arguments (macOS-specific)
+    // =========================================================================
+
+    /// Get pointer to argc (crt_externs.h)
+    fn _NSGetArgc() -> &Int;
+
+    /// Get pointer to argv (crt_externs.h)
+    fn _NSGetArgv() -> &(&(&Byte));
+
+    /// Get pointer to environ (crt_externs.h)
+    fn _NSGetEnviron() -> &(&(&Byte));
+
+    // =========================================================================
+    // Signals
+    // =========================================================================
+
+    /// Set signal handler
+    fn signal(signum: Int, handler: fn(Int)) -> fn(Int);
+
+    /// Signal action
+    fn sigaction(signum: Int, act: &Sigaction, oldact: &mut Sigaction) -> Int;
+
+    /// Signal mask
+    fn sigprocmask(how: Int, set: &Sigset, oldset: &mut Sigset) -> Int;
+
+    // =========================================================================
+    // Random
+    // =========================================================================
+
+    /// Get entropy (macOS 10.12+)
+    fn getentropy(buffer: &unsafe Byte, length: Int) -> Int;
+
+    /// arc4random (BSD)
+    fn arc4random() -> UInt32;
+
+    /// arc4random_buf (BSD)
+    fn arc4random_buf(buf: &unsafe Byte, nbytes: Int);
+
+    // =========================================================================
+    // Error Handling
+    // =========================================================================
+
+    /// Get errno location
+    fn __error() -> &mut Int;
+
+    /// String error
+    fn strerror(errnum: Int) -> &Byte;
+
+    // =========================================================================
+    // Dynamic Loading
+    // =========================================================================
+
+    /// Open dynamic library
+    fn dlopen(filename: &Byte, flags: Int) -> &unsafe Byte;
+
+    /// Get symbol
+    fn dlsym(handle: &unsafe Byte, symbol: &Byte) -> &unsafe Byte;
+
+    /// Close dynamic library
+    fn dlclose(handle: &unsafe Byte) -> Int;
+
+    /// Get error
+    fn dlerror() -> &Byte;
+
+    // =========================================================================
+    // Mach Kernel Interface
+    // =========================================================================
+
+    /// Get Mach host port
+    fn mach_host_self() -> MachPort;
+
+    /// Get Mach task port
+    fn mach_task_self() -> MachPort;
+
+    /// Get Mach thread port
+    fn mach_thread_self() -> MachPort;
+
+    /// Allocate VM
+    fn vm_allocate(
+        target_task: MachPort,
+        address: &mut Int,
+        size: Int,
+        flags: Int,
+    ) -> Int;
+
+    /// Deallocate VM
+    fn vm_deallocate(target_task: MachPort, address: Int, size: Int) -> Int;
+
+    /// Protect VM
+    fn vm_protect(
+        target_task: MachPort,
+        address: Int,
+        size: Int,
+        set_maximum: Int,
+        new_protection: Int,
+    ) -> Int;
+}
+
+// =============================================================================
+// Type Definitions
+// =============================================================================
+
+/// pthread_t type
+public type PthreadT is (Int);
+
+/// pthread_key_t type
+public type PthreadKey is (Int);
+
+/// pthread_attr_t (opaque)
+public type PthreadAttr is {
+    _opaque: [Int; 8],
+};
+
+/// pthread_mutex_t (opaque)
+public type PthreadMutex is {
+    _opaque: [Int; 8],
+};
+
+/// pthread_mutexattr_t (opaque)
+public type PthreadMutexAttr is {
+    _opaque: [Int; 2],
+};
+
+/// pthread_cond_t (opaque)
+public type PthreadCond is {
+    _opaque: [Int; 6],
+};
+
+/// pthread_condattr_t (opaque)
+public type PthreadCondAttr is {
+    _opaque: [Int; 2],
+};
+
+/// Mach port type
+public type MachPort is (UInt32);
+
+/// timespec structure
+public type Timespec is {
+    tv_sec: Int,
+    tv_nsec: Int,
+};
+
+/// timeval structure
+public type Timeval is {
+    tv_sec: Int,
+    tv_usec: Int,
+};
+
+/// mach_timebase_info structure
+public type MachTimebaseInfo is {
+    numer: UInt32,
+    denom: UInt32,
+};
+
+/// kevent structure (32-bit ident)
+public type KEvent is {
+    ident: Int,
+    filter: Int16,
+    flags: UInt16,
+    fflags: UInt32,
+    data: Int,
+    udata: &unsafe Byte,
+};
+
+/// kevent64 structure (64-bit ident)
+public type KEvent64 is {
+    ident: UInt64,
+    filter: Int16,
+    flags: UInt16,
+    fflags: UInt32,
+    data: Int64,
+    udata: UInt64,
+    ext: [UInt64; 2],
+};
+
+/// stat structure
+public type Stat is {
+    st_dev: Int32,
+    st_ino: UInt64,
+    st_mode: UInt16,
+    st_nlink: UInt16,
+    st_uid: UInt32,
+    st_gid: UInt32,
+    st_rdev: Int32,
+    st_atime: Timespec,
+    st_mtime: Timespec,
+    st_ctime: Timespec,
+    st_birthtime: Timespec,
+    st_size: Int64,
+    st_blocks: Int64,
+    st_blksize: Int32,
+    st_flags: UInt32,
+    st_gen: UInt32,
+};
+
+/// sockaddr (generic)
+public type Sockaddr is {
+    sa_len: UInt8,
+    sa_family: UInt8,
+    sa_data: [Byte; 14],
+};
+
+/// sockaddr_in (IPv4)
+public type SockaddrIn is {
+    sin_len: UInt8,
+    sin_family: UInt8,
+    sin_port: UInt16,
+    sin_addr: UInt32,
+    sin_zero: [Byte; 8],
+};
+
+/// sockaddr_in6 (IPv6)
+public type SockaddrIn6 is {
+    sin6_len: UInt8,
+    sin6_family: UInt8,
+    sin6_port: UInt16,
+    sin6_flowinfo: UInt32,
+    sin6_addr: [Byte; 16],
+    sin6_scope_id: UInt32,
+};
+
+/// DIR opaque type
+public type DIR is {
+    _opaque: [Byte; 1],
+};
+
+/// dirent structure
+public type Dirent is {
+    d_ino: UInt64,
+    d_seekoff: UInt64,
+    d_reclen: UInt16,
+    d_namlen: UInt16,
+    d_type: UInt8,
+    d_name: [Byte; 1024],
+};
+
+/// sigaction structure
+public type Sigaction is {
+    sa_handler: fn(Int),
+    sa_mask: Sigset,
+    sa_flags: Int,
+};
+
+/// sigset_t
+public type Sigset is (UInt32);
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+// Open flags
+public const O_RDONLY: Int = 0x0000;
+public const O_WRONLY: Int = 0x0001;
+public const O_RDWR: Int = 0x0002;
+public const O_NONBLOCK: Int = 0x0004;
+public const O_APPEND: Int = 0x0008;
+public const O_CREAT: Int = 0x0200;
+public const O_TRUNC: Int = 0x0400;
+public const O_EXCL: Int = 0x0800;
+public const O_CLOEXEC: Int = 0x1000000;
+public const O_DIRECTORY: Int = 0x100000;
+public const O_SYMLINK: Int = 0x200000;
+
+// Seek whence
+public const SEEK_SET: Int = 0;
+public const SEEK_CUR: Int = 1;
+public const SEEK_END: Int = 2;
+
+// Memory protection
+public const PROT_NONE: Int = 0x00;
+public const PROT_READ: Int = 0x01;
+public const PROT_WRITE: Int = 0x02;
+public const PROT_EXEC: Int = 0x04;
+
+// Memory mapping flags
+public const MAP_SHARED: Int = 0x0001;
+public const MAP_PRIVATE: Int = 0x0002;
+public const MAP_FIXED: Int = 0x0010;
+public const MAP_ANON: Int = 0x1000;
+public const MAP_ANONYMOUS: Int = 0x1000;
+public const MAP_JIT: Int = 0x0800;
+public const MAP_NOCACHE: Int = 0x0400;
+
+// madvise advice
+public const MADV_NORMAL: Int = 0;
+public const MADV_RANDOM: Int = 1;
+public const MADV_SEQUENTIAL: Int = 2;
+public const MADV_WILLNEED: Int = 3;
+public const MADV_DONTNEED: Int = 4;
+public const MADV_FREE: Int = 5;
+public const MADV_ZERO_WIRED_PAGES: Int = 6;
+public const MADV_FREE_REUSABLE: Int = 7;
+public const MADV_FREE_REUSE: Int = 8;
+/// Linux compatibility stub - maps to MADV_NORMAL (no-op on macOS)
+public const MADV_HUGEPAGE: Int = 0;
+
+// msync flags
+public const MS_ASYNC: Int = 0x0001;
+public const MS_INVALIDATE: Int = 0x0002;
+public const MS_SYNC: Int = 0x0010;
+
+// kqueue filters
+public const EVFILT_READ: Int16 = -1;
+public const EVFILT_WRITE: Int16 = -2;
+public const EVFILT_AIO: Int16 = -3;
+public const EVFILT_VNODE: Int16 = -4;
+public const EVFILT_PROC: Int16 = -5;
+public const EVFILT_SIGNAL: Int16 = -6;
+public const EVFILT_TIMER: Int16 = -7;
+public const EVFILT_MACHPORT: Int16 = -8;
+public const EVFILT_FS: Int16 = -9;
+public const EVFILT_USER: Int16 = -10;
+public const EVFILT_VM: Int16 = -12;
+public const EVFILT_EXCEPT: Int16 = -15;
+
+// kqueue flags
+public const EV_ADD: UInt16 = 0x0001;
+public const EV_DELETE: UInt16 = 0x0002;
+public const EV_ENABLE: UInt16 = 0x0004;
+public const EV_DISABLE: UInt16 = 0x0008;
+public const EV_ONESHOT: UInt16 = 0x0010;
+public const EV_CLEAR: UInt16 = 0x0020;
+public const EV_RECEIPT: UInt16 = 0x0040;
+public const EV_DISPATCH: UInt16 = 0x0080;
+public const EV_UDATA_SPECIFIC: UInt16 = 0x0100;
+public const EV_EOF: UInt16 = 0x8000;
+public const EV_ERROR: UInt16 = 0x4000;
+
+// kqueue fflags for EVFILT_VNODE
+public const NOTE_DELETE: UInt32 = 0x00000001;
+public const NOTE_WRITE: UInt32 = 0x00000002;
+public const NOTE_EXTEND: UInt32 = 0x00000004;
+public const NOTE_ATTRIB: UInt32 = 0x00000008;
+public const NOTE_LINK: UInt32 = 0x00000010;
+public const NOTE_RENAME: UInt32 = 0x00000020;
+public const NOTE_REVOKE: UInt32 = 0x00000040;
+public const NOTE_NONE: UInt32 = 0x00000080;
+public const NOTE_FUNLOCK: UInt32 = 0x00000100;
+
+// kqueue fflags for EVFILT_USER
+public const NOTE_TRIGGER: UInt32 = 0x01000000;
+
+// kqueue fflags for EVFILT_TIMER
+public const NOTE_SECONDS: UInt32 = 0x00000001;
+public const NOTE_USECONDS: UInt32 = 0x00000002;
+public const NOTE_NSECONDS: UInt32 = 0x00000004;
+public const NOTE_ABSOLUTE: UInt32 = 0x00000008;
+public const NOTE_CRITICAL: UInt32 = 0x00000010;
+public const NOTE_BACKGROUND: UInt32 = 0x00000020;
+public const NOTE_LEEWAY: UInt32 = 0x00000040;
+
+// Socket domains
+public const AF_UNSPEC: Int = 0;
+public const AF_UNIX: Int = 1;
+public const AF_INET: Int = 2;
+public const AF_INET6: Int = 30;
+
+// Socket types
+public const SOCK_STREAM: Int = 1;
+public const SOCK_DGRAM: Int = 2;
+public const SOCK_RAW: Int = 3;
+public const SOCK_SEQPACKET: Int = 5;
+
+// Socket options
+public const SOL_SOCKET: Int = 0xFFFF;
+public const SO_REUSEADDR: Int = 0x0004;
+public const SO_KEEPALIVE: Int = 0x0008;
+public const SO_BROADCAST: Int = 0x0020;
+public const SO_LINGER: Int = 0x0080;
+public const SO_RCVBUF: Int = 0x1002;
+public const SO_SNDBUF: Int = 0x1001;
+public const SO_RCVTIMEO: Int = 0x1006;
+public const SO_SNDTIMEO: Int = 0x1005;
+public const SO_ERROR: Int = 0x1007;
+public const SO_NOSIGPIPE: Int = 0x1022;
+
+// TCP options
+public const IPPROTO_TCP: Int = 6;
+public const TCP_NODELAY: Int = 0x01;
+public const TCP_KEEPALIVE: Int = 0x10;
+
+// IP options (IPPROTO_IP = 0)
+public const IPPROTO_IP: Int = 0;
+public const IP_MULTICAST_IF: Int = 9;
+public const IP_MULTICAST_TTL: Int = 10;
+public const IP_MULTICAST_LOOP: Int = 11;
+public const IP_ADD_MEMBERSHIP: Int = 12;
+public const IP_DROP_MEMBERSHIP: Int = 13;
+
+// IPv6 options (IPPROTO_IPV6 = 41)
+public const IPPROTO_IPV6: Int = 41;
+public const IPV6_MULTICAST_IF: Int = 9;
+public const IPV6_MULTICAST_HOPS: Int = 10;
+public const IPV6_MULTICAST_LOOP: Int = 11;
+public const IPV6_JOIN_GROUP: Int = 12;
+public const IPV6_LEAVE_GROUP: Int = 13;
+
+// MSG flags
+public const MSG_PEEK: Int = 0x2;
+public const MSG_DONTWAIT: Int = 0x80;
+
+// Shutdown how
+public const SHUT_RD: Int = 0;
+public const SHUT_WR: Int = 1;
+public const SHUT_RDWR: Int = 2;
+
+// Clock IDs
+public const CLOCK_REALTIME: Int = 0;
+public const CLOCK_MONOTONIC: Int = 6;
+public const CLOCK_MONOTONIC_RAW: Int = 4;
+public const CLOCK_UPTIME_RAW: Int = 8;
+public const CLOCK_PROCESS_CPUTIME_ID: Int = 12;
+public const CLOCK_THREAD_CPUTIME_ID: Int = 16;
+
+// Signal numbers
+public const SIGHUP: Int = 1;
+public const SIGINT: Int = 2;
+public const SIGQUIT: Int = 3;
+public const SIGILL: Int = 4;
+public const SIGTRAP: Int = 5;
+public const SIGABRT: Int = 6;
+public const SIGFPE: Int = 8;
+public const SIGKILL: Int = 9;
+public const SIGBUS: Int = 10;
+public const SIGSEGV: Int = 11;
+public const SIGSYS: Int = 12;
+public const SIGPIPE: Int = 13;
+public const SIGALRM: Int = 14;
+public const SIGTERM: Int = 15;
+public const SIGURG: Int = 16;
+public const SIGSTOP: Int = 17;
+public const SIGTSTP: Int = 18;
+public const SIGCONT: Int = 19;
+public const SIGCHLD: Int = 20;
+public const SIGUSR1: Int = 30;
+public const SIGUSR2: Int = 31;
+
+// dlopen flags
+public const RTLD_LAZY: Int = 0x1;
+public const RTLD_NOW: Int = 0x2;
+public const RTLD_LOCAL: Int = 0x4;
+public const RTLD_GLOBAL: Int = 0x8;
+public const RTLD_NOLOAD: Int = 0x10;
+public const RTLD_NODELETE: Int = 0x80;
+public const RTLD_FIRST: Int = 0x100;
+
+// fcntl commands
+public const F_DUPFD: Int = 0;
+public const F_GETFD: Int = 1;
+public const F_SETFD: Int = 2;
+public const F_GETFL: Int = 3;
+public const F_SETFL: Int = 4;
+public const F_GETOWN: Int = 5;
+public const F_SETOWN: Int = 6;
+public const F_GETLK: Int = 7;
+public const F_SETLK: Int = 8;
+public const F_SETLKW: Int = 9;
+public const F_SETNOSIGPIPE: Int = 73;
+public const F_GETNOSIGPIPE: Int = 74;
+
+// FD flags
+public const FD_CLOEXEC: Int = 1;
+
+// VM allocation flags
+public const VM_FLAGS_FIXED: Int = 0x0000;
+public const VM_FLAGS_ANYWHERE: Int = 0x0001;
+public const VM_FLAGS_PURGABLE: Int = 0x0002;
+public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
+
+// =============================================================================
+// Safe Wrapper Functions
+// =============================================================================
+
+/// Get the last error number
+public fn errno() -> Int {
+    unsafe { *__error() }
+}
+
+/// Set the error number
+public fn set_errno(err: Int) {
+    unsafe { *__error() = err; }
+}
+
+/// Read from file descriptor (safe wrapper) - takes a mutable slice
+public fn safe_read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    let result = unsafe { read(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Read from file descriptor (raw pointer API)
+public fn safe_read_raw(fd: FileDesc, buf: &unsafe Byte, count: Int) -> Result<Int, OSError> {
+    let result = unsafe { read(fd.0, buf, count) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Write to file descriptor (safe wrapper) - takes a slice
+public fn safe_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    let result = unsafe { write(fd.0, buf.as_ptr(), buf.len()) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Write to file descriptor (low-level) - takes pointer and count
+public fn safe_write_raw(fd: FileDesc, buf: &Byte, count: Int) -> Result<Int, OSError> {
+    let result = unsafe { write(fd.0, buf, count) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Close file descriptor (safe wrapper)
+public fn safe_close(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe { close(fd.0) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Memory map (safe wrapper) - returns typed pointer consistent with Linux
+@intrinsic("sys_mmap")
+@vbc_direct_lowering
+public fn safe_mmap(
+    addr: Int,
+    len: Int,
+    prot: MemProt,
+    flags: MapFlags,
+    fd: FileDesc,
+    offset: Int,
+) -> Result<&unsafe Byte, OSError> {
+    let raw_result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags(), flags.to_unix_flags(), fd.0, offset) };
+    // MAP_FAILED is (void *)-1 which is -1 as Int on 64-bit
+    if raw_result == -1 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        let ptr: &unsafe Byte = transmute(raw_result);
+        Ok(ptr)
+    }
+}
+
+/// Memory map (raw integer API) - returns raw address as Int
+public fn safe_mmap_raw(
+    addr: Int,
+    len: Int,
+    prot: MemProt,
+    flags: MapFlags,
+    fd: FileDesc,
+    offset: Int,
+) -> Result<Int, OSError> {
+    let result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags(), flags.to_unix_flags(), fd.0, offset) };
+    if result == -1 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Memory unmap (safe wrapper)
+@intrinsic("sys_munmap")
+@vbc_direct_lowering
+public fn safe_munmap(addr: Int, len: Int) -> Result<(), OSError> {
+    let result = unsafe { munmap(addr, len) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Memory advise (safe wrapper)
+/// Advise kernel about memory usage patterns
+@intrinsic("sys_madvise")
+@vbc_direct_lowering
+public fn safe_madvise(addr: &unsafe Byte, len: Int, advice: Int) -> Result<(), OSError> {
+    let result = unsafe { madvise(addr as Int, len, advice) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Advise kernel that memory will be needed soon (prefetch)
+public fn madvise_willneed(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    safe_madvise(addr, len, MADV_WILLNEED)
+}
+
+/// Advise kernel that memory will not be needed (may be freed/zeroed)
+public fn madvise_dontneed(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    safe_madvise(addr, len, MADV_DONTNEED)
+}
+
+/// Advise kernel that memory may be freed (more lazy than DONTNEED)
+public fn madvise_free(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    safe_madvise(addr, len, MADV_FREE)
+}
+
+/// Advise kernel that memory is reusable (can be reclaimed without swap)
+public fn madvise_free_reusable(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    safe_madvise(addr, len, MADV_FREE_REUSABLE)
+}
+
+/// Advise kernel that reusable memory is now in use again
+public fn madvise_free_reuse(addr: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    safe_madvise(addr, len, MADV_FREE_REUSE)
+}
+
+/// Get process ID (always succeeds)
+@intrinsic("sys_getpid")
+@vbc_direct_lowering
+public fn safe_getpid() -> Int {
+    unsafe { getpid() }
+}
+
+/// Get thread ID
+@intrinsic("sys_gettid")
+@vbc_direct_lowering
+public fn safe_gettid() -> UInt64 {
+    let mut tid: UInt64 = 0;
+    unsafe { pthread_threadid_np(PthreadT(0), &mut tid) };
+    tid
+}
+
+/// Get entropy (cryptographic random bytes)
+@intrinsic("sys_getentropy")
+@vbc_direct_lowering
+public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {
+    if len > 256 {
+        return Err(OSError { code: 5, message: "getentropy: max 256 bytes" });
+    }
+    let result = unsafe { getentropy(buf, len) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Create kqueue (safe wrapper)
+public fn safe_kqueue() -> Result<FileDesc, OSError> {
+    let result = unsafe { kqueue() };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(FileDesc(result))
+    }
+}
+
+/// Sleep for duration
+public fn safe_nanosleep(seconds: Int, nanoseconds: Int) -> Result<(), OSError> {
+    let req = Timespec { tv_sec: seconds, tv_nsec: nanoseconds };
+    let mut rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let result = unsafe { nanosleep(&req, &mut rem) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get monotonic time in nanoseconds (high performance)
+public fn monotonic_nanos() -> UInt64 {
+    static mut timebase_info: MachTimebaseInfo = MachTimebaseInfo { numer: 0, denom: 0 };
+    static mut timebase_initialized: Bool = false;
+
+    unsafe {
+        if !timebase_initialized {
+            mach_timebase_info(&mut timebase_info);
+            timebase_initialized = true;
+        }
+
+        let ticks = mach_absolute_time();
+        (ticks * timebase_info.numer as UInt64) / timebase_info.denom as UInt64
+    }
+}
+
+/// Get monotonic time in microseconds (high performance)
+public fn monotonic_micros() -> UInt64 {
+    monotonic_nanos() / 1_000
+}
+
+/// Get monotonic time in milliseconds (high performance)
+public fn monotonic_millis() -> UInt64 {
+    monotonic_nanos() / 1_000_000
+}
+
+/// Get clock time
+public fn safe_clock_gettime(clock_id: Int) -> Result<Timespec, OSError> {
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let result = unsafe { clock_gettime(clock_id, &mut ts) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(ts)
+    }
+}
+
+/// Open file (safe wrapper)
+public fn safe_open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    // Copy path and null-terminate
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { open(path_buf.as_ptr() as &Byte, flags, mode) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(FileDesc(result))
+    }
+}
+
+/// Seek file (safe wrapper)
+public fn safe_lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSError> {
+    let result = unsafe { lseek(fd.0, offset, whence) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Get file status (safe wrapper)
+public fn safe_fstat(fd: FileDesc, stat_buf: &mut Stat) -> Result<(), OSError> {
+    let result = unsafe { fstat(fd.0, stat_buf as &unsafe Stat) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Sync file to disk (safe wrapper)
+public fn safe_fsync(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe { fsync(fd.0) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Truncate file (safe wrapper)
+public fn safe_ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
+    let result = unsafe { ftruncate(fd.0, length) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Duplicate file descriptor (safe wrapper)
+public fn safe_dup(fd: FileDesc) -> Result<FileDesc, OSError> {
+    let result = unsafe { dup(fd.0) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(FileDesc(result))
+    }
+}
+
+// =============================================================================
+// Filesystem Safe Wrappers
+// =============================================================================
+
+/// Get file status by path (follows symlinks)
+public fn safe_stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { stat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe Stat) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get file status by path (doesn't follow symlinks)
+public fn safe_lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { lstat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe Stat) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Create a directory
+public fn safe_mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { mkdir(path_buf.as_ptr() as &Byte, mode) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove a directory
+public fn safe_rmdir(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { rmdir(path_buf.as_ptr() as &Byte) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove a file
+public fn safe_unlink(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { unlink(path_buf.as_ptr() as &Byte) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Rename a file or directory
+public fn safe_rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
+    let old_p: &Byte = transmute(oldpath);
+    let new_p: &Byte = transmute(newpath);
+    let result = unsafe { rename_ffi(old_p, new_p) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Create a symbolic link
+public fn safe_symlink(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
+    let src_p: &Byte = transmute(src);
+    let dst_p: &Byte = transmute(dst);
+    let result = unsafe { symlink_ffi(src_p, dst_p) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Read a symbolic link
+public fn safe_readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { readlink(path_buf.as_ptr() as &Byte, buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Create a hard link
+public fn safe_link(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
+    let mut src_buf = [0_u8; 4096];
+    let src_len = src.len().min(4095);
+    src_buf[..src_len].copy_from_slice(&src[..src_len]);
+    src_buf[src_len] = 0;
+
+    let mut dst_buf = [0_u8; 4096];
+    let dst_len = dst.len().min(4095);
+    dst_buf[..dst_len].copy_from_slice(&dst[..dst_len]);
+    dst_buf[dst_len] = 0;
+
+    let result = unsafe { link(src_buf.as_ptr() as &Byte, dst_buf.as_ptr() as &Byte) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Change file mode
+public fn safe_chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { chmod(path_buf.as_ptr() as &Byte, mode) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get current working directory
+public fn safe_getcwd(buf: &mut [Byte]) -> Result<Int, OSError> {
+    let result = unsafe { getcwd(buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
+    if (result as Int) == 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        // Find the length of the null-terminated string
+        let mut len = 0;
+        while len < buf.len() && buf[len] != 0 {
+            len = len + 1;
+        }
+        Ok(len)
+    }
+}
+
+/// Change current working directory
+public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    let result = unsafe { chdir(path_buf.as_ptr() as &Byte) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Environment Variable Safe Wrappers
+// =============================================================================
+
+/// Get environment variable value
+///
+/// Returns None if the variable is not set.
+public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
+    let mut name_buf = [0_u8; 256];
+    let len = name.len().min(255);
+    name_buf[..len].copy_from_slice(&name[..len]);
+    name_buf[len] = 0;
+
+    let result = unsafe { getenv(name_buf.as_ptr() as &Byte) };
+    if result.is_null() {
+        None
+    } else {
+        // Find length of null-terminated string
+        let mut value_len = 0;
+        unsafe {
+            while *result.offset(value_len) != 0 {
+                value_len = value_len + 1;
+            }
+            let value_bytes = core.slice.from_raw_parts(result as &Byte, value_len);
+            Some(Text.from_utf8_lossy(value_bytes))
+        }
+    }
+}
+
+/// Set environment variable
+///
+/// If overwrite is true, replaces existing value. If false, does nothing if variable exists.
+public fn safe_setenv(name: &[Byte], value: &[Byte], overwrite: Bool) -> Result<(), OSError> {
+    let mut name_buf = [0_u8; 256];
+    let name_len = name.len().min(255);
+    name_buf[..name_len].copy_from_slice(&name[..name_len]);
+    name_buf[name_len] = 0;
+
+    let mut value_buf = [0_u8; 4096];
+    let value_len = value.len().min(4095);
+    value_buf[..value_len].copy_from_slice(&value[..value_len]);
+    value_buf[value_len] = 0;
+
+    let result = unsafe {
+        setenv(
+            name_buf.as_ptr() as &Byte,
+            value_buf.as_ptr() as &Byte,
+            if overwrite { 1 } else { 0 }
+        )
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove environment variable
+public fn safe_unsetenv(name: &[Byte]) -> Result<(), OSError> {
+    let mut name_buf = [0_u8; 256];
+    let len = name.len().min(255);
+    name_buf[..len].copy_from_slice(&name[..len]);
+    name_buf[len] = 0;
+
+    let result = unsafe { unsetenv(name_buf.as_ptr() as &Byte) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Command Line Arguments Safe Wrappers
+// =============================================================================
+
+/// Get the number of command line arguments
+public fn args_count() -> Int {
+    unsafe { *_NSGetArgc() }
+}
+
+/// Get a command line argument by index
+///
+/// Returns None if index is out of bounds.
+public fn args_get(index: Int) -> Maybe<Text> {
+    let argc = args_count();
+    if index < 0 || index >= argc {
+        return None;
+    }
+
+    unsafe {
+        let argv = *_NSGetArgv();
+        let arg_ptr = *argv.offset(index);
+        if arg_ptr.is_null() {
+            return None;
+        }
+
+        // Find length of null-terminated string
+        let mut len = 0;
+        while *arg_ptr.offset(len) != 0 {
+            len = len + 1;
+        }
+        let arg_bytes = core.slice.from_raw_parts(arg_ptr as &Byte, len);
+        Some(Text.from_utf8_lossy(arg_bytes))
+    }
+}
+
+// Helper function
+fn errno_to_message(code: Int) -> Text {
+    super.errno.errno_name(code)
+}
+
+// =============================================================================
+// Socket Safe Wrappers
+// =============================================================================
+
+/// Create a socket (safe wrapper)
+public fn safe_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<FileDesc, OSError> {
+    let result = unsafe { socket(domain, sock_type, protocol) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(FileDesc(result))
+    }
+}
+
+/// Bind a socket to an address (safe wrapper)
+public fn safe_bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OSError> {
+    let result = unsafe { bind(fd.0, addr, addr_len) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Listen on a socket (safe wrapper)
+public fn safe_listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
+    let result = unsafe { listen(fd.0, backlog) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Accept a connection (safe wrapper)
+public fn safe_accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        accept(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(FileDesc(result))
+    }
+}
+
+/// Connect to an address (safe wrapper)
+public fn safe_connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(), OSError> {
+    let result = unsafe { connect(fd.0, addr, addr_len) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Send data on a connected socket (safe wrapper)
+public fn safe_send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSError> {
+    let result = unsafe { send(fd.0, buf.as_ptr(), buf.len(), flags) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Receive data from a connected socket (safe wrapper)
+public fn safe_recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
+    let result = unsafe { recv(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len(), flags) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Send data to an address (safe wrapper)
+public fn safe_sendto(
+    fd: FileDesc,
+    buf: &[Byte],
+    flags: Int,
+    dest_addr: &unsafe Byte,
+    addr_len: Int
+) -> Result<Int, OSError> {
+    let result = unsafe {
+        sendto(fd.0, buf.as_ptr(), buf.len(), flags, dest_addr, addr_len)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Receive data with source address (safe wrapper)
+public fn safe_recvfrom(
+    fd: FileDesc,
+    buf: &mut [Byte],
+    flags: Int,
+    src_addr: &mut [Byte],
+    addr_len: &mut Int
+) -> Result<Int, OSError> {
+    let buf_ptr: &unsafe Byte = transmute(buf);
+    let buf_len = buf.len();
+    let src_ptr: &unsafe Byte = transmute(src_addr);
+    let result = unsafe {
+        recvfrom_ffi(fd.0, buf_ptr, buf_len, flags, src_ptr, addr_len)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Set a socket option (safe wrapper)
+public fn safe_setsockopt(
+    fd: FileDesc,
+    level: Int,
+    optname: Int,
+    optval: &unsafe Byte,
+    optlen: Int
+) -> Result<(), OSError> {
+    let result = unsafe { setsockopt(fd.0, level, optname, optval as &Byte, optlen) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Set an integer socket option (convenience wrapper)
+public fn safe_setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> Result<(), OSError> {
+    let val: Int32 = value as Int32;
+    safe_setsockopt(fd, level, optname, &val as &unsafe Byte, 4)
+}
+
+/// Get a socket option (safe wrapper)
+public fn safe_getsockopt(
+    fd: FileDesc,
+    level: Int,
+    optname: Int,
+    optval: &mut [Byte],
+    optlen: &mut Int
+) -> Result<(), OSError> {
+    let result = unsafe {
+        getsockopt(fd.0, level, optname, optval.as_mut_ptr() as &unsafe Byte, optlen)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get socket error (convenience wrapper)
+public fn safe_getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
+    let mut buf = [0_u8; 4];
+    let mut len = 4;
+    safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf, &mut len)?;
+    let error = (buf[0] as Int) | ((buf[1] as Int) << 8) |
+                ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
+    Ok(error)
+}
+
+/// Shutdown a socket (safe wrapper)
+public fn safe_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
+    let result = unsafe { shutdown(fd.0, how) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get local socket address (safe wrapper)
+public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+    let result = unsafe {
+        getsockname(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// Get peer socket address (safe wrapper)
+public fn safe_getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+    let result = unsafe {
+        getpeername(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
+    };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
+/// File control operations (safe wrapper)
+public fn safe_fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
+    let result = unsafe { fcntl(fd.0, cmd, arg) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Set file descriptor to non-blocking mode
+public fn safe_set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError> {
+    let flags = safe_fcntl(fd, F_GETFL, 0)?;
+    let new_flags = if nonblocking {
+        flags | O_NONBLOCK
+    } else {
+        flags & !O_NONBLOCK
+    };
+    safe_fcntl(fd, F_SETFL, new_flags)?;
+    Ok(())
+}
+
+/// Set SO_REUSEADDR option
+public fn safe_set_reuseaddr(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_REUSEADDR, if reuse { 1 } else { 0 })
+}
+
+/// Set TCP_NODELAY option (disable Nagle's algorithm)
+public fn safe_set_tcp_nodelay(fd: FileDesc, nodelay: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_TCP, TCP_NODELAY, if nodelay { 1 } else { 0 })
+}
+
+/// Set SO_KEEPALIVE option
+public fn safe_set_keepalive(fd: FileDesc, keepalive: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_KEEPALIVE, if keepalive { 1 } else { 0 })
+}
+
+/// Set SO_NOSIGPIPE option (macOS specific - prevents SIGPIPE on write to closed socket)
+public fn safe_set_nosigpipe(fd: FileDesc, nosigpipe: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_NOSIGPIPE, if nosigpipe { 1 } else { 0 })
+}
+
+/// Set socket send/receive timeout
+/// timeout_ms: timeout in milliseconds, 0 to disable
+public fn safe_set_socket_timeout(fd: FileDesc, timeout_ms: Int, is_recv: Bool) -> Result<(), OSError> {
+    let tv_sec = timeout_ms / 1000;
+    let tv_usec = (timeout_ms % 1000) * 1000;
+
+    // struct timeval { time_t tv_sec; suseconds_t tv_usec; }
+    // On macOS: 8 + 4 = 12 bytes (but may be padded to 16)
+    let mut timeval = [0_u8; 16];
+
+    // Write tv_sec (little-endian Int64)
+    timeval[0] = (tv_sec & 0xFF) as UInt8;
+    timeval[1] = ((tv_sec >> 8) & 0xFF) as UInt8;
+    timeval[2] = ((tv_sec >> 16) & 0xFF) as UInt8;
+    timeval[3] = ((tv_sec >> 24) & 0xFF) as UInt8;
+    timeval[4] = ((tv_sec >> 32) & 0xFF) as UInt8;
+    timeval[5] = ((tv_sec >> 40) & 0xFF) as UInt8;
+    timeval[6] = ((tv_sec >> 48) & 0xFF) as UInt8;
+    timeval[7] = ((tv_sec >> 56) & 0xFF) as UInt8;
+
+    // Write tv_usec (little-endian Int32 on macOS)
+    timeval[8] = (tv_usec & 0xFF) as UInt8;
+    timeval[9] = ((tv_usec >> 8) & 0xFF) as UInt8;
+    timeval[10] = ((tv_usec >> 16) & 0xFF) as UInt8;
+    timeval[11] = ((tv_usec >> 24) & 0xFF) as UInt8;
+
+    let optname = if is_recv { SO_RCVTIMEO } else { SO_SNDTIMEO };
+    safe_setsockopt(fd, SOL_SOCKET, optname, timeval.as_ptr() as &unsafe Byte, 16)
+}
+
+/// Set SO_BROADCAST option (required for UDP broadcast)
+public fn safe_set_broadcast(fd: FileDesc, broadcast: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_BROADCAST, if broadcast { 1 } else { 0 })
+}
+
+/// Set send buffer size
+public fn safe_set_send_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_SNDBUF, size)
+}
+
+/// Set receive buffer size
+public fn safe_set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
+}
+
+/// struct ip_mreq for multicast membership
+@repr(C)
+public type IpMreq is {
+    imr_multiaddr: UInt32,   // Multicast group address (network byte order)
+    imr_interface: UInt32,   // Interface address (network byte order), 0 = default
+};
+
+/// Join an IPv4 multicast group
+///
+/// multiaddr: multicast group address (network byte order)
+/// interface: local interface address (network byte order), 0 = default
+public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        imr_multiaddr: multiaddr,
+        imr_interface: interface,
+    };
+    safe_setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                    &mreq as &unsafe Byte, 8)  // sizeof(ip_mreq) = 8
+}
+
+/// Leave an IPv4 multicast group
+public fn safe_leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        imr_multiaddr: multiaddr,
+        imr_interface: interface,
+    };
+    safe_setsockopt(fd, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+                    &mreq as &unsafe Byte, 8)
+}
+
+/// Set multicast TTL for IPv4
+public fn safe_set_multicast_ttl_v4(fd: FileDesc, ttl: Int) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IP, IP_MULTICAST_TTL, ttl)
+}
+
+/// Set multicast loopback for IPv4
+public fn safe_set_multicast_loop_v4(fd: FileDesc, enabled: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IP, IP_MULTICAST_LOOP, if enabled { 1 } else { 0 })
+}
+
+/// Peek at data without consuming it (MSG_PEEK)
+public fn safe_peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    safe_recv(fd, buf, MSG_PEEK)
+}
+
+/// Receive with MSG_DONTWAIT (non-blocking, even on blocking socket)
+public fn safe_recv_nonblock(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    safe_recv(fd, buf, MSG_DONTWAIT)
+}
+
+/// Send with MSG_DONTWAIT (non-blocking, even on blocking socket)
+public fn safe_send_nonblock(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    safe_send(fd, buf, MSG_DONTWAIT)
+}
+

@@ -1,0 +1,521 @@
+// Verum Registry - Concurrency Service
+//
+// Helper functions for concurrent and parallel operations.
+// Provides utilities for task spawning, parallel mapping, and structured concurrency.
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe};
+mount core.time.{unix_timestamp_millis, sleep_millis};
+mount super.super.domain.errors.{RegistryError};
+
+// ============================================================================
+// Parallel Map Operations
+// ============================================================================
+
+/// Map a function over items concurrently
+///
+/// Spawns a task for each item and collects results in order.
+/// All tasks run in parallel with structured concurrency.
+///
+/// Example:
+/// ```
+/// let urls = ["http://a.com", "http://b.com", "http://c.com"];
+/// let results = parallel_map(urls, |url| fetch(url)).await?;
+/// ```
+pub async fn parallel_map<T, U>(
+    items: List<T>,
+    mapper: fn(T) -> async Result<U, RegistryError>
+) -> Result<List<U>, RegistryError> {
+    if items.is_empty() {
+        return Result.Ok(List.new());
+    }
+
+    // Spawn a task for each item
+    let mut tasks = List.new();
+
+    for item in items {
+        let task = spawn async {
+            mapper(item).await
+        };
+        tasks.push(task);
+    }
+
+    // Collect results in order
+    let mut results = List.new();
+    for task in tasks {
+        results.push(task.await?);
+    }
+
+    Result.Ok(results)
+}
+
+/// Map a function over items concurrently with concurrency limit
+///
+/// Processes items in batches to limit concurrent operations.
+/// Useful for rate limiting or controlling resource usage.
+///
+/// Example:
+/// ```
+/// // Process 100 items but only 10 concurrent operations at a time
+/// let results = parallel_map_limited(items, mapper, 10).await?;
+/// ```
+pub async fn parallel_map_limited<T, U>(
+    items: List<T>,
+    mapper: fn(T) -> async Result<U, RegistryError>,
+    max_concurrent: Int
+) -> Result<List<U>, RegistryError> {
+    if items.is_empty() {
+        return Result.Ok(List.new());
+    }
+
+    if max_concurrent <= 0 {
+        return Result.Err(RegistryError.validation_error(
+            "max_concurrent",
+            "Must be greater than 0"
+        ));
+    }
+
+    let mut results = List.new();
+    let total = items.len();
+    let mut offset = 0;
+
+    // Process in chunks
+    while offset < total {
+        let chunk_size = if (offset + max_concurrent) > total {
+            total - offset
+        } else {
+            max_concurrent
+        };
+
+        let chunk = items.skip(offset).take(chunk_size);
+        let chunk_results = parallel_map(chunk, mapper).await?;
+
+        for result in chunk_results {
+            results.push(result);
+        }
+
+        offset = offset + chunk_size;
+    }
+
+    Result.Ok(results)
+}
+
+// ============================================================================
+// Task Combinators
+// ============================================================================
+
+/// Run two async operations concurrently and return both results
+///
+/// Example:
+/// ```
+/// let (user, packages) = join2(
+///     fetch_user(id),
+///     fetch_packages(id)
+/// ).await?;
+/// ```
+pub async fn join2<T1, T2>(
+    task1: async Result<T1, RegistryError>,
+    task2: async Result<T2, RegistryError>
+) -> Result<(T1, T2), RegistryError> {
+    let t1 = spawn async { task1.await };
+    let t2 = spawn async { task2.await };
+
+    let r1 = t1.await?;
+    let r2 = t2.await?;
+
+    Result.Ok((r1, r2))
+}
+
+/// Run three async operations concurrently and return all results
+///
+/// Example:
+/// ```
+/// let (user, packages, stats) = join3(
+///     fetch_user(id),
+///     fetch_packages(id),
+///     fetch_stats(id)
+/// ).await?;
+/// ```
+pub async fn join3<T1, T2, T3>(
+    task1: async Result<T1, RegistryError>,
+    task2: async Result<T2, RegistryError>,
+    task3: async Result<T3, RegistryError>
+) -> Result<(T1, T2, T3), RegistryError> {
+    let t1 = spawn async { task1.await };
+    let t2 = spawn async { task2.await };
+    let t3 = spawn async { task3.await };
+
+    let r1 = t1.await?;
+    let r2 = t2.await?;
+    let r3 = t3.await?;
+
+    Result.Ok((r1, r2, r3))
+}
+
+/// Run four async operations concurrently and return all results
+///
+/// Example:
+/// ```
+/// let (a, b, c, d) = join4(task_a, task_b, task_c, task_d).await?;
+/// ```
+pub async fn join4<T1, T2, T3, T4>(
+    task1: async Result<T1, RegistryError>,
+    task2: async Result<T2, RegistryError>,
+    task3: async Result<T3, RegistryError>,
+    task4: async Result<T4, RegistryError>
+) -> Result<(T1, T2, T3, T4), RegistryError> {
+    let t1 = spawn async { task1.await };
+    let t2 = spawn async { task2.await };
+    let t3 = spawn async { task3.await };
+    let t4 = spawn async { task4.await };
+
+    let r1 = t1.await?;
+    let r2 = t2.await?;
+    let r3 = t3.await?;
+    let r4 = t4.await?;
+
+    Result.Ok((r1, r2, r3, r4))
+}
+
+/// Run five async operations concurrently and return all results
+///
+/// Example:
+/// ```
+/// let (a, b, c, d, e) = join5(t1, t2, t3, t4, t5).await?;
+/// ```
+pub async fn join5<T1, T2, T3, T4, T5>(
+    task1: async Result<T1, RegistryError>,
+    task2: async Result<T2, RegistryError>,
+    task3: async Result<T3, RegistryError>,
+    task4: async Result<T4, RegistryError>,
+    task5: async Result<T5, RegistryError>
+) -> Result<(T1, T2, T3, T4, T5), RegistryError> {
+    let t1 = spawn async { task1.await };
+    let t2 = spawn async { task2.await };
+    let t3 = spawn async { task3.await };
+    let t4 = spawn async { task4.await };
+    let t5 = spawn async { task5.await };
+
+    let r1 = t1.await?;
+    let r2 = t2.await?;
+    let r3 = t3.await?;
+    let r4 = t4.await?;
+    let r5 = t5.await?;
+
+    Result.Ok((r1, r2, r3, r4, r5))
+}
+
+// ============================================================================
+// Timeout Operations
+// ============================================================================
+
+/// Execute an async operation with a timeout
+///
+/// Returns an error if the operation doesn't complete within the timeout.
+/// Uses a polling-based approach since true async timeout primitives aren't available yet.
+///
+/// Note: This implementation executes the task and checks if it exceeded the timeout.
+/// It cannot cancel a running task, but will return a timeout error if the deadline is exceeded.
+///
+/// Example:
+/// ```
+/// // Timeout after 5 seconds (5000 milliseconds)
+/// let result = with_timeout(long_operation(), 5000).await?;
+/// ```
+pub async fn with_timeout<T>(
+    task: async Result<T, RegistryError>,
+    timeout_ms: Int
+) -> Result<T, RegistryError> {
+    let start = unix_timestamp_millis();
+
+    // Execute the task
+    let result = task.await;
+
+    // Check if we exceeded the timeout
+    let elapsed = unix_timestamp_millis() - start;
+
+    match result {
+        Result.Ok(value) => {
+            if elapsed > timeout_ms {
+                // Task completed but took too long
+                Result.Err(RegistryError.internal_error(
+                    f"Operation exceeded timeout: {elapsed}ms > {timeout_ms}ms"
+                ))
+            } else {
+                Result.Ok(value)
+            }
+        },
+        Result.Err(err) => {
+            // Task failed, return the original error
+            Result.Err(err)
+        }
+    }
+}
+
+/// Execute an async operation with a timeout, returning Maybe.None on timeout
+///
+/// Example:
+/// ```
+/// let result = with_timeout_optional(operation(), 1000).await;
+/// match result {
+///     Maybe.Some(value) => // Operation completed
+///     Maybe.None => // Operation timed out
+/// }
+/// ```
+pub async fn with_timeout_optional<T>(
+    task: async Result<T, RegistryError>,
+    timeout_ms: Int
+) -> Maybe<T> {
+    let result = with_timeout(task, timeout_ms).await;
+    match result {
+        Result.Ok(value) => Maybe.Some(value),
+        Result.Err(_) => Maybe.None,
+    }
+}
+
+// ============================================================================
+// Filtering and Collection
+// ============================================================================
+
+/// Filter items concurrently using a predicate function
+///
+/// Runs the predicate function in parallel for all items.
+///
+/// Example:
+/// ```
+/// let valid_packages = parallel_filter(packages, |pkg| {
+///     validate_package(pkg).await
+/// }).await?;
+/// ```
+pub async fn parallel_filter<T>(
+    items: List<T>,
+    predicate: fn(&T) -> async Result<Bool, RegistryError>
+) -> Result<List<T>, RegistryError> {
+    if items.is_empty() {
+        return Result.Ok(List.new());
+    }
+
+    // Spawn tasks to test each item
+    let mut tasks = List.new();
+
+    for item in items.clone() {
+        let task = spawn async {
+            predicate(&item).await
+        };
+        tasks.push(task);
+    }
+
+    // Collect items that pass the predicate
+    let mut results = List.new();
+    let mut index = 0;
+
+    for task in tasks {
+        let passed = task.await?;
+        if passed {
+            results.push(items.get(index).unwrap());
+        }
+        index = index + 1;
+    }
+
+    Result.Ok(results)
+}
+
+/// Collect successful results, filtering out errors
+///
+/// Useful when you want to continue processing even if some operations fail.
+///
+/// Example:
+/// ```
+/// let packages = collect_ok(load_packages_batch(ids)).await;
+/// ```
+pub async fn collect_ok<T>(
+    results: List<Result<T, RegistryError>>
+) -> List<T> {
+    let mut collected = List.new();
+
+    for result in results {
+        match result {
+            Result.Ok(value) => {
+                collected.push(value);
+            },
+            Result.Err(_) => {
+                // Skip errors
+            }
+        }
+    }
+
+    collected
+}
+
+// ============================================================================
+// Retry Logic
+// ============================================================================
+
+/// Configuration for retry behavior with exponential backoff
+pub type RetryConfig is {
+    max_attempts: Int,       // Maximum number of attempts (including initial)
+    initial_delay_ms: Int,   // Initial delay in milliseconds
+    max_delay_ms: Int,       // Maximum delay cap in milliseconds
+    multiplier: Float,       // Backoff multiplier (e.g., 2.0 for exponential)
+    jitter: Bool,            // Whether to add random jitter
+};
+
+implement RetryConfig {
+    /// Create a default retry configuration
+    pub fn default() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 10000,
+            multiplier: 2.0,
+            jitter: true,
+        }
+    }
+
+    /// Calculate delay for a given attempt number with exponential backoff
+    fn calculate_delay(&self, attempt: Int) -> Int {
+        if attempt == 0 {
+            return 0;
+        }
+
+        // Calculate exponential backoff: initial * (multiplier ^ (attempt - 1))
+        let mut delay = self.initial_delay_ms;
+        let mut i = 1;
+
+        while i < attempt {
+            let next_delay = (delay.to_float() * self.multiplier).to_int();
+            delay = if next_delay > self.max_delay_ms {
+                self.max_delay_ms
+            } else {
+                next_delay
+            };
+            i = i + 1;
+        }
+
+        // Apply jitter if configured (50-100% of calculated delay)
+        if self.jitter {
+            let jitter_factor = 0.5 + (attempt % 50).to_float() / 100.0; // Simple jitter
+            (delay.to_float() * jitter_factor).to_int()
+        } else {
+            delay
+        }
+    }
+}
+
+/// Retry an async operation up to max_attempts times with exponential backoff
+///
+/// Uses default retry configuration (3 attempts, 100ms initial delay, 2x multiplier).
+///
+/// Example:
+/// ```
+/// let result = retry(|| fetch_data(), 3).await?;
+/// ```
+pub async fn retry<T>(
+    operation: fn() -> async Result<T, RegistryError>,
+    max_attempts: Int
+) -> Result<T, RegistryError> {
+    let config = RetryConfig {
+        max_attempts: max_attempts,
+        initial_delay_ms: 100,
+        max_delay_ms: 10000,
+        multiplier: 2.0,
+        jitter: true,
+    };
+
+    retry_with_config(operation, config).await
+}
+
+/// Retry an async operation with custom retry configuration
+///
+/// Implements exponential backoff with optional jitter.
+///
+/// Example:
+/// ```
+/// let config = RetryConfig {
+///     max_attempts: 5,
+///     initial_delay_ms: 200,
+///     max_delay_ms: 30000,
+///     multiplier: 2.0,
+///     jitter: true,
+/// };
+/// let result = retry_with_config(|| fetch_data(), config).await?;
+/// ```
+pub async fn retry_with_config<T>(
+    operation: fn() -> async Result<T, RegistryError>,
+    config: RetryConfig
+) -> Result<T, RegistryError> {
+    let mut attempts = 0;
+    let mut last_error = RegistryError.internal_error("No attempts made");
+
+    while attempts < config.max_attempts {
+        let result = operation().await;
+        match result {
+            Result.Ok(value) => {
+                return Result.Ok(value);
+            },
+            Result.Err(e) => {
+                last_error = e;
+                attempts = attempts + 1;
+
+                if attempts < config.max_attempts {
+                    // Calculate and apply exponential backoff delay
+                    let delay = config.calculate_delay(attempts);
+                    if delay > 0 {
+                        sleep_millis(delay);
+                    }
+                }
+            }
+        }
+    }
+
+    Result.Err(last_error)
+}
+
+/// Retry with custom retry logic based on error type
+///
+/// Only retries if the error is retryable according to the predicate.
+///
+/// Example:
+/// ```
+/// let result = retry_if(
+///     || fetch_data(),
+///     RetryConfig.default(),
+///     |err| err.is_recoverable()
+/// ).await?;
+/// ```
+pub async fn retry_if<T>(
+    operation: fn() -> async Result<T, RegistryError>,
+    config: RetryConfig,
+    is_retryable: fn(&RegistryError) -> Bool
+) -> Result<T, RegistryError> {
+    let mut attempts = 0;
+    let mut last_error = RegistryError.internal_error("No attempts made");
+
+    while attempts < config.max_attempts {
+        let result = operation().await;
+        match result {
+            Result.Ok(value) => {
+                return Result.Ok(value);
+            },
+            Result.Err(e) => {
+                // Check if we should retry this error
+                if !is_retryable(&e) {
+                    return Result.Err(e);
+                }
+
+                last_error = e;
+                attempts = attempts + 1;
+
+                if attempts < config.max_attempts {
+                    // Calculate and apply exponential backoff delay
+                    let delay = config.calculate_delay(attempts);
+                    if delay > 0 {
+                        sleep_millis(delay);
+                    }
+                }
+            }
+        }
+    }
+
+    Result.Err(last_error)
+}

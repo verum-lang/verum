@@ -1,0 +1,309 @@
+// =============================================================================
+// once.vr - One-time initialization
+// =============================================================================
+// Layer: 2.5 (Sync)
+// Dependencies: core, sync/atomic
+// =============================================================================
+//
+// Once ensures a function is called exactly once, even with concurrent access.
+// Useful for lazy static initialization.
+//
+// =============================================================================
+
+module core.sync.once;
+mount core.*;
+mount .atomic.*;
+mount core.intrinsics.compiler_fence;
+
+// =============================================================================
+// Once
+// =============================================================================
+
+// State values
+const INCOMPLETE: Int = 0;
+const RUNNING: Int = 1;
+const COMPLETE: Int = 2;
+const POISONED: Int = 3;
+
+// State for querying Once status.
+public type OnceState is
+    | New           // Not yet called
+    | InProgress    // Currently running
+    | Done          // Successfully completed
+    | Poisoned;     // Panicked during execution
+
+// Guard that sets POISONED if dropped without completing.
+// This handles the case where the initialization function panics.
+type OnceGuard is {
+    state: &AtomicInt,
+    completed: Bool,
+};
+
+implement Drop for OnceGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            // Initialization panicked - poison the Once
+            self.state.store(POISONED, MemoryOrdering.Release);
+        }
+    }
+}
+
+// Synchronization primitive for one-time initialization.
+public type Once is {
+    state: AtomicInt,
+};
+
+implement Once {
+    // Create new Once that hasn't been called.
+    public fn new() -> Once {
+        Once { state: AtomicInt.new(INCOMPLETE) }
+    }
+
+    // Run function if not yet called.
+    // Blocks if another thread is currently running the function.
+    // Returns Ok if function completed, Err if it panicked.
+    public fn call_once<F: fn()>(&self, f: F) {
+        // Fast path: already complete
+        if self.is_completed() {
+            return;
+        }
+
+        self.call_once_slow(f);
+    }
+
+    // Slow path for call_once.
+    fn call_once_slow<F: fn()>(&self, f: F) {
+        loop {
+            match self.state.compare_exchange(INCOMPLETE, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+                Ok(_) => {
+                    // We won the race - use a guard to handle panics
+                    // The guard will set POISONED if dropped without completing
+                    let mut guard = OnceGuard { state: &self.state, completed: false };
+
+                    // Run the initialization function
+                    f();
+
+                    // Mark as completed && disarm the guard
+                    self.state.store(COMPLETE, MemoryOrdering.Release);
+                    guard.completed = true;
+                    // Guard will be dropped here but won't poison since completed=true
+
+                    return;
+                }
+                Err(COMPLETE) => {
+                    // Already done
+                    return;
+                }
+                Err(POISONED) => {
+                    // Previous attempt panicked
+                    panic("Once.call_once called after panic");
+                }
+                Err(RUNNING) => {
+                    // Another thread is running, wait
+                    while self.state.load(MemoryOrdering.Acquire) == RUNNING {
+                        compiler_fence(MemoryOrdering.SeqCst);
+                    }
+                }
+                Err(_) => {
+                    // Unexpected state, retry
+                    compiler_fence(MemoryOrdering.SeqCst);
+                }
+            }
+        }
+    }
+
+    /// Run function if !yet called, ignoring poison.
+    ///
+    /// Unlike `call_once`, this will attempt initialization even if a
+    /// previous attempt panicked. Useful for recovery scenarios.
+    public fn call_once_force<F: fn()>(&self, f: F) {
+        // Fast path: already complete
+        if self.state.load(MemoryOrdering.Acquire) == COMPLETE {
+            return;
+        }
+
+        loop {
+            let state = self.state.load(MemoryOrdering.Acquire);
+            if state == COMPLETE {
+                return;
+            }
+
+            // Accept any state except RUNNING
+            match self.state.compare_exchange(state, RUNNING, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+                Ok(_) => {
+                    // Use guard for panic safety
+                    let mut guard = OnceGuard { state: &self.state, completed: false };
+
+                    f();
+
+                    self.state.store(COMPLETE, MemoryOrdering.Release);
+                    guard.completed = true;
+                    return;
+                }
+                Err(COMPLETE) => {
+                    return;
+                }
+                Err(RUNNING) => {
+                    // Wait for current attempt to finish
+                    while self.state.load(MemoryOrdering.Acquire) == RUNNING {
+                        compiler_fence(MemoryOrdering.SeqCst);
+                    }
+                    // Then retry
+                }
+                Err(_) => {
+                    // Retry
+                    compiler_fence(MemoryOrdering.SeqCst);
+                }
+            }
+        }
+    }
+
+    // Check if initialization is complete.
+    public fn is_completed(&self) -> Bool {
+        self.state.load(MemoryOrdering.Acquire) == COMPLETE
+    }
+
+    // Get current state.
+    public fn state(&self) -> OnceState {
+        match self.state.load(MemoryOrdering.Acquire) {
+            INCOMPLETE => New,
+            RUNNING => InProgress,
+            COMPLETE => Done,
+            POISONED => Poisoned,
+            _ => New,
+        }
+    }
+}
+
+implement Default for Once {
+    fn default() -> Once {
+        Once.new()
+    }
+}
+
+implement Debug for Once {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Once { state: ")?;
+        self.state().fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement Debug for OnceState {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            New => f.write_str("New"),
+            InProgress => f.write_str("InProgress"),
+            Done => f.write_str("Done"),
+            Poisoned => f.write_str("Poisoned"),
+        }
+    }
+}
+
+// =============================================================================
+// OnceLock<T> - Lazy initialization with stored value
+// =============================================================================
+
+// Lazy-initialized value that can only be set once.
+public type OnceLock<T> is {
+    once: Once,
+    value: Maybe<T>,
+};
+
+implement<T> OnceLock<T> {
+    // Create new empty OnceLock.
+    public fn new() -> OnceLock<T> {
+        OnceLock {
+            once: Once.new(),
+            value: None,
+        }
+    }
+
+    // Get value, initializing with function if needed.
+    public fn get_or_init<F: fn() -> T>(&self, f: F) -> &T {
+        self.once.call_once(|| {
+            let v = f();
+            unsafe {
+                let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                *ptr = Some(v);
+            }
+        });
+
+        self.value.as_ref().unwrap()
+    }
+
+    // Get value if initialized.
+    public fn get(&self) -> Maybe<&T> {
+        if self.once.is_completed() {
+            self.value.as_ref()
+        } else {
+            None
+        }
+    }
+
+    // Set value if !already set.
+    // Returns Ok(()) on success, Err(value) if already initialized.
+    public fn set(&self, value: T) -> Result<(), T> {
+        let mut stored = false;
+        let mut rejected_value: Maybe<T> = None;
+
+        self.once.call_once(|| {
+            unsafe {
+                let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                *ptr = Some(value);
+            }
+            stored = true;
+        });
+
+        if stored {
+            Ok(())
+        } else {
+            // Already initialized, return the value
+            // Note: This is a simplification; real impl would save rejected value
+            Err(value)
+        }
+    }
+
+    // Take value, leaving None.
+    public fn take(&mut self) -> Maybe<T> {
+        if self.once.is_completed() {
+            self.value.take()
+        } else {
+            None
+        }
+    }
+
+    // Check if initialized.
+    public fn is_initialized(&self) -> Bool {
+        self.once.is_completed()
+    }
+
+    /// Get value, initializing with a fallible function if needed.
+    /// If the function returns Err, the OnceLock remains uninitialized
+    /// and the error is returned.
+    public fn get_or_try_init<E, F: fn() -> Result<T, E>>(&self, f: F) -> Result<&T, E> {
+        if self.once.is_completed() {
+            return Ok(self.value.as_ref().unwrap());
+        }
+
+        let result = f();
+        match result {
+            Ok(v) => {
+                self.once.call_once(|| {
+                    unsafe {
+                        let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
+                        *ptr = Some(v);
+                    }
+                });
+                Ok(self.value.as_ref().unwrap())
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+implement<T: Default> Default for OnceLock<T> {
+    fn default() -> OnceLock<T> {
+        OnceLock.new()
+    }
+}

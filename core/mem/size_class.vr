@@ -1,0 +1,506 @@
+// =============================================================================
+// mem/size_class.vr - Mimalloc-Style Size Class System
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// Size classes with ~12.5% spacing for minimal internal fragmentation.
+// Based on mimalloc's proven bin design:
+// - 73 size classes covering 8 bytes to 5 MiB
+// - Exact sizes for small allocations (≤64 bytes)
+// - Exponential growth with 4 sub-bins per power of 2
+//
+// # Size Class Distribution
+//
+// Bins 0-7:   Exact sizes: 8, 16, 24, 32, 40, 48, 56, 64 bytes
+// Bins 8+:   Exponential with 12.5% spacing up to 5 MiB
+// Bin 73:    Huge allocations (direct segment allocation)
+//
+// # Performance
+//
+// - O(1) size-to-bin calculation via bit manipulation
+// - Direct lookup array for small sizes (≤1024 bytes)
+// - Maximum internal fragmentation: ~12.5%
+//
+// Spec: docs/architecture/mimalloc-allocator-plan.md
+// =============================================================================
+
+// Import intrinsics as functions
+
+module core.mem.size_class;
+mount core.intrinsics.{clz_u64};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Total number of size class bins (not including huge/full queues)
+public const BIN_COUNT: Int = 73;
+
+/// Bin index for huge allocations
+public const BIN_HUGE: Int = 73;
+
+/// Bin index for full pages (internal use)
+public const BIN_FULL: Int = 74;
+
+/// Total queues (73 size classes + huge + full)
+public const QUEUE_COUNT: Int = 75;
+
+/// Maximum size for small allocations (uses small 64KiB pages)
+public const SMALL_SIZE_MAX: Int = 8192;  // 8 KiB
+
+/// Maximum size for medium allocations (uses medium 512KiB pages)
+public const MEDIUM_SIZE_MAX: Int = 65536;  // 64 KiB
+
+/// Maximum size for large allocations (dedicated page in segment)
+public const LARGE_SIZE_MAX: Int = 16777216;  // 16 MiB
+
+/// Size that triggers huge allocation (dedicated segment)
+public const HUGE_SIZE_THRESHOLD: Int = 5242880;  // 5 MiB
+
+/// Word size (8 bytes on 64-bit)
+public const WORD_SIZE: Int = 8;
+
+/// Maximum alignment for small objects
+public const MAX_ALIGN_SIZE: Int = 16;
+
+// =============================================================================
+// Size Class Table
+// =============================================================================
+
+/// Size classes in bytes (73 classes)
+/// Follows mimalloc's word-based sizing converted to bytes
+public const SIZE_CLASSES: [Int; 73] = [
+    // Exact small sizes (bins 0-7): 8-byte increments
+    8, 16, 24, 32, 40, 48, 56, 64,
+
+    // Exponential sizes with 12.5% spacing (bins 8-72)
+    // Each group of 4 bins spans one power of 2
+
+    // 64-128 range (bins 8-11)
+    80, 96, 112, 128,
+
+    // 128-256 range (bins 12-15)
+    160, 192, 224, 256,
+
+    // 256-512 range (bins 16-19)
+    320, 384, 448, 512,
+
+    // 512-1K range (bins 20-23)
+    640, 768, 896, 1024,
+
+    // 1K-2K range (bins 24-27)
+    1280, 1536, 1792, 2048,
+
+    // 2K-4K range (bins 28-31)
+    2560, 3072, 3584, 4096,
+
+    // 4K-8K range (bins 32-35)
+    5120, 6144, 7168, 8192,
+
+    // 8K-16K range (bins 36-39)
+    10240, 12288, 14336, 16384,
+
+    // 16K-32K range (bins 40-43)
+    20480, 24576, 28672, 32768,
+
+    // 32K-64K range (bins 44-47)
+    40960, 49152, 57344, 65536,
+
+    // 64K-128K range (bins 48-51)
+    81920, 98304, 114688, 131072,
+
+    // 128K-256K range (bins 52-55)
+    163840, 196608, 229376, 262144,
+
+    // 256K-512K range (bins 56-59)
+    327680, 393216, 458752, 524288,
+
+    // 512K-1M range (bins 60-63)
+    655360, 786432, 917504, 1048576,
+
+    // 1M-2M range (bins 64-67)
+    1310720, 1572864, 1835008, 2097152,
+
+    // 2M-4M range (bins 68-71)
+    2621440, 3145728, 3670016, 4194304,
+
+    // 4M-5M range (bin 72)
+    5242880
+];
+
+/// Direct lookup table for small sizes (word count → bin)
+/// Covers sizes 0-1024 bytes (0-128 words)
+/// This enables O(1) bin lookup for small allocations
+const SMALL_BIN_LOOKUP: [UInt8; 129] = [
+    // 0 words → bin 0 (8 bytes)
+    0,
+    // 1-8 words (8-64 bytes) → exact bins 0-7
+    0, 1, 2, 3, 4, 5, 6, 7,
+    // 9-10 words (72-80 bytes) → bin 8
+    8, 8,
+    // 11-12 words (88-96 bytes) → bin 9
+    9, 9,
+    // 13-14 words (104-112 bytes) → bin 10
+    10, 10,
+    // 15-16 words (120-128 bytes) → bin 11
+    11, 11,
+    // 17-20 words (136-160 bytes) → bin 12
+    12, 12, 12, 12,
+    // 21-24 words (168-192 bytes) → bin 13
+    13, 13, 13, 13,
+    // 25-28 words (200-224 bytes) → bin 14
+    14, 14, 14, 14,
+    // 29-32 words (232-256 bytes) → bin 15
+    15, 15, 15, 15,
+    // 33-40 words (264-320 bytes) → bin 16
+    16, 16, 16, 16, 16, 16, 16, 16,
+    // 41-48 words (328-384 bytes) → bin 17
+    17, 17, 17, 17, 17, 17, 17, 17,
+    // 49-56 words (392-448 bytes) → bin 18
+    18, 18, 18, 18, 18, 18, 18, 18,
+    // 57-64 words (456-512 bytes) → bin 19
+    19, 19, 19, 19, 19, 19, 19, 19,
+    // 65-80 words (520-640 bytes) → bin 20
+    20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+    // 81-96 words (648-768 bytes) → bin 21
+    21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+    // 97-112 words (776-896 bytes) → bin 22
+    22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22,
+    // 113-128 words (904-1024 bytes) → bin 23
+    23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
+];
+
+// =============================================================================
+// Size Class Functions
+// =============================================================================
+
+/// Convert allocation size to bin index.
+/// Returns BIN_HUGE for sizes > HUGE_SIZE_THRESHOLD.
+///
+/// # Performance
+/// - O(1) for sizes ≤ 1024 bytes (direct lookup)
+/// - O(1) for larger sizes (bit manipulation)
+@inline
+public fn size_to_bin(size: Int) -> Int {
+    if size <= 0 {
+        return 0;
+    }
+
+    // Convert to word count (round up)
+    let wsize = (size + WORD_SIZE - 1) / WORD_SIZE;
+
+    // Fast path: direct lookup for small sizes
+    if wsize <= 128 {
+        return SMALL_BIN_LOOKUP[wsize] as Int;
+    }
+
+    // Larger sizes: logarithmic calculation
+    size_to_bin_large(wsize)
+}
+
+/// Calculate bin for large sizes (> 1024 bytes)
+/// Uses bit manipulation for O(1) calculation
+fn size_to_bin_large(wsize: Int) -> Int {
+    // Find highest bit position
+    let b = 63 - clz_u64(wsize as UInt64) as Int;
+
+    // Calculate bin using top 2 bits after highest
+    // This gives 4 sub-bins per power of 2 (12.5% spacing)
+    let shifted = wsize >> (b - 2);
+    let sub_bin = shifted & 0x03;
+
+    // Base bin for this power of 2, plus sub-bin offset
+    let bin = ((b - 3) << 2) + sub_bin;
+
+    // Clamp to valid range
+    if bin >= BIN_HUGE {
+        BIN_HUGE
+    } else {
+        bin
+    }
+}
+
+/// Get block size for a bin index.
+@inline
+public fn bin_to_size(bin: Int) -> Int {
+    if bin >= BIN_COUNT {
+        0  // Invalid bin
+    } else {
+        SIZE_CLASSES[bin]
+    }
+}
+
+/// Check if a size is considered "small" (uses small pages)
+@inline
+public fn is_small_size(size: Int) -> Bool {
+    size <= SMALL_SIZE_MAX
+}
+
+/// Check if a size is considered "medium" (uses medium pages)
+@inline
+public fn is_medium_size(size: Int) -> Bool {
+    size > SMALL_SIZE_MAX && size <= MEDIUM_SIZE_MAX
+}
+
+/// Check if a size is considered "large" (dedicated page)
+@inline
+public fn is_large_size(size: Int) -> Bool {
+    size > MEDIUM_SIZE_MAX && size <= LARGE_SIZE_MAX
+}
+
+/// Check if a size is considered "huge" (dedicated segment)
+@inline
+public fn is_huge_size(size: Int) -> Bool {
+    size > HUGE_SIZE_THRESHOLD
+}
+
+/// Get number of slices needed for a page of given size class
+@inline
+public fn slices_for_bin(bin: Int) -> Int {
+    let size = bin_to_size(bin);
+
+    if size <= 8192 {
+        1  // Small: 1 slice (64 KiB)
+    } else if size <= 65536 {
+        8  // Medium: 8 slices (512 KiB)
+    } else {
+        // Large: calculate needed slices
+        let slice_size = 65536;
+        (size + slice_size - 1) / slice_size
+    }
+}
+
+/// Get page size for a bin
+@inline
+public fn page_size_for_bin(bin: Int) -> Int {
+    slices_for_bin(bin) * 65536
+}
+
+/// Calculate maximum blocks that fit in a page for a size class
+@inline
+public fn blocks_per_page(bin: Int) -> Int {
+    if bin >= BIN_COUNT {
+        return 1;  // Huge: one block
+    }
+
+    let block_size = SIZE_CLASSES[bin];
+    let page_size = page_size_for_bin(bin);
+
+    // Account for page header (64 bytes) and metadata
+    let header_size = 64;
+    let usable = page_size - header_size;
+
+    usable / block_size
+}
+
+/// Adjust size for alignment requirements
+@inline
+public fn aligned_size(size: Int, align: Int) -> Int {
+    if align <= MAX_ALIGN_SIZE {
+        // Standard alignment is satisfied by size class
+        size
+    } else {
+        // Need extra space for alignment
+        size + align - 1
+    }
+}
+
+// =============================================================================
+// Page Type Classification
+// =============================================================================
+
+/// Page type based on size class
+public type PageKind is
+    | Small     // 1 slice (64 KiB) for sizes ≤ 8 KiB
+    | Medium    // 8 slices (512 KiB) for sizes ≤ 64 KiB
+    | Large     // Variable slices for sizes ≤ 16 MiB
+    | Huge      // Dedicated segment for sizes > 5 MiB
+    ;
+
+/// Get page kind for a bin
+@inline
+public fn page_kind_for_bin(bin: Int) -> PageKind {
+    if bin >= BIN_HUGE {
+        PageKind.Huge
+    } else {
+        let size = SIZE_CLASSES[bin];
+        if size <= SMALL_SIZE_MAX {
+            PageKind.Small
+        } else if size <= MEDIUM_SIZE_MAX {
+            PageKind.Medium
+        } else {
+            PageKind.Large
+        }
+    }
+}
+
+// =============================================================================
+// Fragmentation Analysis
+// =============================================================================
+
+/// Calculate internal fragmentation for a size in a bin
+/// Returns fragmentation as percentage (0-100)
+@inline
+public fn fragmentation_percent(requested_size: Int, bin: Int) -> Int {
+    if bin >= BIN_COUNT || requested_size <= 0 {
+        return 0;
+    }
+
+    let actual_size = SIZE_CLASSES[bin];
+    let wasted = actual_size - requested_size;
+
+    (wasted * 100) / actual_size
+}
+
+/// Get optimal bin for a size (may be larger than size_to_bin result
+/// if fragmentation is very high in the normal bin)
+@inline
+public fn optimal_bin(size: Int) -> Int {
+    let bin = size_to_bin(size);
+
+    // If fragmentation > 25%, check if next smaller bin works
+    // (This is a heuristic for cache efficiency)
+    if bin > 0 {
+        let frag = fragmentation_percent(size, bin);
+        if frag > 25 && bin > 0 {
+            let prev_size = SIZE_CLASSES[bin - 1];
+            if size <= prev_size {
+                return bin - 1;
+            }
+        }
+    }
+
+    bin
+}
+
+// =============================================================================
+// Debug/Statistics
+// =============================================================================
+
+/// Size class statistics
+public type SizeClassStats is {
+    /// Total allocations per bin
+    public alloc_count: [UInt64; 75],
+    /// Total deallocations per bin
+    public dealloc_count: [UInt64; 75],
+    /// Current live allocations per bin
+    public live_count: [UInt64; 75],
+    /// Total bytes allocated per bin
+    public bytes_allocated: [UInt64; 75],
+    /// Total bytes wasted (fragmentation) per bin
+    public bytes_wasted: [UInt64; 75],
+};
+
+implement SizeClassStats {
+    /// Create empty statistics
+    public fn new() -> SizeClassStats {
+        SizeClassStats {
+            alloc_count: [0; 75],
+            dealloc_count: [0; 75],
+            live_count: [0; 75],
+            bytes_allocated: [0; 75],
+            bytes_wasted: [0; 75],
+        }
+    }
+
+    /// Record an allocation
+    public fn record_alloc(&mut self, bin: Int, requested_size: Int) {
+        if bin < 75 {
+            self.alloc_count[bin] = self.alloc_count[bin] + 1;
+            self.live_count[bin] = self.live_count[bin] + 1;
+
+            let actual_size = if bin < BIN_COUNT { SIZE_CLASSES[bin] } else { requested_size };
+            self.bytes_allocated[bin] = self.bytes_allocated[bin] + actual_size as UInt64;
+
+            let wasted = actual_size - requested_size;
+            if wasted > 0 {
+                self.bytes_wasted[bin] = self.bytes_wasted[bin] + wasted as UInt64;
+            }
+        }
+    }
+
+    /// Record a deallocation
+    public fn record_dealloc(&mut self, bin: Int) {
+        if bin < 75 {
+            self.dealloc_count[bin] = self.dealloc_count[bin] + 1;
+            if self.live_count[bin] > 0 {
+                self.live_count[bin] = self.live_count[bin] - 1;
+            }
+        }
+    }
+
+    /// Get total fragmentation percentage
+    public fn total_fragmentation_percent(&self) -> Int {
+        let mut total_allocated: UInt64 = 0;
+        let mut total_wasted: UInt64 = 0;
+
+        for bin in 0..75 {
+            total_allocated = total_allocated + self.bytes_allocated[bin];
+            total_wasted = total_wasted + self.bytes_wasted[bin];
+        }
+
+        if total_allocated == 0 {
+            0
+        } else {
+            ((total_wasted * 100) / total_allocated) as Int
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_size_to_bin_small() {
+    // Exact small sizes
+    assert_eq(size_to_bin(1), 0);
+    assert_eq(size_to_bin(8), 0);
+    assert_eq(size_to_bin(16), 1);
+    assert_eq(size_to_bin(24), 2);
+    assert_eq(size_to_bin(32), 3);
+    assert_eq(size_to_bin(64), 7);
+
+    // Just over exact boundaries
+    assert_eq(size_to_bin(9), 1);   // 9 → bin 1 (16 bytes)
+    assert_eq(size_to_bin(65), 8);  // 65 → bin 8 (80 bytes)
+}
+
+@test
+fn test_size_to_bin_medium() {
+    assert_eq(size_to_bin(100), 9);   // → 96 byte bin
+    assert_eq(size_to_bin(200), 13);  // → 192 byte bin
+    assert_eq(size_to_bin(1000), 23); // → 1024 byte bin
+}
+
+@test
+fn test_bin_to_size() {
+    assert_eq(bin_to_size(0), 8);
+    assert_eq(bin_to_size(7), 64);
+    assert_eq(bin_to_size(23), 1024);
+    assert_eq(bin_to_size(47), 65536);
+}
+
+@test
+fn test_fragmentation() {
+    // 60 bytes in 64-byte bin: (64-60)/64 = 6.25%
+    let frag = fragmentation_percent(60, 7);
+    assert(frag >= 6 && frag <= 7);
+
+    // 17 bytes in 24-byte bin: (24-17)/24 = 29%
+    let frag2 = fragmentation_percent(17, 2);
+    assert(frag2 >= 29 && frag2 <= 30);
+}
+
+@test
+fn test_page_kind() {
+    assert(page_kind_for_bin(0) is Small);
+    assert(page_kind_for_bin(7) is Small);
+    assert(page_kind_for_bin(35) is Small);  // 8192 bytes
+    assert(page_kind_for_bin(36) is Medium); // 10240 bytes
+    assert(page_kind_for_bin(47) is Medium); // 65536 bytes
+    assert(page_kind_for_bin(48) is Large);  // 81920 bytes
+    assert(page_kind_for_bin(73) is Huge);
+}

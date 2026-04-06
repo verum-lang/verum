@@ -1,0 +1,7 @@
+// Test just basic imports without stdlib calls
+link std.collections.{List, Map};
+link core.base.{Result, Maybe, Text, Int, Bool};
+
+fn main() {
+    print("Basic imports successful!");
+}

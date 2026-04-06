@@ -1,0 +1,244 @@
+// In-Memory Search Index Provider
+//
+// Implements the Search context protocol with a simple in-memory inverted index.
+// Supports basic TF scoring and prefix-based autocomplete. Suitable for small
+// registries; swap with an Elasticsearch provider for production scale.
+
+mount core.base.{Result, Text, Int, Float, Bool, Maybe};
+mount core.collections.{List, Map};
+mount core.sync.Mutex;
+mount core.text.to_lowercase;
+
+mount crate.contexts.search.{Search, SearchError, SearchQuery, SearchResult, SearchResponse};
+
+// ============================================================================
+// Index Internals
+// ============================================================================
+
+type IndexEntry is {
+    name: Text,
+    metadata: Map<Text, Text>,
+    tokens: List<Text>,
+};
+
+// ============================================================================
+// MemorySearchProvider
+// ============================================================================
+
+pub type MemorySearchProvider is {
+    entries: Mutex<Map<Text, IndexEntry>>,
+    inverted: Mutex<Map<Text, List<Text>>>,
+};
+
+implement MemorySearchProvider {
+    pub fn new() -> MemorySearchProvider {
+        MemorySearchProvider {
+            entries: Mutex.new(Map.new()),
+            inverted: Mutex.new(Map.new()),
+        }
+    }
+
+    /// Tokenize text into lowercase search tokens.
+    fn tokenize(text: Text) -> List<Text> {
+        let lower = to_lowercase(text);
+        lower.split_whitespace()
+    }
+
+    /// Score a document against a set of query tokens.
+    fn score_entry(entry: &IndexEntry, query_tokens: &List<Text>) -> Float {
+        let mut hits = 0;
+        for qt in query_tokens {
+            for et in entry.tokens {
+                if et.contains(qt) {
+                    hits = hits + 1;
+                }
+            }
+        }
+        hits as Float
+    }
+}
+
+implement Search for MemorySearchProvider {
+    async fn search(self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
+        let entries_map = self.entries.lock();
+        let tokens = MemorySearchProvider.tokenize(query.term);
+
+        if tokens.is_empty() {
+            return Result.Ok(SearchResponse {
+                results: List.new(),
+                total: 0,
+                page: 0,
+                per_page: 0,
+            });
+        }
+
+        // Collect and score matching entries
+        let mut scored = List.new();
+        for name in entries_map.keys() {
+            match entries_map.get(name) {
+                Maybe.Some(entry) => {
+                    let s = MemorySearchProvider.score_entry(entry, &tokens);
+                    if s > 0.0 {
+                        scored.push(ScoredHit { name: name.clone(), entry: entry.clone(), score: s });
+                    }
+                },
+                Maybe.None => {},
+            }
+        }
+
+        // Sort descending by score (simple selection sort)
+        for i in 0..scored.len() {
+            let mut best = i;
+            for j in (i + 1)..scored.len() {
+                if scored.get(j).unwrap().score > scored.get(best).unwrap().score {
+                    best = j;
+                }
+            }
+            if best != i {
+                scored.swap(i, best);
+            }
+        }
+
+        let total = scored.len();
+        let offset = query.offset.unwrap_or(0);
+        let limit = query.limit.unwrap_or(20);
+
+        // Slice results
+        let mut results = List.new();
+        let end = if offset + limit < total { offset + limit } else { total };
+        for i in offset..end {
+            match scored.get(i) {
+                Maybe.Some(hit) => {
+                    results.push(SearchResult {
+                        package_name: hit.name.clone(),
+                        version: hit.entry.metadata.get("version").unwrap_or("0.0.0").clone(),
+                        description: hit.entry.metadata.get("description").unwrap_or("").clone(),
+                        score: hit.score,
+                        downloads: hit.entry.metadata.get("downloads").unwrap_or("0").parse_int().unwrap_or(0),
+                        license: hit.entry.metadata.get("license").unwrap_or("").clone(),
+                        published_at: hit.entry.metadata.get("published_at").unwrap_or("").clone(),
+                        category: hit.entry.metadata.get("category").map(fn(c) { c.clone() }),
+                    });
+                },
+                Maybe.None => {},
+            }
+        }
+
+        Result.Ok(SearchResponse {
+            results: results,
+            total: total,
+            page: offset / limit,
+            per_page: limit,
+        })
+    }
+
+    async fn index_package(self, name: Text, metadata: Map<Text, Text>) -> Result<(), SearchError> {
+        // Build tokens from name + description
+        let mut all_text = name.clone();
+        match metadata.get("description") {
+            Maybe.Some(desc) => { all_text = f"{all_text} {desc}"; },
+            Maybe.None => {},
+        }
+        match metadata.get("keywords") {
+            Maybe.Some(kw) => { all_text = f"{all_text} {kw}"; },
+            Maybe.None => {},
+        }
+
+        let tokens = MemorySearchProvider.tokenize(all_text);
+
+        let entry = IndexEntry {
+            name: name.clone(),
+            metadata: metadata,
+            tokens: tokens.clone(),
+        };
+
+        let mut entries_map = self.entries.lock();
+        entries_map.insert(name.clone(), entry);
+
+        // Update inverted index
+        let mut inv = self.inverted.lock();
+        for token in tokens {
+            match inv.get(token.clone()) {
+                Maybe.Some(names) => {
+                    let mut updated = names.clone();
+                    if !updated.contains(name.clone()) {
+                        updated.push(name.clone());
+                    }
+                    inv.insert(token, updated);
+                },
+                Maybe.None => {
+                    inv.insert(token, List.from([name.clone()]));
+                },
+            }
+        }
+
+        Result.Ok(())
+    }
+
+    async fn remove_package(self, name: Text) -> Result<(), SearchError> {
+        let mut entries_map = self.entries.lock();
+        entries_map.remove(name);
+        Result.Ok(())
+    }
+
+    async fn suggest(self, prefix: Text, limit: Int) -> Result<List<Text>, SearchError> {
+        self.autocomplete(prefix, limit).await
+    }
+
+    async fn rebuild_index(self) -> Result<(), SearchError> {
+        // Re-tokenize all entries and rebuild the inverted index
+        let entries_map = self.entries.lock();
+        let mut inv = Map.new();
+        for name in entries_map.keys() {
+            match entries_map.get(name) {
+                Maybe.Some(entry) => {
+                    for token in entry.tokens {
+                        match inv.get(token.clone()) {
+                            Maybe.Some(names) => {
+                                let mut updated = names.clone();
+                                updated.push(name.clone());
+                                inv.insert(token, updated);
+                            },
+                            Maybe.None => {
+                                inv.insert(token, List.from([name.clone()]));
+                            },
+                        }
+                    }
+                },
+                Maybe.None => {},
+            }
+        }
+        let mut inverted_map = self.inverted.lock();
+        *inverted_map = inv;
+        Result.Ok(())
+    }
+
+    async fn autocomplete(self, query: Text, limit: Int) -> Result<List<Text>, SearchError> {
+        let prefix = to_lowercase(query);
+        let entries_map = self.entries.lock();
+        let mut suggestions = List.new();
+        for name in entries_map.keys() {
+            if to_lowercase(name.clone()).starts_with(prefix.clone()) {
+                suggestions.push(name.clone());
+                if suggestions.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Result.Ok(suggestions)
+    }
+
+    async fn ping(self) -> Result<(), SearchError> {
+        Result.Ok(())
+    }
+}
+
+// ============================================================================
+// Internal Types
+// ============================================================================
+
+type ScoredHit is {
+    name: Text,
+    entry: IndexEntry,
+    score: Float,
+};

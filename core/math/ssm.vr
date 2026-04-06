@@ -1,0 +1,1168 @@
+// =============================================================================
+// ssm.vr - State Space Models (L8)
+// =============================================================================
+// Layer: 8 (State Space Models - SSM/Mamba)
+//
+// State Space Models provide an alternative to Transformers with linear-time
+// sequence modeling O(L) vs O(L²) for attention. Mamba achieves 5x higher
+// throughput than Transformers while matching quality on language modeling.
+//
+// # Architecture
+//
+// - StateSpaceKernel: Core SSM with HiPPO initialization
+// - S4Layer: Structured State Space with efficient FFT convolution
+// - MambaBlock: Selective SSM with input-dependent dynamics
+// - BiMambaBlock: Bidirectional Mamba for classification tasks
+// - JambaLayer: Hybrid Mamba-Transformer architecture
+// - MoE: Mixture of Experts for sparse activation
+//
+// # Key Innovations
+//
+// 1. Selection mechanism: B, C, Δ are functions of input (Mamba)
+// 2. Hardware-aware algorithm: parallel associative scan O(L) vs O(L²)
+// 3. Linear-time complexity for long sequences
+//
+// Spec: docs/architecture/math-spec.md#38
+// =============================================================================
+
+module core.math.ssm;
+
+mount core.math.tensor.{
+    DynTensor, zeros, ones, full, eye, randn, linspace, arange,
+    exp, mul, add, sub, div, neg, matmul, transpose, einsum,
+    reshape, unsqueeze, squeeze, slice, flip, cat, chunk,
+    sum_axis, mean_axis, softmax, topk, gather, scatter_add,
+};
+mount core.math.nn.{
+    Module, Linear, Conv1d, Embedding, RMSNorm, MultiHeadAttention,
+    gelu, silu, relu, sigmoid, softplus,
+};
+mount core.math.elementary.{sqrt, log, PI};
+mount core.math.autodiff.{Differentiable};
+mount core.prelude.{List, Maybe, Bool, USize, Float, Complex};
+
+// =============================================================================
+// Discretization Methods
+// =============================================================================
+
+// Discretization method for continuous-to-discrete SSM transformation
+// x'(t) = Ax(t) + Bu(t) → x_k = Ā·x_{k-1} + B̄·u_k
+public type DiscretizationMethod is
+    // Zero-Order Hold: Ā = exp(A·Δt)
+    | ZeroOrderHold
+    // Bilinear (Tustin): Ā = (I + A·Δt/2)(I - A·Δt/2)^{-1}
+    | Bilinear
+    // Forward Euler: Ā = I + A·Δt
+    | Euler;
+
+// =============================================================================
+// State Space Kernel
+// =============================================================================
+
+// Core State Space Model kernel with HiPPO initialization
+// Continuous: x'(t) = Ax(t) + Bu(t), y(t) = Cx(t) + Du(t)
+// Discretized: x_k = Ā·x_{k-1} + B̄·u_k, y_k = C·x_k + D·u_k
+public type StateSpaceKernel<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    // State transition matrix (continuous): [N, N]
+    A: DynTensor<Float>,
+    // Input projection (continuous): [N, D]
+    B: DynTensor<Float>,
+    // Output projection: [D, N]
+    C: DynTensor<Float>,
+    // Skip connection (optional): [D]
+    D: Maybe<DynTensor<Float>>,
+    // Log of time step (learnable)
+    log_dt: DynTensor<Float>,
+    // Discretization method
+    method: DiscretizationMethod,
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> StateSpaceKernel<D, N> {
+    // Create HiPPO-initialized SSM kernel
+    // HiPPO matrix approximates continuous history via Legendre polynomials
+    public fn hippo_init() -> Self {
+        // HiPPO-LegS initialization: A_{nk} = -(2n+1)^{1/2}(2k+1)^{1/2} if n > k else n+1
+        let A = zeros(&[N, N]);
+        for n in 0..N {
+            for k in 0..N {
+                let val = if n > k {
+                    -sqrt((2.0 * n as Float + 1.0) * (2.0 * k as Float + 1.0))
+                } else if n == k {
+                    -(n as Float + 1.0)
+                } else {
+                    0.0
+                };
+                A[[n, k]] = val;
+            }
+        }
+
+        let B = mul(&randn(&[N, D]), &full(&[N, D], 0.01));
+        let C = mul(&randn(&[D, N]), &full(&[D, N], 0.01));
+        let log_dt = full(&[D], -4.0); // dt ≈ 0.018
+
+        StateSpaceKernel {
+            A, B, C,
+            D: Maybe.None,
+            log_dt,
+            method: DiscretizationMethod.ZeroOrderHold,
+        }
+    }
+
+    // Discretize continuous parameters
+    // ZOH: Ā = exp(A·Δt), B̄ = (Ā - I)·A^{-1}·B
+    public fn discretize(&self, dt: &DynTensor<Float>) -> (DynTensor<Float>, DynTensor<Float>) {
+        match self.method {
+            DiscretizationMethod.ZeroOrderHold => {
+                // Ā = exp(A · Δt)
+                let A_scaled = mul(&self.A, &dt.unsqueeze(-1).unsqueeze(-1));
+                let A_discrete = matrix_exp(&A_scaled);
+                // B̄ = (Ā - I) @ A^{-1} @ B
+                let A_inv = matrix_inverse(&self.A);
+                let B_discrete = matmul(&matmul(&sub(&A_discrete, &eye(N)), &A_inv), &self.B);
+                (A_discrete, B_discrete)
+            },
+            DiscretizationMethod.Bilinear => {
+                // Bilinear (Tustin): Ā = (I + A·Δt/2)(I - A·Δt/2)^{-1}
+                let half_dt = mul(&dt, &full(&dt.shape(), 0.5));
+                let half_dt_A = mul(&self.A, &half_dt.unsqueeze(-1).unsqueeze(-1));
+                let I = eye(N);
+                let A_discrete = matmul(&add(&I, &half_dt_A), &matrix_inverse(&sub(&I, &half_dt_A)));
+                let B_discrete = matmul(&mul(&dt.unsqueeze(-1), &sub(&I, &half_dt_A)), &self.B);
+                (A_discrete, B_discrete)
+            },
+            DiscretizationMethod.Euler => {
+                // Forward Euler: Ā = I + A·Δt
+                let A_discrete = add(&eye(N), &mul(&self.A, &dt.unsqueeze(-1).unsqueeze(-1)));
+                let B_discrete = mul(&self.B, &dt.unsqueeze(-1));
+                (A_discrete, B_discrete)
+            },
+        }
+    }
+}
+
+// =============================================================================
+// S4 Layer - Structured State Space
+// =============================================================================
+
+// S4: Structured State Space for Sequence Modeling
+// Key insight: Parameterize A with structure for efficient O(N log N) convolution
+public type S4Layer<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    // Diagonal plus low-rank: A = Λ - PP*
+    Lambda: DynTensor<Complex<Float>>,  // Diagonal eigenvalues [N]
+    P: DynTensor<Complex<Float>>,       // Low-rank factor [N, r]
+    B: DynTensor<Complex<Float>>,       // Input projection [N, D]
+    C: DynTensor<Complex<Float>>,       // Output projection [D, N]
+    D: DynTensor<Float>,                // Skip connection [D]
+    log_dt: DynTensor<Float>,           // Log time step [D]
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> S4Layer<D, N> {
+    // DPLR (Diagonal Plus Low-Rank) initialization from HiPPO
+    public fn dplr_init() -> Self {
+        // Initialize with NPLR (Normal Plus Low-Rank) then convert to diagonal
+        // This ensures stable eigenvalues in left half-plane
+        let Lambda = Complex.new(
+            linspace(-0.5, -0.5, N),  // Real part: negative for stability
+            linspace(0.0, (N - 1) as Float * PI, N)  // Imaginary: spread spectrum
+        );
+
+        let P = mul(&Complex.new(randn(&[N, 1]), randn(&[N, 1])), &full(&[N, 1], 0.5));
+        let B = mul(&Complex.new(randn(&[N, D]), randn(&[N, D])), &full(&[N, D], 0.01));
+        let C = mul(&Complex.new(randn(&[D, N]), randn(&[D, N])), &full(&[D, N], 0.01));
+        let D = zeros(&[D]);
+        let log_dt = uniform(&[D], -4.0, -3.0);
+
+        S4Layer { Lambda, P, B, C, D, log_dt }
+    }
+
+    // Compute SSM convolution kernel via Cauchy kernel
+    // K(L) = C @ (I - Ā^L)^{-1} @ (I - Ā) @ B̄
+    // Complexity: O(N + L log L) using FFT
+    @cost(O(N + L * log(L)))
+    public fn compute_kernel(&self, L: USize) -> DynTensor<Float> {
+        let dt = exp(&self.log_dt);
+
+        // Discretize: Ā = exp(Λ · Δt) for diagonal case
+        let Lambda_bar = exp(&mul(&self.Lambda, &dt.unsqueeze(0)));
+
+        // Vandermonde-like multiplication via FFT
+        // K[k] = Σ_n C_n · Ā_n^k · B_n
+        let roots = Lambda_bar.unsqueeze(-1);  // [N, 1]
+        let powers = arange(0.0, L as Float, 1.0);  // [L]
+        let vandermonde = pow_complex(&roots, &powers);  // [N, L]
+
+        let kernel = einsum("dn,nl->dl", &[&self.C, &matmul(&vandermonde, &self.B)]);
+        kernel.real()  // Take real part
+    }
+
+    // Apply S4 as convolution (training mode)
+    // Complexity: O(D · L log L) via FFT
+    @cost(O(D * L * log(L)))
+    public fn convolve(&self, u: &DynTensor<Float>) -> DynTensor<Float> {
+        let shape = u.shape();
+        let batch = shape[0];
+        let L = shape[1];
+        let K = self.compute_kernel(L);  // [D, L]
+
+        // FFT convolution: y = K * u
+        let u_fft = rfft(&u.permute(&[0, 2, 1]), L * 2);  // [batch, D, L*2]
+        let K_fft = rfft(&K, L * 2);  // [D, L*2]
+        let y_fft = mul_complex(&u_fft, &K_fft.unsqueeze(0));
+        let y = irfft(&y_fft, L * 2).slice(&[.., .., 0..L]);  // [batch, D, L]
+
+        // Add skip connection
+        add(&y.permute(&[0, 2, 1]), &mul(&u, &self.D.unsqueeze(0).unsqueeze(0)))
+    }
+
+    // Apply S4 as recurrence (inference mode)
+    // Complexity: O(D · N) per step - constant in sequence length
+    @cost(O(D * N))
+    public fn step(&self, u: &DynTensor<Float>, state: &mut DynTensor<Complex<Float>>) -> DynTensor<Float> {
+        let dt = exp(&self.log_dt);
+        let Lambda_bar = exp(&mul(&self.Lambda, &dt.unsqueeze(0)));
+        let B_bar = mul(&self.B, &dt.unsqueeze(0));
+
+        // x_k = Ā · x_{k-1} + B̄ · u_k
+        *state = add(&mul(&Lambda_bar.unsqueeze(0), state), &mul(&B_bar, &u.unsqueeze(-1)));
+
+        // y_k = Re(C · x_k) + D · u_k
+        let y = add(&einsum("dn,bnd->bd", &[&self.C, state]).real(), &mul(&u, &self.D));
+        y
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<Float>, DynTensor<Float>> for S4Layer<D, N>
+{
+    @differentiable
+    fn forward(&self, u: DynTensor<Float>) -> DynTensor<Float> {
+        self.convolve(&u)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        List.from([&self.D, &self.log_dt])
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        List.from([&mut self.D, &mut self.log_dt])
+    }
+}
+
+// =============================================================================
+// Mamba Block - Selective State Space
+// =============================================================================
+
+// Mamba: Selective State Space with input-dependent dynamics
+// Key innovations:
+// 1. Selection mechanism: B, C, Δ are functions of input
+// 2. Hardware-aware algorithm: parallel scan instead of convolution
+// 3. Linear-time complexity: O(L) vs O(L²) for attention
+public type MambaBlock<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    // Input expansion dimension (typically 2*D)
+    expand: USize,
+    // Input projection: D -> 2*expand (for x and z paths)
+    in_proj: Linear,
+    // Conv1d for local context (kernel_size typically 4)
+    conv: Conv1d,
+    // SSM dimension projection: expand -> N for B, C
+    x_proj: Linear,
+    // Time step projection: expand -> D for Δ
+    dt_proj: Linear,
+    // Learnable parameters for diagonal A
+    A_log: DynTensor<Float>,  // [expand, N]
+    // Skip/residual parameter
+    D: DynTensor<Float>,      // [expand]
+    // Output projection: expand -> D
+    out_proj: Linear,
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> MambaBlock<D, N> {
+    public fn new(
+        expand_factor: USize{expand_factor > 0},
+        conv_kernel: USize{conv_kernel > 0},
+    ) -> Self {
+        let expand = D * expand_factor;
+
+        MambaBlock {
+            expand,
+            in_proj: Linear.new(D, expand * 2, false),
+            conv: Conv1d.new(expand, expand, conv_kernel, 1, (conv_kernel - 1) / 2, expand), // depthwise
+            x_proj: Linear.new(expand, N * 2 + D, false),  // B, C, dt
+            dt_proj: Linear.new(D, expand, true),
+            A_log: reshape(&repeat(&log(&linspace(1.0, N as Float, N)), expand), &[expand, N]),
+            D: ones(&[expand]),
+            out_proj: Linear.new(expand, D, false),
+        }
+    }
+
+    // Selective scan: parallel associative scan for O(L) complexity
+    // h_t = Ā_t ⊙ h_{t-1} + B̄_t ⊙ x_t
+    // y_t = C_t ⊙ h_t
+    @cost(O(expand * N * L))
+    public fn selective_scan(
+        &self,
+        x: &DynTensor<Float>,     // [batch, L, expand]
+        dt: &DynTensor<Float>,    // [batch, L, expand]
+        B: &DynTensor<Float>,     // [batch, L, N]
+        C: &DynTensor<Float>,     // [batch, L, N]
+    ) -> DynTensor<Float> {
+        let shape = x.shape();
+        let batch = shape[0];
+        let L = shape[1];
+
+        // Discretize with input-dependent dt
+        // A is diagonal, so Ā = exp(A · Δt)
+        let A = neg(&exp(&self.A_log));  // [expand, N]
+        let A_bar = exp(&einsum("en,ble->blen", &[&A, dt]));  // [batch, L, expand, N]
+
+        // B̄ = Δt · B (simplified for diagonal case)
+        let B_bar = einsum("ble,bln->blen", &[dt, B]);  // [batch, L, expand, N]
+
+        // Parallel associative scan
+        // Key insight: (a_1, b_1) ∘ (a_2, b_2) = (a_1 · a_2, a_2 · b_1 + b_2)
+        // This is associative, enabling O(log L) parallel depth
+        let x_expanded = x.unsqueeze(-1);  // [batch, L, expand, 1]
+        let Bx = mul(&B_bar, &x_expanded);  // [batch, L, expand, N]
+
+        // Scan: h_t = A_bar_t · h_{t-1} + Bx_t
+        let h = associative_scan(
+            |carry: &DynTensor<Float>, elem: (&DynTensor<Float>, &DynTensor<Float>)| {
+                let (a, bx) = elem;
+                add(&mul(a, carry), bx)
+            },
+            &zeros(&[batch, self.expand, N]),  // Initial state
+            (&A_bar, &Bx),  // Elements to scan
+            1,  // Scan along sequence dimension
+        );  // [batch, L, expand, N]
+
+        // Output: y = C · h + D · x
+        let y = einsum("blen,bln->ble", &[&h, C]);  // [batch, L, expand]
+        add(&y, &mul(x, &self.D.unsqueeze(0).unsqueeze(0)))
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<Float>, DynTensor<Float>> for MambaBlock<D, N>
+{
+    // Mamba forward pass
+    // Complexity: O(batch · L · D · expand_factor) - LINEAR in sequence length
+    @differentiable
+    @cost(O(batch * L * D * expand))
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        let shape = x.shape();
+        let batch = shape[0];
+        let L = shape[1];
+
+        // Split into main path (x_path) and gate path (z_path)
+        let xz = self.in_proj.forward(x.clone());  // [batch, L, 2*expand]
+        let chunks = xz.chunk(2, -1);
+        let x_path = &chunks[0];
+        let z_path = &chunks[1];
+
+        // Local convolution for short-range dependencies
+        let x_conv = self.conv.forward(x_path.transpose(1, 2)).transpose(1, 2);
+        let x_conv = silu(&x_conv);
+
+        // Project to get B, C, dt (selection mechanism)
+        let x_dbl = self.x_proj.forward(x_conv.clone());  // [batch, L, N*2 + D]
+        let B = x_dbl.slice(&[.., .., 0..N]);
+        let C = x_dbl.slice(&[.., .., N..2*N]);
+        let dt_raw = x_dbl.slice(&[.., .., 2*N..]);
+
+        // Compute delta (time step) with softplus for positivity
+        let dt = softplus(&self.dt_proj.forward(dt_raw));  // [batch, L, expand]
+
+        // Core selective scan
+        let y = self.selective_scan(&x_conv, &dt, &B, &C);
+
+        // Gated output
+        let z = silu(z_path);
+        let output = mul(&y, &z);
+
+        self.out_proj.forward(output)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut params = self.in_proj.parameters();
+        params.extend(self.conv.parameters());
+        params.extend(self.x_proj.parameters());
+        params.extend(self.dt_proj.parameters());
+        params.push(&self.A_log);
+        params.push(&self.D);
+        params.extend(self.out_proj.parameters());
+        params
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut params = self.in_proj.parameters_mut();
+        params.extend(self.conv.parameters_mut());
+        params.extend(self.x_proj.parameters_mut());
+        params.extend(self.dt_proj.parameters_mut());
+        params.push(&mut self.A_log);
+        params.push(&mut self.D);
+        params.extend(self.out_proj.parameters_mut());
+        params
+    }
+}
+
+// =============================================================================
+// Full Mamba Model
+// =============================================================================
+
+// Full Mamba model (stack of Mamba blocks with normalization)
+public type Mamba<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    embedding: Embedding,
+    layers: List<(RMSNorm, MambaBlock<D, N>)>,
+    norm_f: RMSNorm,
+    lm_head: Linear,
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> Mamba<D, N> {
+    public fn new(
+        vocab_size: USize,
+        n_layers: USize{n_layers > 0},
+        expand_factor: USize,
+        conv_kernel: USize,
+    ) -> Self {
+        let layers = (0..n_layers).map(|_| {
+            (RMSNorm.new(D), MambaBlock.new(expand_factor, conv_kernel))
+        }).collect();
+
+        Mamba {
+            embedding: Embedding.new(vocab_size, D),
+            layers,
+            norm_f: RMSNorm.new(D),
+            lm_head: Linear.new(D, vocab_size, false),
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<USize>, DynTensor<Float>> for Mamba<D, N>
+{
+    @differentiable
+    fn forward(&self, input_ids: DynTensor<USize>) -> DynTensor<Float> {
+        let mut h = self.embedding.forward(input_ids);
+
+        for (norm, block) in &self.layers {
+            // Pre-norm residual connection
+            h = add(&h, &block.forward(norm.forward(h.clone())));
+        }
+
+        self.lm_head.forward(self.norm_f.forward(h))
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut params = self.embedding.parameters();
+        for (norm, block) in &self.layers {
+            params.extend(norm.parameters());
+            params.extend(block.parameters());
+        }
+        params.extend(self.norm_f.parameters());
+        params.extend(self.lm_head.parameters());
+        params
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut params = self.embedding.parameters_mut();
+        for (norm, block) in &mut self.layers {
+            params.extend(norm.parameters_mut());
+            params.extend(block.parameters_mut());
+        }
+        params.extend(self.norm_f.parameters_mut());
+        params.extend(self.lm_head.parameters_mut());
+        params
+    }
+}
+
+// =============================================================================
+// Bidirectional Mamba (BiMamba)
+// =============================================================================
+
+// Bidirectional Mamba for tasks requiring full sequence context
+// (e.g., classification, masked language modeling)
+public type BiMambaBlock<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    forward_mamba: MambaBlock<D, N>,
+    backward_mamba: MambaBlock<D, N>,
+    merge_proj: Linear,
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> BiMambaBlock<D, N> {
+    public fn new(expand_factor: USize, conv_kernel: USize) -> Self {
+        BiMambaBlock {
+            forward_mamba: MambaBlock.new(expand_factor, conv_kernel),
+            backward_mamba: MambaBlock.new(expand_factor, conv_kernel),
+            merge_proj: Linear.new(D * 2, D, false),
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<Float>, DynTensor<Float>> for BiMambaBlock<D, N>
+{
+    @differentiable
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        // Forward direction
+        let h_fwd = self.forward_mamba.forward(x.clone());
+
+        // Backward direction (flip, process, flip back)
+        let x_rev = flip(&x, 1);  // Reverse along sequence dim
+        let h_bwd = flip(&self.backward_mamba.forward(x_rev), 1);
+
+        // Merge bidirectional representations
+        let h_cat = cat(&[&h_fwd, &h_bwd], -1);  // [batch, L, 2*D]
+        self.merge_proj.forward(h_cat)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut params = self.forward_mamba.parameters();
+        params.extend(self.backward_mamba.parameters());
+        params.extend(self.merge_proj.parameters());
+        params
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut params = self.forward_mamba.parameters_mut();
+        params.extend(self.backward_mamba.parameters_mut());
+        params.extend(self.merge_proj.parameters_mut());
+        params
+    }
+}
+
+// =============================================================================
+// Jamba Layer - SSM-Transformer Hybrid
+// =============================================================================
+
+// Jamba: Hybrid Mamba-Transformer architecture
+// Combines Mamba's efficiency with Transformer's expressivity
+// Structure: [Mamba] x n -> [Attention + Mamba] -> [Mamba] x n
+public type JambaLayer<D: meta USize{D > 0}, N: meta USize{N > 0}> is
+    | MambaOnly { block: MambaBlock<D, N>, norm: RMSNorm }
+    | Hybrid {
+        mamba: MambaBlock<D, N>,
+        attention: MultiHeadAttention,
+        norm1: RMSNorm,
+        norm2: RMSNorm,
+        gate: DynTensor<Float>,  // Learnable gate [D]
+    };
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> JambaLayer<D, N> {
+    public fn mamba_only(expand_factor: USize, conv_kernel: USize) -> Self {
+        JambaLayer.MambaOnly {
+            block: MambaBlock.new(expand_factor, conv_kernel),
+            norm: RMSNorm.new(D),
+        }
+    }
+
+    public fn hybrid(expand_factor: USize, num_heads: USize) -> Self {
+        JambaLayer.Hybrid {
+            mamba: MambaBlock.new(expand_factor, 4),
+            attention: MultiHeadAttention.new(D, num_heads, 0.0),
+            norm1: RMSNorm.new(D),
+            norm2: RMSNorm.new(D),
+            gate: zeros(&[D]),
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<Float>, DynTensor<Float>> for JambaLayer<D, N>
+{
+    @differentiable
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        match self {
+            JambaLayer.MambaOnly { block, norm } => {
+                add(&x, &block.forward(norm.forward(x.clone())))
+            },
+            JambaLayer.Hybrid { mamba, attention, norm1, norm2, gate } => {
+                // Mamba path
+                let h_mamba = mamba.forward(norm1.forward(x.clone()));
+
+                // Attention path
+                let h_attn = attention.forward((norm2.forward(x.clone()), Maybe.None));
+
+                // Gated combination: gate · mamba + (1 - gate) · attention
+                let g = sigmoid(gate).unsqueeze(0).unsqueeze(0);
+                let one_minus_g = sub(&ones_like(&g), &g);
+                let h = add(&mul(&g, &h_mamba), &mul(&one_minus_g, &h_attn));
+
+                add(&x, &h)
+            },
+        }
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        match self {
+            JambaLayer.MambaOnly { block, norm } => {
+                let mut p = block.parameters();
+                p.extend(norm.parameters());
+                p
+            },
+            JambaLayer.Hybrid { mamba, attention, norm1, norm2, gate } => {
+                let mut p = mamba.parameters();
+                p.extend(attention.parameters());
+                p.extend(norm1.parameters());
+                p.extend(norm2.parameters());
+                p.push(gate);
+                p
+            },
+        }
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        match self {
+            JambaLayer.MambaOnly { block, norm } => {
+                let mut p = block.parameters_mut();
+                p.extend(norm.parameters_mut());
+                p
+            },
+            JambaLayer.Hybrid { mamba, attention, norm1, norm2, gate } => {
+                let mut p = mamba.parameters_mut();
+                p.extend(attention.parameters_mut());
+                p.extend(norm1.parameters_mut());
+                p.extend(norm2.parameters_mut());
+                p.push(gate);
+                p
+            },
+        }
+    }
+}
+
+// Full Jamba model
+public type Jamba<D: meta USize{D > 0}, N: meta USize{N > 0}> is {
+    embedding: Embedding,
+    layers: List<JambaLayer<D, N>>,
+    norm_f: RMSNorm,
+    lm_head: Linear,
+};
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}> Jamba<D, N> {
+    // Create Jamba with attention every `attention_ratio` layers
+    public fn new(
+        vocab_size: USize,
+        n_layers: USize{n_layers > 0},
+        num_heads: USize,
+        expand_factor: USize,
+        attention_ratio: USize{attention_ratio > 0},  // Insert attention every N layers
+    ) -> Self {
+        let layers = (0..n_layers).map(|i| {
+            if i % attention_ratio == attention_ratio - 1 {
+                JambaLayer.hybrid(expand_factor, num_heads)
+            } else {
+                JambaLayer.mamba_only(expand_factor, 4)
+            }
+        }).collect();
+
+        Jamba {
+            embedding: Embedding.new(vocab_size, D),
+            layers,
+            norm_f: RMSNorm.new(D),
+            lm_head: Linear.new(D, vocab_size, false),
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
+    Module<DynTensor<USize>, DynTensor<Float>> for Jamba<D, N>
+{
+    @differentiable
+    fn forward(&self, input_ids: DynTensor<USize>) -> DynTensor<Float> {
+        let mut h = self.embedding.forward(input_ids);
+
+        for lyr in &self.layers {
+            h = lyr.forward(h);
+        }
+
+        self.lm_head.forward(self.norm_f.forward(h))
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = self.embedding.parameters();
+        for lyr in &self.layers {
+            p.extend(lyr.parameters());
+        }
+        p.extend(self.norm_f.parameters());
+        p.extend(self.lm_head.parameters());
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = self.embedding.parameters_mut();
+        for lyr in &mut self.layers {
+            p.extend(lyr.parameters_mut());
+        }
+        p.extend(self.norm_f.parameters_mut());
+        p.extend(self.lm_head.parameters_mut());
+        p
+    }
+}
+
+// =============================================================================
+// Mixture of Experts (MoE)
+// =============================================================================
+
+// Expert routing strategy
+public type RoutingStrategy is
+    // Select top-k experts per token
+    | TopK { k: USize }
+    // Each expert selects top-k tokens
+    | ExpertChoice { k: USize }
+    // Soft assignment (no hard routing)
+    | SoftMoE;
+
+// Load balancing loss type
+public type BalanceLoss is
+    // Standard auxiliary loss
+    | Auxiliary { coefficient: Float }
+    // Router z-loss
+    | ZLoss { coefficient: Float }
+    // Combined auxiliary and z-loss
+    | Combined { aux: Float, z: Float };
+
+// Individual expert (typically FFN)
+public type Expert<D: meta USize{D > 0}, H: meta USize{H > 0}> is {
+    w1: Linear,      // up-projection: D -> H
+    w2: Linear,      // down-projection: H -> D
+    activation: Activation,
+};
+
+// Activation function type
+public type Activation is GELU | SiLU | ReLU | Tanh | Sigmoid;
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}> Expert<D, H> {
+    public fn new(activation: Activation) -> Self {
+        Expert {
+            w1: Linear.new(D, H, false),
+            w2: Linear.new(H, D, false),
+            activation,
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}>
+    Module<DynTensor<Float>, DynTensor<Float>> for Expert<D, H>
+{
+    @differentiable
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        let h = self.w1.forward(x);
+        let h = match self.activation {
+            Activation.GELU => gelu(&h),
+            Activation.SiLU => silu(&h),
+            Activation.ReLU => relu(&h),
+            Activation.Tanh => tanh(&h),
+            Activation.Sigmoid => sigmoid(&h),
+        };
+        self.w2.forward(h)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = self.w1.parameters();
+        p.extend(self.w2.parameters());
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = self.w1.parameters_mut();
+        p.extend(self.w2.parameters_mut());
+        p
+    }
+}
+
+// Router network for expert selection
+public type Router<D: meta USize{D > 0}, E: meta USize{E > 1}> is {
+    gate: Linear,           // D -> E (logits for each expert)
+    noise_std: Float,       // Noise for load balancing during training
+    strategy: RoutingStrategy,
+};
+
+implement<D: meta USize{D > 0}, E: meta USize{E > 1}> Router<D, E> {
+    public fn new(strategy: RoutingStrategy, noise_std: Float) -> Self {
+        Router {
+            gate: Linear.new(D, E, false),
+            noise_std,
+            strategy,
+        }
+    }
+
+    // Compute routing weights and indices
+    // Returns: (weights, indices, auxiliary_loss)
+    public fn route(
+        &self,
+        x: &DynTensor<Float>,
+        training: Bool,
+    ) -> (DynTensor<Float>, DynTensor<USize>, Float) {
+        let shape = x.shape();
+        let batch = shape[0];
+        let seq_len = shape[1];
+        let tokens = batch * seq_len;
+
+        // Compute router logits
+        let logits = self.gate.forward(x.reshape(&[tokens, D]));  // [tokens, E]
+
+        // Add noise during training for load balancing
+        let logits = if training && self.noise_std > 0.0 {
+            let noise = mul(&randn_like(&logits), &full_like(&logits, self.noise_std));
+            add(&logits, &noise)
+        } else {
+            logits
+        };
+
+        match &self.strategy {
+            RoutingStrategy.TopK { k } => {
+                // Top-k expert selection per token
+                let (top_weights, top_indices) = topk(&softmax(&logits, -1), *k, -1);
+                // Renormalize weights
+                let weights = div(&top_weights, &sum_axis(&top_weights, -1).unsqueeze(-1));
+
+                // Compute auxiliary load balancing loss
+                let aux_loss = self.compute_balance_loss(&logits, &top_indices);
+
+                (weights, top_indices, aux_loss)
+            },
+            RoutingStrategy.ExpertChoice { k } => {
+                // Each expert selects its top-k tokens
+                let expert_logits = logits.transpose(0, 1);  // [E, tokens]
+                let (_, token_indices) = topk(&expert_logits, *k, -1);  // [E, k]
+
+                // Compute weights for selected tokens
+                let weights = softmax(&gather_nd(&logits, &token_indices), -1);
+
+                (weights, token_indices, 0.0)  // Expert choice naturally balances
+            },
+            RoutingStrategy.SoftMoE => {
+                // Soft assignment: all experts receive weighted input
+                let weights = softmax(&logits, -1);  // [tokens, E]
+                let indices = arange_usize(0, E, 1).unsqueeze(0).expand(&[tokens, E]);
+                (weights, indices, 0.0)
+            },
+        }
+    }
+
+    // Auxiliary loss to encourage balanced expert utilization
+    fn compute_balance_loss(&self, logits: &DynTensor<Float>, indices: &DynTensor<USize>) -> Float {
+        let shape = logits.shape();
+        let tokens = shape[0];
+        let probs = softmax(logits, -1);  // [tokens, E]
+
+        // Fraction of tokens routed to each expert
+        let expert_counts = bincount(indices, E);
+        let counts_f: DynTensor<Float> = expert_counts.cast();
+        let expert_frac = div(&counts_f, &full(&[E], tokens as Float));
+
+        // Mean probability for each expert
+        let expert_prob = mean_axis(&probs, 0);  // [E]
+
+        // Balance loss: encourage uniform distribution
+        // L_aux = E · sum(expert_frac · expert_prob)
+        E as Float * sum(&mul(&expert_frac, &expert_prob))
+    }
+}
+
+// Full MoE layer with gating and experts
+public type MoELayer<
+    D: meta USize{D > 0},
+    H: meta USize{H > 0},
+    E: meta USize{E > 1},
+> is {
+    router: Router<D, E>,
+    experts: List<Expert<D, H>>,
+    balance_loss: BalanceLoss,
+    // Capacity factor: max tokens per expert = (total_tokens / E) · capacity_factor
+    capacity_factor: Float,
+    // Cached auxiliary loss from last forward pass
+    last_aux_loss: Float,
+    last_z_loss: Float,
+};
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
+    MoELayer<D, H, E>
+{
+    public fn new(
+        strategy: RoutingStrategy,
+        activation: Activation,
+        balance_loss: BalanceLoss,
+        capacity_factor: Float{capacity_factor > 0.0},
+    ) -> Self {
+        let mut experts: List<Expert<D, H>> = [];
+        let mut i: USize = 0;
+        while i < E {
+            experts.push(Expert.new(activation));
+            i = i + 1;
+        }
+
+        MoELayer {
+            router: Router.new(strategy, 0.1),
+            experts,
+            balance_loss,
+            capacity_factor,
+            last_aux_loss: 0.0,
+            last_z_loss: 0.0,
+        }
+    }
+
+    // Get the auxiliary loss from the last forward pass
+    public fn get_aux_loss(&self) -> Float {
+        match &self.balance_loss {
+            BalanceLoss.Auxiliary { coefficient } => self.last_aux_loss * *coefficient,
+            BalanceLoss.ZLoss { coefficient } => self.last_z_loss * *coefficient,
+            BalanceLoss.Combined { aux, z } =>
+                self.last_aux_loss * *aux + self.last_z_loss * *z,
+        }
+    }
+}
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
+    Module<DynTensor<Float>, DynTensor<Float>> for MoELayer<D, H, E>
+{
+    // MoE forward pass with sparse expert dispatch
+    // Complexity: O(batch · seq_len · D · H · k / E) for top-k routing
+    @differentiable
+    @cost(O(batch * seq_len * D * H * k / E))
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        let shape = x.shape();
+        let batch = shape[0];
+        let seq_len = shape[1];
+        let tokens = batch * seq_len;
+
+        // Route tokens to experts
+        let (weights, indices, aux_loss) = self.router.route(&x, is_training());
+        self.last_aux_loss = aux_loss;
+
+        let x_flat = x.reshape(&[tokens, D]);
+        let mut output = zeros(&[tokens, D]);
+
+        match &self.router.strategy {
+            RoutingStrategy.TopK { k } => {
+                // Dispatch tokens to top-k experts
+                for token_idx in 0..tokens {
+                    for i in 0..*k {
+                        let expert_idx = indices[[token_idx, i]] as USize;
+                        let weight = weights[[token_idx, i]];
+
+                        let token = x_flat.slice(&[token_idx..token_idx+1, ..]);
+                        let expert_output = self.experts[expert_idx].forward(token);
+
+                        let scaled = mul(&expert_output, &full_like(&expert_output, weight));
+                        output = scatter_add(&output, &make_tensor([token_idx as USize]), &scaled, 0);
+                    }
+                }
+            },
+            RoutingStrategy.ExpertChoice { k } => {
+                // Each expert processes its selected tokens
+                for expert_idx in 0..E {
+                    let token_indices = indices.slice(&[expert_idx..expert_idx+1, ..]).squeeze(0);
+                    let selected_tokens = gather(&x_flat, &token_indices, 0);
+                    let expert_weights = weights.slice(&[expert_idx..expert_idx+1, ..]).squeeze(0);
+
+                    let expert_output = self.experts[expert_idx].forward(selected_tokens);
+                    let weighted_output = mul(&expert_output, &expert_weights.unsqueeze(-1));
+
+                    // Scatter back to output
+                    output = scatter_add(&output, &token_indices, &weighted_output, 0);
+                }
+            },
+            RoutingStrategy.SoftMoE => {
+                // Soft combination: all experts contribute
+                for expert_idx in 0..E {
+                    let expert_output = self.experts[expert_idx].forward(x_flat.clone());
+                    let expert_weight = weights.slice(&[.., expert_idx..expert_idx+1]);
+                    output = add(&output, &mul(&expert_output, &expert_weight));
+                }
+            },
+        }
+
+        output.reshape(&[batch, seq_len, D])
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = self.router.gate.parameters();
+        for expert in &self.experts {
+            p.extend(expert.parameters());
+        }
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = self.router.gate.parameters_mut();
+        for expert in &mut self.experts {
+            p.extend(expert.parameters_mut());
+        }
+        p
+    }
+}
+
+// Full MoE Transformer block
+public type MoETransformerBlock<
+    D: meta USize{D > 0},
+    H: meta USize{H > 0},
+    E: meta USize{E > 1},
+> is {
+    ln1: RMSNorm,
+    attn: MultiHeadAttention,
+    ln2: RMSNorm,
+    moe: MoELayer<D, H, E>,
+};
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
+    MoETransformerBlock<D, H, E>
+{
+    public fn new(
+        num_heads: USize,
+        top_k: USize,
+        activation: Activation,
+    ) -> Self {
+        MoETransformerBlock {
+            ln1: RMSNorm.new(D),
+            attn: MultiHeadAttention.new(D, num_heads, 0.0),
+            ln2: RMSNorm.new(D),
+            moe: MoELayer.new(
+                RoutingStrategy.TopK { k: top_k },
+                activation,
+                BalanceLoss.Auxiliary { coefficient: 0.01 },
+                1.25,  // capacity factor
+            ),
+        }
+    }
+
+    // Get total auxiliary loss for this block
+    public fn aux_loss(&self) -> Float {
+        self.moe.get_aux_loss()
+    }
+}
+
+implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
+    Module<DynTensor<Float>, DynTensor<Float>> for MoETransformerBlock<D, H, E>
+{
+    @differentiable
+    fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float> {
+        // Pre-norm attention
+        let h = add(&x, &self.attn.forward((self.ln1.forward(x.clone()), Maybe.None)));
+
+        // Pre-norm MoE FFN
+        add(&h, &self.moe.forward(self.ln2.forward(h.clone())))
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = self.ln1.parameters();
+        p.extend(self.attn.parameters());
+        p.extend(self.ln2.parameters());
+        p.extend(self.moe.parameters());
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = self.ln1.parameters_mut();
+        p.extend(self.attn.parameters_mut());
+        p.extend(self.ln2.parameters_mut());
+        p.extend(self.moe.parameters_mut());
+        p
+    }
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+// Parallel associative scan (Blelloch algorithm)
+// Complexity: O(L) work, O(log L) depth
+fn associative_scan<T, F>(
+    op: F,
+    init: &T,
+    elements: (&DynTensor<Float>, &DynTensor<Float>),
+    dim: USize,
+) -> DynTensor<Float>
+where
+    F: Fn(&T, (&DynTensor<Float>, &DynTensor<Float>)) -> T,
+{
+    @vbc(SSM_SCAN, op, init, elements, dim)
+}
+
+// Matrix exponential for ZOH discretization
+fn matrix_exp(mat: &DynTensor<Float>) -> DynTensor<Float> {
+    @vbc(MATRIX_EXP, mat)
+}
+
+// Matrix inverse
+fn matrix_inverse(mat: &DynTensor<Float>) -> DynTensor<Float> {
+    @vbc(MATRIX_INVERSE, mat)
+}
+
+// Complex power operation
+fn pow_complex(base: &DynTensor<Complex<Float>>, exp: &DynTensor<Float>) -> DynTensor<Complex<Float>> {
+    @vbc(COMPLEX_POW, base, exp)
+}
+
+// Complex multiplication
+fn mul_complex(a: &DynTensor<Complex<Float>>, b: &DynTensor<Complex<Float>>) -> DynTensor<Complex<Float>> {
+    @vbc(COMPLEX_MUL, a, b)
+}
+
+// Real FFT
+fn rfft(x: &DynTensor<Float>, n: USize) -> DynTensor<Complex<Float>> {
+    @vbc(RFFT, x, n)
+}
+
+// Inverse real FFT
+fn irfft(x: &DynTensor<Complex<Float>>, n: USize) -> DynTensor<Float> {
+    @vbc(IRFFT, x, n)
+}
+
+// Uniform random tensor
+fn uniform(shape: &[USize], low: Float, high: Float) -> DynTensor<Float> {
+    @vbc(UNIFORM, shape, low, high)
+}
+
+// Random tensor like another tensor
+fn randn_like(x: &DynTensor<Float>) -> DynTensor<Float> {
+    randn(&x.shape())
+}
+
+// Full tensor like another tensor
+fn full_like(x: &DynTensor<Float>, value: Float) -> DynTensor<Float> {
+    full(&x.shape(), value)
+}
+
+// Ones tensor like another tensor
+fn ones_like(x: &DynTensor<Float>) -> DynTensor<Float> {
+    ones(&x.shape())
+}
+
+// Check if in training mode
+fn is_training() -> Bool {
+    @vbc(IS_TRAINING)
+}
+
+// Bincount for expert load statistics
+fn bincount(indices: &DynTensor<USize>, num_bins: USize) -> DynTensor<USize> {
+    @vbc(BINCOUNT, indices, num_bins)
+}
+
+// Gather N-dimensional indices
+fn gather_nd(x: &DynTensor<Float>, indices: &DynTensor<USize>) -> DynTensor<Float> {
+    @vbc(GATHER_ND, x, indices)
+}
+
+// Integer range tensor
+fn arange_usize(start: USize, end: USize, step: USize) -> DynTensor<USize> {
+    @vbc(ARANGE_USIZE, start, end, step)
+}
+
+// Repeat tensor along new dimension
+fn repeat(x: &DynTensor<Float>, times: USize) -> DynTensor<Float> {
+    @vbc(REPEAT, x, times)
+}
+
+// Hyperbolic tangent
+fn tanh(x: &DynTensor<Float>) -> DynTensor<Float> {
+    @vbc(TANH, x)
+}
+
+// Sum over tensor
+fn sum(x: &DynTensor<Float>) -> Float {
+    @vbc(SUM, x)
+}
+
+// Create tensor from single value
+fn make_tensor(values: [USize]) -> DynTensor<USize> {
+    @vbc(TENSOR_FROM_ARRAY, values)
+}

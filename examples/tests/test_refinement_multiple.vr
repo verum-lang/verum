@@ -1,0 +1,24 @@
+// Test 5: Multiple predicates combined
+// Syntax: Type{pred1, pred2, ...}
+
+fn test_multi_inline() -> Int{> 0, < 100, % 2 == 0} {
+    42
+}
+
+fn test_multi_where() -> Int where it > 0 && it < 100 && it % 2 == 0 {
+    42
+}
+
+type ValidPercent = p: Int where p >= 0 && p <= 100;
+
+fn make_percent() -> ValidPercent {
+    75
+}
+
+fn main() {
+    let inline = test_multi_inline();
+    let where_clause = test_multi_where();
+    let percent = make_percent();
+
+    inline + where_clause + percent
+}

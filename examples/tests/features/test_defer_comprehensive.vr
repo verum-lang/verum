@@ -1,0 +1,65 @@
+// Test: Comprehensive defer statement tests
+// Tests defer for cleanup operations that execute when scope exits
+
+type File = {
+    path: Text,
+    handle: Int,
+}
+
+fn open(path: Text) -> File {
+    println("Opening file");
+    File { path: path, handle: 123 }
+}
+
+fn close(file: File) {
+    println("Closing file");
+}
+
+fn process_file(path: Text) {
+    let file = open(path);
+    defer close(file);
+    println("Processing file");
+}
+
+fn multiple_defers() {
+    println("Starting operation");
+    defer println("Cleanup 3");
+    defer println("Cleanup 2");
+    defer println("Cleanup 1");
+    println("Main operation");
+}
+
+fn defer_with_condition(should_process: Bool) {
+    let resource = open("data.txt");
+    defer close(resource);
+
+    if should_process {
+        println("Processing");
+    } else {
+        println("Skipping");
+    }
+}
+
+fn nested_defer() {
+    defer println("Outer defer");
+
+    println("Before inner scope");
+    defer println("Inner defer");
+    println("Inner scope");
+
+    println("Outer scope");
+}
+
+fn main() {
+    println("=== Test 1: Basic defer ===");
+    process_file("example.txt");
+
+    println("=== Test 2: Multiple defers ===");
+    multiple_defers();
+
+    println("=== Test 3: Defer with condition ===");
+    defer_with_condition(true);
+
+    println("=== Test 4: Nested defer ===");
+    nested_defer();
+}

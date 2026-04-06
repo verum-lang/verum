@@ -1,0 +1,825 @@
+module sys.darwin.mach;
+
+// =============================================================================
+// sys/darwin/mach.vr - Mach kernel interface for macOS
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/common, sys/darwin/libsystem
+// Platform: macOS (Darwin/XNU)
+// =============================================================================
+//
+// macOS runs on the XNU kernel which combines:
+// - Mach microkernel: VM, IPC, threads, scheduling
+// - BSD layer: POSIX syscalls, networking, filesystems
+//
+// This module exposes Mach-specific functionality not available through BSD.
+// Key features:
+// - Mach ports (IPC)
+// - VM operations (vm_allocate, vm_deallocate, vm_protect)
+// - Mach semaphores
+// - Mach time (high-precision timing)
+// - Thread primitives
+//
+// All calls go through libSystem.B.dylib (stable API).
+//
+// Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
+// =============================================================================
+
+// Re-export MachPort for use by other modules
+public mount super.libsystem.{MachPort, MachTimebaseInfo};
+
+// =============================================================================
+// Mach FFI Declarations
+// =============================================================================
+
+@ffi("libSystem.B.dylib")
+extern {
+    // =========================================================================
+    // Task and Thread Ports
+    // =========================================================================
+
+    /// Get current task's Mach port
+    fn mach_task_self() -> MachPort;
+
+    /// Get current thread's Mach port
+    fn mach_thread_self() -> MachPort;
+
+    /// Get host Mach port
+    fn mach_host_self() -> MachPort;
+
+    /// Deallocate Mach port
+    fn mach_port_deallocate(task: MachPort, name: MachPort) -> KernReturn;
+
+    /// Allocate Mach port
+    fn mach_port_allocate(task: MachPort, right: MachPortRight, name: &mut MachPort) -> KernReturn;
+
+    /// Insert Mach port right
+    fn mach_port_insert_right(
+        task: MachPort,
+        name: MachPort,
+        poly: MachPort,
+        polyPoly: MachMsgType,
+    ) -> KernReturn;
+
+    // =========================================================================
+    // Virtual Memory
+    // =========================================================================
+
+    /// Allocate virtual memory
+    @ffi_name("vm_allocate")
+    fn vm_allocate_ffi(
+        target_task: MachPort,
+        address: &mut VmAddress,
+        size: VmSize,
+        flags: Int,
+    ) -> KernReturn;
+
+    /// Deallocate virtual memory
+    fn vm_deallocate(
+        target_task: MachPort,
+        address: VmAddress,
+        size: VmSize,
+    ) -> KernReturn;
+
+    /// Protect virtual memory
+    fn vm_protect(
+        target_task: MachPort,
+        address: VmAddress,
+        size: VmSize,
+        set_maximum: Bool,
+        new_protection: VmProt,
+    ) -> KernReturn;
+
+    /// Read virtual memory
+    fn vm_read(
+        target_task: MachPort,
+        address: VmAddress,
+        size: VmSize,
+        data: &mut VmAddress,
+        data_cnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Write virtual memory
+    fn vm_write(
+        target_task: MachPort,
+        address: VmAddress,
+        data: VmAddress,
+        data_cnt: MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Copy virtual memory
+    fn vm_copy(
+        target_task: MachPort,
+        source_address: VmAddress,
+        size: VmSize,
+        dest_address: VmAddress,
+    ) -> KernReturn;
+
+    /// Map virtual memory
+    fn vm_map(
+        target_task: MachPort,
+        address: &mut VmAddress,
+        size: VmSize,
+        mask: VmAddress,
+        flags: Int,
+        object: MemoryObject,
+        offset: MemoryObjectOffset,
+        copy: Bool,
+        cur_protection: VmProt,
+        max_protection: VmProt,
+        inheritance: VmInherit,
+    ) -> KernReturn;
+
+    /// Remap virtual memory
+    fn vm_remap(
+        target_task: MachPort,
+        address: &mut VmAddress,
+        size: VmSize,
+        mask: VmAddress,
+        flags: Int,
+        src_task: MachPort,
+        src_address: VmAddress,
+        copy: Bool,
+        cur_protection: &mut VmProt,
+        max_protection: &mut VmProt,
+        inheritance: VmInherit,
+    ) -> KernReturn;
+
+    /// Machine attribute
+    fn vm_machine_attribute(
+        target_task: MachPort,
+        address: VmAddress,
+        size: VmSize,
+        attribute: VmMachineAttribute,
+        value: &mut VmMachineAttributeVal,
+    ) -> KernReturn;
+
+    // =========================================================================
+    // Mach Time
+    // =========================================================================
+
+    /// Get absolute time (high precision)
+    fn mach_absolute_time() -> UInt64;
+
+    /// Get time base info
+    fn mach_timebase_info(info: &mut MachTimebaseInfo) -> KernReturn;
+
+    /// Wait until absolute time
+    fn mach_wait_until(deadline: UInt64) -> KernReturn;
+
+    /// Continuous time (doesn't stop during sleep)
+    fn mach_continuous_time() -> UInt64;
+
+    /// Approximate time (faster, less precise)
+    fn mach_approximate_time() -> UInt64;
+
+    // =========================================================================
+    // Mach Semaphores
+    // =========================================================================
+
+    /// Create semaphore
+    fn semaphore_create(
+        task: MachPort,
+        semaphore: &mut SemaphoreT,
+        policy: Int,
+        value: Int,
+    ) -> KernReturn;
+
+    /// Destroy semaphore
+    fn semaphore_destroy(task: MachPort, semaphore: SemaphoreT) -> KernReturn;
+
+    /// Signal semaphore
+    fn semaphore_signal(semaphore: SemaphoreT) -> KernReturn;
+
+    /// Signal all waiters
+    fn semaphore_signal_all(semaphore: SemaphoreT) -> KernReturn;
+
+    /// Wait on semaphore
+    fn semaphore_wait(semaphore: SemaphoreT) -> KernReturn;
+
+    /// Timed wait on semaphore
+    fn semaphore_timedwait(semaphore: SemaphoreT, wait_time: MachTimespec) -> KernReturn;
+
+    /// Signal and wait atomically
+    fn semaphore_timedwait_signal(
+        wait_semaphore: SemaphoreT,
+        signal_semaphore: SemaphoreT,
+        wait_time: MachTimespec,
+    ) -> KernReturn;
+
+    // =========================================================================
+    // Thread Control
+    // =========================================================================
+
+    /// Suspend thread
+    fn thread_suspend(target_act: MachPort) -> KernReturn;
+
+    /// Resume thread
+    fn thread_resume(target_act: MachPort) -> KernReturn;
+
+    /// Abort thread
+    fn thread_abort(target_act: MachPort) -> KernReturn;
+
+    /// Get thread info
+    fn thread_info(
+        target_act: MachPort,
+        flavor: ThreadFlavor,
+        thread_info_out: &mut ThreadBasicInfo,
+        thread_info_outCnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Set thread policy
+    fn thread_policy_set(
+        thread: MachPort,
+        flavor: ThreadPolicyFlavor,
+        policy_info: &ThreadPolicyInfo,
+        count: MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    // =========================================================================
+    // Task Control
+    // =========================================================================
+
+    /// Suspend task
+    fn task_suspend(target_task: MachPort) -> KernReturn;
+
+    /// Resume task
+    fn task_resume(target_task: MachPort) -> KernReturn;
+
+    /// Get task info
+    fn task_info(
+        target_task: MachPort,
+        flavor: TaskFlavor,
+        task_info_out: &mut TaskBasicInfo,
+        task_info_outCnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Get task threads
+    fn task_threads(
+        target_task: MachPort,
+        act_list: &mut (&mut MachPort),
+        act_listCnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    // =========================================================================
+    // Host Info
+    // =========================================================================
+
+    /// Get host info
+    fn host_info(
+        host: MachPort,
+        flavor: HostFlavor,
+        host_info_out: &mut HostBasicInfo,
+        host_info_outCnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Get host statistics
+    fn host_statistics(
+        host_priv: MachPort,
+        flavor: HostFlavor,
+        host_info_out: &mut VmStatistics,
+        host_info_outCnt: &mut MachMsgTypeNumber,
+    ) -> KernReturn;
+
+    /// Get host page size
+    fn host_page_size(host: MachPort, page_size: &mut VmSize) -> KernReturn;
+
+    // =========================================================================
+    // Mach Messages
+    // =========================================================================
+
+    /// Send Mach message
+    fn mach_msg(
+        msg: &mut MachMsgHeader,
+        option: MachMsgOption,
+        send_size: MachMsgSize,
+        rcv_size: MachMsgSize,
+        rcv_name: MachPort,
+        timeout: MachMsgTimeout,
+        notify: MachPort,
+    ) -> MachMsgReturn;
+
+    // =========================================================================
+    // Error Handling
+    // =========================================================================
+
+    /// Get Mach error string
+    fn mach_error_string(error_value: KernReturn) -> &Byte;
+}
+
+// =============================================================================
+// Type Definitions
+// =============================================================================
+
+/// Kernel return type
+public type KernReturn is (Int);
+
+/// VM address type
+public type VmAddress is (Int);
+
+/// VM size type
+public type VmSize is (Int);
+
+/// VM protection type
+public type VmProt is (Int);
+
+/// VM inheritance type
+type VmInherit is (Int);
+
+/// Memory object type
+type MemoryObject is (MachPort);
+
+/// Memory object offset
+type MemoryObjectOffset is (UInt64);
+
+/// VM machine attribute
+type VmMachineAttribute is (Int);
+
+/// VM machine attribute value
+type VmMachineAttributeVal is (Int);
+
+/// Semaphore type
+public type SemaphoreT is (MachPort);
+
+/// Mach message type number
+type MachMsgTypeNumber is (UInt32);
+
+/// Mach port right
+type MachPortRight is (UInt32);
+
+/// Mach message type
+type MachMsgType is (UInt32);
+
+/// Mach message option
+type MachMsgOption is (Int);
+
+/// Mach message size
+type MachMsgSize is (UInt32);
+
+/// Mach message timeout
+type MachMsgTimeout is (UInt32);
+
+/// Mach message return
+type MachMsgReturn is (Int);
+
+/// Thread flavor
+type ThreadFlavor is (Int);
+
+/// Thread policy flavor
+type ThreadPolicyFlavor is (Int);
+
+/// Task flavor
+type TaskFlavor is (Int);
+
+/// Host flavor
+type HostFlavor is (Int);
+
+/// Mach timespec
+type MachTimespec is {
+    tv_sec: UInt32,
+    tv_nsec: Int,
+};
+
+/// Mach message header
+public type MachMsgHeader is {
+    msgh_bits: MachMsgBits,
+    msgh_size: MachMsgSize,
+    msgh_remote_port: MachPort,
+    msgh_local_port: MachPort,
+    msgh_voucher_port: MachPort,
+    msgh_id: Int,
+};
+
+type MachMsgBits is (UInt32);
+
+/// Thread basic info
+type ThreadBasicInfo is {
+    user_time: TimeValue,
+    system_time: TimeValue,
+    cpu_usage: Int,
+    policy: Int,
+    run_state: Int,
+    flags: Int,
+    suspend_count: Int,
+    sleep_time: Int,
+};
+
+/// Time value
+type TimeValue is {
+    seconds: Int,
+    microseconds: Int,
+};
+
+/// Thread policy info (generic)
+type ThreadPolicyInfo is {
+    data: [Int; 16],
+};
+
+/// Task basic info
+type TaskBasicInfo is {
+    suspend_count: Int,
+    virtual_size: VmSize,
+    resident_size: VmSize,
+    user_time: TimeValue,
+    system_time: TimeValue,
+    policy: Int,
+};
+
+/// Host basic info
+type HostBasicInfo is {
+    max_cpus: Int,
+    avail_cpus: Int,
+    memory_size: UInt32,
+    cpu_type: Int,
+    cpu_subtype: Int,
+    cpu_threadtype: Int,
+    physical_cpu: Int,
+    physical_cpu_max: Int,
+    logical_cpu: Int,
+    logical_cpu_max: Int,
+    max_mem: UInt64,
+};
+
+/// VM statistics
+type VmStatistics is {
+    free_count: UInt32,
+    active_count: UInt32,
+    inactive_count: UInt32,
+    wire_count: UInt32,
+    zero_fill_count: UInt32,
+    reactivations: UInt32,
+    pageins: UInt32,
+    pageouts: UInt32,
+    faults: UInt32,
+    cow_faults: UInt32,
+    lookups: UInt32,
+    hits: UInt32,
+    purgeable_count: UInt32,
+    purges: UInt32,
+    speculative_count: UInt32,
+};
+
+// =============================================================================
+// Kernel Return Codes
+// =============================================================================
+
+public const KERN_SUCCESS: KernReturn = KernReturn(0);
+public const KERN_INVALID_ADDRESS: KernReturn = KernReturn(1);
+public const KERN_PROTECTION_FAILURE: KernReturn = KernReturn(2);
+public const KERN_NO_SPACE: KernReturn = KernReturn(3);
+public const KERN_INVALID_ARGUMENT: KernReturn = KernReturn(4);
+public const KERN_FAILURE: KernReturn = KernReturn(5);
+public const KERN_RESOURCE_SHORTAGE: KernReturn = KernReturn(6);
+public const KERN_NOT_RECEIVER: KernReturn = KernReturn(7);
+public const KERN_NO_ACCESS: KernReturn = KernReturn(8);
+public const KERN_MEMORY_FAILURE: KernReturn = KernReturn(9);
+public const KERN_MEMORY_ERROR: KernReturn = KernReturn(10);
+public const KERN_ALREADY_IN_SET: KernReturn = KernReturn(11);
+public const KERN_NOT_IN_SET: KernReturn = KernReturn(12);
+public const KERN_NAME_EXISTS: KernReturn = KernReturn(13);
+public const KERN_ABORTED: KernReturn = KernReturn(14);
+public const KERN_INVALID_NAME: KernReturn = KernReturn(15);
+public const KERN_INVALID_TASK: KernReturn = KernReturn(16);
+public const KERN_INVALID_RIGHT: KernReturn = KernReturn(17);
+public const KERN_INVALID_VALUE: KernReturn = KernReturn(18);
+public const KERN_UREFS_OVERFLOW: KernReturn = KernReturn(19);
+public const KERN_INVALID_CAPABILITY: KernReturn = KernReturn(20);
+public const KERN_RIGHT_EXISTS: KernReturn = KernReturn(21);
+public const KERN_INVALID_HOST: KernReturn = KernReturn(22);
+public const KERN_MEMORY_PRESENT: KernReturn = KernReturn(23);
+public const KERN_MEMORY_DATA_MOVED: KernReturn = KernReturn(24);
+public const KERN_MEMORY_RESTART_COPY: KernReturn = KernReturn(25);
+public const KERN_INVALID_PROCESSOR_SET: KernReturn = KernReturn(26);
+public const KERN_POLICY_LIMIT: KernReturn = KernReturn(27);
+public const KERN_INVALID_POLICY: KernReturn = KernReturn(28);
+public const KERN_INVALID_OBJECT: KernReturn = KernReturn(29);
+public const KERN_ALREADY_WAITING: KernReturn = KernReturn(30);
+public const KERN_DEFAULT_SET: KernReturn = KernReturn(31);
+public const KERN_EXCEPTION_PROTECTED: KernReturn = KernReturn(32);
+public const KERN_INVALID_LEDGER: KernReturn = KernReturn(33);
+public const KERN_INVALID_MEMORY_CONTROL: KernReturn = KernReturn(34);
+public const KERN_INVALID_SECURITY: KernReturn = KernReturn(35);
+public const KERN_NOT_DEPRESSED: KernReturn = KernReturn(36);
+public const KERN_TERMINATED: KernReturn = KernReturn(37);
+public const KERN_LOCK_SET_DESTROYED: KernReturn = KernReturn(38);
+public const KERN_LOCK_UNSTABLE: KernReturn = KernReturn(39);
+public const KERN_LOCK_OWNED: KernReturn = KernReturn(40);
+public const KERN_LOCK_OWNED_SELF: KernReturn = KernReturn(41);
+public const KERN_SEMAPHORE_DESTROYED: KernReturn = KernReturn(42);
+public const KERN_RPC_SERVER_TERMINATED: KernReturn = KernReturn(43);
+public const KERN_RPC_TERMINATE_ORPHAN: KernReturn = KernReturn(44);
+public const KERN_RPC_CONTINUE_ORPHAN: KernReturn = KernReturn(45);
+public const KERN_NOT_SUPPORTED: KernReturn = KernReturn(46);
+public const KERN_NODE_DOWN: KernReturn = KernReturn(47);
+public const KERN_NOT_WAITING: KernReturn = KernReturn(48);
+public const KERN_OPERATION_TIMED_OUT: KernReturn = KernReturn(49);
+public const KERN_CODESIGN_ERROR: KernReturn = KernReturn(50);
+public const KERN_POLICY_STATIC: KernReturn = KernReturn(51);
+public const KERN_INSUFFICIENT_BUFFER_SIZE: KernReturn = KernReturn(52);
+
+// =============================================================================
+// VM Protection Flags
+// =============================================================================
+
+public const VM_PROT_NONE: VmProt = VmProt(0x00);
+public const VM_PROT_READ: VmProt = VmProt(0x01);
+public const VM_PROT_WRITE: VmProt = VmProt(0x02);
+public const VM_PROT_EXECUTE: VmProt = VmProt(0x04);
+public const VM_PROT_DEFAULT: VmProt = VmProt(0x03);  // READ | WRITE
+public const VM_PROT_ALL: VmProt = VmProt(0x07);      // READ | WRITE | EXECUTE
+public const VM_PROT_COPY: VmProt = VmProt(0x10);
+
+// =============================================================================
+// VM Allocation Flags
+// =============================================================================
+
+public const VM_FLAGS_FIXED: Int = 0x0000;
+public const VM_FLAGS_ANYWHERE: Int = 0x0001;
+public const VM_FLAGS_PURGABLE: Int = 0x0002;
+public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
+public const VM_FLAGS_NO_PMAP_CHECK: Int = 0x0010;
+public const VM_FLAGS_OVERWRITE: Int = 0x4000;
+public const VM_FLAGS_SUPERPAGE_MASK: Int = 0x70000;
+public const VM_FLAGS_SUPERPAGE_NONE: Int = 0x00000;
+public const VM_FLAGS_SUPERPAGE_SIZE_2MB: Int = 0x10000;
+public const VM_FLAGS_RETURN_DATA_ADDR: Int = 0x100000;
+public const VM_FLAGS_RETURN_4K_DATA_ADDR: Int = 0x800000;
+
+// =============================================================================
+// VM Inheritance
+// =============================================================================
+
+public const VM_INHERIT_SHARE: VmInherit = VmInherit(0);
+public const VM_INHERIT_COPY: VmInherit = VmInherit(1);
+public const VM_INHERIT_NONE: VmInherit = VmInherit(2);
+public const VM_INHERIT_DONATE_COPY: VmInherit = VmInherit(3);
+public const VM_INHERIT_DEFAULT: VmInherit = VmInherit(1);
+
+// =============================================================================
+// Mach Port Rights
+// =============================================================================
+
+public const MACH_PORT_RIGHT_SEND: MachPortRight = MachPortRight(0);
+public const MACH_PORT_RIGHT_RECEIVE: MachPortRight = MachPortRight(1);
+public const MACH_PORT_RIGHT_SEND_ONCE: MachPortRight = MachPortRight(2);
+public const MACH_PORT_RIGHT_PORT_SET: MachPortRight = MachPortRight(3);
+public const MACH_PORT_RIGHT_DEAD_NAME: MachPortRight = MachPortRight(4);
+
+// =============================================================================
+// Semaphore Policies
+// =============================================================================
+
+public const SYNC_POLICY_FIFO: Int = 0x0;
+public const SYNC_POLICY_FIXED_PRIORITY: Int = 0x1;
+public const SYNC_POLICY_REVERSED: Int = 0x2;
+public const SYNC_POLICY_ORDER_MASK: Int = 0x3;
+public const SYNC_POLICY_LIFO: Int = 0x2;
+
+// =============================================================================
+// Thread Run States
+// =============================================================================
+
+public const TH_STATE_RUNNING: Int = 1;
+public const TH_STATE_STOPPED: Int = 2;
+public const TH_STATE_WAITING: Int = 3;
+public const TH_STATE_UNINTERRUPTIBLE: Int = 4;
+public const TH_STATE_HALTED: Int = 5;
+
+// =============================================================================
+// Thread Flags
+// =============================================================================
+
+public const TH_FLAGS_SWAPPED: Int = 0x1;
+public const TH_FLAGS_IDLE: Int = 0x2;
+public const TH_FLAGS_GLOBAL_FORCED_IDLE: Int = 0x4;
+
+// =============================================================================
+// Info Flavors
+// =============================================================================
+
+public const THREAD_BASIC_INFO: ThreadFlavor = ThreadFlavor(3);
+public const THREAD_IDENTIFIER_INFO: ThreadFlavor = ThreadFlavor(4);
+public const THREAD_EXTENDED_INFO: ThreadFlavor = ThreadFlavor(5);
+
+public const TASK_BASIC_INFO: TaskFlavor = TaskFlavor(5);
+public const TASK_EVENTS_INFO: TaskFlavor = TaskFlavor(2);
+public const TASK_THREAD_TIMES_INFO: TaskFlavor = TaskFlavor(3);
+public const TASK_ABSOLUTETIME_INFO: TaskFlavor = TaskFlavor(1);
+
+public const HOST_BASIC_INFO: HostFlavor = HostFlavor(1);
+public const HOST_SCHED_INFO: HostFlavor = HostFlavor(3);
+public const HOST_RESOURCE_SIZES: HostFlavor = HostFlavor(4);
+public const HOST_PRIORITY_INFO: HostFlavor = HostFlavor(5);
+public const HOST_VM_INFO: HostFlavor = HostFlavor(2);
+public const HOST_CPU_LOAD_INFO: HostFlavor = HostFlavor(3);
+
+// =============================================================================
+// Thread Policy Flavors
+// =============================================================================
+
+public const THREAD_STANDARD_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(1);
+public const THREAD_TIME_CONSTRAINT_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(2);
+public const THREAD_PRECEDENCE_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(3);
+public const THREAD_AFFINITY_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(4);
+public const THREAD_BACKGROUND_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(5);
+public const THREAD_LATENCY_QOS_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(7);
+public const THREAD_THROUGHPUT_QOS_POLICY: ThreadPolicyFlavor = ThreadPolicyFlavor(8);
+
+// =============================================================================
+// Mach Message Options
+// =============================================================================
+
+public const MACH_MSG_OPTION_NONE: MachMsgOption = MachMsgOption(0);
+public const MACH_SEND_MSG: MachMsgOption = MachMsgOption(0x00000001);
+public const MACH_RCV_MSG: MachMsgOption = MachMsgOption(0x00000002);
+public const MACH_RCV_LARGE: MachMsgOption = MachMsgOption(0x00000004);
+public const MACH_RCV_LARGE_IDENTITY: MachMsgOption = MachMsgOption(0x00000008);
+public const MACH_SEND_TIMEOUT: MachMsgOption = MachMsgOption(0x00000010);
+public const MACH_SEND_INTERRUPT: MachMsgOption = MachMsgOption(0x00000040);
+public const MACH_SEND_NOTIFY: MachMsgOption = MachMsgOption(0x00000080);
+public const MACH_SEND_ALWAYS: MachMsgOption = MachMsgOption(0x00010000);
+public const MACH_SEND_TRAILER: MachMsgOption = MachMsgOption(0x00020000);
+public const MACH_SEND_NOIMPORTANCE: MachMsgOption = MachMsgOption(0x00040000);
+public const MACH_SEND_SYNC_OVERRIDE: MachMsgOption = MachMsgOption(0x00100000);
+public const MACH_RCV_TIMEOUT: MachMsgOption = MachMsgOption(0x00000100);
+public const MACH_RCV_NOTIFY: MachMsgOption = MachMsgOption(0x00000200);
+public const MACH_RCV_INTERRUPT: MachMsgOption = MachMsgOption(0x00000400);
+public const MACH_RCV_VOUCHER: MachMsgOption = MachMsgOption(0x00000800);
+public const MACH_RCV_OVERWRITE: MachMsgOption = MachMsgOption(0x00001000);
+public const MACH_RCV_SYNC_WAIT: MachMsgOption = MachMsgOption(0x00004000);
+
+// =============================================================================
+// Mach Message Returns
+// =============================================================================
+
+public const MACH_MSG_SUCCESS: MachMsgReturn = MachMsgReturn(0);
+public const MACH_MSG_MASK: MachMsgReturn = MachMsgReturn(0x00003e00);
+public const MACH_MSG_IPC_SPACE: MachMsgReturn = MachMsgReturn(0x00002000);
+public const MACH_MSG_VM_SPACE: MachMsgReturn = MachMsgReturn(0x00001000);
+public const MACH_MSG_IPC_KERNEL: MachMsgReturn = MachMsgReturn(0x00000800);
+public const MACH_MSG_VM_KERNEL: MachMsgReturn = MachMsgReturn(0x00000400);
+public const MACH_SEND_IN_PROGRESS: MachMsgReturn = MachMsgReturn(0x10000001);
+public const MACH_SEND_INVALID_DATA: MachMsgReturn = MachMsgReturn(0x10000002);
+public const MACH_SEND_INVALID_DEST: MachMsgReturn = MachMsgReturn(0x10000003);
+public const MACH_SEND_TIMED_OUT: MachMsgReturn = MachMsgReturn(0x10000004);
+public const MACH_SEND_INVALID_VOUCHER: MachMsgReturn = MachMsgReturn(0x10000005);
+public const MACH_SEND_INTERRUPTED: MachMsgReturn = MachMsgReturn(0x10000007);
+public const MACH_SEND_MSG_TOO_SMALL: MachMsgReturn = MachMsgReturn(0x10000008);
+public const MACH_SEND_INVALID_REPLY: MachMsgReturn = MachMsgReturn(0x10000009);
+public const MACH_SEND_INVALID_RIGHT: MachMsgReturn = MachMsgReturn(0x1000000a);
+public const MACH_SEND_INVALID_NOTIFY: MachMsgReturn = MachMsgReturn(0x1000000b);
+public const MACH_SEND_INVALID_MEMORY: MachMsgReturn = MachMsgReturn(0x1000000c);
+public const MACH_SEND_NO_BUFFER: MachMsgReturn = MachMsgReturn(0x1000000d);
+public const MACH_SEND_TOO_LARGE: MachMsgReturn = MachMsgReturn(0x1000000e);
+public const MACH_SEND_INVALID_TYPE: MachMsgReturn = MachMsgReturn(0x1000000f);
+public const MACH_SEND_INVALID_HEADER: MachMsgReturn = MachMsgReturn(0x10000010);
+public const MACH_SEND_INVALID_TRAILER: MachMsgReturn = MachMsgReturn(0x10000011);
+public const MACH_RCV_IN_PROGRESS: MachMsgReturn = MachMsgReturn(0x10004001);
+public const MACH_RCV_INVALID_NAME: MachMsgReturn = MachMsgReturn(0x10004002);
+public const MACH_RCV_TIMED_OUT: MachMsgReturn = MachMsgReturn(0x10004003);
+public const MACH_RCV_TOO_LARGE: MachMsgReturn = MachMsgReturn(0x10004004);
+public const MACH_RCV_INTERRUPTED: MachMsgReturn = MachMsgReturn(0x10004005);
+public const MACH_RCV_PORT_CHANGED: MachMsgReturn = MachMsgReturn(0x10004006);
+public const MACH_RCV_INVALID_NOTIFY: MachMsgReturn = MachMsgReturn(0x10004007);
+public const MACH_RCV_INVALID_DATA: MachMsgReturn = MachMsgReturn(0x10004008);
+public const MACH_RCV_PORT_DIED: MachMsgReturn = MachMsgReturn(0x10004009);
+public const MACH_RCV_IN_SET: MachMsgReturn = MachMsgReturn(0x1000400a);
+public const MACH_RCV_HEADER_ERROR: MachMsgReturn = MachMsgReturn(0x1000400b);
+public const MACH_RCV_BODY_ERROR: MachMsgReturn = MachMsgReturn(0x1000400c);
+public const MACH_RCV_INVALID_TYPE: MachMsgReturn = MachMsgReturn(0x1000400d);
+public const MACH_RCV_SCATTER_SMALL: MachMsgReturn = MachMsgReturn(0x1000400e);
+public const MACH_RCV_INVALID_TRAILER: MachMsgReturn = MachMsgReturn(0x1000400f);
+public const MACH_RCV_IN_PROGRESS_TIMED: MachMsgReturn = MachMsgReturn(0x10004011);
+
+// =============================================================================
+// Safe Wrapper Functions
+// =============================================================================
+
+/// Get current task port
+public fn current_task() -> MachPort {
+    unsafe { mach_task_self() }
+}
+
+/// Get current thread port
+public fn current_thread() -> MachPort {
+    unsafe { mach_thread_self() }
+}
+
+/// Get host port
+public fn host_self() -> MachPort {
+    unsafe { mach_host_self() }
+}
+
+/// Allocate virtual memory (safe wrapper)
+public fn safe_vm_allocate(size: VmSize, anywhere: Bool) -> Result<VmAddress, KernReturn> {
+    let mut address: VmAddress = VmAddress(0);
+    let mut vm_flags: Int = VM_FLAGS_FIXED;
+    if anywhere {
+        vm_flags = VM_FLAGS_ANYWHERE;
+    }
+    let kr = unsafe { vm_allocate_ffi(mach_task_self(), &mut address, size, vm_flags) };
+    let kr_val = kr as Int;
+    if kr_val == 0 {
+        Ok(address)
+    } else {
+        Err(kr)
+    }
+}
+
+/// Deallocate virtual memory (safe wrapper)
+public fn safe_vm_deallocate(address: VmAddress, size: VmSize) -> Result<(), KernReturn> {
+    let result = unsafe { vm_deallocate(mach_task_self(), address, size) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Protect virtual memory (safe wrapper)
+public fn safe_vm_protect(address: VmAddress, size: VmSize, prot: VmProt) -> Result<(), KernReturn> {
+    let result = unsafe { vm_protect(mach_task_self(), address, size, false, prot) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Get high-precision monotonic time in nanoseconds
+public fn monotonic_nanos() -> UInt64 {
+    static mut timebase_info: MachTimebaseInfo = MachTimebaseInfo { numer: 0, denom: 0 };
+    static mut timebase_initialized: Bool = false;
+
+    unsafe {
+        if !timebase_initialized {
+            mach_timebase_info(&mut timebase_info);
+            timebase_initialized = true;
+        }
+
+        let ticks = mach_absolute_time();
+        (ticks * timebase_info.numer as UInt64) / timebase_info.denom as UInt64
+    }
+}
+
+/// Create semaphore (safe wrapper)
+public fn safe_semaphore_create(initial_value: Int) -> Result<SemaphoreT, KernReturn> {
+    let mut sem = SemaphoreT(MachPort(0));
+    let result = unsafe {
+        semaphore_create(mach_task_self(), &mut sem, SYNC_POLICY_FIFO, initial_value)
+    };
+    if result as Int == 0 {
+        Result.Ok(sem)
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Destroy semaphore (safe wrapper)
+public fn safe_semaphore_destroy(sem: SemaphoreT) -> Result<(), KernReturn> {
+    let result = unsafe { semaphore_destroy(mach_task_self(), sem) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Signal semaphore (safe wrapper)
+public fn safe_semaphore_signal(sem: SemaphoreT) -> Result<(), KernReturn> {
+    let result = unsafe { semaphore_signal(sem) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Wait on semaphore (safe wrapper)
+public fn safe_semaphore_wait(sem: SemaphoreT) -> Result<(), KernReturn> {
+    let result = unsafe { semaphore_wait(sem) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Sleep until deadline (absolute mach time)
+public fn sleep_until(deadline: UInt64) -> Result<(), KernReturn> {
+    let result = unsafe { mach_wait_until(deadline) };
+    if result as Int == 0 {
+        Result.Ok(())
+    } else {
+        Result.Err(result)
+    }
+}
+
+/// Get Mach error string
+public fn error_string(kr: KernReturn) -> Text {
+    unsafe {
+        let ptr = mach_error_string(kr);
+        // Convert C string to Text
+        Text.from_cstr(ptr)
+    }
+}

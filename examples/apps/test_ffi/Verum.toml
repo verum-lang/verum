@@ -1,0 +1,14 @@
+[package]
+name = "test_ffi"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Comprehensive FFI system test application"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []

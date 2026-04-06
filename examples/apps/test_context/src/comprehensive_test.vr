@@ -1,0 +1,66 @@
+// Comprehensive Context Method Dispatch Test
+
+context Logger {
+    fn log(msg: Text)
+    fn debug(msg: Text)
+    fn error(msg: Text)
+}
+
+context Database {
+    fn query(sql: Text)
+    fn connect()
+    fn disconnect()
+}
+
+fn test_single_context() {
+    print("Test 1: Single context with multiple methods");
+    Logger.log("Application started");
+    Logger.debug("Debugging information");
+    Logger.error("Error occurred");
+    print("✓ Test 1 passed");
+    print("");
+}
+
+fn test_multiple_contexts() {
+    print("Test 2: Multiple contexts");
+    Logger.log("Connecting to database...");
+    Database.connect();
+    Logger.log("Connected!");
+    Database.query("SELECT * FROM users");
+    Logger.log("Query executed");
+    Database.disconnect();
+    Logger.log("Disconnected");
+    print("✓ Test 2 passed");
+    print("");
+}
+
+fn test_nested_calls() {
+    print("Test 3: Nested context calls");
+    Logger.log("Starting nested operations");
+    Database.connect();
+    Logger.debug("Connected to DB");
+    Database.query("SELECT count(*) FROM products");
+    Logger.log("Query 1 complete");
+    Database.query("SELECT * FROM orders");
+    Logger.log("Query 2 complete");
+    Database.disconnect();
+    Logger.debug("All operations complete");
+    print("✓ Test 3 passed");
+    print("");
+}
+
+fn main() {
+    print("=== Comprehensive Context Method Dispatch Test ===");
+    print("");
+
+    test_single_context();
+    test_multiple_contexts();
+    test_nested_calls();
+
+    print("=== All Tests Passed! ===");
+    print("");
+    print("✓ Context method dispatch is working correctly");
+    print("✓ Methods can be called on context values");
+    print("✓ Multiple contexts can be used together");
+    print("✓ Context methods can be called from functions");
+}

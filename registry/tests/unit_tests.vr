@@ -1,0 +1,188 @@
+// Verum Registry - Unit Tests
+//
+// Unit tests for validation functions and utility logic.
+// These tests use only built-in functions (no stdlib imports needed).
+
+// ============================================================================
+// Validation Function Tests (Inline Implementations)
+// ============================================================================
+
+// Helper: Check if a string is a valid package name
+fn is_valid_package_name(name: Text) -> Bool {
+    let length = len(name);
+
+    // Length check: 2-64 characters
+    if length < 2 || length > 64 {
+        return false;
+    }
+
+    // First char can't be hyphen
+    if starts_with(name, "-") {
+        return false;
+    }
+
+    // Last char can't be hyphen
+    if ends_with(name, "-") {
+        return false;
+    }
+
+    true
+}
+
+// Helper: Check if a string is a valid version
+fn is_valid_version(version: Text) -> Bool {
+    // Must contain at least two dots for x.y.z
+    if !contains(version, ".") {
+        return false;
+    }
+
+    // Should not start or end with dot
+    if starts_with(version, ".") || ends_with(version, ".") {
+        return false;
+    }
+
+    true
+}
+
+// Helper: Check if a string is a valid username
+fn is_valid_username(username: Text) -> Bool {
+    let length = len(username);
+
+    // Length check: 3-32 characters
+    if length < 3 || length > 32 {
+        return false;
+    }
+
+    true
+}
+
+// Helper: Check if a string is a valid email
+fn is_valid_email(email: Text) -> Bool {
+    // Must contain @ and .
+    if !contains(email, "@") || !contains(email, ".") {
+        return false;
+    }
+
+    // @ must not be first
+    if starts_with(email, "@") {
+        return false;
+    }
+
+    true
+}
+
+// ============================================================================
+// Validation Tests
+// ============================================================================
+
+/// Test: Package name validation
+@test
+fn test_package_name_validation() {
+    // Valid names
+    assert(is_valid_package_name("http-client"), "Should accept 'http-client'");
+    assert(is_valid_package_name("core"), "Should accept 'core'");
+    assert(is_valid_package_name("json-parser-v2"), "Should accept 'json-parser-v2'");
+    assert(is_valid_package_name("ab"), "Should accept 2-char names");
+
+    // Invalid names - too short
+    assert(!is_valid_package_name("a"), "Should reject 1-char name");
+    assert(!is_valid_package_name(""), "Should reject empty name");
+
+    // Invalid names - invalid characters
+    assert(!is_valid_package_name("-invalid"), "Should reject name starting with hyphen");
+    assert(!is_valid_package_name("invalid-"), "Should reject name ending with hyphen");
+}
+
+/// Test: Version validation
+@test
+fn test_version_validation() {
+    // Valid versions
+    assert(is_valid_version("1.0.0"), "Should accept '1.0.0'");
+    assert(is_valid_version("0.1.2"), "Should accept '0.1.2'");
+    assert(is_valid_version("10.20.30"), "Should accept '10.20.30'");
+
+    // Invalid versions
+    assert(!is_valid_version("1"), "Should reject single number");
+    assert(!is_valid_version(".1.0"), "Should reject version starting with dot");
+    assert(!is_valid_version("1.0."), "Should reject version ending with dot");
+}
+
+/// Test: Username validation
+@test
+fn test_username_validation() {
+    // Valid usernames
+    assert(is_valid_username("alice"), "Should accept 'alice'");
+    assert(is_valid_username("john_doe"), "Should accept 'john_doe'");
+    assert(is_valid_username("user123"), "Should accept 'user123'");
+
+    // Invalid usernames - too short
+    assert(!is_valid_username("ab"), "Should reject 2-char username");
+    assert(!is_valid_username("a"), "Should reject 1-char username");
+}
+
+/// Test: Email validation
+@test
+fn test_email_validation() {
+    // Valid emails
+    assert(is_valid_email("user@example.com"), "Should accept 'user@example.com'");
+    assert(is_valid_email("test@domain.org"), "Should accept 'test@domain.org'");
+
+    // Invalid emails
+    assert(!is_valid_email("invalid"), "Should reject email without @");
+    assert(!is_valid_email("@example.com"), "Should reject email starting with @");
+    assert(!is_valid_email("user@"), "Should reject email without domain");
+}
+
+/// Test: Helper function for string operations
+@test
+fn test_string_helpers() {
+    // Test contains
+    assert(contains("hello world", "world"), "Should find 'world' in 'hello world'");
+    assert(!contains("hello", "world"), "Should not find 'world' in 'hello'");
+
+    // Test starts_with
+    assert(starts_with("hello", "hel"), "Should start with 'hel'");
+    assert(!starts_with("hello", "ell"), "Should not start with 'ell'");
+
+    // Test ends_with
+    assert(ends_with("hello", "llo"), "Should end with 'llo'");
+    assert(!ends_with("hello", "hel"), "Should not end with 'hel'");
+}
+
+/// Test: SemVer parsing (simplified)
+@test
+fn test_semver_format() {
+    let version = "1.2.3";
+    assert(len(version) == 5, "Version '1.2.3' should have length 5");
+    assert(contains(version, "."), "Version should contain dots");
+}
+
+/// Test: Package metadata format
+@test
+fn test_package_metadata_format() {
+    let name = "my-package";
+    let version = "1.0.0";
+    let description = "A sample package";
+
+    assert(is_valid_package_name(name), "Package name should be valid");
+    assert(is_valid_version(version), "Version should be valid");
+    assert(len(description) > 0, "Description should not be empty");
+}
+
+/// Test: Token format
+@test
+fn test_token_format() {
+    let token = "vrm_abc123def456";
+    assert(starts_with(token, "vrm_"), "Token should start with 'vrm_'");
+    assert(len(token) > 10, "Token should be at least 10 characters");
+}
+
+/// Test: User role validation
+@test
+fn test_user_role_format() {
+    let admin_role = "admin";
+    let user_role = "user";
+
+    assert(admin_role == "admin", "Admin role should be 'admin'");
+    assert(user_role == "user", "User role should be 'user'");
+}

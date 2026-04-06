@@ -1,0 +1,20 @@
+// Step 3: Test generic variant types (simple version)
+
+type Maybe<T> is
+  | Just(T)
+  | Nothing
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Just(val) => val,
+        Nothing => default
+    }
+}
+
+fn main() -> Int {
+    let m1 = Just(42);
+    let m2 = Nothing;
+    let r1 = unwrap_or(m1, 0);
+    let r2 = unwrap_or(m2, 99);
+    r1
+}

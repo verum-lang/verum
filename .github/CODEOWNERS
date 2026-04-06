@@ -1,0 +1,98 @@
+# Verum Language Platform - Code Owners
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @verum-lang/maintainers
+
+# Core Language Components
+/crates/verum_core/ @verum-lang/core-team
+/crates/verum_types/ @verum-lang/type-system-team
+/crates/verum_cbgr/ @verum-lang/memory-safety-team
+
+# Parser and Lexer
+/crates/verum_lexer/ @verum-lang/parser-team
+/crates/verum_parser/ @verum-lang/parser-team
+/crates/verum_ast/ @verum-lang/parser-team
+
+# Code Generation
+/crates/verum_codegen/ @verum-lang/codegen-team
+/crates/verum_runtime/ @verum-lang/runtime-team
+/experiments/inkwell/ @verum-lang/codegen-team
+
+# Verification and SMT
+/crates/verum_smt/ @verum-lang/verification-team
+/crates/verum_verification/ @verum-lang/verification-team
+/experiments/z3.rs/ @verum-lang/verification-team
+
+# Context System
+/crates/verum_context/ @verum-lang/core-team
+/crates/verum_context_macros/ @verum-lang/core-team
+
+# Compiler Pipeline
+/crates/verum_compiler/ @verum-lang/compiler-team
+/crates/verum_resolve/ @verum-lang/compiler-team
+/crates/verum_modules/ @verum-lang/compiler-team
+
+# Tooling
+/crates/verum_cli/ @verum-lang/tooling-team
+/crates/verum_lsp/ @verum-lang/tooling-team
+
+# Documentation
+/docs/ @verum-lang/docs-team
+*.md @verum-lang/docs-team
+CLAUDE.md @verum-lang/core-team @verum-lang/docs-team
+
+# CI/CD
+/.github/ @verum-lang/devops-team
+/.github/workflows/ @verum-lang/devops-team
+/scripts/ @verum-lang/devops-team
+Dockerfile @verum-lang/devops-team
+docker-compose.yml @verum-lang/devops-team
+
+# Configuration
+Cargo.toml @verum-lang/core-team
+rust-toolchain.toml @verum-lang/core-team
+clippy.toml @verum-lang/core-team
+deny.toml @verum-lang/security-team
+
+# Security
+/SECURITY.md @verum-lang/security-team
+/deny.toml @verum-lang/security-team
+
+# Standard Library
+/crates/verum_std/ @verum-lang/stdlib-team
+
+# ==============================================================================
+# Verum Compliance Suite (VCS)
+# ==============================================================================
+
+# VCS Core - Test framework and runner infrastructure
+/vcs/ @verum-lang/vcs-team @verum-lang/core-team
+/vcs/runner/ @verum-lang/vcs-team
+/vcs/runner/vtest/ @verum-lang/vcs-team
+/vcs/runner/vbench/ @verum-lang/vcs-team @verum-lang/performance-team
+/vcs/runner/vfuzz/ @verum-lang/vcs-team @verum-lang/security-team
+
+# VCS Specifications - Language compliance tests
+/vcs/specs/ @verum-lang/vcs-team @verum-lang/core-team
+/vcs/specs/L0-critical/ @verum-lang/parser-team @verum-lang/core-team
+/vcs/specs/L1-core/ @verum-lang/type-system-team @verum-lang/core-team
+/vcs/specs/L2-standard/ @verum-lang/stdlib-team @verum-lang/core-team
+/vcs/specs/L3-extended/ @verum-lang/codegen-team @verum-lang/verification-team
+/vcs/specs/L4-performance/ @verum-lang/performance-team @verum-lang/runtime-team
+
+# VCS Differential Testing
+/vcs/differential/ @verum-lang/vcs-team @verum-lang/codegen-team
+/vcs/differential/tier-oracle/ @verum-lang/verification-team
+
+# VCS Proof Stability
+/vcs/proof_stability/ @verum-lang/verification-team @verum-lang/vcs-team
+
+# VCS Configuration
+/vcs/config/ @verum-lang/vcs-team @verum-lang/devops-team
+
+# VCS CI/CD Workflows
+/.github/workflows/vcs-*.yml @verum-lang/vcs-team @verum-lang/devops-team
+/.github/actions/setup-vcs/ @verum-lang/vcs-team @verum-lang/devops-team
+/.github/actions/run-vtest/ @verum-lang/vcs-team
+/.github/actions/report-results/ @verum-lang/vcs-team @verum-lang/devops-team

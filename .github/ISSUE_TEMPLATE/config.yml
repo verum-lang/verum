@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Verum Community Discord
+    url: https://discord.gg/verum-lang
+    about: Join our Discord server for questions and discussions
+  - name: Verum Discussions
+    url: https://github.com/verum-lang/verum/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: Security Vulnerability
+    url: https://github.com/verum-lang/verum/security/advisories/new
+    about: Report security vulnerabilities privately

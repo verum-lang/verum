@@ -1,0 +1,280 @@
+// Comprehensive Async Features Test
+// Tests: async/await, spawn, streams, yield
+
+// Test 1: Basic async function
+async fn simple_async() -> Int {
+    42
+}
+
+// Test 2: Async function with await
+async fn async_with_await() -> Int {
+    let value = simple_async().await;
+    value + 10
+}
+
+// Test 3: Multiple awaits
+async fn multiple_awaits() -> Int {
+    let a = simple_async().await;
+    let b = simple_async().await;
+    a + b
+}
+
+// Test 4: Async function with computation
+async fn async_computation(x: Int, y: Int) -> Int {
+    let sum = x + y;
+    let product = x * y;
+    sum + product
+}
+
+// Test 5: Chained async calls
+async fn chained_async() -> Int {
+    let x = async_with_await().await;
+    let y = simple_async().await;
+    x + y
+}
+
+// Test 6: Basic spawn expression - spawn with block
+fn test_spawn_block() -> Int {
+    let task = spawn {
+        42
+    };
+    println("Spawned block task");
+    0
+}
+
+// Test 7: Spawn with function call
+fn background_task() -> Int {
+    42
+}
+
+fn test_spawn_function() -> Int {
+    let task = spawn background_task();
+    println("Spawned function task");
+    0
+}
+
+// Test 8: Spawn with computation
+fn compute_task() -> Int {
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+fn test_spawn_computation() -> Int {
+    let task = spawn compute_task();
+    println("Spawned computation task");
+    0
+}
+
+// Test 9: Multiple spawns
+fn task1() -> Int {
+    10
+}
+
+fn task2() -> Int {
+    20
+}
+
+fn task3() -> Int {
+    30
+}
+
+fn test_multiple_spawns() -> Int {
+    let t1 = spawn task1();
+    let t2 = spawn task2();
+    let t3 = spawn task3();
+    println("Spawned 3 tasks");
+    0
+}
+
+// Test 10: Basic stream comprehension
+fn test_stream_basic() -> Int {
+    let nums = [1, 2, 3, 4, 5];
+    let doubled = stream [x * 2 for x in nums];
+    println("Stream basic created");
+    0
+}
+
+// Test 11: Stream with filter
+fn test_stream_filter() -> Int {
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = stream [x for x in nums if x % 2 == 0];
+    println("Stream with filter created");
+    0
+}
+
+// Test 12: Stream with map
+fn test_stream_map() -> Int {
+    let nums = [1, 2, 3, 4, 5];
+    let mapped = stream [x * 3 for x in nums];
+    println("Stream with map created");
+    0
+}
+
+// Test 13: Stream with map and filter
+fn test_stream_map_filter() -> Int {
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let result = stream [x * 2 for x in nums if x > 5];
+    println("Stream with map and filter created");
+    0
+}
+
+// Test 14: Nested stream comprehension
+fn test_stream_nested() -> Int {
+    let xs = [1, 2, 3];
+    let ys = [10, 20];
+    let result = stream [x + y for x in xs for y in ys];
+    println("Nested stream created");
+    0
+}
+
+// Test 15: Basic yield expression - NOT YET IMPLEMENTED
+// fn test_yield_basic() -> Int {
+//     yield 1;
+//     yield 2;
+//     yield 3;
+//     println("Yield basic completed");
+//     0
+// }
+
+// Test 16: Yield in loop - NOT YET IMPLEMENTED
+// fn test_yield_loop() -> Int {
+//     for i in [1, 2, 3, 4, 5] {
+//         yield i * 2;
+//     };
+//     println("Yield loop completed");
+//     0
+// }
+
+// Test 17: Yield with condition - NOT YET IMPLEMENTED
+// fn test_yield_conditional() -> Int {
+//     for i in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+//         if i % 2 == 0 {
+//             yield i;
+//         }
+//     };
+//     println("Yield conditional completed");
+//     0
+// }
+
+// Test 18: Async with stream
+async fn test_async_stream() -> Int {
+    let base = simple_async().await;
+    let nums = [1, 2, 3];
+    let result = stream [x + base for x in nums];
+    println("Async with stream completed");
+    0
+}
+
+// Test 19: Complex async pattern - spawn async function
+async fn async_task() -> Int {
+    let x = simple_async().await;
+    x + 10
+}
+
+async fn test_spawn_async() -> Int {
+    let task = spawn async_task();
+    println("Spawned async function");
+    0
+}
+
+// Test 20: Async with multiple awaits and computation
+async fn test_complex_async() -> Int {
+    let a = simple_async().await;
+    let b = async_computation(5, 10).await;
+    let c = async_with_await().await;
+    println("Complex async completed");
+    a + b + c
+}
+
+// Main entry point to test all features
+async fn main() {
+    println("=== Async Features Test Suite ===");
+
+    // Test 1-5: Async/Await
+    println("\n--- Test 1: Simple async ---");
+    let t1 = simple_async().await;
+    println(t1);
+
+    println("\n--- Test 2: Async with await ---");
+    let t2 = async_with_await().await;
+    println(t2);
+
+    println("\n--- Test 3: Multiple awaits ---");
+    let t3 = multiple_awaits().await;
+    println(t3);
+
+    println("\n--- Test 4: Async computation ---");
+    let t4 = async_computation(5, 10).await;
+    println(t4);
+
+    println("\n--- Test 5: Chained async ---");
+    let t5 = chained_async().await;
+    println(t5);
+
+    // Test 6-9: Spawn expressions
+    println("\n--- Test 6: Spawn block ---");
+    let t6 = test_spawn_block();
+    println(t6);
+
+    println("\n--- Test 7: Spawn function ---");
+    let t7 = test_spawn_function();
+    println(t7);
+
+    println("\n--- Test 8: Spawn computation ---");
+    let t8 = test_spawn_computation();
+    println(t8);
+
+    println("\n--- Test 9: Multiple spawns ---");
+    let t9 = test_multiple_spawns();
+    println(t9);
+
+    // Test 10-14: Stream comprehensions
+    println("\n--- Test 10: Stream basic ---");
+    let t10 = test_stream_basic();
+    println(t10);
+
+    println("\n--- Test 11: Stream filter ---");
+    let t11 = test_stream_filter();
+    println(t11);
+
+    println("\n--- Test 12: Stream map ---");
+    let t12 = test_stream_map();
+    println(t12);
+
+    println("\n--- Test 13: Stream map filter ---");
+    let t13 = test_stream_map_filter();
+    println(t13);
+
+    println("\n--- Test 14: Stream nested ---");
+    let t14 = test_stream_nested();
+    println(t14);
+
+    // Test 15-17: Yield expressions - NOT YET IMPLEMENTED
+    // println("\n--- Test 15: Yield basic ---");
+    // let t15 = test_yield_basic();
+    // println(t15);
+
+    // println("\n--- Test 16: Yield loop ---");
+    // let t16 = test_yield_loop();
+    // println(t16);
+
+    // println("\n--- Test 17: Yield conditional ---");
+    // let t17 = test_yield_conditional();
+    // println(t17);
+
+    // Test 18-20: Advanced async patterns
+    println("\n--- Test 18: Async with stream ---");
+    let t18 = test_async_stream().await;
+    println(t18);
+
+    println("\n--- Test 19: Spawn async ---");
+    let t19 = test_spawn_async().await;
+    println(t19);
+
+    println("\n--- Test 20: Complex async ---");
+    let t20 = test_complex_async().await;
+    println(t20);
+
+    println("\n=== Test Suite Complete ===");
+}

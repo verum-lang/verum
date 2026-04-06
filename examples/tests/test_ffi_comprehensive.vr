@@ -1,0 +1,37 @@
+// Test comprehensive FFI declarations
+
+ffi LibC {
+    @extern("C")
+    fn strlen(s: *const u8) -> usize;
+
+    @extern("C")
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+
+    @extern("C")
+    fn malloc(size: usize) -> *mut u8;
+
+    @extern("C")
+    fn free(ptr: *mut u8);
+}
+
+// Test with visibility modifier
+pub ffi Math {
+    @extern("C")
+    fn sqrt(x: f64) -> f64;
+
+    @extern("C")
+    fn pow(base: f64, exp: f64) -> f64;
+}
+
+// Test with extends clause
+ffi Extended extends LibC {
+    @extern("C")
+    fn custom_function(x: i32) -> i32;
+}
+
+fn main() {
+    let _ = println("All FFI declarations parsed successfully!");
+    let _ = println("- LibC with basic functions");
+    let _ = println("- Math with visibility modifier");
+    let _ = println("- Extended with extends clause");
+}

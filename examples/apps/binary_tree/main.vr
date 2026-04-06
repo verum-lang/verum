@@ -1,0 +1,135 @@
+// Binary Tree Data Structure
+// Demonstrates: recursive types, pattern matching, tree algorithms
+
+type Maybe<T> is Some(T) | None;
+
+// Binary tree node - using Box simulation via nested variant
+type Tree<T> is
+    Leaf |
+    Node { value: T, left: Tree<T>, right: Tree<T> };
+
+// Create leaf node
+fn leaf<T>() -> Tree<T> {
+    Leaf
+}
+
+// Create node with value
+fn node<T>(value: T, left: Tree<T>, right: Tree<T>) -> Tree<T> {
+    Node { value: value, left: left, right: right }
+}
+
+// Check if tree is empty
+fn is_empty<T>(tree: Tree<T>) -> Bool {
+    match tree {
+        Leaf => true,
+        Node { value: _, left: _, right: _ } => false
+    }
+}
+
+// Count nodes in tree
+fn count_nodes(tree: Tree<Float>) -> Float {
+    match tree {
+        Leaf => 0.0,
+        Node { value: _, left: l, right: r } => 1.0 + count_nodes(l) + count_nodes(r)
+    }
+}
+
+// Calculate tree height
+fn height(tree: Tree<Float>) -> Float {
+    match tree {
+        Leaf => 0.0,
+        Node { value: _, left: l, right: r } => {
+            let left_h = height(l);
+            let right_h = height(r);
+            1.0 + (if left_h > right_h { left_h } else { right_h })
+        }
+    }
+}
+
+// Sum all values in tree
+fn sum_tree(tree: Tree<Float>) -> Float {
+    match tree {
+        Leaf => 0.0,
+        Node { value: v, left: l, right: r } => v + sum_tree(l) + sum_tree(r)
+    }
+}
+
+// Find minimum value
+fn find_min(tree: Tree<Float>) -> Maybe<Float> {
+    match tree {
+        Leaf => None,
+        Node { value: v, left: l, right: _ } => {
+            match find_min(l) {
+                Some(left_min) => if left_min < v { Some(left_min) } else { Some(v) },
+                None => Some(v)
+            }
+        }
+    }
+}
+
+// Check if value exists in tree
+fn contains(tree: Tree<Float>, target: Float) -> Bool {
+    match tree {
+        Leaf => false,
+        Node { value: v, left: l, right: r } => {
+            if v == target {
+                true
+            } else {
+                contains(l, target) || contains(r, target)
+            }
+        }
+    }
+}
+
+fn main() {
+    let _ = print("=== Binary Tree Demo ===");
+    let _ = print("");
+
+    // Build a tree:
+    //        5
+    //       / \
+    //      3   7
+    //     / \   \
+    //    1   4   9
+
+    let tree: Tree<Float> = Node {
+        value: 5.0,
+        left: Node {
+            value: 3.0,
+            left: Node { value: 1.0, left: Leaf, right: Leaf },
+            right: Node { value: 4.0, left: Leaf, right: Leaf }
+        },
+        right: Node {
+            value: 7.0,
+            left: Leaf,
+            right: Node { value: 9.0, left: Leaf, right: Leaf }
+        }
+    };
+
+    let _ = print("Tree structure:");
+    let _ = print("       5");
+    let _ = print("      / \\");
+    let _ = print("     3   7");
+    let _ = print("    / \\   \\");
+    let _ = print("   1   4   9");
+    let _ = print("");
+
+    let _ = print(f"Node count: {count_nodes(tree)}");
+    let _ = print(f"Tree height: {height(tree)}");
+    let _ = print(f"Sum of values: {sum_tree(tree)}");
+
+    match find_min(tree) {
+        Some(min) => { let _ = print(f"Minimum value: {min}"); },
+        None => { let _ = print("Tree is empty"); }
+    }
+
+    let _ = print(f"Contains 4? {contains(tree, 4.0)}");
+    let _ = print(f"Contains 6? {contains(tree, 6.0)}");
+
+    // Empty tree test
+    let empty: Tree<Float> = Leaf;
+    let _ = print(f"Empty tree is_empty: {is_empty(empty)}");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

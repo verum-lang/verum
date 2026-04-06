@@ -1,0 +1,19 @@
+context Logger {
+    fn log(message: Text);
+}
+
+fn greet(name: Text) using Logger {
+    Logger.log(f"Hello, {name}!")
+}
+
+fn main() {
+    // Create a simple logger record
+    let console_logger = {}
+
+    // Provide the context (note: this requires protocol implementation support)
+    // provide Logger = console_logger
+
+    // For now, just call greet directly since provide isn't fully working
+    println("Testing basic context with using clause")
+    // greet("World")
+}

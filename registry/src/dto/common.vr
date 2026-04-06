@@ -1,0 +1,182 @@
+// Common DTOs
+//
+// Shared types used across multiple API endpoints.
+
+mount core.base.{Text, Int, Float, Maybe};
+mount core.collections.{List};
+mount core.time.unix_timestamp;
+
+// ============================================================================
+// Pagination
+// ============================================================================
+
+/// Pagination parameters
+pub type PaginationDto is {
+    page: Int,
+    per_page: Int,
+    total: Int,
+    total_pages: Int,
+};
+
+implement PaginationDto {
+    pub fn new(page: Int, per_page: Int, total: Int) -> PaginationDto {
+        let total_pages = if total == 0 {
+            0
+        } else if per_page == 0 {
+            0
+        } else {
+            (total + per_page - 1) / per_page
+        };
+
+        PaginationDto {
+            page: page,
+            per_page: per_page,
+            total: total,
+            total_pages: total_pages,
+        }
+    }
+
+    pub fn has_next(self) -> Bool {
+        self.page < self.total_pages
+    }
+
+    pub fn has_prev(self) -> Bool {
+        self.page > 1
+    }
+}
+
+// ============================================================================
+// Error Response
+// ============================================================================
+
+/// API error response
+pub type ErrorResponseDto is {
+    error: Text,
+    code: Int,
+    message: Text,
+    error_field: Maybe<Text>,
+};
+
+implement ErrorResponseDto {
+    pub fn validation(field_name: Text, message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"validation_error",
+            code: 400,
+            message: message,
+            error_field: Maybe.Some(field_name),
+        }
+    }
+
+    pub fn not_found(resource: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"not_found",
+            code: 404,
+            message: f"{resource} not found",
+            error_field: Maybe.None,
+        }
+    }
+
+    pub fn unauthorized(message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"unauthorized",
+            code: 401,
+            message: message,
+            error_field: Maybe.None,
+        }
+    }
+
+    pub fn forbidden(message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"forbidden",
+            code: 403,
+            message: message,
+            error_field: Maybe.None,
+        }
+    }
+
+    pub fn conflict(message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"conflict",
+            code: 409,
+            message: message,
+            error_field: Maybe.None,
+        }
+    }
+
+    pub fn internal_error(message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"internal_error",
+            code: 500,
+            message: message,
+            error_field: Maybe.None,
+        }
+    }
+
+    pub fn service_unavailable(message: Text) -> ErrorResponseDto {
+        ErrorResponseDto {
+            error: f"service_unavailable",
+            code: 503,
+            message: message,
+            error_field: Maybe.None,
+        }
+    }
+}
+
+// ============================================================================
+// Health Check DTOs
+// ============================================================================
+
+/// Health status enum
+pub type HealthStatusDto is
+    | Healthy
+    | Degraded
+    | Unhealthy;
+
+implement HealthStatusDto {
+    pub fn to_string(self) -> Text {
+        match self {
+            HealthStatusDto.Healthy => "healthy",
+            HealthStatusDto.Degraded => "degraded",
+            HealthStatusDto.Unhealthy => "unhealthy",
+        }
+    }
+}
+
+/// Individual component health
+pub type ComponentHealthDto is {
+    name: Text,
+    status: HealthStatusDto,
+    message: Maybe<Text>,
+    response_time_ms: Maybe<Int>,
+};
+
+/// Full health check response
+pub type HealthResponseDto is {
+    status: HealthStatusDto,
+    version: Text,
+    uptime_seconds: Int,
+    components: List<ComponentHealthDto>,
+    timestamp: Int,
+};
+
+implement HealthResponseDto {
+    pub fn healthy(version: Text, uptime: Int, components: List<ComponentHealthDto>) -> HealthResponseDto {
+        HealthResponseDto {
+            status: HealthStatusDto.Healthy,
+            version: version,
+            uptime_seconds: uptime,
+            components: components,
+            timestamp: unix_timestamp(),
+        }
+    }
+}
+
+/// System metrics response
+pub type MetricsResponseDto is {
+    requests_total: Int,
+    requests_per_second: Float,
+    avg_response_time_ms: Float,
+    active_connections: Int,
+    memory_usage_mb: Int,
+    cpu_usage_percent: Float,
+};

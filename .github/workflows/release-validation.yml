@@ -1,0 +1,889 @@
+# =============================================================================
+# Verum Compliance Suite (VCS) - Release Validation
+# =============================================================================
+#
+# Comprehensive validation workflow that runs before any release. This is the
+# most thorough validation suite and must pass completely before releasing.
+#
+# Validation Checklist:
+#   1. All test levels (L0-L4) with 100% pass for L0-L1, 95%+ for L2
+#   2. Full differential testing across all tier combinations
+#   3. Extended fuzzing campaign (2 hours minimum)
+#   4. Performance benchmarks with baseline comparison
+#   5. Cross-platform validation (Linux, macOS, Windows)
+#   6. Security audit (dependency scan, SAST)
+#   7. Documentation build verification
+#
+# Reference: VCS Spec Section 23.8 - Release Validation
+# =============================================================================
+
+name: VCS Release Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'minor'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - rc
+      skip_fuzz:
+        description: 'Skip extended fuzzing (not recommended)'
+        required: false
+        default: false
+        type: boolean
+      skip_perf:
+        description: 'Skip performance benchmarks'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RELEASE_VERSION: ${{ github.event.inputs.release_version }}
+
+# Only one release validation at a time
+concurrency:
+  group: release-validation
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Pre-flight Checks
+  # ==========================================================================
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    outputs:
+      version_valid: ${{ steps.validate.outputs.version_valid }}
+      changelog_exists: ${{ steps.validate.outputs.changelog_exists }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Release
+        id: validate
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+
+          # Validate version format
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION (expected vX.Y.Z or vX.Y.Z-rc.N)"
+            echo "version_valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "version_valid=true" >> $GITHUB_OUTPUT
+
+          # Check if version tag already exists
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "::warning::Tag $VERSION already exists"
+          fi
+
+          # Check for changelog entry
+          if [ -f "CHANGELOG.md" ] && grep -q "$VERSION" CHANGELOG.md; then
+            echo "changelog_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::No changelog entry found for $VERSION"
+            echo "changelog_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "## Pre-flight Checks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Format | $VERSION |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Type | ${{ github.event.inputs.release_type }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Build All Platforms
+  # ==========================================================================
+  build:
+    name: Build (${{ matrix.os }})
+    needs: preflight
+    if: needs.preflight.outputs.version_valid == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+          - os: windows-2022
+            platform: windows-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 cmake
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        run: |
+          choco install llvm -y
+          choco install z3 -y
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "release-v1"
+          shared-key: ${{ matrix.platform }}
+
+      - name: Build VCS tools
+        run: |
+          cd vcs/runner/vtest && cargo build --release
+          cd ../vfuzz && cargo build --release
+          cd ../vbench && cargo build --release
+
+      - name: Build Verum compiler
+        run: cargo build --release --all
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: |
+            target/release/verum*
+            vcs/runner/*/target/release/vtest*
+            vcs/runner/*/target/release/vfuzz*
+            vcs/runner/*/target/release/vbench*
+          retention-days: 7
+
+  # ==========================================================================
+  # L0 Critical Tests - All Platforms
+  # ==========================================================================
+  l0-critical:
+    name: L0 Critical (${{ matrix.platform }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.os }}" == "ubuntu-22.04" ]; then
+            sudo apt-get update
+            sudo apt-get install -y llvm-14-dev libz3-dev jq
+          else
+            brew install z3 jq
+          fi
+
+      - name: Run L0 Critical Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ../artifacts/vcs/runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel 8 \
+            --timeout 30000 \
+            --format json \
+            --output reports/l0-${{ matrix.platform }}.json \
+            --config config/vcs.toml
+
+          FAILED=$(jq -r '.summary.failed // 0' reports/l0-${{ matrix.platform }}.json)
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::L0 Critical tests failed on ${{ matrix.platform }}"
+            exit 1
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l0-results-${{ matrix.platform }}
+          path: vcs/reports/l0-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L1 Core Tests - All Platforms
+  # ==========================================================================
+  l1-core:
+    name: L1 Core (${{ matrix.platform }})
+    needs: [build, l0-critical]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.os }}" == "ubuntu-22.04" ]; then
+            sudo apt-get update
+            sudo apt-get install -y llvm-14-dev libz3-dev jq
+          else
+            brew install z3 jq
+          fi
+
+      - name: Run L1 Core Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ../artifacts/vcs/runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel 8 \
+            --timeout 30000 \
+            --format json \
+            --output reports/l1-${{ matrix.platform }}.json \
+            --config config/vcs.toml
+
+          FAILED=$(jq -r '.summary.failed // 0' reports/l1-${{ matrix.platform }}.json)
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::L1 Core tests failed on ${{ matrix.platform }}"
+            exit 1
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l1-results-${{ matrix.platform }}
+          path: vcs/reports/l1-*
+          retention-days: 30
+
+  # ==========================================================================
+  # L2 Standard Tests
+  # ==========================================================================
+  l2-standard:
+    name: L2 Standard Tests
+    needs: [build, l1-core]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-linux-x64
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq bc
+
+      - name: Run L2 Standard Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ../artifacts/vcs/runner/vtest/target/release/vtest run \
+            --level L2 \
+            --parallel 8 \
+            --timeout 30000 \
+            --format json \
+            --output reports/l2.json \
+            --config config/vcs.toml
+
+          PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l2.json)
+
+          if (( $(echo "$PASS_RATE < 95" | bc -l) )); then
+            echo "::error::L2 Standard tests below 95% threshold (${PASS_RATE}%)"
+            exit 1
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l2-results
+          path: vcs/reports/l2*
+          retention-days: 30
+
+  # ==========================================================================
+  # L3 Extended Tests
+  # ==========================================================================
+  l3-extended:
+    name: L3 Extended Tests
+    needs: [build, l2-standard]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-linux-x64
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq bc
+
+      - name: Run L3 Extended Tests
+        id: test
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ../artifacts/vcs/runner/vtest/target/release/vtest run \
+            --level L3 \
+            --parallel 8 \
+            --timeout 600000 \
+            --format json \
+            --output reports/l3.json \
+            --config config/vcs.toml || true
+
+          PASS_RATE=$(jq -r '.summary.pass_percentage // 0' reports/l3.json)
+
+          echo "## L3 Extended Tests" >> $GITHUB_STEP_SUMMARY
+          echo "Pass Rate: ${PASS_RATE}% (Target: 90%+)" >> $GITHUB_STEP_SUMMARY
+
+          if (( $(echo "$PASS_RATE < 90" | bc -l) )); then
+            echo "::warning::L3 Extended tests below 90% threshold (${PASS_RATE}%)"
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: l3-results
+          path: vcs/reports/l3*
+          retention-days: 30
+
+  # ==========================================================================
+  # Full Differential Testing
+  # ==========================================================================
+  differential:
+    name: Differential Tests (All Tiers)
+    needs: [build, l1-core]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-linux-x64
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq
+
+      - name: Run Differential Tests (All Tier Combinations)
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          TOTAL_DIVERGENT=0
+
+          for TIER1 in 0 1 2; do
+            for TIER2 in $((TIER1 + 1)) 3; do
+              if [ $TIER2 -le 3 ] && [ $TIER1 -lt $TIER2 ]; then
+                echo "Testing Tier $TIER1 vs Tier $TIER2..."
+
+                ../artifacts/vcs/runner/vtest/target/release/vtest run \
+                  --differential \
+                  --tier $TIER1,$TIER2 \
+                  --parallel 8 \
+                  --timeout 60000 \
+                  --format json \
+                  --output reports/diff-tier${TIER1}-tier${TIER2}.json \
+                  --config config/vcs.toml || true
+
+                if [ -f "reports/diff-tier${TIER1}-tier${TIER2}.json" ]; then
+                  DIVERGENT=$(jq -r '.summary.divergent // 0' reports/diff-tier${TIER1}-tier${TIER2}.json)
+                  TOTAL_DIVERGENT=$((TOTAL_DIVERGENT + DIVERGENT))
+
+                  if [ "$DIVERGENT" -gt 0 ]; then
+                    echo "::error::Tier $TIER1 vs Tier $TIER2: $DIVERGENT divergence(s)"
+                  fi
+                fi
+              fi
+            done
+          done
+
+          if [ "$TOTAL_DIVERGENT" -gt 0 ]; then
+            echo "::error::Release blocked - $TOTAL_DIVERGENT total divergence(s) found"
+            exit 1
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: differential-results
+          path: vcs/reports/diff-*
+          retention-days: 30
+
+  # ==========================================================================
+  # Extended Fuzzing
+  # ==========================================================================
+  fuzz:
+    name: Extended Fuzzing (2h)
+    needs: [build, l2-standard]
+    if: github.event.inputs.skip_fuzz != 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq
+
+      - name: Run Extended Fuzzing
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports
+
+          DURATION=7200  # 2 hours
+
+          # Run all fuzz targets in parallel
+          for target in lexer_fuzz parser_fuzz types_inference_fuzz; do
+            echo "Starting $target..."
+            timeout $((DURATION / 3)) cargo +nightly fuzz run $target \
+              --jobs 2 \
+              -- \
+              -max_len=16384 \
+              -max_total_time=$((DURATION / 3)) \
+              -artifact_prefix=artifacts/${target}/ \
+              2>&1 | tee reports/${target}.log &
+          done
+
+          wait
+
+          # Count crashes
+          CRASH_COUNT=$(find artifacts -type f 2>/dev/null | wc -l || echo "0")
+
+          echo "## Extended Fuzzing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Duration: 2 hours" >> $GITHUB_STEP_SUMMARY
+          echo "Crashes found: $CRASH_COUNT" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "::error::Fuzzing found $CRASH_COUNT crash(es) - release blocked"
+            exit 1
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-results
+          path: |
+            vcs/fuzz/artifacts/
+            vcs/fuzz/reports/
+          retention-days: 30
+
+  # ==========================================================================
+  # Performance Benchmarks
+  # ==========================================================================
+  benchmarks:
+    name: Performance Benchmarks
+    needs: [build, l2-standard]
+    if: github.event.inputs.skip_perf != 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      meets_targets: ${{ steps.analyze.outputs.meets_targets }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-linux-x64
+          path: artifacts/
+
+      - name: Set permissions
+        run: chmod +x artifacts/vcs/runner/*/target/release/*
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev jq bc
+
+      - name: Download baseline
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: performance-tracking.yml
+          name: perf-baseline
+          path: baseline/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Run Comprehensive Benchmarks
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          # Run all benchmark categories
+          for category in cbgr compilation type_inference runtime memory; do
+            ../artifacts/vcs/runner/vbench/target/release/vbench run \
+              --category $category \
+              --iterations 200 \
+              --warm-up 20 \
+              --format json \
+              --output reports/bench-${category}.json \
+              --config config/thresholds.toml \
+              2>&1 | tee reports/bench-${category}.log || true
+          done
+
+      - name: Analyze Results
+        id: analyze
+        run: |
+          cd vcs
+          MEETS_TARGETS=true
+
+          echo "## Performance Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Check CBGR
+          if [ -f "reports/bench-cbgr.json" ]; then
+            CBGR=$(jq -r '.results["cbgr/tier0_check"].mean_ns // 0' reports/bench-cbgr.json)
+            if (( $(echo "$CBGR <= 15" | bc -l) )); then
+              echo "| CBGR Check | ${CBGR}ns | <15ns | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| CBGR Check | ${CBGR}ns | <15ns | FAIL |" >> $GITHUB_STEP_SUMMARY
+              MEETS_TARGETS=false
+            fi
+          fi
+
+          # Check Compilation
+          if [ -f "reports/bench-compilation.json" ]; then
+            COMPILE=$(jq -r '.results["compilation/throughput"].loc_per_sec // 0' reports/bench-compilation.json)
+            if (( $(echo "$COMPILE >= 50000" | bc -l) )); then
+              echo "| Compilation | ${COMPILE} LOC/s | >50K LOC/s | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Compilation | ${COMPILE} LOC/s | >50K LOC/s | FAIL |" >> $GITHUB_STEP_SUMMARY
+              MEETS_TARGETS=false
+            fi
+          fi
+
+          # Check Type Inference
+          if [ -f "reports/bench-type_inference.json" ]; then
+            TYPES=$(jq -r '.results["type_inference/10k_loc"].mean_ms // 0' reports/bench-type_inference.json)
+            if (( $(echo "$TYPES <= 100" | bc -l) )); then
+              echo "| Type Inference | ${TYPES}ms | <100ms | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Type Inference | ${TYPES}ms | <100ms | FAIL |" >> $GITHUB_STEP_SUMMARY
+              MEETS_TARGETS=false
+            fi
+          fi
+
+          # Check Memory
+          if [ -f "reports/bench-memory.json" ]; then
+            MEM=$(jq -r '.results["memory/overhead_percent"].value // 0' reports/bench-memory.json)
+            if (( $(echo "$MEM <= 5" | bc -l) )); then
+              echo "| Memory Overhead | ${MEM}% | <5% | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Memory Overhead | ${MEM}% | <5% | FAIL |" >> $GITHUB_STEP_SUMMARY
+              MEETS_TARGETS=false
+            fi
+          fi
+
+          echo "meets_targets=$MEETS_TARGETS" >> $GITHUB_OUTPUT
+
+          if [ "$MEETS_TARGETS" == "false" ]; then
+            echo "::warning::Some performance targets not met"
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: vcs/reports/bench-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Security Audit
+  # ==========================================================================
+  security:
+    name: Security Audit
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run Security Audit
+        run: |
+          cargo audit --json > security-audit.json || true
+
+          VULNS=$(jq '.vulnerabilities.count // 0' security-audit.json)
+
+          echo "## Security Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Vulnerabilities found: $VULNS" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$VULNS" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+            jq -r '.vulnerabilities.list[] | "- \(.advisory.id): \(.advisory.title)"' security-audit.json >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Found $VULNS security vulnerabilities"
+          fi
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit
+          path: security-audit.json
+          retention-days: 30
+
+  # ==========================================================================
+  # Generate Release Report
+  # ==========================================================================
+  release-report:
+    name: Generate Release Report
+    needs: [l0-critical, l1-core, l2-standard, l3-extended, differential, fuzz, benchmarks, security]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      release_approved: ${{ steps.evaluate.outputs.release_approved }}
+
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          path: results/
+          merge-multiple: false
+
+      - name: Evaluate Release Readiness
+        id: evaluate
+        run: |
+          APPROVED=true
+
+          echo "# Release Validation Report" > release-report.md
+          echo "" >> release-report.md
+          echo "**Version:** ${{ github.event.inputs.release_version }}" >> release-report.md
+          echo "**Type:** ${{ github.event.inputs.release_type }}" >> release-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> release-report.md
+          echo "**Commit:** ${{ github.sha }}" >> release-report.md
+          echo "" >> release-report.md
+
+          echo "## Validation Summary" >> release-report.md
+          echo "" >> release-report.md
+          echo "| Check | Result | Blocking |" >> release-report.md
+          echo "|-------|--------|----------|" >> release-report.md
+
+          # Check L0
+          if [ "${{ needs.l0-critical.result }}" == "success" ]; then
+            echo "| L0 Critical Tests | PASS | Yes |" >> release-report.md
+          else
+            echo "| L0 Critical Tests | FAIL | Yes |" >> release-report.md
+            APPROVED=false
+          fi
+
+          # Check L1
+          if [ "${{ needs.l1-core.result }}" == "success" ]; then
+            echo "| L1 Core Tests | PASS | Yes |" >> release-report.md
+          else
+            echo "| L1 Core Tests | FAIL | Yes |" >> release-report.md
+            APPROVED=false
+          fi
+
+          # Check L2
+          if [ "${{ needs.l2-standard.result }}" == "success" ]; then
+            echo "| L2 Standard Tests | PASS | Yes |" >> release-report.md
+          else
+            echo "| L2 Standard Tests | FAIL | Yes |" >> release-report.md
+            APPROVED=false
+          fi
+
+          # Check L3
+          if [ "${{ needs.l3-extended.result }}" == "success" ]; then
+            echo "| L3 Extended Tests | PASS | No |" >> release-report.md
+          else
+            echo "| L3 Extended Tests | WARN | No |" >> release-report.md
+          fi
+
+          # Check Differential
+          if [ "${{ needs.differential.result }}" == "success" ]; then
+            echo "| Differential Tests | PASS | Yes |" >> release-report.md
+          else
+            echo "| Differential Tests | FAIL | Yes |" >> release-report.md
+            APPROVED=false
+          fi
+
+          # Check Fuzz
+          if [ "${{ needs.fuzz.result }}" == "success" ] || [ "${{ needs.fuzz.result }}" == "skipped" ]; then
+            echo "| Extended Fuzzing | PASS | Yes |" >> release-report.md
+          else
+            echo "| Extended Fuzzing | FAIL | Yes |" >> release-report.md
+            APPROVED=false
+          fi
+
+          # Check Benchmarks
+          if [ "${{ needs.benchmarks.result }}" == "success" ]; then
+            echo "| Performance | PASS | Advisory |" >> release-report.md
+          else
+            echo "| Performance | WARN | Advisory |" >> release-report.md
+          fi
+
+          # Check Security
+          if [ "${{ needs.security.result }}" == "success" ]; then
+            echo "| Security Audit | PASS | Advisory |" >> release-report.md
+          else
+            echo "| Security Audit | WARN | Advisory |" >> release-report.md
+          fi
+
+          echo "" >> release-report.md
+
+          if [ "$APPROVED" == "true" ]; then
+            echo "## Result: APPROVED FOR RELEASE" >> release-report.md
+            echo "" >> release-report.md
+            echo "All blocking checks passed. Version ${{ github.event.inputs.release_version }} is ready for release." >> release-report.md
+          else
+            echo "## Result: RELEASE BLOCKED" >> release-report.md
+            echo "" >> release-report.md
+            echo "One or more blocking checks failed. Please fix the issues before releasing." >> release-report.md
+          fi
+
+          echo "release_approved=$APPROVED" >> $GITHUB_OUTPUT
+
+          cat release-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Release Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-report
+          path: release-report.md
+          retention-days: 365
+
+  # ==========================================================================
+  # Notify Results
+  # ==========================================================================
+  notify:
+    name: Notify Results
+    needs: [release-report]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ needs.release-report.outputs.release_approved == 'true' && 'success' || 'failure' }}
+          fields: repo,message,commit,author,workflow
+          text: 'Release Validation for ${{ github.event.inputs.release_version }}: ${{ needs.release-report.outputs.release_approved == ''true'' && ''APPROVED'' || ''BLOCKED'' }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Release (if approved)
+        if: needs.release-report.outputs.release_approved == 'true'
+        run: |
+          echo "Release ${{ github.event.inputs.release_version }} approved!"
+          echo "To create the release, run:"
+          echo "  gh release create ${{ github.event.inputs.release_version }} --generate-notes"

@@ -1,0 +1,171 @@
+// Test edge cases for comprehensions
+
+fn main() -> Int {
+    test_empty_comprehensions();
+    test_single_element_comprehensions();
+    test_type_inference();
+    test_pattern_matching_in_comprehensions();
+    test_comprehension_ordering();
+
+    0
+}
+
+// Test empty comprehensions
+fn test_empty_comprehensions() -> Int {
+    // Empty list comprehension
+    let empty_list: [Int] = [];
+    let result1 = [x * 2 for x in empty_list];
+    // Expected: []
+
+    // Empty stream comprehension
+    let result2 = stream[x * 2 for x in empty_list];
+    // Expected: empty stream
+
+    // Filter that produces empty result
+    let numbers = [1, 2, 3];
+    let result3 = [x for x in numbers if x > 100];
+    // Expected: []
+
+    0
+}
+
+// Test single element comprehensions
+fn test_single_element_comprehensions() -> Int {
+    let single = [42];
+    let doubled = [x * 2 for x in single];
+    // Expected: [84]
+
+    let filtered = [x for x in single if x > 0];
+    // Expected: [42]
+
+    let with_let = [y for x in single let y = x + 1];
+    // Expected: [43]
+
+    0
+}
+
+// Test type inference in comprehensions
+fn test_type_inference() -> Int {
+    // Compiler should infer Int
+    let ints = [x for x in [1, 2, 3]];
+
+    // Compiler should infer Text
+    let strings = [s for s in ["a", "b", "c"]];
+
+    // Mixed operations - should infer correctly
+    let mixed = [x + 1 for x in [1, 2, 3]];
+
+    // Type annotation should work
+    let annotated: [Int] = [x * 2 for x in [1, 2, 3]];
+
+    0
+}
+
+// Test pattern matching in comprehensions
+fn test_pattern_matching_in_comprehensions() -> Int {
+    // Tuple destructuring
+    let pairs = [(1, 2), (3, 4), (5, 6)];
+    let sums = [a + b for (a, b) in pairs];
+    // Expected: [3, 7, 11]
+
+    // Pattern with wildcards
+    let ignore_second = [a for (a, _) in pairs];
+    // Expected: [1, 3, 5]
+
+    // Nested patterns
+    let nested = [((1, 2), 3), ((4, 5), 6)];
+    let flat = [a + b + c for ((a, b), c) in nested];
+    // Expected: [6, 15]
+
+    0
+}
+
+// Test comprehension clause ordering
+fn test_comprehension_ordering() -> Int {
+    let numbers = [1, 2, 3];
+
+    // Filter before let
+    let order1 = [y for x in numbers if x > 1 let y = x * 2];
+    // Filter first: [2, 3], then let: [4, 6]
+
+    // Let before filter
+    let order2 = [y for x in numbers let y = x * 2 if y > 2];
+    // Let first: [2, 4, 6], then filter: [4, 6]
+
+    // Multiple clauses - order matters
+    let order3 = [z for x in [1, 2]
+                  for y in [10, 20]
+                  if x > 1
+                  let z = x + y];
+    // x=1: filtered out
+    // x=2, y=10: z=12
+    // x=2, y=20: z=22
+    // Expected: [12, 22]
+
+    0
+}
+
+// Test comprehensions with complex types
+fn test_complex_types() -> Int {
+    // Maybe types
+    let maybes = [Just(1), Nothing, Just(3)];
+    // This might require special handling
+
+    // Result types
+    // let results = [Ok(1), Err("bad"), Ok(3)];
+
+    // Custom types
+    // type Point = { x: Int, y: Int }
+    // let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+    // let xs = [p.x for p in points];
+
+    0
+}
+
+// Test comprehension with side effects
+fn test_side_effects() -> Int {
+    // Note: Comprehensions should be pure, but testing behavior
+    let counter = 0;
+
+    // Each iteration might have side effects
+    // let with_effects = [increment_counter() for _ in [1, 2, 3]];
+
+    0
+}
+
+// Test very long comprehensions
+fn test_long_comprehensions() -> Int {
+    let large = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+
+    let result = [x * 2 + 1 for x in large if x % 2 == 0 let y = x * 3];
+
+    0
+}
+
+// Test comprehensions with operators
+fn test_operators() -> Int {
+    let nums = [1, 2, 3, 4, 5];
+
+    // All arithmetic operators
+    let add = [x + 1 for x in nums];
+    let sub = [x - 1 for x in nums];
+    let mul = [x * 2 for x in nums];
+    let div = [x / 2 for x in nums];
+    let rem = [x % 2 for x in nums];
+    let pow = [x ** 2 for x in nums];  // If power operator is supported
+
+    // Comparison operators in filter
+    let lt = [x for x in nums if x < 3];
+    let le = [x for x in nums if x <= 3];
+    let gt = [x for x in nums if x > 3];
+    let ge = [x for x in nums if x >= 3];
+    let eq = [x for x in nums if x == 3];
+    let ne = [x for x in nums if x != 3];
+
+    // Logical operators in filter
+    let and_op = [x for x in nums if x > 2 if x < 5];  // Using multiple ifs
+    // let or_op = [x for x in nums if x < 2 || x > 4];  // If OR is supported in filter
+
+    0
+}

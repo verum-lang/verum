@@ -1,0 +1,24 @@
+// Test 3: Call protocol methods
+
+type Printable is protocol {
+    fn to_text(self) -> Text;
+}
+
+type Point is {
+    x: Int,
+    y: Int
+}
+
+implement Printable for Point {
+    fn to_text(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+fn main() {
+    print("Test 3: Calling protocol methods");
+    let p = Point { x: 10, y: 20 };
+    let text = p.to_text();
+    print(text);
+    print("SUCCESS: Protocol method called");
+}

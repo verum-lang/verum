@@ -1,0 +1,24 @@
+// Extended macro invocation tests
+
+fn main() {
+    // Test println! macro
+    println!("=== Testing Macros ===");
+
+    // Test print! macro (no newline)
+    print!("Hello ");
+    print!("World");
+    println!("!");
+
+    // Test vec! macro
+    let numbers = vec![1, 2, 3];
+    let _ = print("Vector created");
+
+    // Test format! macro
+    let msg = format!("Formatted message");
+    let _ = print(msg);
+
+    // Test dbg! macro
+    dbg!("Debug output");
+
+    println!("=== All Tests Complete ===");
+}

@@ -1,0 +1,23 @@
+// Test file to specifically test the ? operator
+
+fn divide(x: Int, y: Int) -> Result<Int, Text> {
+    if y == 0 {
+        Result.Err("division by zero")
+    } else {
+        Result.Ok(x / y)
+    }
+}
+
+fn compute_with_propagation(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+    let x = divide(a, b)?;
+    let y = divide(x, c)?;
+    Result.Ok(y)
+}
+
+fn main() {
+    let result = compute_with_propagation(100, 10, 2);
+    match result {
+        Result.Ok(v) => println(v),
+        Result.Err(e) => println(e),
+    }
+}

@@ -1,0 +1,182 @@
+// =============================================================================
+// async/spawn_config.vr - Spawn Configuration for Structured Concurrency
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core
+// =============================================================================
+//
+// Provides SpawnConfig builder for fine-grained control over spawned tasks.
+// Implements spec: docs/detailed/10-concurrency-model.md Section 3.5
+//
+// =============================================================================
+
+module spawn_config;
+
+mount core.*;
+
+// =============================================================================
+// Recovery Strategies
+// =============================================================================
+
+/// Strategy for recovering from task failures.
+public type RecoveryStrategy is
+    /// No automatic recovery — propagate error
+    None
+    /// Retry with exponential backoff
+    | Retry(RetryConfig)
+    /// Circuit breaker pattern
+    | CircuitBreaker(CircuitBreakerConfig)
+    /// Fallback to a default value
+    | Fallback(Int)
+    /// Delegate to supervisor
+    | Supervised;
+
+/// Configuration for retry strategy.
+public type RetryConfig is {
+    max_retries: Int,
+    initial_delay_ms: Int,
+    max_delay_ms: Int,
+    backoff_factor: Int,  // multiplier (2 = exponential)
+};
+
+implement RetryConfig {
+    /// Default retry: 3 attempts, 100ms initial, 2x backoff, 5s max.
+    public fn default() -> RetryConfig {
+        RetryConfig {
+            max_retries: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_factor: 2,
+        }
+    }
+}
+
+/// Configuration for circuit breaker.
+public type CircuitBreakerConfig is {
+    failure_threshold: Int,
+    reset_timeout_ms: Int,
+    half_open_max_calls: Int,
+};
+
+implement CircuitBreakerConfig {
+    /// Default circuit breaker: 5 failures, 30s reset, 1 half-open call.
+    public fn default() -> CircuitBreakerConfig {
+        CircuitBreakerConfig {
+            failure_threshold: 5,
+            reset_timeout_ms: 30000,
+            half_open_max_calls: 1,
+        }
+    }
+}
+
+// =============================================================================
+// Restart Policies
+// =============================================================================
+
+/// Policy for restarting failed tasks.
+public type RestartPolicy is
+    /// Always restart on failure
+    Permanent
+    /// Restart only on unexpected failure
+    | Transient
+    /// Never restart
+    | Temporary;
+
+// =============================================================================
+// Isolation Levels
+// =============================================================================
+
+/// Isolation level for spawned tasks.
+public type IsolationLevel is
+    /// Share parent's context (default)
+    Shared
+    /// Receive only Send-safe values
+    | SendOnly
+    /// Full isolation — no shared state
+    | Full;
+
+// =============================================================================
+// Priority
+// =============================================================================
+
+/// Task priority hint for the scheduler.
+public type Priority is
+    Low
+    | Normal
+    | High
+    | Critical;
+
+// =============================================================================
+// SpawnConfig Builder
+// =============================================================================
+
+/// Configuration for spawning tasks with fine-grained control.
+///
+/// Usage:
+///   let config = SpawnConfig.new()
+///       .with_recovery(Retry(RetryConfig.default()))
+///       .with_restart(Transient)
+///       .with_priority(High)
+///       .with_timeout_ms(5000);
+///
+///   spawn_with(config) {
+///       do_work()
+///   };
+public type SpawnConfig is {
+    recovery: RecoveryStrategy,
+    restart: RestartPolicy,
+    isolation: IsolationLevel,
+    priority: Priority,
+    timeout_ms: Int,          // 0 = no timeout
+    name: Text,               // task name for debugging
+};
+
+implement SpawnConfig {
+    /// Create default spawn configuration.
+    public fn new() -> SpawnConfig {
+        SpawnConfig {
+            recovery: None,
+            restart: Temporary,
+            isolation: Shared,
+            priority: Normal,
+            timeout_ms: 0,
+            name: "",
+        }
+    }
+
+    /// Set recovery strategy.
+    public fn with_recovery(&mut self, strategy: RecoveryStrategy) -> &mut SpawnConfig {
+        self.recovery = strategy;
+        self
+    }
+
+    /// Set restart policy.
+    public fn with_restart(&mut self, policy: RestartPolicy) -> &mut SpawnConfig {
+        self.restart = policy;
+        self
+    }
+
+    /// Set isolation level.
+    public fn with_isolation(&mut self, level: IsolationLevel) -> &mut SpawnConfig {
+        self.isolation = level;
+        self
+    }
+
+    /// Set priority.
+    public fn with_priority(&mut self, p: Priority) -> &mut SpawnConfig {
+        self.priority = p;
+        self
+    }
+
+    /// Set timeout in milliseconds (0 = no timeout).
+    public fn with_timeout_ms(&mut self, ms: Int) -> &mut SpawnConfig {
+        self.timeout_ms = ms;
+        self
+    }
+
+    /// Set task name for debugging.
+    public fn with_name(&mut self, n: Text) -> &mut SpawnConfig {
+        self.name = n;
+        self
+    }
+}

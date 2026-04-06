@@ -1,0 +1,8 @@
+// Test 2: Where clause refinement
+fn test_where() -> Int where it > 0 {
+    42
+}
+
+fn main() -> Int {
+    test_where()
+}

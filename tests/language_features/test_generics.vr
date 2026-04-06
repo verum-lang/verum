@@ -1,0 +1,75 @@
+// Test: Generics - Generic types and functions
+// Priority: Critical
+// Status: Working - Core generic features
+
+// Generic type definition
+type Pair<T, U> is { first: T, second: U };
+
+// Generic variant type
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// Generic function
+fn identity<T>(value: T) -> T {
+    value
+}
+
+// Generic box type
+type Box<T> is { value: T };
+
+fn main() {
+    print(f"=== Generic Types ===");
+
+    // Test basic generic type
+    let pair1 = Pair { first: 42, second: "hello" };
+    print(f"Pair: {pair1.first}, {pair1.second}");
+
+    // Test generic function
+    let x = identity(100);
+    let s = identity("test");
+    print(f"Identity int: {x}");
+    print(f"Identity text: {s}");
+
+    print(f"=== Generic Variants ===");
+
+    // Test Maybe type
+    let some_value: Maybe<Int> = Maybe.Some(42);
+    let none_value: Maybe<Int> = Maybe.None;
+
+    match some_value {
+        Maybe.Some(v) => print(f"Some: {v}"),
+        Maybe.None => print(f"None"),
+    }
+
+    match none_value {
+        Maybe.Some(v) => print(f"Some: {v}"),
+        Maybe.None => print(f"None"),
+    }
+
+    // Test Result type
+    let ok_result: Result<Int, Text> = Result.Ok(100);
+    let err_result: Result<Int, Text> = Result.Err("error message");
+
+    match ok_result {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Err: {e}"),
+    }
+
+    match err_result {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Err: {e}"),
+    }
+
+    print(f"=== Generic Wrappers ===");
+
+    // Test Box
+    let b = Box { value: 42 };
+    print(f"Box value: {b.value}");
+
+    print(f"All generics tests complete");
+}

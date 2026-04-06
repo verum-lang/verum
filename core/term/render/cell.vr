@@ -1,0 +1,122 @@
+// =============================================================================
+// cell.vr - Terminal cell (one position in the buffer)
+// =============================================================================
+module cell;
+
+mount super.super.style.{Style, Color, Modifier};
+
+/// A terminal cell — one position in the buffer.
+/// Stores a grapheme cluster (not a single char) + style.
+public type Cell is {
+    grapheme: Text,
+    style: Style,
+    skip: Bool,         // Skip during rendering (second cell of wide char)
+};
+
+implement Cell {
+    public const EMPTY: Cell = Cell {
+        grapheme: " ",
+        style: Style.DEFAULT,
+        skip: false,
+    };
+
+    /// Width of the cell in columns (1 for normal chars, 2 for CJK/emoji).
+    public fn width(&self) -> Int {
+        char_display_width(&self.grapheme)
+    }
+
+    /// Set character and style.
+    public fn set_char(&mut self, ch: &Text, style: Style) {
+        self.grapheme = ch.clone();
+        self.style = style;
+        self.skip = false;
+    }
+
+    /// Reset to empty space with default style.
+    public fn reset(&mut self) {
+        self.grapheme = " ";
+        self.style = Style.DEFAULT;
+        self.skip = false;
+    }
+
+    /// Check if this cell is equal to another (for diff).
+    public fn eq(&self, other: &Cell) -> Bool {
+        self.grapheme == other.grapheme
+            && self.style.fg == other.style.fg
+            && self.style.bg == other.style.bg
+            && self.style.add_modifier.bits == other.style.add_modifier.bits
+            && self.style.sub_modifier.bits == other.style.sub_modifier.bits
+            && self.skip == other.skip
+    }
+}
+
+/// Determine the display width of a grapheme/text fragment.
+/// ASCII = 1, CJK Unicode ranges = 2, control chars = 0.
+/// This is a simplified fallback — full Unicode width requires ICU.
+public fn char_display_width(s: &Text) -> Int {
+    if s.len() == 0 { return 0; }
+
+    let first_byte = s.as_bytes()[0];
+
+    // ASCII fast path
+    if first_byte < 0x80 {
+        if first_byte < 0x20 { return 0; }  // Control characters
+        return 1;
+    }
+
+    // Decode first codepoint for width estimation
+    let cp = decode_first_codepoint(s);
+
+    // CJK Unified Ideographs
+    if cp >= 0x4E00 && cp <= 0x9FFF { return 2; }
+    // CJK Extension A
+    if cp >= 0x3400 && cp <= 0x4DBF { return 2; }
+    // CJK Extension B
+    if cp >= 0x20000 && cp <= 0x2A6DF { return 2; }
+    // CJK Compatibility Ideographs
+    if cp >= 0xF900 && cp <= 0xFAFF { return 2; }
+    // Hangul Syllables
+    if cp >= 0xAC00 && cp <= 0xD7AF { return 2; }
+    // Fullwidth Forms
+    if cp >= 0xFF01 && cp <= 0xFF60 { return 2; }
+    if cp >= 0xFFE0 && cp <= 0xFFE6 { return 2; }
+    // Emoji (common ranges)
+    if cp >= 0x1F600 && cp <= 0x1F64F { return 2; }
+    if cp >= 0x1F300 && cp <= 0x1F5FF { return 2; }
+    if cp >= 0x1F680 && cp <= 0x1F6FF { return 2; }
+    if cp >= 0x1F900 && cp <= 0x1F9FF { return 2; }
+    if cp >= 0x2600 && cp <= 0x26FF { return 2; }
+    if cp >= 0x2700 && cp <= 0x27BF { return 2; }
+    // Zero-width characters
+    if cp >= 0x200B && cp <= 0x200F { return 0; }
+    if cp >= 0xFE00 && cp <= 0xFE0F { return 0; }  // Variation selectors
+    if cp >= 0xE0100 && cp <= 0xE01EF { return 0; } // VS17-VS256
+
+    1
+}
+
+/// Decode first Unicode codepoint from UTF-8 text.
+fn decode_first_codepoint(s: &Text) -> Int {
+    let bytes = s.as_bytes();
+    let b0 = bytes[0] as Int;
+
+    if b0 < 0x80 { return b0; }
+    if b0 < 0xC0 { return 0xFFFD; }  // Invalid continuation byte
+
+    if b0 < 0xE0 && bytes.len() >= 2 {
+        return ((b0 & 0x1F) << 6) | (bytes[1] as Int & 0x3F);
+    }
+    if b0 < 0xF0 && bytes.len() >= 3 {
+        return ((b0 & 0x0F) << 12)
+             | ((bytes[1] as Int & 0x3F) << 6)
+             | (bytes[2] as Int & 0x3F);
+    }
+    if b0 < 0xF8 && bytes.len() >= 4 {
+        return ((b0 & 0x07) << 18)
+             | ((bytes[1] as Int & 0x3F) << 12)
+             | ((bytes[2] as Int & 0x3F) << 6)
+             | (bytes[3] as Int & 0x3F);
+    }
+
+    0xFFFD  // Replacement character
+}

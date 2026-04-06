@@ -1,0 +1,399 @@
+// Verum Registry - Authentication Middleware
+//
+// Provides JWT-based authentication middleware with token validation,
+// role-based access control, and request authorization.
+//
+// Features:
+// - Refinement types for validated tokens
+// - Context-based auth protocol integration
+// - Async token verification
+// - Role-based permissions
+
+mount core.collections.{Map, List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// Import context protocols
+mount super.super.contexts.{Auth, Logger};
+mount super.super.domain.errors.{RegistryError};
+
+// ============================================================================
+// Types - Authentication Middleware
+// ============================================================================
+
+/// Configuration for authentication middleware
+pub type AuthConfig is {
+    /// Whether to require authentication for all requests
+    require_auth: Bool,
+
+    /// List of paths that bypass authentication
+    public_paths: List<Text>,
+
+    /// Token expiration time in seconds
+    token_expiration_secs: Int,
+
+    /// Whether to validate token signature
+    validate_signature: Bool,
+
+    /// Allowed roles (empty means all roles allowed)
+    allowed_roles: List<Text>,
+};
+
+/// Validated authentication token with refinement guarantees
+///
+/// Invariants:
+/// - token is non-empty
+/// - user_id is non-empty
+/// - issued_at <= current timestamp
+/// - expires_at > current timestamp (token not expired)
+pub type ValidatedToken is {
+    /// Original token string
+    token: Text where |t| t.len() > 0,
+
+    /// Authenticated user ID
+    user_id: Text where |id| id.len() > 0,
+
+    /// Username
+    username: Text,
+
+    /// User role for authorization
+    role: Text,
+
+    /// Token issued timestamp
+    issued_at: Int where |t| t <= unix_timestamp(),
+
+    /// Token expiration timestamp
+    expires_at: Int where |t| t > unix_timestamp(),
+
+    /// Additional claims/metadata
+    claims: Map<Text, Text>,
+};
+
+/// Authentication result with detailed error information
+pub type AuthResult is
+    | Authenticated(ValidatedToken)
+    | Unauthenticated(Text)
+    | Forbidden(Text)
+    | TokenExpired(Int);  // Expired at timestamp
+
+/// Request context with authentication information
+pub type AuthenticatedRequest<T> is {
+    /// Original request data
+    request: T,
+
+    /// Validated authentication token
+    token: ValidatedToken,
+
+    /// Request metadata
+    metadata: RequestMetadata,
+};
+
+/// Request metadata for tracking
+pub type RequestMetadata is {
+    /// Client IP address
+    client_ip: Text,
+
+    /// Request path
+    path: Text,
+
+    /// HTTP method
+    method: Text,
+
+    /// Request timestamp
+    timestamp: Int,
+
+    /// Request ID for tracing
+    request_id: Text,
+};
+
+// ============================================================================
+// Authentication Middleware Protocol
+// ============================================================================
+
+/// Context protocol for authentication middleware
+///
+/// Provides composable authentication with dependency injection
+pub context protocol AuthMiddleware {
+    /// Validate an incoming request token
+    ///
+    /// Returns ValidatedToken if authentication succeeds
+    async fn authenticate(
+        self,
+        token: Text,
+        metadata: RequestMetadata
+    ) -> Result<ValidatedToken, RegistryError>;
+
+    /// Check if user has required role
+    ///
+    /// Useful for role-based access control
+    async fn authorize(
+        self,
+        token: ValidatedToken,
+        required_role: Text
+    ) -> Result<Bool, RegistryError>;
+
+    /// Check if user has any of the required roles
+    async fn authorize_any(
+        self,
+        token: ValidatedToken,
+        required_roles: List<Text>
+    ) -> Result<Bool, RegistryError>;
+
+    /// Refresh an existing token
+    ///
+    /// Generates new token with extended expiration
+    async fn refresh_token(
+        self,
+        token: ValidatedToken
+    ) -> Result<ValidatedToken, RegistryError>;
+
+    /// Revoke a token (logout)
+    async fn revoke_token(
+        self,
+        token: ValidatedToken
+    ) -> Result<(), RegistryError>;
+}
+
+// ============================================================================
+// Middleware Functions
+// ============================================================================
+
+/// Create authentication middleware with configuration
+///
+/// Example:
+/// ```
+/// let auth_config = AuthConfig {
+///     require_auth: true,
+///     public_paths: List.from(["/health", "/ping"]),
+///     token_expiration_secs: 3600,
+///     validate_signature: true,
+///     allowed_roles: List.new(),
+/// };
+/// let middleware = create_auth_middleware(auth_config);
+/// ```
+pub fn create_auth_middleware(config: AuthConfig) -> AuthConfig {
+    config
+}
+
+/// Validate request authentication token
+///
+/// Extracts token from request headers and validates it against
+/// the Auth context protocol.
+///
+/// Returns ValidatedToken on success or RegistryError on failure.
+pub async fn validate_request_token(
+    token_string: Text,
+    metadata: RequestMetadata,
+    config: AuthConfig
+) -> Result<ValidatedToken, RegistryError>
+    using [Auth, Logger]
+{
+    // Check if path is public
+    if is_public_path(&metadata.path, &config.public_paths) {
+        Logger.debug(f"Path {metadata.path} is public, skipping auth");
+        return create_guest_token(metadata);
+    }
+
+    // Validate token is not empty
+    if token_string.len() == 0 {
+        Logger.warn(f"Empty token for request {metadata.request_id}");
+        return Result.Err(RegistryError.invalid_token("Token is empty"));
+    }
+
+    // Verify token with Auth context
+    let auth_user = match Auth.verify_token(token_string).await {
+        Result.Ok(user) => user,
+        Result.Err(err) => {
+            Logger.warn(f"Token verification failed: {err}");
+            return Result.Err(RegistryError.invalid_token("Invalid token"));
+        },
+    };
+
+    // Check role authorization if configured
+    if config.allowed_roles.len() > 0 {
+        if !config.allowed_roles.contains(auth_user.role) {
+            Logger.warn(f"User {auth_user.username} role {auth_user.role} not allowed");
+            return Result.Err(RegistryError.unauthorized(
+                f"Role {auth_user.role} not permitted"
+            ));
+        }
+    }
+
+    // Create validated token
+    let now = unix_timestamp();
+    let expires = now + config.token_expiration_secs;
+
+    let mut claims = Map.new();
+    claims.insert("user_id", auth_user.id);
+    claims.insert("username", auth_user.username);
+    claims.insert("role", auth_user.role);
+
+    Logger.info(f"User {auth_user.username} authenticated for {metadata.path}");
+
+    Result.Ok(ValidatedToken {
+        token: token_string,
+        user_id: auth_user.id,
+        username: auth_user.username,
+        role: auth_user.role,
+        issued_at: now,
+        expires_at: expires,
+        claims,
+    })
+}
+
+/// Authorize validated token for specific role
+///
+/// Checks if the user's role matches the required role.
+pub async fn authorize_role(
+    token: ValidatedToken,
+    required_role: Text
+) -> Result<Bool, RegistryError>
+    using [Logger]
+{
+    if token.role == required_role {
+        Logger.debug(f"User {token.username} authorized for role {required_role}");
+        Result.Ok(true)
+    } else {
+        Logger.warn(f"User {token.username} lacks role {required_role}");
+        Result.Ok(false)
+    }
+}
+
+/// Authorize validated token for any of the required roles
+///
+/// Returns true if user has at least one of the required roles.
+pub async fn authorize_any_role(
+    token: ValidatedToken,
+    required_roles: List<Text>
+) -> Result<Bool, RegistryError>
+    using [Logger]
+{
+    if required_roles.contains(token.role) {
+        Logger.debug(f"User {token.username} authorized");
+        Result.Ok(true)
+    } else {
+        Logger.warn(f"User {token.username} lacks any required role");
+        Result.Ok(false)
+    }
+}
+
+/// Extract bearer token from Authorization header
+///
+/// Expected format: "Bearer <token>"
+pub fn extract_bearer_token(auth_header: Text) -> Result<Text, RegistryError> {
+    if !auth_header.starts_with("Bearer ") {
+        return Result.Err(RegistryError.invalid_token(
+            "Invalid Authorization header format"
+        ));
+    }
+
+    // Skip "Bearer " prefix (7 characters)
+    // TODO: Implement proper substring or use split method when available
+    let token = auth_header;  // Placeholder until substring is implemented
+
+    if token.len() == 0 {
+        return Result.Err(RegistryError.invalid_token("Token is empty"));
+    }
+
+    Result.Ok(token)
+}
+
+/// Wrap request with authentication context
+///
+/// Creates AuthenticatedRequest combining original request with validated token.
+pub fn wrap_authenticated_request<T>(
+    request: T,
+    token: ValidatedToken,
+    metadata: RequestMetadata
+) -> AuthenticatedRequest<T> {
+    AuthenticatedRequest {
+        request,
+        token,
+        metadata,
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Check if request path is in public paths list
+fn is_public_path(path: &Text, public_paths: &List<Text>) -> Bool {
+    for public_path in public_paths {
+        if path.starts_with(public_path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Create guest token for public endpoints
+///
+/// Allows unauthenticated access to public paths while maintaining
+/// consistent token-based request handling.
+fn create_guest_token(metadata: RequestMetadata) -> Result<ValidatedToken, RegistryError> {
+    let now = unix_timestamp();
+    let expires = now + 300;  // 5 minute guest token
+
+    let mut claims = Map.new();
+    claims.insert("guest", "true");
+    claims.insert("path", metadata.path);
+
+    Result.Ok(ValidatedToken {
+        token: "guest",
+        user_id: "guest",
+        username: "guest",
+        role: "guest",
+        issued_at: now,
+        expires_at: expires,
+        claims,
+    })
+}
+
+/// Check if token is expired
+pub fn is_token_expired(token: &ValidatedToken) -> Bool {
+    token.expires_at <= unix_timestamp()
+}
+
+/// Get time until token expiration in seconds
+pub fn token_time_to_expiry(token: &ValidatedToken) -> Int {
+    let now = unix_timestamp();
+    if token.expires_at > now {
+        token.expires_at - now
+    } else {
+        0
+    }
+}
+
+/// Require admin role for request
+///
+/// Convenience function for endpoints requiring admin access.
+pub async fn require_admin(token: ValidatedToken) -> Result<ValidatedToken, RegistryError>
+    using [Logger]
+{
+    if token.role != "admin" {
+        Logger.warn(f"Admin access denied for user {token.username}");
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    Result.Ok(token)
+}
+
+/// Require specific user ID match
+///
+/// Ensures user can only access their own resources.
+pub async fn require_user_match(
+    token: ValidatedToken,
+    required_user_id: Text
+) -> Result<ValidatedToken, RegistryError>
+    using [Logger]
+{
+    if token.user_id != required_user_id && token.role != "admin" {
+        Logger.warn(f"User {token.username} cannot access user {required_user_id}");
+        return Result.Err(RegistryError.unauthorized(
+            "Cannot access other user's resources"
+        ));
+    }
+
+    Result.Ok(token)
+}

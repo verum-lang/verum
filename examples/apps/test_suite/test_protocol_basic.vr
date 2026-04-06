@@ -1,0 +1,11 @@
+// Test 1: Basic Protocol Definition
+// Tests: protocol definition with single method
+
+type Greeter is protocol {
+    fn greet(&self) -> Int;
+}
+
+fn main() -> Int {
+    // Protocol defined successfully if we get here
+    42
+}

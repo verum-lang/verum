@@ -1,0 +1,116 @@
+// =============================================================================
+// raw/cursor.vr - Cursor Positioning & Shape Control
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.io, escape.vr, mod.vr (CursorShape)
+// =============================================================================
+//
+// Cursor movement, visibility, shape, save/restore via ANSI escape sequences.
+// All functions take an EscapeWriter so they work with any backend.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
+// =============================================================================
+
+module cursor;
+
+mount core.io.IoResult;
+mount super.escape.EscapeWriter;
+mount super.CursorShape;
+
+// =============================================================================
+// Save / Restore
+// =============================================================================
+
+/// Save cursor position (DECSC).
+public fn save_position(w: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    let _ = w.write("\x1b7".as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    Ok(())
+}
+
+/// Restore cursor position (DECRC).
+public fn restore_position(w: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    let _ = w.write("\x1b8".as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    Ok(())
+}
+
+// =============================================================================
+// Absolute / Relative Movement
+// =============================================================================
+
+/// Move cursor to absolute position (0-indexed input, converted to 1-indexed for terminal).
+public fn move_to(w: &mut (dyn EscapeWriter), col: Int, row: Int) -> IoResult<()> {
+    w.write_csi(&[row + 1, col + 1], 'H' as Byte)
+}
+
+/// Move cursor up by n lines (CUU).
+public fn move_up(w: &mut (dyn EscapeWriter), n: Int) -> IoResult<()> {
+    if n > 0 { w.write_csi(&[n], 'A' as Byte) } else { let ok: IoResult<()> = Ok(()); ok }
+}
+
+/// Move cursor down by n lines (CUD).
+public fn move_down(w: &mut (dyn EscapeWriter), n: Int) -> IoResult<()> {
+    if n > 0 { w.write_csi(&[n], 'B' as Byte) } else { let ok: IoResult<()> = Ok(()); ok }
+}
+
+/// Move cursor right by n columns (CUF).
+public fn move_right(w: &mut (dyn EscapeWriter), n: Int) -> IoResult<()> {
+    if n > 0 { w.write_csi(&[n], 'C' as Byte) } else { let ok: IoResult<()> = Ok(()); ok }
+}
+
+/// Move cursor left by n columns (CUB).
+public fn move_left(w: &mut (dyn EscapeWriter), n: Int) -> IoResult<()> {
+    if n > 0 { w.write_csi(&[n], 'D' as Byte) } else { let ok: IoResult<()> = Ok(()); ok }
+}
+
+/// Move cursor to column n (0-indexed, CHA).
+public fn move_to_column(w: &mut (dyn EscapeWriter), col: Int) -> IoResult<()> {
+    w.write_csi(&[col + 1], 'G' as Byte)
+}
+
+/// Move cursor to row n (0-indexed, VPA).
+public fn move_to_row(w: &mut (dyn EscapeWriter), row: Int) -> IoResult<()> {
+    w.write_csi(&[row + 1], 'd' as Byte)
+}
+
+// =============================================================================
+// Visibility (DECTCEM)
+// =============================================================================
+
+/// Show cursor (DECTCEM set).
+public fn show(w: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    let _ = w.write("\x1b[?25h".as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    Ok(())
+}
+
+/// Hide cursor (DECTCEM reset).
+public fn hide(w: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    let _ = w.write("\x1b[?25l".as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    Ok(())
+}
+
+// =============================================================================
+// Cursor Shape (DECSCUSR)
+// =============================================================================
+
+/// Set cursor shape (DECSCUSR).
+public fn set_shape(w: &mut (dyn EscapeWriter), shape: CursorShape) -> IoResult<()> {
+    let code = match shape {
+        CursorShape.BlinkingBlock => 1,
+        CursorShape.SteadyBlock => 2,
+        CursorShape.BlinkingUnderline => 3,
+        CursorShape.SteadyUnderline => 4,
+        CursorShape.BlinkingBar => 5,
+        CursorShape.SteadyBar => 6,
+    };
+    let _ = w.write(f"\x1b[{code} q".as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    Ok(())
+}
+
+// =============================================================================
+// Query
+// =============================================================================
+
+/// Query cursor position (DSR 6). Response arrives as CSI row ; col R.
+public fn query_position(w: &mut (dyn EscapeWriter)) -> IoResult<()> {
+    w.write_csi(&[6], 'n' as Byte)
+}

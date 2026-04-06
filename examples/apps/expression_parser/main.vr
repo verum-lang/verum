@@ -1,0 +1,129 @@
+// Simple Expression Evaluator
+// Demonstrates: recursion, variant types, pattern matching
+
+type Expr is
+    Num(Float) |
+    Add(Expr, Expr) |
+    Sub(Expr, Expr) |
+    Mul(Expr, Expr) |
+    Div(Expr, Expr) |
+    Neg(Expr);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+// Evaluate an expression
+fn eval(expr: Expr) -> Result<Float, Text> {
+    match expr {
+        Num(n) => Ok(n),
+        Neg(e) => {
+            match eval(e) {
+                Ok(v) => Ok(0.0 - v),
+                Err(msg) => Err(msg)
+            }
+        },
+        Add(left, right) => {
+            match eval(left) {
+                Ok(l) => match eval(right) {
+                    Ok(r) => Ok(l + r),
+                    Err(msg) => Err(msg)
+                },
+                Err(msg) => Err(msg)
+            }
+        },
+        Sub(left, right) => {
+            match eval(left) {
+                Ok(l) => match eval(right) {
+                    Ok(r) => Ok(l - r),
+                    Err(msg) => Err(msg)
+                },
+                Err(msg) => Err(msg)
+            }
+        },
+        Mul(left, right) => {
+            match eval(left) {
+                Ok(l) => match eval(right) {
+                    Ok(r) => Ok(l * r),
+                    Err(msg) => Err(msg)
+                },
+                Err(msg) => Err(msg)
+            }
+        },
+        Div(left, right) => {
+            match eval(left) {
+                Ok(l) => match eval(right) {
+                    Ok(r) => {
+                        if r == 0.0 {
+                            Err("Division by zero")
+                        } else {
+                            Ok(l / r)
+                        }
+                    },
+                    Err(msg) => Err(msg)
+                },
+                Err(msg) => Err(msg)
+            }
+        }
+    }
+}
+
+// Helper to print result
+fn print_result(name: Text, result: Result<Float, Text>) {
+    match result {
+        Ok(v) => { let _ = print(f"  {name} = {v}"); },
+        Err(e) => { let _ = print(f"  {name} = Error: {e}"); }
+    }
+}
+
+fn main() {
+    let _ = print("=== Expression Evaluator ===");
+    let _ = print("");
+
+    // Build some expressions
+    let _ = print("Evaluating expressions:");
+
+    // Simple: 5
+    let e1 = Num(5.0);
+    print_result("5", eval(e1));
+
+    // Addition: 3 + 4
+    let e2 = Add(Num(3.0), Num(4.0));
+    print_result("3 + 4", eval(e2));
+
+    // Subtraction: 10 - 3
+    let e3 = Sub(Num(10.0), Num(3.0));
+    print_result("10 - 3", eval(e3));
+
+    // Multiplication: 6 * 7
+    let e4 = Mul(Num(6.0), Num(7.0));
+    print_result("6 * 7", eval(e4));
+
+    // Division: 20 / 4
+    let e5 = Div(Num(20.0), Num(4.0));
+    print_result("20 / 4", eval(e5));
+
+    // Negation: -5
+    let e6 = Neg(Num(5.0));
+    print_result("-5", eval(e6));
+
+    // Complex: (3 + 4) * 2
+    let e7 = Mul(Add(Num(3.0), Num(4.0)), Num(2.0));
+    print_result("(3 + 4) * 2", eval(e7));
+
+    // Complex: 10 - 2 * 3
+    let e8 = Sub(Num(10.0), Mul(Num(2.0), Num(3.0)));
+    print_result("10 - (2 * 3)", eval(e8));
+
+    // Division by zero
+    let e9 = Div(Num(5.0), Num(0.0));
+    print_result("5 / 0", eval(e9));
+
+    // Nested: ((1 + 2) * (3 + 4)) / 7
+    let e10 = Div(
+        Mul(Add(Num(1.0), Num(2.0)), Add(Num(3.0), Num(4.0))),
+        Num(7.0)
+    );
+    print_result("((1+2)*(3+4))/7", eval(e10));
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

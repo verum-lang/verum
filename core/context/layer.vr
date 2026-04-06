@@ -1,0 +1,64 @@
+// =============================================================================
+// context/layer.vr — Context Layer Composition
+// =============================================================================
+// Grammar: layer_def = visibility 'layer' identifier layer_body
+//          layer_body = '{' { provide_stmt } '}' | '=' layer_expr ';'
+//          layer_expr = identifier { '+' identifier }
+// Spec: docs/detailed/16-context-system.md
+// =============================================================================
+
+module layer;
+
+// =============================================================================
+// Layer Composition
+// =============================================================================
+//
+// Layers are compile-time constructs that group `provide` statements for
+// modular application assembly. The compiler resolves dependencies between
+// layers and generates optimal initialization order.
+//
+// # Defining Layers
+//
+// ```verum
+// layer DatabaseLayer {
+//     provide ConnectionPool = ConnectionPool.new(Config.get_url());
+//     provide QueryExecutor = QueryExecutor.new(ConnectionPool);
+//     provide Migrations = Migrations.new(ConnectionPool);
+// }
+//
+// layer LoggingLayer {
+//     provide Logger = ConsoleLogger.new(Config.get_level());
+//     provide Metrics = PrometheusMetrics.new(Config.get_endpoint());
+// }
+// ```
+//
+// # Composing Layers
+//
+// Layers compose via `+` for modular assembly:
+//
+// ```verum
+// layer AppLayer = DatabaseLayer + LoggingLayer;
+//
+// fn main() {
+//     provide AppLayer;  // Expands all provides in dependency order
+//     run_server();
+// }
+// ```
+//
+// # Dependency Order
+//
+// Within a layer, provides are executed in declaration order.
+// When composing, left-to-right: `A + B + C` → A's provides, then B's, then C's.
+// The compiler detects circular dependencies at compile time.
+//
+// # Layer vs Context Group
+//
+// | Feature | Context Group | Layer |
+// |---------|--------------|-------|
+// | Defines | Required contexts | Provided values |
+// | Syntax | `using WebCtx = [Database, Logger]` | `layer WebLayer { provide ... }` |
+// | Usage | `fn f() using [WebCtx]` | `provide WebLayer;` |
+// | Phase | Compile-time (requirement list) | Runtime (initialization) |
+//
+// Context groups declare WHAT you need. Layers declare HOW to provide it.
+// They are complementary: use groups in function signatures, layers at boundaries.

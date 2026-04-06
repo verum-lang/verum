@@ -1,0 +1,14 @@
+// =============================================================================
+// mod.vr - Verum Bootstrap Compiler
+// =============================================================================
+// The self-hosted Verum compiler, written in Verum.
+// Stage 1: Compiled by the Rust host compiler (Stage 0).
+// Stage 2: Compiles itself (self-hosting verification).
+// =============================================================================
+
+module bootstrap;
+
+public module token;
+public module lexer;
+public module ast;
+public module parser;

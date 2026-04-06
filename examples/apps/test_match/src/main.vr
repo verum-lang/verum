@@ -1,0 +1,82 @@
+// Test pattern matching - Extended with string patterns
+
+// Test string literal pattern matching
+fn match_string(s: Text) -> Text {
+    match s {
+        "+" => "plus",
+        "-" => "minus",
+        "*" => "times",
+        "/" => "divide",
+        _ => "unknown"
+    }
+}
+
+type Color is | Red | Green | Blue;
+
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float)
+    | Square(Float);
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+fn area(s: Shape) -> Float {
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle(w, h) => w * h,
+        Square(side) => side * side
+    }
+}
+
+fn get_or_default(m: Maybe<Int>, default: Int) -> Int {
+    match m {
+        Some(v) => v,
+        None => default
+    }
+}
+
+fn main() {
+    // String pattern matching
+    print("Testing string patterns:");
+    let r1 = match_string("+");
+    print(r1);
+    let r2 = match_string("-");
+    print(r2);
+    let r3 = match_string("*");
+    print(r3);
+    let r4 = match_string("?");
+    print(r4);
+
+    // Color matching
+    let red = Red;
+    let name = color_name(red);
+    print(f"Color: {name}");
+
+    // Shape matching
+    let circle = Circle(5.0);
+    let a1 = area(circle);
+    print(f"Circle area: {a1}");
+
+    let rect = Rectangle(3.0, 4.0);
+    let a2 = area(rect);
+    print(f"Rectangle area: {a2}");
+
+    // Maybe matching
+    let some_val = Some(42);
+    let v1 = get_or_default(some_val, 0);
+    print(f"Some value: {v1}");
+
+    let no_val = None;
+    let v2 = get_or_default(no_val, -1);
+    print(f"None value: {v2}");
+}

@@ -1,0 +1,112 @@
+// Test: Refinements - Refinement types (Working subset)
+// Priority: Critical
+// Expected output: Refinement type validation
+// NOTE: Full refinement checking requires SMT solver integration
+// NOTE: Tuple and record refinements not yet supported in parser
+
+// 1. Basic refinement syntax - WORKS
+type PositiveInt is Int where it > 0;
+type NonZeroInt is Int where it != 0;
+type Percentage is Int where it >= 0 && it <= 100;
+
+// 2. Simple functions with parameter refinements - WORKS
+fn divide(a: Int, b: Int where it != 0) -> Int {
+    a / b
+}
+
+fn absolute(x: Int) -> Int {
+    if x < 0 {
+        -x
+    } else {
+        x
+    }
+}
+
+fn clamp(value: Int, min: Int, max: Int) -> Int {
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value
+    }
+}
+
+// 3. Nested refinements - WORKS
+type ValidAge is Int where it >= 0 && it <= 150;
+type AdultAge is ValidAge where it >= 18;
+
+// 4. Text refinements with method calls - WORKS
+type NonEmptyText is Text where it.len() > 0;
+type ShortText is Text where it.len() <= 256;
+
+// 5. Range refinements - WORKS
+type DayOfMonth is Int where it >= 1 && it <= 31;
+type MonthOfYear is Int where it >= 1 && it <= 12;
+type Year is Int where it >= 1900 && it <= 2100;
+
+// 6. Record type WITHOUT refinement (record refinements not yet supported)
+type Rectangle is {
+    width: Int,
+    height: Int
+};
+
+fn area(rect: Rectangle) -> Int {
+    rect.width * rect.height
+}
+
+// 7. Date using refined component types
+type Date is {
+    day: DayOfMonth,
+    month: MonthOfYear,
+    year: Year
+};
+
+fn main() {
+    // Test basic refinements
+    let pos: PositiveInt = 10;
+    print(f"Positive: {pos}");
+
+    let nonzero: NonZeroInt = 5;
+    print(f"Non-zero: {nonzero}");
+
+    let pct: Percentage = 75;
+    print(f"Percentage: {pct}");
+
+    // Test refined function parameters
+    let result = divide(10, 2);
+    print(f"Division: {result}");
+
+    let abs_val = absolute(-5);
+    print(f"Absolute: {abs_val}");
+
+    let clamped = clamp(150, 0, 100);
+    print(f"Clamped: {clamped}");
+
+    // Test nested refinements
+    let age: ValidAge = 25;
+    let adult: AdultAge = age;
+    print(f"Adult age: {adult}");
+
+    // Test text refinements
+    let non_empty: NonEmptyText = "hello";
+    print(f"Non-empty: {non_empty}");
+
+    let short_text: ShortText = "This is a short text";
+    print(f"Short text: {short_text}");
+
+    // Test rectangle (without refinement)
+    let rect = Rectangle { width: 10, height: 20 };
+    let rect_area = area(rect);
+    print(f"Rectangle area: {rect_area}");
+
+    // Test date with refined fields
+    let date = Date {
+        day: 15,
+        month: 6,
+        year: 2024
+    };
+    print(f"Date: {date.day}/{date.month}/{date.year}");
+
+    print(f"All refinement tests complete");
+}

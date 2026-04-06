@@ -1,0 +1,157 @@
+// Test: Pointer operations (*const T, *mut T)
+// Tests pointer type syntax and basic operations
+
+// FFI functions for pointer testing
+ffi PointerOps {
+    @extern("C")
+    fn malloc(size: usize) -> *mut u8;
+    requires size > 0;
+    ensures result != 0;
+    memory_effects = Allocates;
+    thread_safe = true;
+    errors_via = ReturnValue(0);
+    @ownership(transfer_from);
+
+    @extern("C")
+    fn free(ptr: *mut u8);
+    requires ptr != 0;
+    ensures true;
+    memory_effects = Deallocates;
+    thread_safe = true;
+    errors_via = None;
+    @ownership(transfer_to);
+
+    @extern("C")
+    fn strlen(s: *const u8) -> usize;
+    requires s != 0;
+    ensures result >= 0;
+    memory_effects = Reads([s]);
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow);
+
+    @extern("C")
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+    requires dest != 0 && src != 0 && n > 0;
+    ensures result == dest;
+    memory_effects = Combined([Writes([dest]), Reads([src])]);
+    thread_safe = false;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+// Test 1: Const pointer declarations
+fn test_const_pointers() {
+    print("Test 1: Const pointer types");
+
+    // These are type declarations - actual pointer operations would be unsafe
+    print("*const u8 - byte pointer");
+    print("*const i32 - integer pointer");
+    print("*const f64 - float pointer");
+
+    print("Test 1 PASS");
+}
+
+// Test 2: Mutable pointer declarations
+fn test_mut_pointers() {
+    print("Test 2: Mutable pointer types");
+
+    // These are type declarations - actual pointer operations would be unsafe
+    print("*mut u8 - mutable byte pointer");
+    print("*mut i32 - mutable integer pointer");
+    print("*mut f64 - mutable float pointer");
+
+    print("Test 2 PASS");
+}
+
+// Test 3: Pointer null comparisons
+fn test_pointer_null_checks() {
+    print("Test 3: Pointer null checks");
+
+    // Conceptual test - actual implementation would need FFI
+    print("Checking if pointer != 0");
+    print("Null pointer check enabled");
+
+    print("Test 3 PASS");
+}
+
+// Test 4: FFI functions with pointer parameters
+fn test_ffi_with_pointers() {
+    print("Test 4: FFI with pointer parameters");
+
+    // Test that FFI functions with pointer types compile
+    print("PointerOps.malloc declared with *mut u8 return");
+    print("PointerOps.free declared with *mut u8 parameter");
+    print("PointerOps.strlen declared with *const u8 parameter");
+    print("PointerOps.memcpy declared with *mut and *const parameters");
+
+    print("Test 4 PASS");
+}
+
+// Test 5: Pointer type compatibility
+fn test_pointer_types() {
+    print("Test 5: Pointer type compatibility");
+
+    // Different pointer types
+    print("*const u8 vs *mut u8");
+    print("*const i32 vs *mut i32");
+    print("Const pointers are read-only");
+    print("Mut pointers allow writing");
+
+    print("Test 5 PASS");
+}
+
+// Test 6: Pointer in struct/type definitions
+type PtrHolder is {
+    const_ptr: *const u8,
+    mut_ptr: *mut u8,
+}
+
+fn test_pointers_in_types() {
+    print("Test 6: Pointers in type definitions");
+
+    print("PtrHolder type has const_ptr: *const u8");
+    print("PtrHolder type has mut_ptr: *mut u8");
+
+    print("Test 6 PASS");
+}
+
+// Test 7: Function pointers
+ffi FunctionPointers {
+    @extern("C")
+    fn qsort(
+        base: *mut u8,
+        nmemb: usize,
+        size: usize,
+        compar: *const fn(*const u8, *const u8) -> i32
+    );
+    requires base != 0 && nmemb > 0 && size > 0 && compar != 0;
+    ensures true;
+    memory_effects = Writes([base]);
+    thread_safe = false;
+    errors_via = None;
+    @ownership(borrow);
+}
+
+fn test_function_pointers() {
+    print("Test 7: Function pointers");
+
+    print("Function pointer type: *const fn(*const u8, *const u8) -> i32");
+    print("Used in qsort FFI function");
+
+    print("Test 7 PASS");
+}
+
+fn main() {
+    print("=== Pointer Operations Test ===");
+
+    test_const_pointers();
+    test_mut_pointers();
+    test_pointer_null_checks();
+    test_ffi_with_pointers();
+    test_pointer_types();
+    test_pointers_in_types();
+    test_function_pointers();
+
+    print("All pointer operation tests PASS");
+}

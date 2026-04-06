@@ -1,0 +1,31 @@
+// Test: CL-009/CL-010 + EH-001/EH-002 - Maybe and Result types
+// Priority: Critical
+// Expected output: Maybe and Result handling
+
+fn main() {
+    // Maybe with Some
+    let x: Maybe<Int> = Maybe.Some(42);
+    match x {
+        Maybe.Some(v) => print(f"Got: {v}"),
+        Maybe.None => print(f"None"),
+    }
+
+    // Maybe with None and null coalescing
+    let y: Maybe<Int> = Maybe.None;
+    let z = y ?? 0;
+    print(f"Default: {z}");
+
+    // Result Ok
+    let ok_result: Result<Int, Text> = Result.Ok(100);
+    match ok_result {
+        Result.Ok(v) => print(f"Success: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // Result Err
+    let err_result: Result<Int, Text> = Result.Err("Failed");
+    match err_result {
+        Result.Ok(v) => print(f"Success: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+}

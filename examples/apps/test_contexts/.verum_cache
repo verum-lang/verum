@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_contexts/src/main.vr": {
+      "hash": "59fe3952f57e0e0267d77767a7314bc32125662391ca50714eda4b14eb3969ea",
+      "timestamp": {
+        "secs_since_epoch": 1765117262,
+        "nanos_since_epoch": 781303637
+      },
+      "size": 5292
+    }
+  },
+  "artifacts": {}
+}

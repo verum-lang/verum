@@ -1,0 +1,11 @@
+// Test basic yield expression
+fn generator() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+    0
+}
+
+fn main() {
+    println("Testing yield");
+}

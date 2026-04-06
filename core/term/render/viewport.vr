@@ -1,0 +1,84 @@
+// =============================================================================
+// render/viewport.vr - Viewport Modes
+// =============================================================================
+// Layer: 3 (Rendering Engine)
+// Dependencies: layout/rect.vr
+// =============================================================================
+//
+// Viewport modes determine how the terminal renders content: fullscreen
+// (alternate buffer), inline (within normal terminal flow), or fixed
+// (a specific rectangular area).
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 7.3
+// =============================================================================
+
+module viewport;
+
+mount super.super.layout.rect.Rect;
+
+// =============================================================================
+// Viewport — rendering mode
+// =============================================================================
+
+/// Viewport mode — how the terminal renders content.
+///
+/// - Fullscreen: uses the alternate screen buffer for the entire terminal.
+/// - Inline: renders within the normal terminal flow, occupying a fixed
+///   number of rows from the current cursor position downward.
+/// - Fixed: renders into a specific rectangular area of the terminal.
+public type Viewport is
+    | Fullscreen
+    | Inline { height: Int }
+    | Fixed { area: Rect };
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement Viewport {
+    /// Create a fullscreen viewport (alternate screen buffer).
+    public fn fullscreen() -> Viewport {
+        Viewport.Fullscreen
+    }
+
+    /// Create an inline viewport with the given height in rows.
+    public fn inline(height: Int) -> Viewport {
+        Viewport.Inline { height: height.max(1) }
+    }
+
+    /// Create a fixed viewport at a specific area.
+    public fn fixed(area: Rect) -> Viewport {
+        Viewport.Fixed { area: area }
+    }
+
+    /// Get the effective rendering area for this viewport given terminal size.
+    ///
+    /// - Fullscreen: entire terminal (0, 0, cols, rows)
+    /// - Inline: (0, 0, cols, min(height, rows)) — positioned by the backend
+    /// - Fixed: the stored area, clipped to terminal bounds
+    public fn get_area(&self, cols: Int, rows: Int) -> Rect {
+        match self {
+            Viewport.Fullscreen => {
+                Rect.new(0, 0, cols, rows)
+            },
+            Viewport.Inline { height } => {
+                let h = if height < rows { height } else { rows };
+                Rect.new(0, 0, cols, h)
+            },
+            Viewport.Fixed { area } => {
+                // Clip to terminal bounds
+                let w = if area.x + area.width > cols { (cols - area.x).max(0) } else { area.width };
+                let h = if area.y + area.height > rows { (rows - area.y).max(0) } else { area.height };
+                Rect.new(area.x, area.y, w, h)
+            },
+        }
+    }
+
+    /// Check if this viewport uses the alternate screen buffer.
+    public fn uses_alternate_screen(&self) -> Bool {
+        match self {
+            Viewport.Fullscreen => true,
+            _ => false,
+        }
+    }
+}

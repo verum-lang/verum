@@ -1,0 +1,16 @@
+// Step 4: Test nested generics (simplified)
+
+type Box<T> is {
+    value: T
+}
+
+fn nest_box<T>(x: T) -> Box<Box<T>> {
+    Box { value: Box { value: x } }
+}
+
+fn main() -> Int {
+    let nb = nest_box(42);
+    let inner = nb.value;
+    let result = inner.value;
+    result
+}

@@ -1,0 +1,7 @@
+// Test sigma type refinements
+
+type ValidText is s: Text where s.len() > 5;
+
+fn main() {
+    print("Sigma type refinement test");
+}

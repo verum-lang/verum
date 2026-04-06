@@ -1,0 +1,9 @@
+// Minimal test for inline refinements
+
+// Simple inline refinement
+type Positive is Int{it > 0};
+
+fn main() {
+    let x: Positive = 5;
+    let _ = print(f"x = {x}");
+}

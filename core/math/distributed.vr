@@ -1,0 +1,1025 @@
+// =============================================================================
+// distributed.vr - Distributed Training Infrastructure (L8)
+// =============================================================================
+// Layer: 8 (Distributed Computing)
+//
+// Multi-node, multi-GPU training infrastructure for large-scale deep learning.
+//
+// # Architecture
+//
+// - Data Parallelism: DataParallel, DDP (Distributed Data Parallel)
+// - Model Parallelism: Tensor Parallelism, Pipeline Parallelism
+// - Memory Optimization: FSDP (Fully Sharded Data Parallel)
+// - Collective Operations: All-reduce, All-gather, Reduce-scatter, etc.
+// - Actor Mesh: Monarch-inspired distributed computing abstraction
+// - Supervision: Fault-tolerant distributed training
+// - RDMA: Zero-copy remote memory access
+//
+// # Communication Backends
+//
+// - NCCL: NVIDIA Collective Communications Library (GPU)
+// - Gloo: Facebook's collective communications library (CPU)
+// - MPI: Message Passing Interface
+//
+// Spec: docs/architecture/math-spec.md#41-44
+// =============================================================================
+
+module core.math.distributed;
+
+mount core.math.tensor.{
+    DynTensor, zeros, ones, full, slice, cat, reshape, gather, scatter_add,
+    add, mul, div, transpose, matmul, sum_axis, flatten,
+};
+mount core.math.nn.{Module, Linear, Parameter};
+mount core.math.gpu.{DeviceId, with_device, current_device};
+mount core.prelude.{
+    List, Maybe, Bool, USize, ISize, Float, U64,
+    Duration, Instant, Channel, Future, Error,
+};
+
+// =============================================================================
+// Process Group and Communication Backend
+// =============================================================================
+
+// Communication backend for distributed operations
+public type CommBackend is
+    // NVIDIA Collective Communications Library (GPU-optimized)
+    | NCCL
+    // Facebook Gloo (CPU-optimized)
+    | Gloo
+    // Message Passing Interface
+    | MPI;
+
+// Process group for distributed communication
+public type ProcessGroup is {
+    // Ranks in this group
+    ranks: List<USize>,
+    // Communication backend
+    backend: CommBackend,
+    // Group handle
+    handle: ProcessGroupHandle,
+};
+
+// Opaque process group handle
+type ProcessGroupHandle is (U64);
+
+implement ProcessGroup {
+    // Create a new process group from all ranks
+    public fn world() -> Self {
+        @vbc(DIST_WORLD_GROUP)
+    }
+
+    // Create a process group from specific ranks
+    public fn from_ranks(ranks: List<USize>) -> Self {
+        @vbc(DIST_NEW_GROUP, ranks)
+    }
+
+    // Get the number of processes in this group
+    public fn size(&self) -> USize {
+        self.ranks.len()
+    }
+
+    // Get the rank of the current process in this group
+    public fn rank(&self) -> USize {
+        @vbc(DIST_GET_RANK, self)
+    }
+
+    // Check if this process is the root (rank 0)
+    public fn is_root(&self) -> Bool {
+        self.rank() == 0
+    }
+}
+
+// Get the current process rank in the world group
+public fn current_rank() -> USize {
+    ProcessGroup.world().rank()
+}
+
+// Get the world size (total number of processes)
+public fn world_size() -> USize {
+    ProcessGroup.world().size()
+}
+
+// =============================================================================
+// Reduction Operations
+// =============================================================================
+
+// Reduction operations for collective communication
+public type ReduceOp is
+    // Sum of all values
+    | Sum
+    // Average of all values
+    | Avg
+    // Minimum value
+    | Min
+    // Maximum value
+    | Max
+    // Product of all values
+    | Product;
+
+// =============================================================================
+// Collective Operations
+// =============================================================================
+
+// All-reduce: reduce across all ranks, result on all ranks
+// T_out[i] = op(T_0[i], T_1[i], ..., T_{n-1}[i]) for all ranks
+public fn all_reduce<T>(
+    t: &mut DynTensor<T>,
+    group: &ProcessGroup,
+    op: ReduceOp,
+) {
+    @vbc(COLLECTIVE_ALL_REDUCE, t, group, op)
+}
+
+// All-gather: gather tensors from all ranks to all ranks
+// Result: concatenated tensors from all ranks
+public fn all_gather<T>(
+    t: &DynTensor<T>,
+    group: &ProcessGroup,
+) -> DynTensor<T> {
+    @vbc(COLLECTIVE_ALL_GATHER, t, group)
+}
+
+// Reduce-scatter: reduce then scatter result
+// Each rank gets a different portion of the reduced result
+public fn reduce_scatter<T>(
+    t: &DynTensor<T>,
+    group: &ProcessGroup,
+    op: ReduceOp,
+) -> DynTensor<T> {
+    @vbc(COLLECTIVE_REDUCE_SCATTER, t, group, op)
+}
+
+// Broadcast: send tensor from src to all ranks
+public fn broadcast<T>(
+    t: &mut DynTensor<T>,
+    src: USize,
+    group: &ProcessGroup,
+) {
+    @vbc(COLLECTIVE_BROADCAST, t, src, group)
+}
+
+// Scatter: send chunks from src to each rank
+public fn scatter<T>(
+    t: &DynTensor<T>,
+    group: &ProcessGroup,
+) -> DynTensor<T> {
+    @vbc(COLLECTIVE_SCATTER, t, group)
+}
+
+// Gather: collect chunks from each rank to dst
+public fn gather<T>(
+    t: &DynTensor<T>,
+    dst: USize,
+    group: &ProcessGroup,
+) -> Maybe<DynTensor<T>> {
+    @vbc(COLLECTIVE_GATHER, t, dst, group)
+}
+
+// Point-to-point send
+public fn send<T>(t: &DynTensor<T>, dst: USize) {
+    @vbc(P2P_SEND, t, dst)
+}
+
+// Point-to-point receive
+public fn recv<T>(src: USize) -> DynTensor<T> {
+    @vbc(P2P_RECV, src)
+}
+
+// Send to specific rank
+public fn send_to<T>(dst: USize, t: &DynTensor<T>) {
+    send(t, dst)
+}
+
+// Receive from specific rank
+public fn recv_from<T>(src: USize) -> DynTensor<T> {
+    recv(src)
+}
+
+// Barrier synchronization
+public fn barrier(group: &ProcessGroup) {
+    @vbc(COLLECTIVE_BARRIER, group)
+}
+
+// =============================================================================
+// Data Parallelism
+// =============================================================================
+
+// Data-parallel model wrapper (single-node, multi-GPU)
+public type DataParallel<M> is {
+    model: M,
+    device_ids: List<USize>,
+    output_device: USize,
+};
+
+implement<M: Module<In, Out>, In, Out> DataParallel<M> {
+    public fn new(model: M, device_ids: &[USize]) -> Self {
+        assert(!device_ids.is_empty(), "need at least one device");
+        DataParallel {
+            model,
+            device_ids: device_ids.to_list(),
+            output_device: device_ids[0],
+        }
+    }
+
+    // Replicate model to all devices
+    fn replicate(&self) -> List<M> {
+        self.device_ids.iter().map(|&device| {
+            with_device(DeviceId.gpu(device as U16), || self.model.clone())
+        }).collect()
+    }
+
+    // Scatter input across devices
+    fn scatter(&self, input: &In) -> List<In> {
+        let batch_size = input.shape()[0];
+        let chunk_size = (batch_size + self.device_ids.len() - 1) / self.device_ids.len();
+
+        self.device_ids.iter().enumerate().map(|(i, &device)| {
+            let start = i * chunk_size;
+            let end = ((i + 1) * chunk_size).min(batch_size);
+            with_device(DeviceId.gpu(device as U16), || {
+                slice(input, &[start..end, ..])
+            })
+        }).collect()
+    }
+
+    // Gather outputs to output device
+    fn gather(&self, outputs: List<Out>) -> Out {
+        with_device(DeviceId.gpu(self.output_device as U16), || {
+            cat(&outputs.iter().collect<List<_>>(), 0)
+        })
+    }
+}
+
+implement<M: Module<In, Out>, In: Tensor, Out: Tensor> Module<In, Out> for DataParallel<M> {
+    fn forward(&self, input: In) -> Out {
+        if self.device_ids.len() == 1 {
+            return self.model.forward(input);
+        }
+
+        // Scatter input across devices
+        let inputs = self.scatter(&input);
+
+        // Replicate model (shares weights via unified memory or explicit copy)
+        let replicas = self.replicate();
+
+        // Parallel forward on each device
+        let outputs: List<Out> = replicas.iter().zip(inputs).map(|(replica, inp)| {
+            replica.forward(inp)
+        }).collect();
+
+        // Gather outputs
+        self.gather(outputs)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        self.model.parameters()
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        self.model.parameters_mut()
+    }
+}
+
+// =============================================================================
+// Distributed Data Parallel (DDP)
+// =============================================================================
+
+// Distributed Data Parallel (multi-process, multi-node)
+// Each process has a complete model replica, gradients are synchronized
+public type DistributedDataParallel<M> is {
+    model: M,
+    process_group: ProcessGroup,
+    bucket_size_mb: USize,
+    gradient_as_bucket_view: Bool,
+};
+
+implement<M: Module<In, Out>, In, Out> DistributedDataParallel<M> {
+    public fn new(model: M, process_group: ProcessGroup) -> Self {
+        DistributedDataParallel {
+            model,
+            process_group,
+            bucket_size_mb: 25,
+            gradient_as_bucket_view: true,
+        }
+    }
+
+    // Set bucket size for gradient all-reduce (in MB)
+    public fn with_bucket_size(mut self, size_mb: USize) -> Self {
+        self.bucket_size_mb = size_mb;
+        self
+    }
+
+    // Synchronize gradients across all processes
+    public fn sync_gradients(&mut self) {
+        let params = self.model.parameters_mut();
+
+        // Bucket gradients for efficient all-reduce
+        let buckets = bucket_gradients(&params, self.bucket_size_mb * 1024 * 1024);
+
+        for bucket in &buckets {
+            // All-reduce: average gradients across processes
+            all_reduce(bucket, &self.process_group, ReduceOp.Avg);
+        }
+    }
+}
+
+implement<M: Module<In, Out>, In, Out> Module<In, Out> for DistributedDataParallel<M> {
+    fn forward(&self, input: In) -> Out {
+        self.model.forward(input)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        self.model.parameters()
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        self.model.parameters_mut()
+    }
+}
+
+// Bucket gradients for efficient all-reduce
+fn bucket_gradients(
+    params: &List<&mut DynTensor<Float>>,
+    bucket_size_bytes: USize,
+) -> List<DynTensor<Float>> {
+    @vbc(BUCKET_GRADIENTS, params, bucket_size_bytes)
+}
+
+// =============================================================================
+// Tensor Parallelism
+// =============================================================================
+
+// Column-parallel linear layer
+// Splits output features across ranks: Y = X @ [W_0 | W_1 | ... | W_{n-1}]^T
+public type ColumnParallelLinear is {
+    weight: Parameter,          // [out_features/world_size, in_features]
+    bias: Maybe<Parameter>,
+    process_group: ProcessGroup,
+    gather_output: Bool,
+};
+
+implement ColumnParallelLinear {
+    public fn new(
+        in_features: USize,
+        out_features: USize,
+        process_group: ProcessGroup,
+        gather_output: Bool,
+    ) -> Self {
+        let world_size = process_group.size();
+        let local_out = out_features / world_size;
+
+        let mut weight = Parameter.new(&[local_out, in_features]);
+        weight.kaiming_uniform(in_features);
+
+        ColumnParallelLinear {
+            weight,
+            bias: Maybe.None,
+            process_group,
+            gather_output,
+        }
+    }
+
+    // Add bias to the layer
+    public fn with_bias(mut self) -> Self {
+        let local_out = self.weight.shape()[0];
+        self.bias = Maybe.Some(Parameter.zeros(&[local_out]));
+        self
+    }
+}
+
+implement Module<DynTensor<Float>, DynTensor<Float>> for ColumnParallelLinear {
+    @differentiable
+    fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float> {
+        // Each rank computes Y_i = X @ W_i^T
+        let mut output = matmul(&input, &transpose(&self.weight.data, 0, 1));
+
+        if let Maybe.Some(bias) = &self.bias {
+            output = add(&output, &bias.data.unsqueeze(0));
+        }
+
+        if self.gather_output {
+            // Gather output from all ranks: [batch, out_features]
+            all_gather(&output, &self.process_group)
+        } else {
+            output  // Keep partitioned for next layer
+        }
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = List.from([&self.weight.data]);
+        if let Maybe.Some(bias) = &self.bias {
+            p.push(&bias.data);
+        }
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = List.from([&mut self.weight.data]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            p.push(&mut bias.data);
+        }
+        p
+    }
+}
+
+// Row-parallel linear layer
+// Splits input features across ranks: Y = [X_0 | X_1 | ...] @ W^T
+public type RowParallelLinear is {
+    weight: Parameter,          // [out_features, in_features/world_size]
+    bias: Maybe<Parameter>,
+    process_group: ProcessGroup,
+    input_is_parallel: Bool,
+};
+
+implement RowParallelLinear {
+    public fn new(
+        in_features: USize,
+        out_features: USize,
+        process_group: ProcessGroup,
+        input_is_parallel: Bool,
+    ) -> Self {
+        let world_size = process_group.size();
+        let local_in = in_features / world_size;
+
+        let mut weight = Parameter.new(&[out_features, local_in]);
+        weight.kaiming_uniform(local_in);
+
+        RowParallelLinear {
+            weight,
+            bias: Maybe.None,
+            process_group,
+            input_is_parallel,
+        }
+    }
+
+    // Add bias to the layer
+    public fn with_bias(mut self) -> Self {
+        let out_features = self.weight.shape()[0];
+        self.bias = Maybe.Some(Parameter.zeros(&[out_features]));
+        self
+    }
+}
+
+implement Module<DynTensor<Float>, DynTensor<Float>> for RowParallelLinear {
+    @differentiable
+    fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float> {
+        let local_input = if self.input_is_parallel {
+            input  // Already partitioned
+        } else {
+            scatter(&input, &self.process_group)
+        };
+
+        // Each rank computes partial Y_i = X_i @ W_i^T
+        let partial_output = matmul(&local_input, &transpose(&self.weight.data, 0, 1));
+
+        // Reduce-scatter to sum partials
+        let mut output = reduce_scatter(&partial_output, &self.process_group, ReduceOp.Sum);
+
+        if let Maybe.Some(bias) = &self.bias {
+            output = add(&output, &bias.data.unsqueeze(0));
+        }
+
+        output
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut p = List.from([&self.weight.data]);
+        if let Maybe.Some(bias) = &self.bias {
+            p.push(&bias.data);
+        }
+        p
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut p = List.from([&mut self.weight.data]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            p.push(&mut bias.data);
+        }
+        p
+    }
+}
+
+// =============================================================================
+// Pipeline Parallelism
+// =============================================================================
+
+// Pipeline schedule strategy
+public type PipelineSchedule is
+    // GPipe: simple fill-drain bubble
+    | GPipe
+    // 1F1B: overlapped forward/backward
+    | OneFOneBSchedule
+    // Interleaved 1F1B: multiple stages per rank
+    | Interleaved;
+
+// Pipeline-parallel model
+public type PipelineParallel<M> is {
+    stages: List<M>,
+    stage_devices: List<USize>,
+    num_microbatches: USize,
+    schedule: PipelineSchedule,
+};
+
+implement<M: Module<In, Out>, In, Out> PipelineParallel<M> {
+    public fn new(
+        stages: List<M>,
+        stage_devices: List<USize>,
+        num_microbatches: USize,
+    ) -> Self {
+        assert(stages.len() == stage_devices.len(), "stages and devices must match");
+        PipelineParallel {
+            stages,
+            stage_devices,
+            num_microbatches,
+            schedule: PipelineSchedule.OneFOneBSchedule,
+        }
+    }
+
+    // Set pipeline schedule
+    public fn with_schedule(mut self, schedule: PipelineSchedule) -> Self {
+        self.schedule = schedule;
+        self
+    }
+
+    // 1F1B schedule execution
+    public fn forward_backward_1f1b<LossFn>(
+        &mut self,
+        inputs: &[In],
+        loss_fn: LossFn,
+    ) -> Float {
+        let num_stages = self.stages.len();
+        let num_micro = self.num_microbatches;
+        let rank = current_rank();
+
+        let mut input_buffers: List<Maybe<In>> = (0..num_micro).map(|_| Maybe.None).collect();
+        let mut output_buffers: List<Maybe<Out>> = (0..num_micro).map(|_| Maybe.None).collect();
+        let mut total_loss = 0.0;
+
+        // Warmup: forward passes to fill pipeline
+        for i in 0..rank.min(num_micro) {
+            if rank > 0 {
+                input_buffers[i] = Maybe.Some(recv_from(rank - 1));
+            } else {
+                input_buffers[i] = Maybe.Some(inputs[i].clone());
+            }
+
+            let output = self.stages[rank].forward(input_buffers[i].clone().unwrap());
+            output_buffers[i] = Maybe.Some(output.clone());
+
+            if rank < num_stages - 1 {
+                send_to(rank + 1, &output);
+            }
+        }
+
+        // Steady state: 1 forward, 1 backward alternating
+        for i in rank..num_micro {
+            // Forward for microbatch i
+            if i < num_micro {
+                if rank > 0 {
+                    input_buffers[i] = Maybe.Some(recv_from(rank - 1));
+                } else {
+                    input_buffers[i] = Maybe.Some(inputs[i].clone());
+                }
+
+                let output = self.stages[rank].forward(input_buffers[i].clone().unwrap());
+                output_buffers[i] = Maybe.Some(output.clone());
+
+                if rank < num_stages - 1 {
+                    send_to(rank + 1, &output);
+                } else {
+                    // Last stage computes loss
+                    total_loss += loss_fn(&output);
+                }
+            }
+
+            // Backward for microbatch i - num_stages + 1
+            let backward_idx = i as ISize - num_stages as ISize + 1;
+            if backward_idx >= 0 {
+                let bi = backward_idx as USize;
+                let grad_output: Out = if rank < num_stages - 1 {
+                    recv_from(rank + 1)
+                } else {
+                    // Last stage: gradient of loss
+                    ones_like(&output_buffers[bi].clone().unwrap())
+                };
+
+                let grad_input = backward(&self.stages[rank], &grad_output);
+
+                if rank > 0 {
+                    send_to(rank - 1, &grad_input);
+                }
+            }
+        }
+
+        // Cooldown: remaining backward passes
+        for i in (num_micro - num_stages + rank + 1)..num_micro {
+            let grad_output: Out = if rank < num_stages - 1 {
+                recv_from(rank + 1)
+            } else {
+                ones_like(&output_buffers[i].clone().unwrap())
+            };
+
+            let grad_input = backward(&self.stages[rank], &grad_output);
+
+            if rank > 0 {
+                send_to(rank - 1, &grad_input);
+            }
+        }
+
+        total_loss / num_micro as Float
+    }
+}
+
+// Compute backward pass for a module
+fn backward<M: Module<In, Out>, In, Out: Tensor>(m: &M, grad_output: &Out) -> In {
+    @vbc(MODULE_BACKWARD, m, grad_output)
+}
+
+// Create ones tensor like another
+fn ones_like<T>(x: &DynTensor<T>) -> DynTensor<T> {
+    ones(&x.shape())
+}
+
+// =============================================================================
+// Fully Sharded Data Parallel (FSDP)
+// =============================================================================
+
+// FSDP sharding strategy
+public type ShardingStrategy is
+    // Shard params, grads, optimizer states
+    | FullShard
+    // Shard grads and optimizer states only
+    | ShardGradOp
+    // DDP-style (no sharding)
+    | NoShard;
+
+// FSDP wrapper for memory-efficient distributed training
+public type FSDP<M> is {
+    model: M,
+    process_group: ProcessGroup,
+    sharding_strategy: ShardingStrategy,
+    mixed_precision: Maybe<DType>,
+};
+
+// Data type for mixed precision
+public type DType is Float32 | Float16 | BFloat16;
+
+implement<M: Module<In, Out>, In, Out> FSDP<M> {
+    public fn new(model: M, process_group: ProcessGroup) -> Self {
+        FSDP {
+            model,
+            process_group,
+            sharding_strategy: ShardingStrategy.FullShard,
+            mixed_precision: Maybe.None,
+        }
+    }
+
+    // Set sharding strategy
+    public fn with_strategy(mut self, strategy: ShardingStrategy) -> Self {
+        self.sharding_strategy = strategy;
+        self
+    }
+
+    // Enable mixed precision
+    public fn with_mixed_precision(mut self, dtype: DType) -> Self {
+        self.mixed_precision = Maybe.Some(dtype);
+        self
+    }
+
+    // Shard parameters across ranks
+    public fn shard_params(&mut self) {
+        let rank = self.process_group.rank();
+        let world_size = self.process_group.size();
+
+        for param in self.model.parameters_mut() {
+            let flat = flatten(param, 0, -1);
+            let numel = flat.numel();
+            let chunk_size = (numel + world_size - 1) / world_size;
+            let start = rank * chunk_size;
+            let end = ((rank + 1) * chunk_size).min(numel);
+
+            // Keep only local shard
+            *param = slice(&flat, &[start..end]);
+        }
+    }
+
+    // All-gather parameters before forward
+    fn unshard_params(&self) -> List<DynTensor<Float>> {
+        self.model.parameters().iter().map(|param| {
+            all_gather(*param, &self.process_group)
+        }).collect()
+    }
+
+    // Reduce-scatter gradients after backward
+    public fn reduce_scatter_grads(&mut self) {
+        for param in self.model.parameters_mut() {
+            if let Maybe.Some(grad) = get_grad(param) {
+                let sharded_grad = reduce_scatter(&grad, &self.process_group, ReduceOp.Avg);
+                set_grad(param, sharded_grad);
+            }
+        }
+    }
+}
+
+implement<M: Module<In, Out>, In, Out> Module<In, Out> for FSDP<M> {
+    fn forward(&self, input: In) -> Out {
+        // All-gather params for forward pass
+        let full_params = self.unshard_params();
+
+        // Temporarily replace sharded params with full params
+        @with_params(&self.model, &full_params) {
+            self.model.forward(input)
+        }
+        // Full params freed after forward (unless needed for backward)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        self.model.parameters()
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        self.model.parameters_mut()
+    }
+}
+
+// Get gradient from parameter
+fn get_grad(param: &DynTensor<Float>) -> Maybe<DynTensor<Float>> {
+    @vbc(GET_GRAD, param)
+}
+
+// Set gradient on parameter
+fn set_grad(param: &mut DynTensor<Float>, grad: DynTensor<Float>) {
+    @vbc(SET_GRAD, param, grad)
+}
+
+// =============================================================================
+// Actor Mesh System (Monarch-Inspired)
+// =============================================================================
+
+// Mesh dimensions with named axes
+public type MeshDims is {
+    // Number of host machines
+    hosts: USize,
+    // GPUs per host
+    gpus: USize,
+    // Pipeline stages (optional)
+    pipelines: USize,
+};
+
+// Mesh topology descriptor
+public type MeshTopology<DIMS: meta MeshDims> is {
+    shape: [USize; 3],  // [hosts, gpus, pipelines]
+    strides: [USize; 3],
+};
+
+implement<DIMS: meta MeshDims> MeshTopology<DIMS> {
+    public fn new() -> Self {
+        let shape = [DIMS.hosts, DIMS.gpus, DIMS.pipelines];
+        let strides = [
+            DIMS.gpus * DIMS.pipelines,
+            DIMS.pipelines,
+            1,
+        ];
+        MeshTopology { shape, strides }
+    }
+
+    // Select indices based on selector
+    public fn select_indices(&self, selector: &MeshSelector) -> List<USize> {
+        @vbc(MESH_SELECT, self, selector)
+    }
+}
+
+// Mesh selector for slicing
+public type MeshSelector is {
+    hosts: SliceOrIndex,
+    gpus: SliceOrIndex,
+    pipelines: SliceOrIndex,
+};
+
+// Slice or index selector
+public type SliceOrIndex is
+    // Select all
+    | All
+    // Select range
+    | SliceRange { start: USize, end: USize, step: USize }
+    // Select single index
+    | Index { value: USize };
+
+// Actor identifier
+public type ActorId is (U64);
+
+implement ActorId {
+    public fn new() -> Self {
+        @vbc(ACTOR_NEW_ID)
+    }
+}
+
+// Device identifier for actor placement
+public type ActorDeviceId is {
+    host: USize,
+    gpu: USize,
+};
+
+// Actor handle with typed endpoints
+public type ActorHandle<A> is {
+    id: ActorId,
+    rank: USize,
+    device: ActorDeviceId,
+    mailbox: Channel<Message<A>>,
+};
+
+// Message wrapper
+public type Message<A> is (A);
+
+// N-dimensional mesh of actors with compile-time bounds checking
+public type ActorMesh<A, DIMS: meta MeshDims> is {
+    actors: List<ActorHandle<A>>,
+    topology: MeshTopology<DIMS>,
+    process_group: ProcessGroup,
+};
+
+// Actor protocol
+public type Actor is protocol {
+    fn handle_message(&mut self, msg: Message<Self>) -> Maybe<Message<Self>>;
+};
+
+implement<A: Actor, DIMS: meta MeshDims> ActorMesh<A, DIMS> {
+    // Create mesh on cluster
+    public fn spawn<F: Fn(USize) -> A>(init: F) -> Self using [ClusterContext] {
+        let total = DIMS.hosts * DIMS.gpus;
+        let actors = (0..total).map(|rank| {
+            let device = ActorDeviceId {
+                host: rank / DIMS.gpus,
+                gpu: rank % DIMS.gpus,
+            };
+            ClusterContext.spawn_on(device, || ActorHandle {
+                id: ActorId.new(),
+                rank,
+                device,
+                mailbox: Channel.new(),
+            })
+        }).collect();
+
+        ActorMesh {
+            actors,
+            topology: MeshTopology.new(),
+            process_group: ProcessGroup.from_ranks((0..total).collect()),
+        }
+    }
+
+    // Slice mesh with selector
+    public fn slice_mesh(&self, selector: MeshSelector) -> ActorMesh<A, DIMS> {
+        let indices = self.topology.select_indices(&selector);
+        ActorMesh {
+            actors: indices.iter().map(|&i| self.actors[i].clone()).collect(),
+            topology: self.topology.clone(),
+            process_group: ProcessGroup.from_ranks(indices),
+        }
+    }
+
+    // Broadcast message to all actors in mesh
+    public fn broadcast<M: Clone>(&self, msg: M) -> List<Future<M>> {
+        self.actors.iter().map(|actor| {
+            actor.mailbox.send(Message(msg.clone()))
+        }).collect()
+    }
+
+    // Call function on all actors
+    public fn call<R, F: Fn(&A) -> R>(&self, endpoint: F) -> List<R> {
+        self.actors.iter().map(|actor| {
+            endpoint(&actor)
+        }).collect()
+    }
+}
+
+// Cluster context for spawning actors
+context ClusterContext {
+    fn spawn_on<A, F: Fn() -> ActorHandle<A>>(device: ActorDeviceId, init: F) -> ActorHandle<A>;
+}
+
+// =============================================================================
+// Supervision
+// =============================================================================
+
+// Supervision strategy for actor failures
+public type SupervisionStrategy is
+    // Restart failed actor with fresh state
+    | Restart
+    // Propagate failure to parent supervisor
+    | Escalate
+    // Remove actor, continue without
+    | Ignore
+    // Restart all children (for correlated failures)
+    | RestartAll;
+
+// Mesh failure descriptor
+public type MeshFailure is {
+    failed_actors: List<ActorId>,
+    error: Error,
+    timestamp: Instant,
+    failure_count: USize,
+};
+
+// Supervision decision
+public type SupervisionDecision is
+    // Failure recovered
+    | Handled
+    // Escalate to parent
+    | Propagate
+    // Custom recovery action
+    | Custom { action: fn() };
+
+// Supervision context for fault-tolerant distributed training
+context Supervision {
+    fn strategy() -> SupervisionStrategy;
+    fn on_failure(failure: &MeshFailure) -> SupervisionDecision;
+    fn max_restarts() -> USize;
+    fn restart_window() -> Duration;
+}
+
+// Default supervision implementation
+public type DefaultSupervision is {
+    strategy: SupervisionStrategy,
+    max_restarts: USize,
+    restart_window: Duration,
+};
+
+implement DefaultSupervision {
+    public fn new(strategy: SupervisionStrategy) -> Self {
+        DefaultSupervision {
+            strategy,
+            max_restarts: 3,
+            restart_window: Duration.seconds(60),
+        }
+    }
+}
+
+// =============================================================================
+// RDMA Zero-Copy References
+// =============================================================================
+
+// RDMA reference - lightweight handle to remote tensor
+// Only ~100 bytes transferred initially, actual data fetched on demand
+public type RdmaRef<T> is {
+    owner_rank: USize,
+    owner_actor: ActorId,
+    remote_ptr: USize,
+    shape: List<USize>,
+    dtype: DType,
+    generation: U64,  // For CBGR validation
+};
+
+implement<T: Tensor> RdmaRef<T> {
+    // Create RDMA reference to local tensor
+    public fn from_local(t: &T, actor_id: ActorId) -> Self {
+        @vbc(RDMA_CREATE_REF, t, actor_id)
+    }
+
+    // Fetch tensor data (actual RDMA transfer happens here)
+    public fn fetch(&self) -> T using [RdmaContext] {
+        @vbc(RDMA_FETCH, self)
+    }
+
+    // Write to remote tensor (zero-copy if supported)
+    public fn write(&self, data: &T) using [RdmaContext] {
+        @vbc(RDMA_WRITE, self, data)
+    }
+
+    // Check if reference is still valid
+    public fn is_valid(&self) -> Bool {
+        @vbc(RDMA_CHECK_VALID, self)
+    }
+}
+
+// RDMA context for zero-copy operations
+context RdmaContext {
+    fn get_ref<T: Tensor>(actor_id: ActorId, t: &T) -> RdmaRef<T>;
+    fn prefetch<T: Tensor>(refs: &[RdmaRef<T>]);
+    fn wait_all();
+}
+
+// =============================================================================
+// Tensor Protocol for Generic Operations
+// =============================================================================
+
+// Tensor protocol for operations that work across tensor types
+public type Tensor is protocol {
+    fn shape(&self) -> List<USize>;
+    fn numel(&self) -> USize;
+    fn clone(&self) -> Self;
+};
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+// Flatten tensor
+fn flatten<T>(t: &DynTensor<T>, start_dim: ISize, end_dim: ISize) -> DynTensor<T> {
+    @vbc(FLATTEN, t, start_dim, end_dim)
+}
+
+// Transpose tensor
+fn transpose<T>(t: &DynTensor<T>, dim0: USize, dim1: USize) -> DynTensor<T> {
+    @vbc(TRANSPOSE, t, dim0, dim1)
+}

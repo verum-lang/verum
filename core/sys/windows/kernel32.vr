@@ -1,0 +1,943 @@
+module sys.windows.kernel32;
+
+// =============================================================================
+// sys/windows/kernel32.vr - Windows API (kernel32.dll) FFI
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/ntstatus, sys/windows/ntdll
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides access to Windows API functions from kernel32.dll.
+// These are higher-level APIs built on top of ntdll.dll.
+//
+// IMPORTANT: Uses IAT imports (@extern) for stable, supported API access.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount super.ntstatus.NtStatus;
+mount super.ntdll.{Handle, LargeInteger, IoStatusBlock};
+
+// Re-export memory protection and allocation constants from ntdll for convenience
+// Tests and user code commonly import these from kernel32 (the higher-level API layer)
+public const MEM_COMMIT: UInt32 = 0x00001000;
+public const MEM_RESERVE: UInt32 = 0x00002000;
+public const MEM_DECOMMIT: UInt32 = 0x00004000;
+public const MEM_RELEASE: UInt32 = 0x00008000;
+public const MEM_RESET: UInt32 = 0x00080000;
+
+public const PAGE_NOACCESS: UInt32 = 0x01;
+public const PAGE_READONLY: UInt32 = 0x02;
+public const PAGE_READWRITE: UInt32 = 0x04;
+public const PAGE_WRITECOPY: UInt32 = 0x08;
+public const PAGE_EXECUTE: UInt32 = 0x10;
+public const PAGE_EXECUTE_READ: UInt32 = 0x20;
+public const PAGE_EXECUTE_READWRITE: UInt32 = 0x40;
+public const PAGE_EXECUTE_WRITECOPY: UInt32 = 0x80;
+public const PAGE_GUARD: UInt32 = 0x100;
+
+/// Sentinel value for invalid handles (as raw integer)
+public const INVALID_HANDLE_VALUE: UInt64 = 0xFFFFFFFFFFFFFFFF;
+
+// =============================================================================
+// Standard Handle Constants
+// =============================================================================
+
+/// Standard input handle
+public const STD_INPUT_HANDLE: UInt32 = 0xFFFFFFF6;  // -10
+
+/// Standard output handle
+public const STD_OUTPUT_HANDLE: UInt32 = 0xFFFFFFF5;  // -11
+
+/// Standard error handle
+public const STD_ERROR_HANDLE: UInt32 = 0xFFFFFFF4;  // -12
+
+// =============================================================================
+// File Creation Flags
+// =============================================================================
+
+/// File attribute flags
+public const FILE_ATTRIBUTE_READONLY: UInt32 = 0x00000001;
+public const FILE_ATTRIBUTE_HIDDEN: UInt32 = 0x00000002;
+public const FILE_ATTRIBUTE_SYSTEM: UInt32 = 0x00000004;
+public const FILE_ATTRIBUTE_DIRECTORY: UInt32 = 0x00000010;
+public const FILE_ATTRIBUTE_ARCHIVE: UInt32 = 0x00000020;
+public const FILE_ATTRIBUTE_DEVICE: UInt32 = 0x00000040;
+public const FILE_ATTRIBUTE_NORMAL: UInt32 = 0x00000080;
+public const FILE_ATTRIBUTE_TEMPORARY: UInt32 = 0x00000100;
+public const FILE_ATTRIBUTE_SPARSE_FILE: UInt32 = 0x00000200;
+public const FILE_ATTRIBUTE_REPARSE_POINT: UInt32 = 0x00000400;
+public const FILE_ATTRIBUTE_COMPRESSED: UInt32 = 0x00000800;
+public const FILE_ATTRIBUTE_OFFLINE: UInt32 = 0x00001000;
+public const FILE_ATTRIBUTE_NOT_CONTENT_INDEXED: UInt32 = 0x00002000;
+public const FILE_ATTRIBUTE_ENCRYPTED: UInt32 = 0x00004000;
+
+/// File flag constants
+public const FILE_FLAG_WRITE_THROUGH: UInt32 = 0x80000000;
+public const FILE_FLAG_OVERLAPPED: UInt32 = 0x40000000;
+public const FILE_FLAG_NO_BUFFERING: UInt32 = 0x20000000;
+public const FILE_FLAG_RANDOM_ACCESS: UInt32 = 0x10000000;
+public const FILE_FLAG_SEQUENTIAL_SCAN: UInt32 = 0x08000000;
+public const FILE_FLAG_DELETE_ON_CLOSE: UInt32 = 0x04000000;
+public const FILE_FLAG_BACKUP_SEMANTICS: UInt32 = 0x02000000;
+public const FILE_FLAG_POSIX_SEMANTICS: UInt32 = 0x01000000;
+public const FILE_FLAG_SESSION_AWARE: UInt32 = 0x00800000;
+public const FILE_FLAG_OPEN_REPARSE_POINT: UInt32 = 0x00200000;
+public const FILE_FLAG_OPEN_NO_RECALL: UInt32 = 0x00100000;
+public const FILE_FLAG_FIRST_PIPE_INSTANCE: UInt32 = 0x00080000;
+
+/// Creation disposition
+public const CREATE_NEW: UInt32 = 1;
+public const CREATE_ALWAYS: UInt32 = 2;
+public const OPEN_EXISTING: UInt32 = 3;
+public const OPEN_ALWAYS: UInt32 = 4;
+public const TRUNCATE_EXISTING: UInt32 = 5;
+
+// =============================================================================
+// Error Codes
+// =============================================================================
+
+public const ERROR_SUCCESS: UInt32 = 0;
+public const ERROR_INVALID_FUNCTION: UInt32 = 1;
+public const ERROR_FILE_NOT_FOUND: UInt32 = 2;
+public const ERROR_PATH_NOT_FOUND: UInt32 = 3;
+public const ERROR_TOO_MANY_OPEN_FILES: UInt32 = 4;
+public const ERROR_ACCESS_DENIED: UInt32 = 5;
+public const ERROR_INVALID_HANDLE: UInt32 = 6;
+public const ERROR_NOT_ENOUGH_MEMORY: UInt32 = 8;
+public const ERROR_INVALID_DATA: UInt32 = 13;
+public const ERROR_OUTOFMEMORY: UInt32 = 14;
+public const ERROR_NO_MORE_FILES: UInt32 = 18;
+public const ERROR_WRITE_PROTECT: UInt32 = 19;
+public const ERROR_NOT_READY: UInt32 = 21;
+public const ERROR_SHARING_VIOLATION: UInt32 = 32;
+public const ERROR_LOCK_VIOLATION: UInt32 = 33;
+public const ERROR_HANDLE_EOF: UInt32 = 38;
+public const ERROR_NOT_SUPPORTED: UInt32 = 50;
+public const ERROR_FILE_EXISTS: UInt32 = 80;
+public const ERROR_INVALID_PARAMETER: UInt32 = 87;
+public const ERROR_BROKEN_PIPE: UInt32 = 109;
+public const ERROR_DISK_FULL: UInt32 = 112;
+public const ERROR_INSUFFICIENT_BUFFER: UInt32 = 122;
+public const ERROR_INVALID_NAME: UInt32 = 123;
+public const ERROR_DIR_NOT_EMPTY: UInt32 = 145;
+public const ERROR_ALREADY_EXISTS: UInt32 = 183;
+public const ERROR_MORE_DATA: UInt32 = 234;
+public const ERROR_NO_MORE_ITEMS: UInt32 = 259;
+public const ERROR_OPERATION_ABORTED: UInt32 = 995;
+public const ERROR_IO_INCOMPLETE: UInt32 = 996;
+public const ERROR_IO_PENDING: UInt32 = 997;
+public const ERROR_TIMEOUT: UInt32 = 1460;
+
+/// Infinite timeout value
+public const INFINITE: UInt32 = 0xFFFFFFFF;
+
+// =============================================================================
+// Wait Return Values
+// =============================================================================
+
+public const WAIT_OBJECT_0: UInt32 = 0x00000000;
+public const WAIT_ABANDONED: UInt32 = 0x00000080;
+public const WAIT_TIMEOUT: UInt32 = 0x00000102;
+public const WAIT_FAILED: UInt32 = 0xFFFFFFFF;
+
+// =============================================================================
+// Overlapped Structure
+// =============================================================================
+
+/// Overlapped structure for async I/O
+public type Overlapped is {
+    internal: Int,
+    internal_high: Int,
+    offset: UInt32,
+    offset_high: UInt32,
+    event: Handle,
+};
+
+implement Overlapped {
+    /// Create a new zeroed overlapped structure
+    public fn new() -> Overlapped {
+        Overlapped {
+            internal: 0,
+            internal_high: 0,
+            offset: 0,
+            offset_high: 0,
+            event: Handle.NULL,
+        }
+    }
+
+    /// Create with event handle
+    public fn with_event(event: Handle) -> Overlapped {
+        Overlapped {
+            internal: 0,
+            internal_high: 0,
+            offset: 0,
+            offset_high: 0,
+            event: event,
+        }
+    }
+
+    /// Set file offset
+    public fn set_offset(&mut self, offset: UInt64) {
+        self.offset = (offset & 0xFFFFFFFF) as UInt32;
+        self.offset_high = (offset >> 32) as UInt32;
+    }
+
+    /// Get file offset
+    public fn get_offset(&self) -> UInt64 {
+        (self.offset as UInt64) | ((self.offset_high as UInt64) << 32)
+    }
+}
+
+// =============================================================================
+// Security Attributes
+// =============================================================================
+
+/// Security attributes structure
+public type SecurityAttributes is {
+    length: UInt32,
+    security_descriptor: &unsafe Byte,
+    inherit_handle: Bool,
+};
+
+implement SecurityAttributes {
+    /// Create default security attributes
+    public fn default() -> SecurityAttributes {
+        SecurityAttributes {
+            length: 24,  // sizeof on x64
+            security_descriptor: 0 as &unsafe Byte,
+            inherit_handle: false,
+        }
+    }
+}
+
+// =============================================================================
+// Kernel32 API Functions
+// =============================================================================
+
+/// Get the last error code
+@extern("kernel32.dll")
+public fn GetLastError() -> UInt32;
+
+/// Set the last error code
+@extern("kernel32.dll")
+public fn SetLastError(error_code: UInt32);
+
+/// Get a standard handle
+@extern("kernel32.dll")
+public fn GetStdHandle(std_handle: UInt32) -> Handle;
+
+/// Set a standard handle
+@extern("kernel32.dll")
+public fn SetStdHandle(std_handle: UInt32, handle: Handle) -> Bool;
+
+/// Close a handle
+@extern("kernel32.dll")
+public fn CloseHandle(handle: Handle) -> Bool;
+
+/// Duplicate a handle
+@extern("kernel32.dll")
+public fn DuplicateHandle(
+    source_process_handle: Handle,
+    source_handle: Handle,
+    target_process_handle: Handle,
+    target_handle: &mut Handle,
+    desired_access: UInt32,
+    inherit_handle: Bool,
+    options: UInt32,
+) -> Bool;
+
+// =============================================================================
+// File Operations
+// =============================================================================
+
+/// Create or open a file
+@extern("kernel32.dll")
+public fn CreateFileW(
+    file_name: &UInt16,
+    desired_access: UInt32,
+    share_mode: UInt32,
+    security_attributes: &SecurityAttributes,
+    creation_disposition: UInt32,
+    flags_and_attributes: UInt32,
+    template_file: Handle,
+) -> Handle;
+
+/// Read from a file
+@extern("kernel32.dll")
+public fn ReadFile(
+    file: Handle,
+    buffer: &unsafe mut Byte,
+    number_of_bytes_to_read: UInt32,
+    number_of_bytes_read: &mut UInt32,
+    overlapped: &mut Overlapped,
+) -> Bool;
+
+/// Write to a file
+@extern("kernel32.dll")
+public fn WriteFile(
+    file: Handle,
+    buffer: &unsafe Byte,
+    number_of_bytes_to_write: UInt32,
+    number_of_bytes_written: &mut UInt32,
+    overlapped: &mut Overlapped,
+) -> Bool;
+
+/// Get overlapped result
+@extern("kernel32.dll")
+public fn GetOverlappedResult(
+    file: Handle,
+    overlapped: &Overlapped,
+    number_of_bytes_transferred: &mut UInt32,
+    wait: Bool,
+) -> Bool;
+
+/// Get overlapped result ex
+@extern("kernel32.dll")
+public fn GetOverlappedResultEx(
+    file: Handle,
+    overlapped: &Overlapped,
+    number_of_bytes_transferred: &mut UInt32,
+    milliseconds: UInt32,
+    alertable: Bool,
+) -> Bool;
+
+/// Cancel I/O operations
+@extern("kernel32.dll")
+public fn CancelIo(file: Handle) -> Bool;
+
+/// Cancel I/O operations ex
+@extern("kernel32.dll")
+public fn CancelIoEx(file: Handle, overlapped: &Overlapped) -> Bool;
+
+/// Set file pointer ex
+@extern("kernel32.dll")
+public fn SetFilePointerEx(
+    file: Handle,
+    distance_to_move: LargeInteger,
+    new_file_pointer: &mut LargeInteger,
+    move_method: UInt32,
+) -> Bool;
+
+/// File seek origins
+public const FILE_BEGIN: UInt32 = 0;
+public const FILE_CURRENT: UInt32 = 1;
+public const FILE_END: UInt32 = 2;
+
+/// Get file size
+@extern("kernel32.dll")
+public fn GetFileSizeEx(
+    file: Handle,
+    file_size: &mut LargeInteger,
+) -> Bool;
+
+/// Flush file buffers
+@extern("kernel32.dll")
+public fn FlushFileBuffers(file: Handle) -> Bool;
+
+// =============================================================================
+// Memory Operations
+// =============================================================================
+
+/// Allocate virtual memory
+@extern("kernel32.dll")
+public fn VirtualAlloc(
+    address: &unsafe Byte,
+    size: Int,
+    allocation_type: UInt32,
+    protect: UInt32,
+) -> &unsafe Byte;
+
+/// Free virtual memory
+@extern("kernel32.dll")
+public fn VirtualFree(
+    address: &unsafe Byte,
+    size: Int,
+    free_type: UInt32,
+) -> Bool;
+
+/// Protect virtual memory
+@extern("kernel32.dll")
+public fn VirtualProtect(
+    address: &unsafe Byte,
+    size: Int,
+    new_protect: UInt32,
+    old_protect: &mut UInt32,
+) -> Bool;
+
+/// Query virtual memory
+@extern("kernel32.dll")
+public fn VirtualQuery(
+    address: &unsafe Byte,
+    buffer: &unsafe mut Byte,
+    length: Int,
+) -> Int;
+
+/// Get system info
+@extern("kernel32.dll")
+public fn GetSystemInfo(system_info: &unsafe mut Byte);
+
+/// System info structure
+public type SystemInfo is {
+    processor_architecture: UInt16,
+    reserved: UInt16,
+    page_size: UInt32,
+    minimum_application_address: &unsafe Byte,
+    maximum_application_address: &unsafe Byte,
+    active_processor_mask: Int,
+    number_of_processors: UInt32,
+    processor_type: UInt32,
+    allocation_granularity: UInt32,
+    processor_level: UInt16,
+    processor_revision: UInt16,
+};
+
+// =============================================================================
+// I/O Completion Ports
+// =============================================================================
+
+/// Create an I/O completion port
+@extern("kernel32.dll")
+public fn CreateIoCompletionPort(
+    file_handle: Handle,
+    existing_completion_port: Handle,
+    completion_key: Int,
+    number_of_concurrent_threads: UInt32,
+) -> Handle;
+
+/// Post a completion status
+@extern("kernel32.dll")
+public fn PostQueuedCompletionStatus(
+    completion_port: Handle,
+    number_of_bytes_transferred: UInt32,
+    completion_key: Int,
+    overlapped: &Overlapped,
+) -> Bool;
+
+/// Get queued completion status
+@extern("kernel32.dll")
+public fn GetQueuedCompletionStatus(
+    completion_port: Handle,
+    number_of_bytes_transferred: &mut UInt32,
+    completion_key: &mut Int,
+    overlapped: &mut &Overlapped,
+    milliseconds: UInt32,
+) -> Bool;
+
+/// Get queued completion status ex
+@extern("kernel32.dll")
+public fn GetQueuedCompletionStatusEx(
+    completion_port: Handle,
+    completion_port_entries: &unsafe mut Byte,
+    count: UInt32,
+    num_entries_removed: &mut UInt32,
+    milliseconds: UInt32,
+    alertable: Bool,
+) -> Bool;
+
+/// Overlapped entry structure (for GetQueuedCompletionStatusEx)
+public type OverlappedEntry is {
+    completion_key: Int,
+    overlapped: &Overlapped,
+    internal: Int,
+    number_of_bytes_transferred: UInt32,
+};
+
+// =============================================================================
+// Process and Thread
+// =============================================================================
+
+/// Get current process handle
+@extern("kernel32.dll")
+public fn GetCurrentProcess() -> Handle;
+
+/// Get current thread handle
+@extern("kernel32.dll")
+public fn GetCurrentThread() -> Handle;
+
+/// Get current process ID
+@extern("kernel32.dll")
+public fn GetCurrentProcessId() -> UInt32;
+
+/// Get current thread ID
+@extern("kernel32.dll")
+public fn GetCurrentThreadId() -> UInt32;
+
+/// Create a thread
+@extern("kernel32.dll")
+public fn CreateThread(
+    thread_attributes: &SecurityAttributes,
+    stack_size: Int,
+    start_address: &unsafe Byte,
+    parameter: &unsafe Byte,
+    creation_flags: UInt32,
+    thread_id: &mut UInt32,
+) -> Handle;
+
+/// Exit thread
+@extern("kernel32.dll")
+public fn ExitThread(exit_code: UInt32);
+
+/// Exit process
+@extern("kernel32.dll")
+public fn ExitProcess(exit_code: UInt32);
+
+/// Terminate thread
+@extern("kernel32.dll")
+public fn TerminateThread(thread: Handle, exit_code: UInt32) -> Bool;
+
+/// Terminate process
+@extern("kernel32.dll")
+public fn TerminateProcess(process: Handle, exit_code: UInt32) -> Bool;
+
+/// Wait for single object
+@extern("kernel32.dll")
+public fn WaitForSingleObject(
+    handle: Handle,
+    milliseconds: UInt32,
+) -> UInt32;
+
+/// Wait for single object ex
+@extern("kernel32.dll")
+public fn WaitForSingleObjectEx(
+    handle: Handle,
+    milliseconds: UInt32,
+    alertable: Bool,
+) -> UInt32;
+
+/// Wait for multiple objects
+@extern("kernel32.dll")
+public fn WaitForMultipleObjects(
+    count: UInt32,
+    handles: &Handle,
+    wait_all: Bool,
+    milliseconds: UInt32,
+) -> UInt32;
+
+/// Wait for multiple objects ex
+@extern("kernel32.dll")
+public fn WaitForMultipleObjectsEx(
+    count: UInt32,
+    handles: &Handle,
+    wait_all: Bool,
+    milliseconds: UInt32,
+    alertable: Bool,
+) -> UInt32;
+
+/// Sleep
+@extern("kernel32.dll")
+public fn Sleep(milliseconds: UInt32);
+
+/// Sleep ex (alertable)
+@extern("kernel32.dll")
+public fn SleepEx(milliseconds: UInt32, alertable: Bool) -> UInt32;
+
+/// Suspend thread
+@extern("kernel32.dll")
+public fn SuspendThread(thread: Handle) -> UInt32;
+
+/// Resume thread
+@extern("kernel32.dll")
+public fn ResumeThread(thread: Handle) -> UInt32;
+
+// =============================================================================
+// Synchronization
+// =============================================================================
+
+/// Create an event
+@extern("kernel32.dll")
+public fn CreateEventW(
+    event_attributes: &SecurityAttributes,
+    manual_reset: Bool,
+    initial_state: Bool,
+    name: &UInt16,
+) -> Handle;
+
+/// Set event
+@extern("kernel32.dll")
+public fn SetEvent(event: Handle) -> Bool;
+
+/// Reset event
+@extern("kernel32.dll")
+public fn ResetEvent(event: Handle) -> Bool;
+
+/// Pulse event
+@extern("kernel32.dll")
+public fn PulseEvent(event: Handle) -> Bool;
+
+/// Create a semaphore
+@extern("kernel32.dll")
+public fn CreateSemaphoreW(
+    semaphore_attributes: &SecurityAttributes,
+    initial_count: Int32,
+    maximum_count: Int32,
+    name: &UInt16,
+) -> Handle;
+
+/// Release semaphore
+@extern("kernel32.dll")
+public fn ReleaseSemaphore(
+    semaphore: Handle,
+    release_count: Int32,
+    previous_count: &mut Int32,
+) -> Bool;
+
+/// Create a mutex
+@extern("kernel32.dll")
+public fn CreateMutexW(
+    mutex_attributes: &SecurityAttributes,
+    initial_owner: Bool,
+    name: &UInt16,
+) -> Handle;
+
+/// Release mutex
+@extern("kernel32.dll")
+public fn ReleaseMutex(mutex: Handle) -> Bool;
+
+// =============================================================================
+// Thread-Local Storage
+// =============================================================================
+
+/// Allocate a TLS index
+@extern("kernel32.dll")
+public fn TlsAlloc() -> UInt32;
+
+/// Free a TLS index
+@extern("kernel32.dll")
+public fn TlsFree(tls_index: UInt32) -> Bool;
+
+/// Get TLS value
+@extern("kernel32.dll")
+public fn TlsGetValue(tls_index: UInt32) -> &unsafe Byte;
+
+/// Set TLS value
+@extern("kernel32.dll")
+public fn TlsSetValue(tls_index: UInt32, tls_value: &unsafe Byte) -> Bool;
+
+/// Invalid TLS index
+public const TLS_OUT_OF_INDEXES: UInt32 = 0xFFFFFFFF;
+
+// =============================================================================
+// Time Functions
+// =============================================================================
+
+/// Get tick count (milliseconds since system start)
+@extern("kernel32.dll")
+public fn GetTickCount() -> UInt32;
+
+/// Get tick count 64-bit
+@extern("kernel32.dll")
+public fn GetTickCount64() -> UInt64;
+
+/// Query performance counter
+@extern("kernel32.dll")
+public fn QueryPerformanceCounter(performance_count: &mut LargeInteger) -> Bool;
+
+/// Query performance frequency
+@extern("kernel32.dll")
+public fn QueryPerformanceFrequency(frequency: &mut LargeInteger) -> Bool;
+
+/// System time structure
+public type SystemTime is {
+    year: UInt16,
+    month: UInt16,
+    day_of_week: UInt16,
+    day: UInt16,
+    hour: UInt16,
+    minute: UInt16,
+    second: UInt16,
+    milliseconds: UInt16,
+};
+
+/// Get system time (UTC)
+@extern("kernel32.dll")
+public fn GetSystemTime(system_time: &mut SystemTime);
+
+/// Get local time
+@extern("kernel32.dll")
+public fn GetLocalTime(local_time: &mut SystemTime);
+
+/// Get system time as file time
+@extern("kernel32.dll")
+public fn GetSystemTimeAsFileTime(system_time_as_file_time: &mut LargeInteger);
+
+/// Get system time precise as file time
+@extern("kernel32.dll")
+public fn GetSystemTimePreciseAsFileTime(system_time_as_file_time: &mut LargeInteger);
+
+// =============================================================================
+// Console Functions
+// =============================================================================
+
+/// Write to console
+@extern("kernel32.dll")
+public fn WriteConsoleW(
+    console_output: Handle,
+    buffer: &UInt16,
+    number_of_chars_to_write: UInt32,
+    number_of_chars_written: &mut UInt32,
+    reserved: &unsafe Byte,
+) -> Bool;
+
+/// Read from console
+@extern("kernel32.dll")
+public fn ReadConsoleW(
+    console_input: Handle,
+    buffer: &mut UInt16,
+    number_of_chars_to_read: UInt32,
+    number_of_chars_read: &mut UInt32,
+    input_control: &unsafe Byte,
+) -> Bool;
+
+// =============================================================================
+// Thread Creation Flags
+// =============================================================================
+
+public const CREATE_SUSPENDED: UInt32 = 0x00000004;
+public const STACK_SIZE_PARAM_IS_A_RESERVATION: UInt32 = 0x00010000;
+
+// =============================================================================
+// Safe Wrappers
+// =============================================================================
+
+/// Get standard output handle
+public fn get_stdout() -> Handle {
+    GetStdHandle(STD_OUTPUT_HANDLE)
+}
+
+/// Get standard input handle
+public fn get_stdin() -> Handle {
+    GetStdHandle(STD_INPUT_HANDLE)
+}
+
+/// Get standard error handle
+public fn get_stderr() -> Handle {
+    GetStdHandle(STD_ERROR_HANDLE)
+}
+
+/// Allocate memory with VirtualAlloc
+public fn safe_alloc(size: Int, protect: UInt32) -> Maybe<&unsafe Byte> {
+    let ptr = VirtualAlloc(
+        0 as &unsafe Byte,
+        size,
+        super.ntdll.MEM_COMMIT | super.ntdll.MEM_RESERVE,
+        protect,
+    );
+    if ptr as Int == 0 {
+        None
+    } else {
+        Some(ptr)
+    }
+}
+
+/// Free memory with VirtualFree
+public fn safe_free(ptr: &unsafe Byte) -> Bool {
+    VirtualFree(ptr, 0, super.ntdll.MEM_RELEASE)
+}
+
+/// Decommit memory (release physical pages but keep virtual address reservation)
+/// Equivalent to MADV_DONTNEED on Unix - decreases RSS immediately
+/// Note: Memory must be recommitted before use
+public fn mem_decommit(addr: &unsafe Byte, size: Int) -> Bool {
+    VirtualFree(addr, size, super.ntdll.MEM_DECOMMIT)
+}
+
+/// Reset memory (mark pages as not needed, may be discarded)
+/// Equivalent to MADV_FREE on Unix - lazy, doesn't decrease RSS immediately
+/// Note: Memory remains committed and accessible, but may be zeroed
+public fn mem_reset(addr: &unsafe Byte, size: Int) -> Bool {
+    let result = VirtualAlloc(addr, size, super.ntdll.MEM_RESET, super.ntdll.PAGE_READWRITE);
+    (result as Int) != 0
+}
+
+/// Recommit previously decommitted memory
+/// Required after mem_decommit before memory can be used again
+public fn mem_recommit(addr: &unsafe Byte, size: Int) -> Bool {
+    let result = VirtualAlloc(addr, size, super.ntdll.MEM_COMMIT, super.ntdll.PAGE_READWRITE);
+    (result as Int) != 0
+}
+
+/// Close handle safely
+public fn safe_close(handle: Handle) -> Bool {
+    if handle.is_valid() {
+        CloseHandle(handle)
+    } else {
+        true
+    }
+}
+
+// =============================================================================
+// Console Mode Constants
+// =============================================================================
+
+/// Console input mode flags
+public const ENABLE_PROCESSED_INPUT: UInt32 = 0x0001;
+public const ENABLE_LINE_INPUT: UInt32 = 0x0002;
+public const ENABLE_ECHO_INPUT: UInt32 = 0x0004;
+public const ENABLE_WINDOW_INPUT: UInt32 = 0x0008;
+public const ENABLE_MOUSE_INPUT: UInt32 = 0x0010;
+public const ENABLE_INSERT_MODE: UInt32 = 0x0020;
+public const ENABLE_QUICK_EDIT_MODE: UInt32 = 0x0040;
+public const ENABLE_EXTENDED_FLAGS: UInt32 = 0x0080;
+public const ENABLE_AUTO_POSITION: UInt32 = 0x0100;
+public const ENABLE_VIRTUAL_TERMINAL_INPUT: UInt32 = 0x0200;
+
+/// Console output mode flags
+public const ENABLE_PROCESSED_OUTPUT: UInt32 = 0x0001;
+public const ENABLE_WRAP_AT_EOL_OUTPUT: UInt32 = 0x0002;
+public const ENABLE_VIRTUAL_TERMINAL_PROCESSING: UInt32 = 0x0004;
+public const DISABLE_NEWLINE_AUTO_RETURN: UInt32 = 0x0008;
+public const ENABLE_LVB_GRID_WORLDWIDE: UInt32 = 0x0010;
+
+// =============================================================================
+// Console Coordinate and Info Types
+// =============================================================================
+
+/// Console coordinate
+public type Coord is {
+    x: Int16,
+    y: Int16,
+};
+
+/// Console small rect
+public type SmallRect is {
+    left: Int16,
+    top: Int16,
+    right: Int16,
+    bottom: Int16,
+};
+
+/// Console screen buffer info
+public type ConsoleScreenBufferInfo is {
+    size: Coord,
+    cursor_position: Coord,
+    attributes: UInt16,
+    window: SmallRect,
+    maximum_window_size: Coord,
+};
+
+/// Console input record event type constants
+public const KEY_EVENT: UInt16 = 0x0001;
+public const MOUSE_EVENT: UInt16 = 0x0002;
+public const WINDOW_BUFFER_SIZE_EVENT: UInt16 = 0x0004;
+public const FOCUS_EVENT: UInt16 = 0x0008;
+public const MENU_EVENT: UInt16 = 0x0010;
+
+// =============================================================================
+// Console API Functions
+// =============================================================================
+
+/// Get the current input mode of a console
+@extern("kernel32.dll")
+public fn GetConsoleMode(console_handle: Handle, mode: &mut UInt32) -> Bool;
+
+/// Set the input mode of a console
+@extern("kernel32.dll")
+public fn SetConsoleMode(console_handle: Handle, mode: UInt32) -> Bool;
+
+/// Get console screen buffer info
+@extern("kernel32.dll")
+public fn GetConsoleScreenBufferInfo(
+    console_output: Handle,
+    console_screen_buffer_info: &mut ConsoleScreenBufferInfo,
+) -> Bool;
+
+/// Set console cursor position
+@extern("kernel32.dll")
+public fn SetConsoleCursorPosition(
+    console_output: Handle,
+    cursor_position: Coord,
+) -> Bool;
+
+/// Fill console output with a character
+@extern("kernel32.dll")
+public fn FillConsoleOutputCharacterW(
+    console_output: Handle,
+    character: UInt16,
+    length: UInt32,
+    write_coord: Coord,
+    number_of_chars_written: &mut UInt32,
+) -> Bool;
+
+/// Fill console output with an attribute
+@extern("kernel32.dll")
+public fn FillConsoleOutputAttribute(
+    console_output: Handle,
+    attribute: UInt16,
+    length: UInt32,
+    write_coord: Coord,
+    number_of_attrs_written: &mut UInt32,
+) -> Bool;
+
+/// Set console text attribute
+@extern("kernel32.dll")
+public fn SetConsoleTextAttribute(
+    console_output: Handle,
+    attributes: UInt16,
+) -> Bool;
+
+/// Set console title
+@extern("kernel32.dll")
+public fn SetConsoleTitleW(
+    console_title: &UInt16,
+) -> Bool;
+
+/// Get number of console input events
+@extern("kernel32.dll")
+public fn GetNumberOfConsoleInputEvents(
+    console_input: Handle,
+    number_of_events: &mut UInt32,
+) -> Bool;
+
+/// Read console input events
+@extern("kernel32.dll")
+public fn ReadConsoleInputW(
+    console_input: Handle,
+    buffer: &unsafe mut Byte,
+    length: UInt32,
+    number_of_events_read: &mut UInt32,
+) -> Bool;
+
+/// Set console cursor info
+@extern("kernel32.dll")
+public fn SetConsoleCursorInfo(
+    console_output: Handle,
+    console_cursor_info: &unsafe Byte,
+) -> Bool;
+
+/// Scroll console screen buffer
+@extern("kernel32.dll")
+public fn ScrollConsoleScreenBufferW(
+    console_output: Handle,
+    scroll_rectangle: &SmallRect,
+    clip_rectangle: &SmallRect,
+    destination_origin: Coord,
+    fill: &unsafe Byte,
+) -> Bool;
+
+// =============================================================================
+// Environment Variables
+// =============================================================================
+
+/// Set an environment variable (ANSI version).
+///
+/// If value is null, the variable is deleted.
+/// Returns true on success.
+@extern("kernel32.dll")
+public fn SetEnvironmentVariableA(
+    name: &unsafe Byte,
+    value: &unsafe Byte,
+) -> Bool;
+
+/// Get an environment variable (ANSI version).
+///
+/// Returns the number of characters written (excluding null),
+/// or 0 on failure. If the buffer is too small, returns the
+/// required size including the null terminator.
+@extern("kernel32.dll")
+public fn GetEnvironmentVariableA(
+    name: &unsafe Byte,
+    buffer: &unsafe Byte,
+    size: UInt32,
+) -> UInt32;

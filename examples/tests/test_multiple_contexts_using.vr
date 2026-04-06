@@ -1,0 +1,26 @@
+// Test: Multiple contexts in using clause
+context Logger {
+    fn log(self, msg: Text)
+}
+
+context Database {
+    fn query(self, sql: Text) -> Int
+}
+
+context Cache {
+    fn get(self, key: Text) -> Int
+}
+
+// Single context - no brackets
+fn single_context_fn() using Logger {
+    let x = 1;
+}
+
+// Multiple contexts - with brackets
+fn multiple_contexts_fn() using [Logger, Database, Cache] {
+    let x = 2;
+}
+
+fn main() {
+    // Don't call to avoid context resolution issues
+}

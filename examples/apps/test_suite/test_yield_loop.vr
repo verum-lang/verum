@@ -1,0 +1,17 @@
+// Test: Yield in loop
+// Tests if yield can be used inside a loop to generate values
+
+fn range_gen(start: Int, end: Int) -> Stream<Int> {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn main() {
+    let gen = range_gen(1, 6);
+    for value in gen {
+        print(value);
+    }
+}

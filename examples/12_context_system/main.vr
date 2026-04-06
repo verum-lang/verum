@@ -1,0 +1,81 @@
+// 12 — Context System
+// Verum's dependency injection: context declarations, `using`, and `provide`.
+// Contexts are runtime-injected capabilities (not algebraic effects).
+// Overhead: ~5-30ns per context lookup.
+
+// --- Declare context interfaces ---
+// A context defines an interface that must be provided at runtime.
+
+context Logger {
+    fn log(message: Text)
+    fn debug(message: Text)
+}
+
+context Config {
+    fn get(key: Text) -> Text
+}
+
+context Clock {
+    fn now() -> Int   // epoch seconds
+}
+
+// --- Context groups: bundle related contexts ---
+using AppContext = [Logger, Config, Clock]
+
+// --- Functions that require contexts ---
+// The `using [...]` clause declares which contexts a function needs.
+// The compiler verifies all required contexts are provided at the call site.
+
+fn log_startup() using [Logger] {
+    Logger.log("Application starting")
+}
+
+fn read_setting(key: Text) -> Text using [Logger, Config] {
+    Logger.debug(f"Reading config key: {key}")
+    Config.get(key)
+}
+
+fn timed_operation(name: Text) using [Logger, Clock] {
+    let start = Clock.now()
+    Logger.log(f"Starting {name} at {start}")
+    // ... do work ...
+    let end = Clock.now()
+    Logger.log(f"Finished {name} in {end - start}s")
+}
+
+// Using a context group
+fn full_startup() using AppContext {
+    log_startup()
+    let port = read_setting("port")
+    timed_operation("initialization")
+    Logger.log(f"Listening on port {port}")
+}
+
+// --- Providing context implementations ---
+// `provide` binds a concrete implementation to a context interface.
+
+fn main() {
+    print("=== Context System ===")
+
+    // In production code, you provide contexts before calling
+    // functions that require them:
+    //
+    //   provide Logger = ConsoleLogger.new()
+    //   provide Config = FileConfig.load("app.toml")
+    //   provide Clock  = SystemClock.new()
+    //
+    //   full_startup()  // all contexts satisfied
+
+    print("context Logger { fn log(message: Text) }")
+    print("fn greet() using [Logger] { Logger.log('hi') }")
+    print("provide Logger = my_logger")
+    print("greet()  // Logger is injected automatically")
+
+    print("\nKey points:")
+    print("  - Contexts are explicit: no hidden global state")
+    print("  - Compiler checks all requirements at build time")
+    print("  - ~5-30ns runtime overhead per lookup")
+    print("  - Groups bundle related contexts: using AppCtx = [A, B, C]")
+
+    print("\nContext system demo complete")
+}

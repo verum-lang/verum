@@ -1,0 +1,250 @@
+// =============================================================================
+// raw/capabilities.vr - Terminal Capability Detection
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.sys, core.io
+// =============================================================================
+//
+// Detects terminal capabilities via environment variables ($TERM, $COLORTERM,
+// $TERM_PROGRAM), DECRPM queries, and heuristics. Used by style layer to
+// choose correct color profile and by event layer to select mouse protocol.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.4
+// =============================================================================
+
+module capabilities;
+
+mount core.sys.{FileDesc, OSError};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Color depth support level.
+public type ColorProfile is
+    | NoColor       // No color support (dumb terminal, CI)
+    | Base16        // 16 ANSI colors
+    | Ansi256       // 256-color palette
+    | TrueColor;    // 24-bit RGB (16M colors)
+
+/// Unicode rendering capability.
+public type UnicodeSupport is
+    | AsciiOnly      // Only ASCII characters
+    | BasicWidth     // Basic Unicode but no wide/combining
+    | Full;          // Full Unicode with proper wcwidth
+
+/// Mouse protocol support.
+public type MouseProtocol is
+    | None           // No mouse support
+    | X10            // X10 compatibility (button press only)
+    | Normal         // Normal tracking (press + release)
+    | Sgr;           // SGR extended (large coordinates, precise button info)
+
+/// Detected terminal capabilities.
+/// Filled by detect_capabilities() from env vars and terminal queries.
+public type TermCapabilities is {
+    color_profile: ColorProfile,
+    unicode_support: UnicodeSupport,
+    mouse_protocol: MouseProtocol,
+    has_alternate_screen: Bool,
+    has_synchronized_output: Bool,    // Mode 2026
+    has_bracketed_paste: Bool,        // Mode 2004
+    has_focus_events: Bool,           // Mode 1004
+    has_kitty_keyboard: Bool,         // Kitty keyboard protocol
+    has_kitty_graphics: Bool,         // Kitty graphics protocol
+    has_sixel: Bool,                  // Sixel graphics
+    has_iterm_images: Bool,           // iTerm2 inline images
+    has_hyperlinks: Bool,             // OSC 8
+    has_osc52_clipboard: Bool,        // OSC 52 clipboard access
+    has_cursor_shape: Bool,           // DECSCUSR
+    term_name: Text,                  // $TERM value
+    term_program: Maybe<Text>,        // $TERM_PROGRAM value
+    is_tmux: Bool,                    // Running inside tmux
+    is_screen: Bool,                  // Running inside GNU screen
+};
+
+/// RGB color type used for background color query.
+public type Rgb is {
+    r: UInt8,
+    g: UInt8,
+    b: UInt8,
+};
+
+// =============================================================================
+// Detection
+// =============================================================================
+
+/// Detect terminal capabilities from environment variables and heuristics.
+///
+/// Checks $TERM, $COLORTERM, $TERM_PROGRAM, $TMUX, $STY, $NO_COLOR,
+/// and common terminal emulator patterns.
+public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
+    let term = env_get("TERM").unwrap_or("");
+    let colorterm = env_get("COLORTERM").unwrap_or("");
+    let term_program = env_get("TERM_PROGRAM");
+    let no_color = env_get("NO_COLOR");
+    let tmux = env_get("TMUX");
+    let screen = env_get("STY");
+
+    let is_tmux = tmux.is_some();
+    let is_screen = screen.is_some();
+
+    // Color profile detection
+    let color_profile = if no_color.is_some() {
+        ColorProfile.NoColor
+    } else if colorterm == "truecolor" || colorterm == "24bit" {
+        ColorProfile.TrueColor
+    } else if term.contains("256color") {
+        ColorProfile.Ansi256
+    } else if term == "dumb" || term == "" {
+        ColorProfile.NoColor
+    } else {
+        // Check known terminal programs for truecolor
+        match term_program {
+            Some(ref prog) if is_truecolor_terminal(prog) => ColorProfile.TrueColor,
+            _ => ColorProfile.Base16,
+        }
+    };
+
+    // Unicode support detection
+    let unicode_support = if term == "dumb" {
+        UnicodeSupport.AsciiOnly
+    } else if term.contains("utf") || term.contains("UTF") {
+        UnicodeSupport.Full
+    } else {
+        // Check $LANG / $LC_ALL for UTF-8
+        let lang = env_get("LANG").unwrap_or("");
+        if lang.contains("UTF-8") || lang.contains("utf-8") {
+            UnicodeSupport.Full
+        } else {
+            UnicodeSupport.BasicWidth
+        }
+    };
+
+    // Mouse protocol: modern terminals support SGR
+    let mouse_protocol = if term == "dumb" {
+        MouseProtocol.None
+    } else {
+        MouseProtocol.Sgr
+    };
+
+    // Feature detection from terminal program
+    let prog_name = term_program.clone().unwrap_or("");
+    let has_kitty = prog_name == "kitty";
+    let has_iterm = prog_name == "iTerm.app" || prog_name == "iTerm2.app";
+    let has_wezterm = prog_name == "WezTerm";
+
+    TermCapabilities {
+        color_profile: color_profile,
+        unicode_support: unicode_support,
+        mouse_protocol: mouse_protocol,
+        has_alternate_screen: term != "dumb",
+        has_synchronized_output: has_kitty || has_wezterm || is_tmux,
+        has_bracketed_paste: term != "dumb",
+        has_focus_events: term != "dumb",
+        has_kitty_keyboard: has_kitty,
+        has_kitty_graphics: has_kitty,
+        has_sixel: check_sixel_support(&term, &prog_name),
+        has_iterm_images: has_iterm,
+        has_hyperlinks: term != "dumb",
+        has_osc52_clipboard: has_kitty || has_iterm || has_wezterm || is_tmux,
+        has_cursor_shape: term != "dumb",
+        term_name: term,
+        term_program: term_program,
+        is_tmux: is_tmux,
+        is_screen: is_screen,
+    }
+}
+
+/// Query the terminal background color via OSC 11.
+/// Returns the RGB color if the terminal responds, None otherwise.
+/// NOTE: This is a blocking query with a short timeout.
+/// Sends OSC 11 query: ESC ] 11 ; ? BEL
+/// Expects: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \  (or BEL terminated)
+public fn query_background_color(fd: FileDesc) -> Maybe<Rgb> {
+    // Write the query to stdout (fd 1)
+    let query = "\x1b]11;?\x07";
+    let write_fd = FileDesc(1);
+    let written: Int = @intrinsic("verum.io.write_fd", write_fd.0, query.as_bytes().as_ptr(), query.len());
+    if written < 0 { return None; }
+
+    // Read response with a short timeout (100ms)
+    // Use poll/select to avoid blocking forever if terminal doesn't respond
+    let mut buf: [Byte; 64] = [0; 64];
+    let n = poll_read_raw(fd.0, &mut buf, 100);
+    if n <= 0 { return None; }
+
+    // Parse response: look for "rgb:" followed by RRRR/GGGG/BBBB
+    let response = Text.from_utf8_lossy(&buf[0..n]);
+    let rgb_idx = response.find("rgb:");
+    match rgb_idx {
+        Some(idx) => {
+            let color_str = response.slice(idx + 4, response.len());
+            // Format: RRRR/GGGG/BBBB (16-bit hex per channel)
+            let parts = color_str.split("/");
+            if parts.len() >= 3 {
+                let r_hex = parts[0].slice(0, 2.min(parts[0].len()));
+                let g_hex = parts[1].slice(0, 2.min(parts[1].len()));
+                let b_hex = parts[2].slice(0, 2.min(parts[2].len()));
+                match (parse_hex_byte(&r_hex), parse_hex_byte(&g_hex), parse_hex_byte(&b_hex)) {
+                    (Some(r), Some(g), Some(b)) => Some(Rgb.new(r, g, b)),
+                    _ => None,
+                }
+            } else { None }
+        }
+        None => None,
+    }
+}
+
+/// Parse a 2-character hex string to a byte value.
+fn parse_hex_byte(s: &Text) -> Maybe<UInt8> {
+    if s.len() < 2 { return None; }
+    let hi = hex_nibble(s.as_bytes()[0]);
+    let lo = hex_nibble(s.as_bytes()[1]);
+    match (hi, lo) {
+        (Some(h), Some(l)) => Some((h * 16 + l) as UInt8),
+        _ => None,
+    }
+}
+
+/// Convert a hex ASCII byte to its numeric value.
+fn hex_nibble(b: Byte) -> Maybe<Int> {
+    if b >= '0' as Byte && b <= '9' as Byte { Some((b - '0' as Byte) as Int) }
+    else if b >= 'a' as Byte && b <= 'f' as Byte { Some((b - 'a' as Byte + 10) as Int) }
+    else if b >= 'A' as Byte && b <= 'F' as Byte { Some((b - 'A' as Byte + 10) as Int) }
+    else { None }
+}
+
+/// Low-level poll+read with millisecond timeout. Returns bytes read or -1.
+@intrinsic("verum.io.poll_read")
+fn poll_read_raw(fd: Int, buf: &mut [Byte], timeout_ms: Int) -> Int;
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Check if a terminal program name is known to support truecolor.
+fn is_truecolor_terminal(program: &Text) -> Bool {
+    program == "iTerm.app" || program == "iTerm2.app"
+        || program == "kitty"
+        || program == "WezTerm"
+        || program == "Alacritty"
+        || program == "Rio"
+        || program == "ghostty"
+        || program == "foot"
+        || program == "contour"
+        || program == "warp"
+        || program == "vscode"
+}
+
+/// Check if terminal supports Sixel graphics.
+fn check_sixel_support(term: &Text, program: &Text) -> Bool {
+    program == "foot"
+        || program == "contour"
+        || program == "WezTerm"
+        || term.contains("xterm") && env_get("XTERM_VERSION").is_some()
+}
+
+/// Get an environment variable value. Returns None if not set.
+@intrinsic("verum.env.get")
+fn env_get(name: &Text) -> Maybe<Text>;

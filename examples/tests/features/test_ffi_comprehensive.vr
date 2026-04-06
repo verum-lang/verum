@@ -1,0 +1,341 @@
+// ============================================================================
+// Comprehensive FFI Test for Verum Language
+// Based on grammar/verum.ebnf Section 2.7
+// Tests all FFI features according to the specification
+// ============================================================================
+
+// Test 1: Basic FFI boundary declaration
+ffi LibC {
+    @extern("strlen")
+    fn strlen(s: *const u8) -> usize;
+}
+
+// Test 2: FFI with multiple functions
+ffi Math {
+    @extern("sin")
+    fn sin(x: Float) -> Float;
+
+    @extern("cos")
+    fn cos(x: Float) -> Float;
+
+    @extern("sqrt")
+    fn sqrt(x: Float) -> Float;
+}
+
+// Test 3: FFI with memory effects - Pure
+ffi PureFunctions {
+    @extern("abs")
+    fn abs(x: Int) -> Int;
+
+    memory_effects = Pure;
+}
+
+// Test 4: FFI with memory effects - Reads with parameter
+ffi ReadOperations {
+    @extern("read_value")
+    fn read_value(ptr: *const Int) -> Int;
+
+    memory_effects = Reads(ptr);
+}
+
+// Test 5: FFI with memory effects - Writes with parameter
+ffi WriteOperations {
+    @extern("write_value")
+    fn write_value(ptr: *mut Int, value: Int) -> ();
+
+    memory_effects = Writes(ptr);
+}
+
+// Test 6: FFI with memory effects - Allocates
+ffi AllocationFunctions {
+    @extern("malloc")
+    fn malloc(size: usize) -> *mut u8;
+
+    memory_effects = Allocates;
+}
+
+// Test 7: FFI with memory effects - Deallocates with parameter
+ffi DeallocationFunctions {
+    @extern("free")
+    fn free(ptr: *mut u8) -> ();
+
+    memory_effects = Deallocates(ptr);
+}
+
+// Test 8: FFI with combined memory effects
+ffi CombinedEffects {
+    @extern("realloc")
+    fn realloc(ptr: *mut u8, new_size: usize) -> *mut u8;
+
+    memory_effects = Deallocates(ptr) + Allocates;
+}
+
+// Test 9: FFI with thread safety - safe
+ffi ThreadSafeFunctions {
+    @extern("atomic_add")
+    fn atomic_add(ptr: *mut Int, value: Int) -> Int;
+
+    thread_safe = true;
+}
+
+// Test 10: FFI with thread safety - unsafe
+ffi ThreadUnsafeFunctions {
+    @extern("global_counter_increment")
+    fn global_counter_increment() -> Int;
+
+    thread_safe = false;
+}
+
+// Test 11: FFI with error protocol - None
+ffi NoErrorFunctions {
+    @extern("always_succeeds")
+    fn always_succeeds(x: Int) -> Int;
+
+    errors_via = None;
+}
+
+// Test 12: FFI with error protocol - Errno
+ffi ErrnoFunctions {
+    @extern("open")
+    fn open(path: *const u8, flags: Int) -> Int;
+
+    errors_via = Errno;
+}
+
+// Test 13: FFI with error protocol - ReturnCode with pattern
+ffi ReturnCodeFunctions {
+    @extern("initialize")
+    fn initialize(config: *const u8) -> Int;
+
+    errors_via = ReturnCode(-1);
+}
+
+// Test 14: FFI with error protocol - ReturnValue with Errno
+ffi ReturnValueWithErrno {
+    @extern("read")
+    fn read(fd: Int, buf: *mut u8, count: usize) -> Int;
+
+    errors_via = ReturnValue(-1) with Errno;
+}
+
+// Test 15: FFI with error protocol - Exception
+ffi ExceptionFunctions {
+    @extern("may_throw")
+    fn may_throw() -> ();
+
+    errors_via = Exception;
+}
+
+// Test 16: FFI with ownership - borrow
+ffi BorrowOwnership {
+    @extern("process_buffer")
+    fn process_buffer(ptr: *const u8, len: usize) -> Int;
+
+    @ownership(borrow)
+}
+
+// Test 17: FFI with ownership - shared
+ffi SharedOwnership {
+    @extern("read_only_access")
+    fn read_only_access(ptr: *const u8) -> Int;
+
+    @ownership(shared)
+}
+
+// Test 18: FFI with requires clause
+ffi RequiresFunctions {
+    @extern("divide")
+    fn divide(a: Int, b: Int) -> Int;
+
+    requires b != 0;
+}
+
+// Test 19: FFI with ensures clause
+ffi EnsuresFunctions {
+    @extern("absolute")
+    fn absolute(x: Int) -> Int;
+
+    ensures result >= 0;
+}
+
+// Test 20: FFI with both requires and ensures
+ffi RequiresAndEnsures {
+    @extern("sqrt_int")
+    fn sqrt_int(x: Int) -> Int;
+
+    requires x >= 0;
+    ensures result >= 0;
+}
+
+// Test 21: FFI with calling convention
+ffi CustomCallingConvention {
+    @extern("windows_api_function", calling_convention = "stdcall")
+    fn windows_api_function(param: Int) -> Int;
+}
+
+// Test 22: FFI with all features combined
+ffi ComprehensiveLibrary {
+    @extern("comprehensive_function")
+    fn comprehensive_function(
+        input: *const u8,
+        output: *mut u8,
+        size: usize
+    ) -> Int;
+
+    requires input != 0;
+    requires output != 0;
+    requires size > 0;
+    ensures result >= -1;
+    memory_effects = Reads(input) + Writes(output);
+    thread_safe = true;
+    errors_via = ReturnValue(-1) with Errno;
+    @ownership(borrow)
+}
+
+// Test 23: Multiple memory effects with multiple reads/writes
+ffi ComplexMemoryEffects {
+    @extern("complex_operation")
+    fn complex_operation(
+        read_ptr: *const u8,
+        write_ptr: *mut u8,
+        old_buffer: *mut u8,
+        new_size: usize
+    ) -> *mut u8;
+
+    memory_effects = Reads(read_ptr) + Writes(write_ptr) + Deallocates(old_buffer) + Allocates;
+}
+
+// Test 24: FFI with pointer types
+ffi PointerOperations {
+    @extern("memcpy")
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+
+    requires dest != 0;
+    requires src != 0;
+    requires n > 0;
+    memory_effects = Reads(src) + Writes(dest);
+    thread_safe = false;
+    errors_via = None;
+    @ownership(borrow)
+}
+
+// Test 25: FFI with void return
+ffi VoidReturnFunctions {
+    @extern("print_debug")
+    fn print_debug(msg: *const u8) -> ();
+
+    memory_effects = Reads(msg);
+    thread_safe = true;
+    errors_via = None;
+}
+
+// Test 26: Public visibility FFI
+public ffi PublicLibrary {
+    @extern("public_function")
+    fn public_function() -> Int;
+}
+
+// Test 27: Internal visibility FFI
+internal ffi InternalLibrary {
+    @extern("internal_function")
+    fn internal_function() -> Int;
+}
+
+// Test 28: Protected visibility FFI
+protected ffi ProtectedLibrary {
+    @extern("protected_function")
+    fn protected_function() -> Int;
+}
+
+// Test 29: FFI with multiple functions sharing properties
+ffi MultiFunction {
+    @extern("func_one")
+    fn func_one(x: Int) -> Int;
+
+    @extern("func_two")
+    fn func_two(y: Float) -> Float;
+
+    @extern("func_three")
+    fn func_three(z: Bool) -> Bool;
+
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+}
+
+// Test 30: FFI with complex parameter types
+ffi ComplexParams {
+    @extern("process_array")
+    fn process_array(
+        arr: *const Int,
+        len: usize,
+        result: *mut Int
+    ) -> Int;
+
+    requires arr != 0;
+    requires result != 0;
+    requires len > 0;
+    memory_effects = Reads(arr) + Writes(result);
+    thread_safe = true;
+    errors_via = ReturnCode(-1);
+}
+
+// Test 31: FFI with no parameters
+ffi NoParams {
+    @extern("get_random")
+    fn get_random() -> Int;
+
+    memory_effects = Reads(random_state);
+    thread_safe = false;
+    errors_via = None;
+}
+
+// Test 32: FFI with ReturnValue error protocol (null pointer)
+ffi NullReturnValue {
+    @extern("create_object")
+    fn create_object() -> *mut Int;
+
+    memory_effects = Allocates;
+    thread_safe = true;
+    errors_via = ReturnValue(null);
+}
+
+// Test 33: FFI extends another FFI boundary
+ffi ExtendedMath extends Math {
+    @extern("tan")
+    fn tan(x: Float) -> Float;
+
+    @extern("log")
+    fn log(x: Float) -> Float;
+
+    memory_effects = Pure;
+    thread_safe = true;
+}
+
+// Test 34: FFI with multiple requires clauses
+ffi MultiRequires {
+    @extern("bounded_divide")
+    fn bounded_divide(a: Int, b: Int, max_result: Int) -> Int;
+
+    requires b != 0;
+    requires max_result > 0;
+    requires a >= 0;
+}
+
+// Test 35: FFI with multiple ensures clauses
+ffi MultiEnsures {
+    @extern("safe_sqrt")
+    fn safe_sqrt(x: Int) -> Int;
+
+    ensures result >= 0;
+    ensures result * result <= x;
+}
+
+// ============================================================================
+// Main test function
+// ============================================================================
+fn main() -> Int {
+    // All FFI declarations tested successfully
+    // FFI functions would be called via FFI mechanism at runtime
+    0
+}

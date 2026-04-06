@@ -1,0 +1,594 @@
+// PostgreSQL Implementation of UserRepository
+//
+// This module provides the concrete PostgreSQL implementation of the UserRepository protocol.
+// It uses the Database context for all data access operations.
+//
+// Design:
+// - Zero-state struct (no fields - uses Database context)
+// - All methods delegate to Database context with SQL queries
+// - Row-to-domain mapping functions for type safety
+// - Parameterized queries to prevent SQL injection
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount core.collections.Map;
+
+// Import domain types
+mount super.super.super.domain.user.{User, UserRole, ApiToken};
+mount super.super.super.domain.errors.RegistryError;
+mount super.super.super.domain.refinements.{
+    EntityId,
+    Username,
+    Email,
+    QueryOffset,
+    QueryLimit,
+    ValidatedPackageName,
+};
+
+// Import repository protocol
+mount super.super.super.domain.repositories.UserRepository;
+
+// Import Database context
+mount super.super.super.contexts.database.{Database, DatabaseError};
+
+/// PostgreSQL implementation of UserRepository
+pub type PostgresUserRepository is {
+    // No fields needed - uses Database context
+};
+
+implement PostgresUserRepository {
+    pub fn new() -> PostgresUserRepository {
+        PostgresUserRepository {}
+    }
+}
+
+implement UserRepository for PostgresUserRepository {
+    async fn get_by_id(id: EntityId) -> Result<Maybe<User>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(id.to_string());
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM users WHERE id = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match row_to_user(r) {
+                    Result.Ok(user) => Result.Ok(Maybe.Some(user)),
+                    Result.Err(e) => Result.Err(e),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn get_by_username(username: Username) -> Result<Maybe<User>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(username.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM users WHERE username = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match row_to_user(r) {
+                    Result.Ok(user) => Result.Ok(Maybe.Some(user)),
+                    Result.Err(e) => Result.Err(e),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn get_by_email(email: Email) -> Result<Maybe<User>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(email.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match row_to_user(r) {
+                    Result.Ok(user) => Result.Ok(Maybe.Some(user)),
+                    Result.Err(e) => Result.Err(e),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn save(user: User) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let role_str = user.role.to_string();
+        let active_str = if user.is_active { "true" } else { "false" };
+        let packages_str = packages_to_string(&user.owned_packages);
+
+        let params = sql_params_7(
+            user.id.to_string(),
+            user.username.clone(),
+            user.email.clone(),
+            role_str,
+            user.created_at.to_string(),
+            active_str,
+            packages_str
+        );
+
+        let result = Database.execute_with(
+            "INSERT INTO users (id, username, email, role, created_at, is_active, owned_packages)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (id) DO UPDATE SET
+                username = EXCLUDED.username,
+                email = EXCLUDED.email,
+                role = EXCLUDED.role,
+                is_active = EXCLUDED.is_active,
+                owned_packages = EXCLUDED.owned_packages",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn delete(id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(id.to_string());
+        let result = Database.execute_with(
+            "DELETE FROM users WHERE id = $1",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn exists(id: EntityId) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(id.to_string());
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM users WHERE id = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn exists_by_username(username: Username) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(username.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM users WHERE username = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn exists_by_email(email: Email) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(email.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<User>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_2(offset.to_string(), limit.to_string());
+        let rows = Database.query_with(
+            "SELECT * FROM users ORDER BY id ASC LIMIT $2 OFFSET $1",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut users = List.new();
+                for row in rs {
+                    match row_to_user(row) {
+                        Result.Ok(user) => users.push(user),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(users)
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn count() -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one("SELECT COUNT(*) as count FROM users").await;
+
+        match row {
+            Result.Ok(r) => {
+                match r.get("count") {
+                    Maybe.Some(count_str) => Result.Ok(parse_int(count_str)),
+                    Maybe.None => Result.Ok(0),
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn find_by_role(role: UserRole) -> Result<List<User>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(role.to_string());
+        let rows = Database.query_with(
+            "SELECT * FROM users WHERE role = $1 ORDER BY created_at DESC",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut users = List.new();
+                for row in rs {
+                    match row_to_user(row) {
+                        Result.Ok(user) => users.push(user),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(users)
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn update_role(user_id: EntityId, new_role: UserRole) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_2(new_role.to_string(), user_id.to_string());
+        let result = Database.execute_with(
+            "UPDATE users SET role = $1 WHERE id = $2",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.database_error("User not found"))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn deactivate(user_id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(user_id.to_string());
+        let result = Database.execute_with(
+            "UPDATE users SET is_active = false WHERE id = $1",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.database_error("User not found"))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn activate(user_id: EntityId) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(user_id.to_string());
+        let result = Database.execute_with(
+            "UPDATE users SET is_active = true WHERE id = $1",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.database_error("User not found"))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn update_email(user_id: EntityId, new_email: Email) -> Result<(), RegistryError>
+        using [Database]
+    {
+        // Check if email is already taken
+        let email_check = Database.fetch_optional_with(
+            "SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) AND id != $2",
+            sql_params_2(new_email.clone(), user_id.to_string())
+        ).await;
+
+        match email_check {
+            Result.Ok(Maybe.Some(_)) => {
+                return Result.Err(RegistryError.validation_error("email", "Email already in use"));
+            },
+            Result.Ok(Maybe.None) => {},
+            Result.Err(db_err) => return Result.Err(db_error_to_registry(db_err)),
+        }
+
+        // Update email
+        let params = sql_params_2(new_email.clone(), user_id.to_string());
+        let result = Database.execute_with(
+            "UPDATE users SET email = $1 WHERE id = $2",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.database_error("User not found"))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn search(query: Text, offset: QueryOffset, limit: QueryLimit) -> Result<List<User>, RegistryError>
+        using [Database]
+    {
+        let search_pattern = f"%{query}%";
+        let params = sql_params_3(search_pattern, offset.to_string(), limit.to_string());
+
+        let rows = Database.query_with(
+            "SELECT * FROM users
+             WHERE username ILIKE $1 OR email ILIKE $1
+             ORDER BY username ASC
+             LIMIT $3 OFFSET $2",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut users = List.new();
+                for row in rs {
+                    match row_to_user(row) {
+                        Result.Ok(user) => users.push(user),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(users)
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+
+    async fn next_id() -> Result<EntityId, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one(
+            "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM users"
+        ).await;
+
+        match row {
+            Result.Ok(r) => {
+                match r.get("next_id") {
+                    Maybe.Some(id_str) => Result.Ok(parse_int(id_str)),
+                    Maybe.None => Result.Ok(1),
+                }
+            },
+            Result.Err(db_err) => Result.Err(db_error_to_registry(db_err)),
+        }
+    }
+}
+
+// ============================================================================
+// Helper Functions - Row Mapping
+// ============================================================================
+
+fn row_to_user(row: Map<Text, Text>) -> Result<User, RegistryError> {
+    let id = match row.get("id") {
+        Maybe.Some(i) => parse_int(i),
+        Maybe.None => return Result.Err(RegistryError.database_error("Missing 'id' field")),
+    };
+
+    let username = match row.get("username") {
+        Maybe.Some(u) => {
+            match Username.try_from(u.clone()) {
+                Result.Ok(validated) => validated,
+                Result.Err(err) => return Result.Err(RegistryError.validation_error("username", err)),
+            }
+        },
+        Maybe.None => return Result.Err(RegistryError.database_error("Missing 'username' field")),
+    };
+
+    let email = match row.get("email") {
+        Maybe.Some(e) => {
+            match Email.try_from(e.clone()) {
+                Result.Ok(validated) => validated,
+                Result.Err(err) => return Result.Err(RegistryError.validation_error("email", err)),
+            }
+        },
+        Maybe.None => return Result.Err(RegistryError.database_error("Missing 'email' field")),
+    };
+
+    let role = match row.get("role") {
+        Maybe.Some(r) => UserRole.from_string(r.clone()),
+        Maybe.None => UserRole.Regular,
+    };
+
+    let created_at = match row.get("created_at") {
+        Maybe.Some(t) => parse_int(t),
+        Maybe.None => 0,
+    };
+
+    let is_active = match row.get("is_active") {
+        Maybe.Some(a) => a == "true" || a == "1" || a == "t",
+        Maybe.None => true,
+    };
+
+    let packages_str = match row.get("owned_packages") {
+        Maybe.Some(p) => p.clone(),
+        Maybe.None => "",
+    };
+    let owned_packages = parse_packages(packages_str);
+
+    Result.Ok(User {
+        id: id,
+        username: username,
+        email: email,
+        role: role,
+        created_at: created_at,
+        api_tokens: List.new(), // Tokens loaded separately
+        owned_packages: owned_packages,
+        is_active: is_active,
+    })
+}
+
+// ============================================================================
+// Helper Functions - Conversion
+// ============================================================================
+
+fn db_error_to_registry(db_err: DatabaseError) -> RegistryError {
+    match db_err {
+        DatabaseError.NotFound => RegistryError.database_error("Record not found"),
+        DatabaseError.ConnectionFailed(msg) => RegistryError.database_error(f"Connection failed: {msg}"),
+        DatabaseError.QueryFailed(msg) => RegistryError.database_error(f"Query failed: {msg}"),
+        DatabaseError.DuplicateKey(msg) => RegistryError.database_error(f"Duplicate key: {msg}"),
+        DatabaseError.TransactionFailed(msg) => RegistryError.database_error(f"Transaction failed: {msg}"),
+    }
+}
+
+fn packages_to_string(packages: &List<ValidatedPackageName>) -> Text {
+    if packages.len() == 0 {
+        return "";
+    }
+
+    let mut result = "";
+    let mut first = true;
+
+    for pkg in packages.clone() {
+        if !first {
+            result = result + ",";
+        }
+        result = result + pkg;
+        first = false;
+    }
+
+    result
+}
+
+fn parse_packages(packages_str: Text) -> List<ValidatedPackageName> {
+    let mut packages = List.new();
+
+    if packages_str.len() == 0 {
+        return packages;
+    }
+
+    let parts = packages_str.split(",");
+    for part in parts {
+        let trimmed = part.trim();
+        match ValidatedPackageName.try_from(trimmed) {
+            Result.Ok(pkg) => packages.push(pkg),
+            Result.Err(_) => {}, // Skip invalid package names
+        }
+    }
+
+    packages
+}
+
+fn parse_int(s: &Text) -> Int {
+    let mut result = 0;
+    let mut is_negative = false;
+    let mut started = false;
+
+    for ch in s.chars() {
+        let ch_str = ch.to_string();
+
+        if ch_str == "-" && !started {
+            is_negative = true;
+            started = true;
+        } else if ch_str >= "0" && ch_str <= "9" {
+            started = true;
+            let digit = match ch_str {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_negative { -result } else { result }
+}
+
+// ============================================================================
+// SQL Parameter Helpers
+// ============================================================================
+
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params
+}
+
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params
+}
+
+fn sql_params_3(p1: Text, p2: Text, p3: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params
+}
+
+fn sql_params_7(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text, p6: Text, p7: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params.push(p4);
+    params.push(p5);
+    params.push(p6);
+    params.push(p7);
+    params
+}

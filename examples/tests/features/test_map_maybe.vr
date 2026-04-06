@@ -1,0 +1,24 @@
+// Test map_maybe generic function
+
+type Maybe<T> is Some(T) | None;
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None
+    }
+}
+
+fn main() {
+    let _ = print("=== Map Maybe Test ===");
+
+    let some_val: Maybe<Float> = Some(10.0);
+    let doubled = map_maybe(some_val, |x: Float| -> Float { x * 2.0 });
+
+    match doubled {
+        Some(v) => { let _ = print(f"Result: {v}"); },
+        None => { let _ = print("None"); }
+    }
+
+    let _ = print("=== Done ===");
+}

@@ -1,0 +1,6 @@
+// Test debug macro with verbose flag
+fn main() {
+    let x = 42;
+    let _ = dbg!(x);
+    let _ = print("Test complete");
+}

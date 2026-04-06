@@ -1,0 +1,97 @@
+[package]
+name = "verum_vbc"
+description = "Verum Bytecode (VBC) - unified intermediate representation for the Verum compiler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal crates
+verum_common = { workspace = true }
+verum_ast = { workspace = true, optional = true }
+verum_lexer = { workspace = true, optional = true }  # For TokenStream serialization in meta-system
+verum_cbgr = { workspace = true }  # CBGR tier analysis (always enabled for industrial quality)
+verum_parser = { workspace = true, optional = true }  # For mount resolution in codegen
+
+# Data structures
+bitflags = { workspace = true }
+smallvec = { version = "1.15", features = ["serde"] }
+indexmap = { version = "2.13", features = ["serde"] }
+
+# Serialization
+serde = { workspace = true }
+bincode = "1.3"
+
+# Errors
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Regex for text processing
+regex = "1.12"
+
+# Parallelism (for Blelloch scan and parallel operations)
+rayon = { workspace = true, optional = true }
+
+# Hashing
+blake3 = { workspace = true }
+
+# Optional compression
+zstd = { version = "0.13", optional = true }
+lz4_flex = { version = "0.12", optional = true }
+
+# Unix libc for V-LLSI syscall operations
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Cross-platform dynamic library loading for FFI
+libloading = { version = "0.9", optional = true }
+
+# FFI calling convention support (optional, for interpreter)
+libffi = { version = "5.1", optional = true }
+
+# Tokenization (HuggingFace, optional)
+tokenizers = { workspace = true, optional = true }
+
+# Metal GPU support (macOS/iOS)
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.33", optional = true }
+objc = { version = "0.2", optional = true }
+block = { version = "0.1", optional = true }
+foreign-types-shared = { version = "0.3", optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
+verum_parser = { workspace = true }
+verum_lexer = { workspace = true }
+
+[features]
+default = ["compression", "table_dispatch"]
+compression = ["dep:zstd", "dep:lz4_flex"]
+computed_goto = []  # Enable computed goto dispatch (platform-specific)
+table_dispatch = []  # Function table dispatch (~40% faster) - ALWAYS USED
+codegen = ["dep:verum_ast", "dep:verum_lexer", "dep:verum_parser"]  # Enable AST to VBC code generation with mount resolution
+parallel = ["dep:rayon"]  # Enable parallel scans and monomorphization
+metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"]  # Metal GPU backend (macOS)
+ffi = ["dep:libloading", "dep:libffi"]  # FFI runtime support for interpreter
+tokenizers = ["dep:tokenizers"]  # HuggingFace tokenizers for BPE/SentencePiece
+# Note: cbgr-integration feature removed - verum_cbgr is now always included for industrial quality
+
+[[bench]]
+name = "tensor_benchmarks"
+harness = false
+
+[[bench]]
+name = "interpreter_benchmarks"
+harness = false
+
+[[bench]]
+name = "production_targets"
+harness = false

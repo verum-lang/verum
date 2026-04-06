@@ -1,0 +1,25 @@
+module runtime.time;
+
+/// Monotonic clock in nanoseconds.
+@intrinsic("verum.runtime.monotonic_nanos")
+public fn monotonic_nanos() -> Int;
+
+/// Real-time clock in seconds since epoch.
+@intrinsic("verum.runtime.realtime_secs")
+public fn realtime_secs() -> Int;
+
+/// Real-time clock in nanoseconds since epoch.
+@intrinsic("verum.runtime.realtime_nanos")
+public fn realtime_nanos() -> Int;
+
+/// Number of logical CPUs available.
+@intrinsic("verum.runtime.num_cpus")
+public fn num_cpus() -> Int;
+
+/// Sleep for the given number of milliseconds.
+@intrinsic("verum.runtime.sleep_ms")
+public fn sleep_ms(ms: Int);
+
+/// Sleep for the given number of nanoseconds.
+@intrinsic("verum.runtime.sleep_ns")
+public fn sleep_ns(ns: Int);

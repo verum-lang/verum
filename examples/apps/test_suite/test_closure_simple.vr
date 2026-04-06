@@ -1,0 +1,14 @@
+// Simple closure test
+fn main() {
+    let _ = print("Test 1: Basic closure...");
+    let double = |x: Int| x * 2;
+    let result = double(5);
+    let _ = print(f"double(5) = {result}");
+    
+    let _ = print("Test 2: Closure capturing variable...");
+    let multiplier = 3;
+    let times_three = |x: Int| x * multiplier;
+    let _ = print(f"times_three(4) = {times_three(4)}");
+    
+    let _ = print("Done!");
+}

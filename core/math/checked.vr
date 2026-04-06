@@ -1,0 +1,509 @@
+// =============================================================================
+// checked.vr - Overflow-Checked Arithmetic
+// =============================================================================
+// Layer: 0 (Foundation)
+//
+// Provides arithmetic operations with explicit overflow handling:
+// - Checked: Returns Maybe<T>, None on overflow
+// - Saturating: Clamps to min/max on overflow
+// - Wrapping: Wraps around (modular arithmetic)
+//
+// All operations map to LLVM intrinsics for optimal code generation.
+//
+// Spec: docs/architecture/math-spec.md Section 1.4
+// =============================================================================
+
+module core.math.checked;
+
+// =============================================================================
+// Result Types
+// =============================================================================
+
+// Result of a checked arithmetic operation
+public type CheckedResult<T> is
+    | Ok(T)
+    | Overflow;
+
+// =============================================================================
+// Checked Operations (64-bit Signed)
+// =============================================================================
+
+// Checked signed addition
+// Returns Overflow if the result would overflow.
+@inline(always)
+public fn checked_add(a: Int64, b: Int64) -> CheckedResult<Int64> {
+    let (result, overflow) = @intrinsic("llvm.sadd.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked signed subtraction
+@inline(always)
+public fn checked_sub(a: Int64, b: Int64) -> CheckedResult<Int64> {
+    let (result, overflow) = @intrinsic("llvm.ssub.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked signed multiplication
+@inline(always)
+public fn checked_mul(a: Int64, b: Int64) -> CheckedResult<Int64> {
+    let (result, overflow) = @intrinsic("llvm.smul.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked signed division
+// Returns Overflow for division by zero or MIN / -1
+@inline(always)
+public fn checked_div(a: Int64, b: Int64) -> CheckedResult<Int64> {
+    if b == 0 {
+        CheckedResult.Overflow
+    } else if a == Int64.MIN && b == -1 {
+        CheckedResult.Overflow  // -MIN overflows
+    } else {
+        CheckedResult.Ok(a / b)
+    }
+}
+
+// Checked negation
+// Returns Overflow for MIN (since -MIN overflows)
+@inline(always)
+public fn checked_neg(a: Int64) -> CheckedResult<Int64> {
+    if a == Int64.MIN {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(-a)
+    }
+}
+
+// Checked absolute value
+// Returns Overflow for MIN
+@inline(always)
+public fn checked_abs(a: Int64) -> CheckedResult<Int64> {
+    if a == Int64.MIN {
+        CheckedResult.Overflow
+    } else if a < 0 {
+        CheckedResult.Ok(-a)
+    } else {
+        CheckedResult.Ok(a)
+    }
+}
+
+// =============================================================================
+// Checked Operations (64-bit Unsigned)
+// =============================================================================
+
+// Checked unsigned addition
+@inline(always)
+public fn checked_add_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
+    let (result, overflow) = @intrinsic("llvm.uadd.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked unsigned subtraction
+@inline(always)
+public fn checked_sub_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
+    let (result, overflow) = @intrinsic("llvm.usub.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked unsigned multiplication
+@inline(always)
+public fn checked_mul_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
+    let (result, overflow) = @intrinsic("llvm.umul.with.overflow.i64", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked unsigned division
+// Returns Overflow for division by zero
+@inline(always)
+public fn checked_div_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
+    if b == 0 {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(a / b)
+    }
+}
+
+// =============================================================================
+// Checked Operations (32-bit)
+// =============================================================================
+
+// Checked 32-bit signed addition
+@inline(always)
+public fn checked_add_i32(a: Int32, b: Int32) -> CheckedResult<Int32> {
+    let (result, overflow) = @intrinsic("llvm.sadd.with.overflow.i32", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked 32-bit signed multiplication
+@inline(always)
+public fn checked_mul_i32(a: Int32, b: Int32) -> CheckedResult<Int32> {
+    let (result, overflow) = @intrinsic("llvm.smul.with.overflow.i32", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// Checked 32-bit unsigned addition
+@inline(always)
+public fn checked_add_u32(a: UInt32, b: UInt32) -> CheckedResult<UInt32> {
+    let (result, overflow) = @intrinsic("llvm.uadd.with.overflow.i32", a, b);
+    if overflow {
+        CheckedResult.Overflow
+    } else {
+        CheckedResult.Ok(result)
+    }
+}
+
+// =============================================================================
+// Saturating Operations (64-bit Signed)
+// =============================================================================
+
+// Saturating signed addition
+// Clamps result to [MIN, MAX] on overflow.
+@inline(always)
+public fn saturating_add(a: Int64, b: Int64) -> Int64 {
+    match checked_add(a, b) {
+        CheckedResult.Ok(x) => x,
+        CheckedResult.Overflow => {
+            if b > 0 { Int64.MAX } else { Int64.MIN }
+        }
+    }
+}
+
+// Saturating signed subtraction
+@inline(always)
+public fn saturating_sub(a: Int64, b: Int64) -> Int64 {
+    match checked_sub(a, b) {
+        CheckedResult.Ok(x) => x,
+        CheckedResult.Overflow => {
+            if b < 0 { Int64.MAX } else { Int64.MIN }
+        }
+    }
+}
+
+// Saturating signed multiplication
+@inline(always)
+public fn saturating_mul(a: Int64, b: Int64) -> Int64 {
+    match checked_mul(a, b) {
+        CheckedResult.Ok(x) => x,
+        CheckedResult.Overflow => {
+            if (a > 0) == (b > 0) { Int64.MAX } else { Int64.MIN }
+        }
+    }
+}
+
+// Saturating negation
+@inline(always)
+public fn saturating_neg(a: Int64) -> Int64 {
+    if a == Int64.MIN { Int64.MAX } else { -a }
+}
+
+// Saturating absolute value
+@inline(always)
+public fn saturating_abs(a: Int64) -> Int64 {
+    if a == Int64.MIN { Int64.MAX } else if a < 0 { -a } else { a }
+}
+
+// =============================================================================
+// Saturating Operations (64-bit Unsigned)
+// =============================================================================
+
+// Saturating unsigned addition
+@inline(always)
+public fn saturating_add_u(a: UInt64, b: UInt64) -> UInt64 {
+    match checked_add_u(a, b) {
+        CheckedResult.Ok(x) => x,
+        CheckedResult.Overflow => UInt64.MAX,
+    }
+}
+
+// Saturating unsigned subtraction
+@inline(always)
+public fn saturating_sub_u(a: UInt64, b: UInt64) -> UInt64 {
+    if b > a { 0 } else { a - b }
+}
+
+// Saturating unsigned multiplication
+@inline(always)
+public fn saturating_mul_u(a: UInt64, b: UInt64) -> UInt64 {
+    match checked_mul_u(a, b) {
+        CheckedResult.Ok(x) => x,
+        CheckedResult.Overflow => UInt64.MAX,
+    }
+}
+
+// =============================================================================
+// Wrapping Operations (Modular Arithmetic)
+// =============================================================================
+
+// Wrapping signed addition (modulo 2^64)
+@inline(always)
+public fn wrapping_add(a: Int64, b: Int64) -> Int64 {
+    a + b
+}
+
+// Wrapping signed subtraction
+@inline(always)
+public fn wrapping_sub(a: Int64, b: Int64) -> Int64 {
+    a - b
+}
+
+// Wrapping signed multiplication
+@inline(always)
+public fn wrapping_mul(a: Int64, b: Int64) -> Int64 {
+    a * b
+}
+
+// Wrapping negation
+@inline(always)
+public fn wrapping_neg(a: Int64) -> Int64 {
+    0i64 - a
+}
+
+// Wrapping unsigned addition
+@inline(always)
+public fn wrapping_add_u(a: UInt64, b: UInt64) -> UInt64 {
+    a + b
+}
+
+// Wrapping unsigned subtraction
+@inline(always)
+public fn wrapping_sub_u(a: UInt64, b: UInt64) -> UInt64 {
+    a - b
+}
+
+// Wrapping unsigned multiplication
+@inline(always)
+public fn wrapping_mul_u(a: UInt64, b: UInt64) -> UInt64 {
+    a * b
+}
+
+// =============================================================================
+// Overflow-Detecting Operations
+// =============================================================================
+
+// Check if addition would overflow
+@inline(always)
+public fn would_add_overflow(a: Int64, b: Int64) -> Bool {
+    match checked_add(a, b) {
+        CheckedResult.Overflow => true,
+        CheckedResult.Ok(_) => false,
+    }
+}
+
+// Check if subtraction would overflow
+@inline(always)
+public fn would_sub_overflow(a: Int64, b: Int64) -> Bool {
+    match checked_sub(a, b) {
+        CheckedResult.Overflow => true,
+        CheckedResult.Ok(_) => false,
+    }
+}
+
+// Check if multiplication would overflow
+@inline(always)
+public fn would_mul_overflow(a: Int64, b: Int64) -> Bool {
+    match checked_mul(a, b) {
+        CheckedResult.Overflow => true,
+        CheckedResult.Ok(_) => false,
+    }
+}
+
+// =============================================================================
+// Wide Multiplication (128-bit result)
+// =============================================================================
+
+// Signed 64×64 → 128-bit multiplication
+// Returns (low, high) parts of the 128-bit result.
+@inline(always)
+public fn widening_mul(a: Int64, b: Int64) -> (Int64, Int64) {
+    @intrinsic("llvm.smul.wide.i64", a, b)
+}
+
+// Unsigned 64×64 → 128-bit multiplication
+@inline(always)
+public fn widening_mul_u(a: UInt64, b: UInt64) -> (UInt64, UInt64) {
+    @intrinsic("llvm.umul.wide.i64", a, b)
+}
+
+// =============================================================================
+// Carry/Borrow Arithmetic
+// =============================================================================
+
+// Add with carry: a + b + carry_in = result + carry_out
+@inline(always)
+public fn adc(a: UInt64, b: UInt64, carry_in: Bool) -> (UInt64, Bool) {
+    let (sum1, overflow1) = @intrinsic("llvm.uadd.with.overflow.i64", a, b);
+    let carry_val: UInt64 = if carry_in { 1 } else { 0 };
+    let (sum2, overflow2) = @intrinsic("llvm.uadd.with.overflow.i64", sum1, carry_val);
+    (sum2, overflow1 || overflow2)
+}
+
+// Subtract with borrow: a - b - borrow_in = result - borrow_out
+@inline(always)
+public fn sbb(a: UInt64, b: UInt64, borrow_in: Bool) -> (UInt64, Bool) {
+    let (diff1, borrow1) = @intrinsic("llvm.usub.with.overflow.i64", a, b);
+    let borrow_val: UInt64 = if borrow_in { 1 } else { 0 };
+    let (diff2, borrow2) = @intrinsic("llvm.usub.with.overflow.i64", diff1, borrow_val);
+    (diff2, borrow1 || borrow2)
+}
+
+// =============================================================================
+// CheckedResult Methods
+// =============================================================================
+
+implement<T> CheckedResult<T> {
+    /// Returns `true` if the result is `Ok`.
+    public fn is_ok(&self) -> Bool {
+        match self {
+            CheckedResult.Ok(_) => true,
+            CheckedResult.Overflow => false,
+        }
+    }
+
+    /// Returns `true` if the result is `Overflow`.
+    public fn is_overflow(&self) -> Bool {
+        match self {
+            CheckedResult.Ok(_) => false,
+            CheckedResult.Overflow => true,
+        }
+    }
+
+    /// Unwrap the ok value, panicking on overflow.
+    public fn unwrap(self) -> T {
+        match self {
+            CheckedResult.Ok(v) => v,
+            CheckedResult.Overflow => panic("called unwrap on Overflow"),
+        }
+    }
+
+    /// Unwrap with a custom panic message.
+    public fn expect(self, msg: Text) -> T {
+        match self {
+            CheckedResult.Ok(v) => v,
+            CheckedResult.Overflow => panic(msg),
+        }
+    }
+
+    /// Returns the contained value or a default.
+    public fn unwrap_or(self, default: T) -> T {
+        match self {
+            CheckedResult.Ok(v) => v,
+            CheckedResult.Overflow => default,
+        }
+    }
+
+    /// Returns the contained value or computes it from a closure.
+    public fn unwrap_or_else(self, f: fn() -> T) -> T {
+        match self {
+            CheckedResult.Ok(v) => v,
+            CheckedResult.Overflow => f(),
+        }
+    }
+
+    /// Map the ok value with a function.
+    public fn map<U>(self, f: fn(T) -> U) -> CheckedResult<U> {
+        match self {
+            CheckedResult.Ok(v) => CheckedResult.Ok(f(v)),
+            CheckedResult.Overflow => CheckedResult.Overflow,
+        }
+    }
+
+    /// Chain an operation that may also overflow.
+    public fn and_then<U>(self, f: fn(T) -> CheckedResult<U>) -> CheckedResult<U> {
+        match self {
+            CheckedResult.Ok(v) => f(v),
+            CheckedResult.Overflow => CheckedResult.Overflow,
+        }
+    }
+
+    /// Returns the other result if this is Ok, otherwise returns Overflow.
+    public fn and<U>(self, other: CheckedResult<U>) -> CheckedResult<U> {
+        match self {
+            CheckedResult.Ok(_) => other,
+            CheckedResult.Overflow => CheckedResult.Overflow,
+        }
+    }
+
+    /// Returns this result if Ok, otherwise returns the other.
+    public fn or(self, other: CheckedResult<T>) -> CheckedResult<T> {
+        match self {
+            CheckedResult.Ok(v) => CheckedResult.Ok(v),
+            CheckedResult.Overflow => other,
+        }
+    }
+
+    /// Convert to Maybe<T>: Ok(v) -> Some(v), Overflow -> None.
+    public fn ok(self) -> Maybe<T> {
+        match self {
+            CheckedResult.Ok(v) => Some(v),
+            CheckedResult.Overflow => None,
+        }
+    }
+}
+
+// =============================================================================
+// Try Protocol for CheckedResult
+// =============================================================================
+
+/// Enables the `?` operator on CheckedResult values.
+///
+/// ```verum
+/// fn add_and_mul(a: Int64, b: Int64, c: Int64) -> CheckedResult<Int64> {
+///     let sum = checked_add(a, b)?;
+///     checked_mul(sum, c)
+/// }
+/// ```
+implement<T> Try for CheckedResult<T> {
+    type Output = T;
+    type Residual = CheckedResult<Never>;
+
+    fn from_output(output: T) -> CheckedResult<T> {
+        CheckedResult.Ok(output)
+    }
+
+    fn branch(self) -> ControlFlow<CheckedResult<Never>, T> {
+        match self {
+            CheckedResult.Ok(v) => ControlFlow.Continue(v),
+            CheckedResult.Overflow => ControlFlow.Break(CheckedResult.Overflow),
+        }
+    }
+}
+
+/// Enables converting CheckedResult<Never> back to CheckedResult<T>
+/// when propagating overflow via `?`.
+implement<T> FromResidual<CheckedResult<Never>> for CheckedResult<T> {
+    fn from_residual(_residual: CheckedResult<Never>) -> CheckedResult<T> {
+        CheckedResult.Overflow
+    }
+}

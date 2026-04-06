@@ -1,0 +1,475 @@
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    unused_must_use,
+    unused_unsafe,
+    deprecated,
+    unexpected_cfgs,
+    unused_comparisons,
+    forgetting_copy_types,
+    useless_ptr_null_checks,
+    unused_assignments
+)]
+// Deref Protocol Implementation Tests
+//
+// Deref protocol: automatic dereferencing for reference types (&T, &checked T, &unsafe T)
+//
+// This test suite verifies the Deref protocol implementations for all three
+// reference types: ManagedRef (ThinRef), CheckedRef, and UnsafeRef.
+//
+// Test categories:
+// - Correctness: Verify correct dereferencing behavior
+// - Safety: Verify safety checks (for ManagedRef)
+// - Performance: Benchmark deref overhead
+// - Edge cases: Null pointers, invalid references, etc.
+
+use verum_types::references::{CheckedRef, CheckedRefMut, UnsafeRef, UnsafeRefMut};
+use verum_cbgr_runtime::ThinRef;
+
+// ==================== CheckedRef Tests ====================
+
+#[test]
+fn test_checked_ref_deref() {
+    // CheckedRef zero-cost deref: &checked T dereferences with no runtime overhead (statically verified)
+    let value = 42;
+    let checked_ref = CheckedRef::from_ref(&value);
+
+    // Test Deref
+    assert_eq!(*checked_ref, 42);
+    assert_eq!(*checked_ref, value);
+}
+
+#[test]
+fn test_checked_ref_deref_string() {
+    let s = "hello".to_string();
+    let checked_ref = CheckedRef::from_ref(&s);
+
+    assert_eq!(*checked_ref, "hello");
+    assert_eq!(checked_ref.len(), 5);
+}
+
+#[test]
+fn test_checked_ref_deref_struct() {
+    #[derive(Debug, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    let point = Point { x: 10, y: 20 };
+    let checked_ref = CheckedRef::from_ref(&point);
+
+    assert_eq!(checked_ref.x, 10);
+    assert_eq!(checked_ref.y, 20);
+    assert_eq!(*checked_ref, point);
+}
+
+#[test]
+fn test_checked_ref_multiple_deref() {
+    let value = 100;
+    let checked_ref = CheckedRef::from_ref(&value);
+
+    // Multiple dereferences should all work (zero-cost)
+    for _ in 0..1000 {
+        assert_eq!(*checked_ref, 100);
+    }
+}
+
+#[test]
+fn test_checked_ref_mut_deref() {
+    // CheckedRefMut zero-cost deref: &checked mut T dereferences with no runtime overhead
+    let mut value = 42;
+    let checked_ref_mut = CheckedRefMut::from_mut(&mut value);
+
+    // Test immutable deref
+    assert_eq!(*checked_ref_mut, 42);
+}
+
+#[test]
+fn test_checked_ref_mut_deref_mut() {
+    let mut value = 42;
+    let mut checked_ref_mut = CheckedRefMut::from_mut(&mut value);
+
+    // Test mutable deref
+    *checked_ref_mut = 100;
+    assert_eq!(*checked_ref_mut, 100);
+    assert_eq!(value, 100);
+}
+
+#[test]
+fn test_checked_ref_mut_modify_string() {
+    let mut s = "hello".to_string();
+    let mut checked_ref_mut = CheckedRefMut::from_mut(&mut s);
+
+    checked_ref_mut.push_str(" world");
+    assert_eq!(*checked_ref_mut, "hello world");
+    assert_eq!(s, "hello world");
+}
+
+#[test]
+fn test_checked_ref_debug() {
+    let value = 42;
+    let checked_ref = CheckedRef::from_ref(&value);
+
+    let debug_str = format!("{:?}", checked_ref);
+    assert!(debug_str.contains("CheckedRef"));
+}
+
+#[test]
+fn test_checked_ref_pointer() {
+    let value = 42;
+    let checked_ref = CheckedRef::from_ref(&value);
+
+    let ptr_str = format!("{:p}", checked_ref);
+    assert!(!ptr_str.is_empty());
+}
+
+// ==================== UnsafeRef Tests ====================
+
+#[test]
+fn test_unsafe_ref_deref() {
+    // UnsafeRef zero-cost deref: &unsafe T dereferences with no checks (programmer responsibility)
+    let value = 42;
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&value) };
+
+    // Test Deref
+    assert_eq!(*unsafe_ref, 42);
+    assert_eq!(*unsafe_ref, value);
+}
+
+#[test]
+fn test_unsafe_ref_deref_string() {
+    let s = "hello".to_string();
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&s) };
+
+    assert_eq!(*unsafe_ref, "hello");
+    assert_eq!(unsafe_ref.len(), 5);
+}
+
+#[test]
+fn test_unsafe_ref_deref_struct() {
+    #[derive(Debug, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    let point = Point { x: 10, y: 20 };
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&point) };
+
+    assert_eq!(unsafe_ref.x, 10);
+    assert_eq!(unsafe_ref.y, 20);
+    assert_eq!(*unsafe_ref, point);
+}
+
+#[test]
+fn test_unsafe_ref_multiple_deref() {
+    let value = 100;
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&value) };
+
+    // Multiple dereferences should all work (zero-cost)
+    for _ in 0..1000 {
+        assert_eq!(*unsafe_ref, 100);
+    }
+}
+
+#[test]
+fn test_unsafe_ref_mut_deref() {
+    // UnsafeRefMut zero-cost deref: &unsafe mut T dereferences with no checks
+    let mut value = 42;
+    let unsafe_ref_mut = unsafe { UnsafeRefMut::from_mut(&mut value) };
+
+    // Test immutable deref
+    assert_eq!(*unsafe_ref_mut, 42);
+}
+
+#[test]
+fn test_unsafe_ref_mut_deref_mut() {
+    let mut value = 42;
+    let mut unsafe_ref_mut = unsafe { UnsafeRefMut::from_mut(&mut value) };
+
+    // Test mutable deref
+    *unsafe_ref_mut = 100;
+    assert_eq!(*unsafe_ref_mut, 100);
+    assert_eq!(value, 100);
+}
+
+#[test]
+fn test_unsafe_ref_mut_modify_string() {
+    let mut s = "hello".to_string();
+    let mut unsafe_ref_mut = unsafe { UnsafeRefMut::from_mut(&mut s) };
+
+    unsafe_ref_mut.push_str(" world");
+    assert_eq!(*unsafe_ref_mut, "hello world");
+    assert_eq!(s, "hello world");
+}
+
+#[test]
+fn test_unsafe_ref_debug() {
+    let value = 42;
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&value) };
+
+    let debug_str = format!("{:?}", unsafe_ref);
+    assert!(debug_str.contains("UnsafeRef"));
+}
+
+#[test]
+fn test_unsafe_ref_pointer() {
+    let value = 42;
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&value) };
+
+    let ptr_str = format!("{:p}", unsafe_ref);
+    assert!(!ptr_str.is_empty());
+}
+
+// ==================== ManagedRef (ThinRef) Tests ====================
+
+#[test]
+fn test_managed_ref_deref() {
+    // ManagedRef CBGR-validated deref: &T validates generation counter at dereference (~15ns)
+    use verum_cbgr_runtime::{Capability, CbgrAllocator};
+
+    let allocator = CbgrAllocator::new();
+    let gen_ref = allocator.allocate(42);
+
+    // Test Deref with CBGR validation
+    assert_eq!(*gen_ref, 42);
+}
+
+#[test]
+fn test_managed_ref_deref_string() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    let allocator = CbgrAllocator::new();
+    let gen_ref = allocator.allocate("hello".to_string());
+
+    assert_eq!(*gen_ref, "hello");
+    assert_eq!(gen_ref.len(), 5);
+}
+
+#[test]
+fn test_managed_ref_deref_struct() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    #[derive(Debug, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    let allocator = CbgrAllocator::new();
+    let gen_ref = allocator.allocate(Point { x: 10, y: 20 });
+
+    assert_eq!(gen_ref.x, 10);
+    assert_eq!(gen_ref.y, 20);
+}
+
+#[test]
+fn test_managed_ref_multiple_deref() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    let allocator = CbgrAllocator::new();
+    let gen_ref = allocator.allocate(100);
+
+    // Multiple dereferences with CBGR validation
+    for _ in 0..100 {
+        assert_eq!(*gen_ref, 100);
+    }
+}
+
+#[test]
+fn test_managed_ref_deref_mut() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    let allocator = CbgrAllocator::new();
+    let mut gen_ref = allocator.allocate(42);
+
+    // Test mutable deref
+    *gen_ref = 100;
+    assert_eq!(*gen_ref, 100);
+}
+
+#[test]
+fn test_managed_ref_deref_mut_string() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    let allocator = CbgrAllocator::new();
+    let mut gen_ref = allocator.allocate("hello".to_string());
+
+    gen_ref.push_str(" world");
+    assert_eq!(*gen_ref, "hello world");
+}
+
+#[test]
+#[should_panic(expected = "use-after-free")]
+fn test_managed_ref_use_after_free() {
+    use verum_cbgr_runtime::CbgrAllocator;
+
+    let allocator = CbgrAllocator::new();
+    let gen_ref = allocator.allocate(42);
+
+    // Simulate use-after-free by creating an invalid reference
+    let invalid_ref = unsafe {
+        use std::ptr::NonNull;
+        ThinRef::new(
+            NonNull::new(gen_ref.as_ptr().cast::<i32>() as *mut i32)
+                .expect("Pointer should not be null"),
+            999999, // Wrong generation
+            0,
+            verum_cbgr_runtime::Capability::Read as u16,
+        )
+    };
+
+    // This should panic with use-after-free error
+    let _ = *invalid_ref;
+}
+
+// ==================== Generic Tests ====================
+
+#[test]
+fn test_all_refs_with_generic_function() {
+    fn use_deref<T: std::ops::Deref<Target = i32>>(r: T) -> i32 {
+        *r
+    }
+
+    let value = 42;
+
+    // Test CheckedRef
+    let checked = CheckedRef::from_ref(&value);
+    assert_eq!(use_deref(checked), 42);
+
+    // Test UnsafeRef
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&value) };
+    assert_eq!(use_deref(unsafe_ref), 42);
+
+    // Test ManagedRef
+    use verum_cbgr_runtime::CbgrAllocator;
+    let allocator = CbgrAllocator::new();
+    let managed = allocator.allocate(42);
+    assert_eq!(use_deref(managed), 42);
+}
+
+// ==================== Send/Sync Tests ====================
+
+#[test]
+fn test_checked_ref_send_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<CheckedRef<i32>>();
+    assert_sync::<CheckedRef<i32>>();
+}
+
+#[test]
+fn test_unsafe_ref_send_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<UnsafeRef<i32>>();
+    assert_sync::<UnsafeRef<i32>>();
+}
+
+#[test]
+fn test_managed_ref_send_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<ThinRef<i32>>();
+    assert_sync::<ThinRef<i32>>();
+}
+
+// ==================== Edge Cases ====================
+
+#[test]
+fn test_checked_ref_with_zero_sized_type() {
+    let unit = ();
+    let checked_ref = CheckedRef::from_ref(&unit);
+    assert_eq!(*checked_ref, ());
+}
+
+#[test]
+fn test_unsafe_ref_with_zero_sized_type() {
+    let unit = ();
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&unit) };
+    assert_eq!(*unsafe_ref, ());
+}
+
+#[test]
+fn test_checked_ref_with_large_struct() {
+    struct Large {
+        data: [u8; 1024],
+    }
+
+    let large = Large { data: [42; 1024] };
+    let checked_ref = CheckedRef::from_ref(&large);
+
+    assert_eq!(checked_ref.data[0], 42);
+    assert_eq!(checked_ref.data[1023], 42);
+}
+
+#[test]
+fn test_unsafe_ref_with_large_struct() {
+    struct Large {
+        data: [u8; 1024],
+    }
+
+    let large = Large { data: [42; 1024] };
+    let unsafe_ref = unsafe { UnsafeRef::from_ref(&large) };
+
+    assert_eq!(unsafe_ref.data[0], 42);
+    assert_eq!(unsafe_ref.data[1023], 42);
+}
+
+// ==================== Performance Characteristics Tests ====================
+
+#[test]
+fn test_checked_ref_is_zero_cost() {
+    // Verify that CheckedRef has the same size as a pointer
+    use std::mem::size_of;
+
+    assert_eq!(size_of::<CheckedRef<i32>>(), size_of::<*const i32>());
+    assert_eq!(size_of::<CheckedRefMut<i32>>(), size_of::<*mut i32>());
+}
+
+#[test]
+fn test_unsafe_ref_is_zero_cost() {
+    // Verify that UnsafeRef has the same size as a pointer
+    use std::mem::size_of;
+
+    assert_eq!(size_of::<UnsafeRef<i32>>(), size_of::<*const i32>());
+    assert_eq!(size_of::<UnsafeRefMut<i32>>(), size_of::<*mut i32>());
+}
+
+#[test]
+fn test_managed_ref_overhead() {
+    // Verify that ThinRef is exactly 16 bytes (ptr + gen + epoch + caps)
+    use std::mem::size_of;
+
+    assert_eq!(size_of::<ThinRef<i32>>(), 16);
+}
+
+// ==================== Integration Tests ====================
+
+#[test]
+fn test_deref_chain() {
+    let value = 42;
+    let checked_ref = CheckedRef::from_ref(&value);
+
+    // Test that we can use Deref repeatedly
+    let _val1: &i32 = &checked_ref;
+    let _val2: &i32 = &checked_ref;
+    let _val3: &i32 = &checked_ref;
+}
+
+#[test]
+fn test_method_calls_through_deref() {
+    let s = "hello".to_string();
+    let checked_ref = CheckedRef::from_ref(&s);
+
+    // Test that we can call methods through Deref
+    assert_eq!(checked_ref.len(), 5);
+    assert!(checked_ref.starts_with("hel"));
+    assert!(checked_ref.ends_with("lo"));
+}

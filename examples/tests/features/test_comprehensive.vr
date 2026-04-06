@@ -1,0 +1,152 @@
+// Comprehensive language feature test
+// Tests all working features in one file
+
+// ========================================
+// 1. TYPE DEFINITIONS
+// ========================================
+type Color is Red | Green | Blue;
+type Maybe<T> is Some(T) | None;
+type Result<T, E> is Ok(T) | Err(E);
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+// ========================================
+// 2. FUNCTIONS
+// ========================================
+fn add(a: Float, b: Float) -> Float {
+    a + b
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn factorial(n: Float) -> Float {
+    if n <= 1.0 { 1.0 } else { n * factorial(n - 1.0) }
+}
+
+// ========================================
+// 3. PATTERN MATCHING
+// ========================================
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+fn unwrap_or(opt: Maybe<Float>, default: Float) -> Float {
+    match opt {
+        Some(v) => v,
+        None => default
+    }
+}
+
+// ========================================
+// 4. CLOSURES
+// ========================================
+fn make_adder(n: Float) -> fn(Float) -> Float {
+    |x: Float| -> Float { x + n }
+}
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+// ========================================
+// 5. CONTROL FLOW
+// ========================================
+fn sum_to(n: Float) -> Float {
+    let mut sum = 0.0;
+    let mut i = 1.0;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1.0;
+    }
+    sum
+}
+
+fn count_down(n: Float) -> Float {
+    let mut count = n;
+    loop {
+        count = count - 1.0;
+        if count <= 0.0 {
+            break;
+        }
+    }
+    count
+}
+
+// ========================================
+// MAIN
+// ========================================
+fn main() {
+    let _ = print("=== Comprehensive Verum Test ===");
+    let _ = print("");
+
+    // Arithmetic
+    let _ = print("-- Arithmetic --");
+    let _ = print(f"5 + 3 = {add(5.0, 3.0)}");
+    let _ = print(f"factorial(6) = {factorial(6.0)}");
+    let _ = print("");
+
+    // Generics
+    let _ = print("-- Generics --");
+    let _ = print(f"identity(42) = {identity(42.0)}");
+    let s = identity("hello");
+    let _ = print(f"identity(hello) = {s}");
+    let _ = print("");
+
+    // Variants
+    let _ = print("-- Variants --");
+    let _ = print(f"color_name(Red) = {color_name(Red)}");
+    let _ = print(f"color_name(Blue) = {color_name(Blue)}");
+    let _ = print("");
+
+    // Maybe
+    let _ = print("-- Maybe --");
+    let some_val: Maybe<Float> = Some(42.0);
+    let none_val: Maybe<Float> = None;
+    let _ = print(f"unwrap_or(Some(42), 0) = {unwrap_or(some_val, 0.0)}");
+    let _ = print(f"unwrap_or(None, 0) = {unwrap_or(none_val, 0.0)}");
+    let _ = print("");
+
+    // Records
+    let _ = print("-- Records --");
+    let p = Point { x: 3.0, y: 4.0 };
+    let _ = print(f"Point: ({p.x}, {p.y})");
+    let _ = print("");
+
+    // Closures
+    let _ = print("-- Closures --");
+    let add5 = make_adder(5.0);
+    let _ = print(f"add5(10) = {add5(10.0)}");
+    let double = |x: Float| x * 2.0;
+    let _ = print(f"apply(double, 7) = {apply(double, 7.0)}");
+    let _ = print("");
+
+    // Control flow
+    let _ = print("-- Control Flow --");
+    let _ = print(f"sum_to(10) = {sum_to(10.0)}");
+    let _ = print(f"count_down(5) = {count_down(5.0)}");
+    let _ = print("");
+
+    // Arrays
+    let _ = print("-- Arrays --");
+    let arr = [1.0, 2.0, 3.0];
+    let _ = print(f"arr[0] = {arr[0]}, arr[1] = {arr[1]}, arr[2] = {arr[2]}");
+    let _ = print("");
+
+    // Tuples
+    let _ = print("-- Tuples --");
+    let pair = (100.0, 200.0);
+    let (a, b) = pair;
+    let _ = print(f"pair: ({a}, {b})");
+    let _ = print("");
+
+    let _ = print("=== All Tests PASSED ===");
+}

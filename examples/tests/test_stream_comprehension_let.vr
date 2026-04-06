@@ -1,0 +1,39 @@
+// Test stream comprehensions with let bindings: stream[y for x in source let y = expr]
+
+fn main() -> Int {
+    // Test 1: Single let binding in stream
+    let numbers = [1, 2, 3];
+    let doubled_stream = stream[y for x in numbers let y = x * 2];
+    // Expected stream: [2, 4, 6]
+
+    // Test 2: Multiple let bindings in stream
+    let chained_stream = stream[z for x in numbers let y = x * 2 let z = y + 1];
+    // Expected stream: [3, 5, 7]
+
+    // Test 3: Let with filter in stream
+    let conditional_stream = stream[y for x in [1, 2, 3, 4, 5] let y = x * 2 if y > 4];
+    // y values: [2, 4, 6, 8, 10], filter > 4 -> stream of [6, 8, 10]
+
+    // Test 4: Let with type annotation in stream
+    let typed_stream = stream[y for x in numbers let y: Int = x + 1];
+    // Expected stream: [2, 3, 4]
+
+    // Test 5: Complex let expressions
+    let complex_stream = stream[result for x in numbers
+                                let a = x * 2
+                                let b = a + 1
+                                let c = b * 2
+                                let result = c + 1];
+    // x=1: a=2, b=3, c=6, result=7
+    // x=2: a=4, b=5, c=10, result=11
+    // x=3: a=6, b=7, c=14, result=15
+
+    // Test 6: Let binding for expensive computation (memoization benefit)
+    let memoized = stream[sq for x in numbers let sq = expensive_computation(x)];
+
+    0
+}
+
+fn expensive_computation(x: Int) -> Int {
+    x * x
+}

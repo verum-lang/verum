@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_refinements/src/main.vr": {
+      "hash": "ead03e2774705ee780061b051f4424db3f0a2a017f0b06086e605a1b27b4e1dd",
+      "timestamp": {
+        "secs_since_epoch": 1765183676,
+        "nanos_since_epoch": 24298071
+      },
+      "size": 7601
+    },
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_refinements/src/test_actual_syntax.vr": {
+      "hash": "ca0af50457e1d9245e8c37f3ffbc8b07aeb7d9f01627fadc2d41ed093bfeb9da",
+      "timestamp": {
+        "secs_since_epoch": 1765113824,
+        "nanos_since_epoch": 398135672
+      },
+      "size": 206
+    },
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_refinements/src/test_advanced.vr": {
+      "hash": "b33eb37dc1d68cc07626617f20b4034364f8a2e1d44e49f4dfb625ae40001b21",
+      "timestamp": {
+        "secs_since_epoch": 1765183727,
+        "nanos_since_epoch": 960707309
+      },
+      "size": 3431
+    },
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_refinements/src/refinement_syntax_test.vr": {
+      "hash": "da156a4b73c1b251826721ce18a2de1addf34805f06f4ec0c684350923f3db3a",
+      "timestamp": {
+        "secs_since_epoch": 1765113768,
+        "nanos_since_epoch": 100457194
+      },
+      "size": 517
+    }
+  },
+  "artifacts": {}
+}

@@ -1,0 +1,30 @@
+// Test multiple spawn expressions
+async fn task1() -> Int {
+    println("Task 1 running");
+    10
+}
+
+async fn task2() -> Int {
+    println("Task 2 running");
+    20
+}
+
+async fn task3() -> Int {
+    println("Task 3 running");
+    30
+}
+
+fn main() {
+    println("Spawning multiple tasks");
+    let h1 = spawn task1();
+    let h2 = spawn task2();
+    let h3 = spawn task3();
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    let sum = r1 + r2 + r3;
+    println("Sum: ");
+    println(sum);
+}

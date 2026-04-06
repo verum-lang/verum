@@ -1,0 +1,49 @@
+// Test: Pattern guards with 'where' clause
+// Tests match patterns with guard conditions
+
+fn classify_number(x: Int) -> Int {
+    match x {
+        n where n > 100 => 3,
+        n where n > 50 => 2,
+        n where n > 0 => 1,
+        _ => 0
+    }
+}
+
+fn test_float_guards(x: Float) -> Int {
+    match x {
+        f where f < 0.0 => 1,
+        f where f == 0.0 => 2,
+        f where f > 0.0 => 3,
+        _ => 0
+    }
+}
+
+fn test_multiple_conditions(x: Int) -> Int {
+    match x {
+        n where n > 10 && n < 20 => 1,
+        n where n >= 20 && n <= 30 => 2,
+        n where n > 30 => 3,
+        _ => 0
+    }
+}
+
+fn test_guard_patterns() -> Int {
+    let x = 75;
+    let result1 = classify_number(x);
+    println(f"classify_number({x}) = {result1}");
+
+    let y = -5.0;
+    let result2 = test_float_guards(y);
+    println(f"test_float_guards({y}) = {result2}");
+
+    let z = 15;
+    let result3 = test_multiple_conditions(z);
+    println(f"test_multiple_conditions({z}) = {result3}");
+
+    result1 + result2 + result3
+}
+
+fn main() -> Int {
+    test_guard_patterns()
+}

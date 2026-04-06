@@ -1,0 +1,580 @@
+// =============================================================================
+// security_service.vr — Supply Chain Security Services
+// =============================================================================
+// Spec: registry/docs/spec.md Section 9 — Supply Chain Security
+//       docs/detailed/15-cog-distribution-architecture.md Section 5
+//
+// Implements proactive security measures:
+// 1. Typosquatting detection (edit distance + phonetic similarity)
+// 2. Malware scanning (static analysis of source code)
+// 3. License compatibility checking
+// 4. Dependency audit (known CVE database)
+//
+// Design: proactive (pre-publish) rather than reactive (post-incident).
+// Inspired by lessons from npm, PyPI, and crates.io security incidents.
+// =============================================================================
+
+module services.security_service;
+
+mount core.collections.{List, Map, Set};
+mount core.text.Text;
+mount core.time.DateTime;
+
+// ---------------------------------------------------------------------------
+// Typosquatting Detection
+// ---------------------------------------------------------------------------
+
+/// Result of a typosquatting check.
+type TyposquatResult is
+    | Safe
+    | Suspicious {
+        similar_package: Text,
+        distance: Int,
+        reason: Text,
+    };
+
+/// Check if a package name is suspiciously similar to existing packages.
+///
+/// Uses three detection methods:
+/// 1. Levenshtein edit distance (catches char swaps/additions)
+/// 2. Keyboard proximity (catches adjacent-key typos)
+/// 3. Separator confusion (catches - vs _ vs no separator)
+///
+/// Returns Safe if no existing package is suspiciously similar,
+/// Suspicious with details if a potential typosquat is detected.
+fn check_typosquatting(name: Text, existing_packages: List<Text>) -> TyposquatResult {
+    let normalized_name = normalize_package_name(name);
+
+    for existing in existing_packages {
+        let normalized_existing = normalize_package_name(existing);
+
+        // Skip exact match (same package)
+        if normalized_name == normalized_existing {
+            continue;
+        }
+
+        // Check 1: Levenshtein distance
+        let distance = levenshtein_distance(name, existing);
+        if distance <= 2 && name.len() > 3 {
+            return Suspicious {
+                similar_package: existing,
+                distance: distance,
+                reason: f"Edit distance {distance} from '{existing}'",
+            };
+        }
+
+        // Check 2: Normalized name collision (- vs _ vs no separator)
+        if normalized_name == normalized_existing {
+            return Suspicious {
+                similar_package: existing,
+                distance: 0,
+                reason: f"Normalizes to same name as '{existing}' (separator confusion)",
+            };
+        }
+
+        // Check 3: Common prefix/suffix swaps
+        if is_prefix_suffix_swap(name, existing) {
+            return Suspicious {
+                similar_package: existing,
+                distance: 1,
+                reason: f"Prefix/suffix swap with '{existing}'",
+            };
+        }
+
+        // Check 4: Scoped name squatting (@org/name vs name)
+        if is_scope_squat(name, existing) {
+            return Suspicious {
+                similar_package: existing,
+                distance: 0,
+                reason: f"Scoped name squatting of '{existing}'",
+            };
+        }
+    }
+
+    Safe
+}
+
+/// Normalize a package name by removing separators and lowercasing.
+fn normalize_package_name(name: Text) -> Text {
+    let mut result = Text.new();
+    for c in name.chars() {
+        if c != '-' && c != '_' && c != '.' {
+            result.push(c.to_lowercase());
+        }
+    }
+    result
+}
+
+/// Compute Levenshtein edit distance between two strings.
+fn levenshtein_distance(a: Text, b: Text) -> Int {
+    let m = a.len();
+    let n = b.len();
+
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+
+    // Use two rows for space efficiency
+    let mut prev = List.new();
+    let mut curr = List.new();
+
+    for j in 0..=n {
+        prev.push(j);
+        curr.push(0);
+    }
+
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a.char_at(i - 1) == b.char_at(j - 1) { 0 } else { 1 };
+            let delete = prev[j] + 1;
+            let insert = curr[j - 1] + 1;
+            let substitute = prev[j - 1] + cost;
+            curr[j] = min3(delete, insert, substitute);
+        }
+        // Swap rows
+        let tmp = prev;
+        prev = curr;
+        curr = tmp;
+    }
+
+    prev[n]
+}
+
+/// Check for common prefix/suffix swaps (e.g., "http-client" vs "client-http").
+fn is_prefix_suffix_swap(a: Text, b: Text) -> Bool {
+    let a_parts = split_by_separators(a);
+    let b_parts = split_by_separators(b);
+
+    if a_parts.len() != b_parts.len() || a_parts.len() < 2 {
+        return false;
+    }
+
+    // Check if same parts in different order
+    let mut a_sorted = a_parts.clone();
+    a_sorted.sort();
+    let mut b_sorted = b_parts.clone();
+    b_sorted.sort();
+
+    a_sorted == b_sorted && a_parts != b_parts
+}
+
+/// Check for scoped name squatting.
+fn is_scope_squat(name: Text, existing: Text) -> Bool {
+    // "@malicious/popular-pkg" squatting "popular-pkg"
+    if name.contains("/") {
+        let unscoped = name.split("/").last().unwrap_or("");
+        return unscoped == existing;
+    }
+    false
+}
+
+/// Split package name by separators (-, _, .).
+fn split_by_separators(name: Text) -> List<Text> {
+    let mut parts = List.new();
+    let mut current = Text.new();
+
+    for c in name.chars() {
+        if c == '-' || c == '_' || c == '.' {
+            if !current.is_empty() {
+                parts.push(current);
+                current = Text.new();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
+}
+
+/// Minimum of three values.
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    if a <= b && a <= c { a }
+    else if b <= c { b }
+    else { c }
+}
+
+// ---------------------------------------------------------------------------
+// Malware Scanning
+// ---------------------------------------------------------------------------
+
+/// Result of a malware scan.
+type ScanResult is
+    | Clean
+    | ThreatDetected {
+        threats: List<Threat>,
+    };
+
+/// A detected threat.
+type Threat is {
+    /// Threat category.
+    category: ThreatCategory,
+    /// File where threat was found.
+    file: Text,
+    /// Line number (0 if file-level).
+    line: Int,
+    /// Description of the threat.
+    description: Text,
+    /// Severity: low, medium, high, critical.
+    severity: Text,
+};
+
+/// Categories of threats.
+type ThreatCategory is
+    | NetworkAccess
+    | FileSystemAccess
+    | ProcessExecution
+    | EnvironmentRead
+    | CryptoMining
+    | DataExfiltration
+    | ObfuscatedCode
+    | KnownMalwareSignature;
+
+/// Scan source files for malware patterns.
+///
+/// Static analysis of source code looking for:
+/// 1. Suspicious network access (connecting to unknown hosts)
+/// 2. Unauthorized file system access (reading sensitive files)
+/// 3. Process execution (shell commands)
+/// 4. Environment variable exfiltration
+/// 5. Crypto mining patterns
+/// 6. Obfuscated code
+fn scan_for_malware(files: List<SourceFile>) -> ScanResult {
+    let mut threats = List.new();
+
+    for file in files {
+        scan_file(file, threats);
+    }
+
+    if threats.is_empty() {
+        Clean
+    } else {
+        ThreatDetected { threats: threats }
+    }
+}
+
+/// A source file to scan.
+type SourceFile is {
+    path: Text,
+    content: Text,
+};
+
+/// Scan a single file for malware patterns.
+fn scan_file(file: SourceFile, threats: &mut List<Threat>) {
+    let lines = file.content.lines();
+
+    for (line_num, line) in lines.enumerate() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") { continue; }
+
+        // Pattern 1: Suspicious network connections in build scripts
+        if file.path.ends_with("build.vr") {
+            if trimmed.contains("http.get(") || trimmed.contains("http.post(")
+                || trimmed.contains("tcp.connect(") || trimmed.contains("udp.send(")
+            {
+                threats.push(Threat {
+                    category: NetworkAccess,
+                    file: file.path,
+                    line: line_num + 1,
+                    description: "Network access in build script — build scripts should not make network calls",
+                    severity: "high",
+                });
+            }
+        }
+
+        // Pattern 2: Reading sensitive files
+        for sensitive_path in ["/etc/passwd", "/etc/shadow", "~/.ssh", "~/.aws", ".env"] {
+            if trimmed.contains(sensitive_path) {
+                threats.push(Threat {
+                    category: FileSystemAccess,
+                    file: file.path,
+                    line: line_num + 1,
+                    description: f"Access to sensitive path: {sensitive_path}",
+                    severity: "critical",
+                });
+            }
+        }
+
+        // Pattern 3: Process execution
+        if trimmed.contains("process.exec(") || trimmed.contains("process.spawn(")
+            || trimmed.contains("shell(") || trimmed.contains("system(")
+        {
+            threats.push(Threat {
+                category: ProcessExecution,
+                file: file.path,
+                line: line_num + 1,
+                description: "Process execution — ensure this is intentional",
+                severity: "medium",
+            });
+        }
+
+        // Pattern 4: Environment variable exfiltration
+        if (trimmed.contains("env.get(") || trimmed.contains("env.vars()"))
+            && (trimmed.contains("http.") || trimmed.contains("tcp.") || trimmed.contains("send("))
+        {
+            threats.push(Threat {
+                category: DataExfiltration,
+                file: file.path,
+                line: line_num + 1,
+                description: "Environment variables sent over network — possible data exfiltration",
+                severity: "critical",
+            });
+        }
+
+        // Pattern 5: Crypto mining indicators
+        for mining_keyword in ["stratum+tcp://", "pool.minexmr", "cryptonight", "hashrate"] {
+            if trimmed.to_lowercase().contains(mining_keyword) {
+                threats.push(Threat {
+                    category: CryptoMining,
+                    file: file.path,
+                    line: line_num + 1,
+                    description: f"Crypto mining indicator: {mining_keyword}",
+                    severity: "critical",
+                });
+            }
+        }
+
+        // Pattern 6: Base64-encoded suspicious payloads (obfuscation)
+        if trimmed.contains("base64.decode(") && trimmed.len() > 200 {
+            threats.push(Threat {
+                category: ObfuscatedCode,
+                file: file.path,
+                line: line_num + 1,
+                description: "Large base64-encoded payload — possible obfuscated malware",
+                severity: "high",
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// License Compatibility
+// ---------------------------------------------------------------------------
+
+/// Check if all dependency licenses are compatible.
+type LicenseResult is
+    | Compatible
+    | Incompatible { conflicts: List<LicenseConflict> };
+
+/// A license conflict between two packages.
+type LicenseConflict is {
+    package_a: Text,
+    license_a: Text,
+    package_b: Text,
+    license_b: Text,
+    reason: Text,
+};
+
+/// Check license compatibility across a dependency tree.
+fn check_license_compatibility(
+    root_license: Text,
+    dependencies: List<DependencyLicense>,
+) -> LicenseResult {
+    let mut conflicts = List.new();
+
+    for dep in dependencies {
+        if !is_license_compatible(root_license, dep.license) {
+            conflicts.push(LicenseConflict {
+                package_a: "root",
+                license_a: root_license,
+                package_b: dep.package,
+                license_b: dep.license,
+                reason: f"'{dep.license}' is not compatible with '{root_license}'",
+            });
+        }
+    }
+
+    if conflicts.is_empty() {
+        Compatible
+    } else {
+        Incompatible { conflicts: conflicts }
+    }
+}
+
+/// A dependency's license info.
+type DependencyLicense is {
+    package: Text,
+    license: Text,
+};
+
+/// Check if two SPDX licenses are compatible.
+fn is_license_compatible(project: Text, dependency: Text) -> Bool {
+    // Permissive licenses are always compatible
+    let permissive = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unlicense"];
+
+    if permissive.contains(dependency) {
+        return true;
+    }
+
+    // GPL is only compatible with GPL projects
+    if dependency.contains("GPL") && !project.contains("GPL") {
+        return false;
+    }
+
+    // LGPL is compatible via dynamic linking
+    if dependency.contains("LGPL") {
+        return true;
+    }
+
+    // AGPL requires AGPL project
+    if dependency.contains("AGPL") && !project.contains("AGPL") {
+        return false;
+    }
+
+    // Default: assume compatible (conservative)
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Dependency Audit
+// ---------------------------------------------------------------------------
+
+/// Known vulnerability advisory.
+type Advisory is {
+    id: Text,
+    package: Text,
+    affected_versions: Text,
+    fixed_version: Maybe<Text>,
+    severity: Text,
+    title: Text,
+    description: Text,
+    cve_ids: List<Text>,
+    published_at: DateTime,
+};
+
+/// Result of a dependency audit.
+type AuditResult is {
+    advisories_found: List<Advisory>,
+    packages_scanned: Int,
+    vulnerable_packages: Int,
+};
+
+/// Audit dependencies against known vulnerability database.
+fn audit_dependencies(
+    dependencies: List<DependencyInfo>,
+    advisory_db: List<Advisory>,
+) -> AuditResult {
+    let mut found = List.new();
+    let mut vulnerable_count = 0;
+
+    for dep in dependencies {
+        for advisory in advisory_db {
+            if advisory.package == dep.name
+                && version_in_range(dep.version, advisory.affected_versions)
+            {
+                found.push(advisory.clone());
+                vulnerable_count = vulnerable_count + 1;
+            }
+        }
+    }
+
+    AuditResult {
+        advisories_found: found,
+        packages_scanned: dependencies.len(),
+        vulnerable_packages: vulnerable_count,
+    }
+}
+
+/// Dependency info for audit.
+type DependencyInfo is {
+    name: Text,
+    version: Text,
+};
+
+/// Check if a version falls within an affected range.
+fn version_in_range(version: Text, range: Text) -> Bool {
+    // Simplified: check if range contains the version
+    // Full implementation would parse SemVer ranges
+    if range.contains("*") { return true; }
+    if range.contains(version) { return true; }
+
+    // Parse >=X <Y format
+    if range.starts_with(">=") && range.contains(" <") {
+        let parts = range.split(" ");
+        if parts.len() >= 2 {
+            let min = parts[0].trim_start(">=").trim();
+            let max = parts[1].trim_start("<").trim();
+            return version >= min && version < max;
+        }
+    }
+
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Semver API Diff
+// ---------------------------------------------------------------------------
+
+/// Check that a version bump is appropriate for the API changes.
+///
+/// - MAJOR bump: allowed to break API
+/// - MINOR bump: must not remove/change existing APIs (only add)
+/// - PATCH bump: must not change any APIs
+type SemverDiffResult is
+    | ValidBump
+    | InvalidBump { reason: Text };
+
+/// Validate that the version bump matches the API changes.
+fn validate_semver_bump(
+    old_version: Text,
+    new_version: Text,
+    api_changes: ApiChanges,
+) -> SemverDiffResult {
+    let old_parts = parse_version_parts(old_version);
+    let new_parts = parse_version_parts(new_version);
+
+    let is_major = new_parts.0 > old_parts.0;
+    let is_minor = !is_major && new_parts.1 > old_parts.1;
+    let is_patch = !is_major && !is_minor && new_parts.2 > old_parts.2;
+
+    if is_major {
+        // Major: anything goes
+        ValidBump
+    } else if is_minor {
+        // Minor: no removals or breaking changes
+        if !api_changes.removed.is_empty() {
+            InvalidBump {
+                reason: f"MINOR bump removes APIs: {api_changes.removed.join(\", \")}. Use MAJOR bump instead.",
+            }
+        } else if !api_changes.changed.is_empty() {
+            InvalidBump {
+                reason: f"MINOR bump changes API signatures: {api_changes.changed.join(\", \")}. Use MAJOR bump instead.",
+            }
+        } else {
+            ValidBump
+        }
+    } else if is_patch {
+        // Patch: no API changes at all
+        if !api_changes.added.is_empty() || !api_changes.removed.is_empty() || !api_changes.changed.is_empty() {
+            InvalidBump {
+                reason: "PATCH bump has API changes. Use MINOR or MAJOR bump instead.",
+            }
+        } else {
+            ValidBump
+        }
+    } else {
+        InvalidBump { reason: "Version must increase" }
+    }
+}
+
+/// API changes between two versions.
+type ApiChanges is {
+    added: List<Text>,
+    removed: List<Text>,
+    changed: List<Text>,
+};
+
+/// Parse version string into (major, minor, patch).
+fn parse_version_parts(version: Text) -> (Int, Int, Int) {
+    let parts = version.split(".");
+    let major = parts.get(0).and_then(fn(s) { s.parse_int().ok() }).unwrap_or(0);
+    let minor = parts.get(1).and_then(fn(s) { s.parse_int().ok() }).unwrap_or(0);
+    let patch = parts.get(2).and_then(fn(s) { s.parse_int().ok() }).unwrap_or(0);
+    (major, minor, patch)
+}

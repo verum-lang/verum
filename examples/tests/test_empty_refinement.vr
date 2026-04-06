@@ -1,0 +1,7 @@
+// Test: Empty refinement
+type AnyInt is Int{};
+
+fn main() {
+    let x: AnyInt = 42;
+    x
+}

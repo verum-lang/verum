@@ -1,0 +1,18 @@
+// Test optional chaining ?.
+// Note: Optional chaining is a planned feature for Verum
+// This test demonstrates the planned syntax once Maybe type is available in stdlib
+
+type User is { name: Text, email: Text }
+
+fn main() {
+    let user = User { name: "Alice", email: "alice@example.com" }
+
+    // For now, we test basic field access
+    println(f"User: {user.name}")
+    println(f"Email: {user.email}")
+
+    // TODO: Once Maybe is available in prelude, test:
+    // let user_opt = User { name: "Alice", email: Maybe.Some("alice@example.com") }
+    // let len = user_opt.email?.len() ?? 0
+    // println(f"Email length: {len}")
+}

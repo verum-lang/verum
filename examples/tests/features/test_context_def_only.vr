@@ -1,0 +1,10 @@
+// Test only context definition
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+}
+
+fn main() {
+    let x = 42;
+}

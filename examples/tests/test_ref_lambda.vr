@@ -1,0 +1,8 @@
+// Test lambda-style refinement
+fn test_lambda() -> Int where |x| x > 0 {
+    42
+}
+
+fn main() -> Int {
+    test_lambda()
+}

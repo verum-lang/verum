@@ -1,0 +1,21 @@
+// Test 3: Generic Protocol with Type Parameters
+// Tests: protocol with generic type parameters
+
+type Container<T> is protocol {
+    fn get(&self) -> T;
+}
+
+type Box<T> is {
+    value: T
+}
+
+implement<T> Container<T> for Box<T> {
+    fn get(&self) -> T {
+        self.value
+    }
+}
+
+fn main() -> Int {
+    let box = Box { value: 100 };
+    box.get()
+}

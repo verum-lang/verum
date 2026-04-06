@@ -1,0 +1,51 @@
+// =============================================================================
+// context/error.vr — Context System Error Types
+// =============================================================================
+// Spec: docs/detailed/16-context-system.md
+// =============================================================================
+
+module error;
+
+/// Error type for context system failures.
+///
+/// Returned when a context cannot be resolved or provided.
+///
+/// # Error Codes
+///
+/// | Code | Error |
+/// |------|-------|
+/// | E3050 | Direct negative context violation |
+/// | E3051 | Transitive negative context violation |
+/// | E3052 | Conflicting positive and negative constraints |
+/// | E805  | Circular dependency in DI graph |
+/// | E806  | Scope violation (Singleton depending on Request) |
+/// | E807  | Missing @inject constructor |
+/// | E808  | Constructor parameter mismatch |
+public type ContextError is
+    /// Context not found in the current environment.
+    NotFound { context_name: Text }
+    /// Context not provided before use.
+    | NotProvided { context_name: Text, function_name: Text }
+    /// Context type mismatch (provided value doesn't match).
+    | TypeMismatch { context_name: Text, expected: Text, found: Text }
+    /// Circular dependency detected in DI graph.
+    | CircularDependency { chain: List<Text> }
+    /// Scope violation: long-lived depends on short-lived.
+    | ScopeViolation { dependent: Text, dependency: Text, dependent_scope: Text, dependency_scope: Text };
+
+implement ContextError {
+    fn message(&self) -> Text {
+        match self {
+            NotFound { context_name } =>
+                f"Context '{context_name}' not found in current environment",
+            NotProvided { context_name, function_name } =>
+                f"Context '{context_name}' not provided before use in '{function_name}'",
+            TypeMismatch { context_name, expected, found } =>
+                f"Context '{context_name}': expected type '{expected}', found '{found}'",
+            CircularDependency { chain } =>
+                f"Circular dependency detected: {chain.join(\" -> \")}",
+            ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
+                f"Scope violation: '{dependent}' ({dependent_scope}) cannot depend on '{dependency}' ({dependency_scope})",
+        }
+    }
+}

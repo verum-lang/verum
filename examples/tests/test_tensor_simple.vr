@@ -1,0 +1,14 @@
+// Test: Simplest possible tensor literal test
+// Syntax: tensor<dims...>Type { data_expression }
+// data_expression can be: array literal, variable, function call, etc.
+
+fn main() -> Int {
+    // Test 1: Single value (scalar initializer)
+    let t1 = tensor<4>Float { 0.0 };
+
+    // Test 2: Array literal
+    let t2 = tensor<4>Float { [1.0, 2.0, 3.0, 4.0] };
+
+    print("Tensor tests completed");
+    0
+}

@@ -1,0 +1,188 @@
+// Comprehensive Meta/Macro System Test
+// Based on grammar/verum.ebnf Section 2.16 (Metaprogramming)
+// Tests meta features currently implemented in Verum
+
+// =============================================================================
+// Section 1: Meta Functions (Compile-Time Functions)
+// Grammar: function_modifiers = [ 'meta' ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
+// =============================================================================
+
+// Test 1.1: Simple meta function - arithmetic
+meta fn compile_time_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Test 1.2: Meta function with conditional logic
+meta fn compile_time_max(a: Int, b: Int) -> Int {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+// Test 1.3: Meta function with loop
+meta fn compile_time_sum_to_n(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    loop {
+        if i > n {
+            break;
+        }
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+// Test 1.4: Recursive meta function
+meta fn compile_time_factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * compile_time_factorial(n - 1)
+    }
+}
+
+// Test 1.5: Meta function with pattern matching
+meta fn compile_time_classify(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        _ => 99
+    }
+}
+
+// Test 1.6: Meta function calling another meta function
+meta fn compile_time_square(n: Int) -> Int {
+    n * n
+}
+
+meta fn compile_time_sum_of_squares(a: Int, b: Int) -> Int {
+    compile_time_square(a) + compile_time_square(b)
+}
+
+// Test 1.7: Meta function with bool return
+meta fn compile_time_is_even(n: Int) -> Bool {
+    n % 2 == 0
+}
+
+// Test 1.8: Meta function with complex expression
+meta fn compile_time_abs(n: Int) -> Int {
+    if n < 0 {
+        0 - n
+    } else {
+        n
+    }
+}
+
+// =============================================================================
+// Section 2: Meta Expressions (meta_expr) - NOT YET SUPPORTED
+// Grammar: meta_expr = 'meta' , block_expr ;
+// Status: Parser recognizes syntax but type inference not fully implemented
+// =============================================================================
+
+// NOTE: Meta blocks (meta { ... }) are parsed but not yet fully supported
+// in type inference. This is a planned feature based on the grammar.
+
+// =============================================================================
+// Section 3: Constants from Meta Functions
+// =============================================================================
+
+const COMPUTED_SUM: Int = compile_time_add(10, 20);
+const COMPUTED_MAX: Int = compile_time_max(15, 25);
+const COMPUTED_FACTORIAL: Int = compile_time_factorial(5);
+const COMPUTED_SUM_TO_10: Int = compile_time_sum_to_n(10);
+const IS_FOUR_EVEN: Bool = compile_time_is_even(4);
+
+fn test_constants() {
+    let _ = println("\n=== Testing Meta Function Constants ===");
+    let _ = println(f"COMPUTED_SUM (10+20): {COMPUTED_SUM}");
+    let _ = println(f"COMPUTED_MAX (15,25): {COMPUTED_MAX}");
+    let _ = println(f"COMPUTED_FACTORIAL (5!): {COMPUTED_FACTORIAL}");
+    let _ = println(f"COMPUTED_SUM_TO_10: {COMPUTED_SUM_TO_10}");
+    let _ = println(f"IS_FOUR_EVEN: {IS_FOUR_EVEN}");
+}
+
+// =============================================================================
+// Section 4: Runtime use of meta functions
+// =============================================================================
+
+fn test_runtime_meta_calls() {
+    let _ = println("\n=== Testing Runtime Meta Function Calls ===");
+
+    // Test meta functions called at runtime
+    let sum = compile_time_add(5, 7);
+    let _ = println(f"Meta add(5,7): {sum}");
+
+    let max_val = compile_time_max(100, 50);
+    let _ = println(f"Meta max(100,50): {max_val}");
+
+    let factorial_6 = compile_time_factorial(6);
+    let _ = println(f"Meta factorial(6): {factorial_6}");
+
+    let sum_squares = compile_time_sum_of_squares(3, 4);
+    let _ = println(f"Meta sum_of_squares(3,4): {sum_squares}");
+
+    let is_ten_even = compile_time_is_even(10);
+    let is_nine_even = compile_time_is_even(9);
+    let _ = println(f"Meta is_even(10): {is_ten_even}");
+    let _ = println(f"Meta is_even(9): {is_nine_even}");
+
+    let abs_neg = compile_time_abs(0 - 15);
+    let abs_pos = compile_time_abs(15);
+    let _ = println(f"Meta abs(-15): {abs_neg}");
+    let _ = println(f"Meta abs(15): {abs_pos}");
+}
+
+// =============================================================================
+// Section 5: Integration Tests
+// =============================================================================
+
+fn test_integration() {
+    let _ = println("\n=== Testing Integration ===");
+
+    // Meta functions in expressions
+    let expr_result = compile_time_square(5) + compile_time_factorial(3);
+    let _ = println(f"Expression with meta: {expr_result}");
+
+    // Nested meta function calls
+    let nested_call = compile_time_sum_of_squares(
+        compile_time_abs(0 - 3),
+        compile_time_abs(4)
+    );
+    let _ = println(f"Nested meta calls: {nested_call}");
+
+    // Meta functions with conditionals
+    let cond_result = if compile_time_is_even(10) {
+        compile_time_factorial(4)
+    } else {
+        compile_time_factorial(5)
+    };
+    let _ = println(f"Conditional with meta: {cond_result}");
+}
+
+// =============================================================================
+// Main Test Runner
+// =============================================================================
+
+fn main() {
+    let _ = println("=======================================================");
+    let _ = println("  Comprehensive Meta System Test Suite");
+    let _ = println("  Based on grammar/verum.ebnf Section 2.16");
+    let _ = println("  Testing: meta fn and constants");
+    let _ = println("=======================================================");
+
+    test_constants();
+    test_runtime_meta_calls();
+    test_integration();
+
+    let _ = println("\n=======================================================");
+    let _ = println("  All Meta System Tests Complete");
+    let _ = println("=======================================================");
+    let _ = println("\n  NOTE: Meta blocks (meta { ... }) are defined in the");
+    let _ = println("  grammar but type inference is not yet fully implemented.");
+    let _ = println("  See existing tests: test_meta_blocks.vr (has same issue)");
+    let _ = println("=======================================================");
+}

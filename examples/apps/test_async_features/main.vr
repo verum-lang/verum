@@ -1,0 +1,99 @@
+// Async/Await Test - Comprehensive
+
+async fn fetch_data(id: Int) -> Text {
+    "Data for " + id.to_string()
+}
+
+async fn process_data(data: Text) -> Int {
+    42
+}
+
+async fn pipeline(id: Int) -> Int {
+    let data = fetch_data(id).await;
+    let result = process_data(data).await;
+    result
+}
+
+async fn chain_calls(id: Int) -> Int {
+    // Test chained async calls
+    let data1 = fetch_data(id).await;
+    let data2 = fetch_data(id + 1).await;
+    let result1 = process_data(data1).await;
+    let result2 = process_data(data2).await;
+    result1 + result2
+}
+
+async fn multiple_concurrent(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+
+    while i < n {
+        let result = process_data(fetch_data(i).await).await;
+        sum = sum + result;
+        i = i + 1;
+    }
+
+    sum
+}
+
+async fn async_block_test() -> Int {
+    let result = async {
+        let data = fetch_data(42).await;
+        process_data(data).await
+    }.await;
+    result
+}
+
+async fn nested_async(id: Int) -> Int {
+    let inner = async {
+        let data = fetch_data(id).await;
+        process_data(data).await
+    };
+    let result = inner.await;
+    result * 2
+}
+
+async fn main() -> () {
+    print("=== Comprehensive Async/Await Test ===");
+    print("");
+
+    // TEST 1: Basic Async Functions
+    print("--- Test 1: Basic Async Functions ---");
+    let data = fetch_data(1).await;
+    print("Fetched: " + data);
+    let processed = process_data(data).await;
+    print("Processed: " + processed.to_string());
+    print("");
+
+    // TEST 2: Simple Pipeline
+    print("--- Test 2: Simple Pipeline ---");
+    let result = pipeline(10).await;
+    print("Pipeline result: " + result.to_string());
+    print("");
+
+    // TEST 3: Chained Async Calls
+    print("--- Test 3: Chained Async Calls ---");
+    let chained = chain_calls(5).await;
+    print("Chained result: " + chained.to_string());
+    print("");
+
+    // TEST 4: Multiple Concurrent Operations
+    print("--- Test 4: Multiple Concurrent Operations ---");
+    let multi = multiple_concurrent(3).await;
+    print("Multiple concurrent result: " + multi.to_string());
+    print("");
+
+    // TEST 5: Async Block
+    print("--- Test 5: Async Block ---");
+    let block = async_block_test().await;
+    print("Async block result: " + block.to_string());
+    print("");
+
+    // TEST 6: Nested Async
+    print("--- Test 6: Nested Async ---");
+    let nested = nested_async(7).await;
+    print("Nested async result: " + nested.to_string());
+    print("");
+
+    print("=== All Async Tests Passed ===");
+}

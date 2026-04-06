@@ -1,0 +1,49 @@
+// Comprehensive Test 6: Advanced async patterns
+
+async fn fetch_data(id: Int) -> Int {
+    id * 10
+}
+
+async fn process_data(data: Int) -> Int {
+    data + 100
+}
+
+async fn main() -> Int {
+    print("Test 6: Advanced async patterns");
+
+    // Test 6a: Sequential async operations
+    print("6a: Sequential async");
+    let data = fetch_data(5).await;
+    let processed = process_data(data).await;
+    print(f"  Result: {processed}");
+
+    // Test 6b: Parallel async with spawn
+    print("6b: Parallel async");
+    let task1 = spawn fetch_data(1);
+    let task2 = spawn fetch_data(2);
+    let task3 = spawn fetch_data(3);
+    let r1 = task1.await;
+    let r2 = task2.await;
+    let r3 = task3.await;
+    let total = r1 + r2 + r3;
+    print(f"  Total: {total}");
+
+    // Test 6c: Mixed sync and async
+    print("6c: Mixed sync/async");
+    let sync_val = 42;
+    let async_val = fetch_data(sync_val).await;
+    let result = sync_val + async_val;
+    print(f"  Result: {result}");
+
+    // Test 6d: Await in conditionals
+    print("6d: Await in conditional");
+    let value = fetch_data(4).await;
+    if value > 30 {
+        print(f"  Value {value} is large");
+    } else {
+        print(f"  Value {value} is small");
+    }
+
+    print("✓ All advanced tests passed");
+    0
+}

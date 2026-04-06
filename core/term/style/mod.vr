@@ -1,0 +1,33 @@
+// =============================================================================
+// style/mod.vr - Layer 2: Style & Color
+// =============================================================================
+// Adaptive color system with perceptual downscaling (True Color -> 256 -> 16),
+// text modifiers, composite styles with builder API, semantic themes,
+// and color space conversion utilities.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6
+// =============================================================================
+
+module style;
+
+// Sub-modules
+public module color;
+public module convert;
+public module modifier;
+public module style;
+public module theme;
+public module profile;
+public module text_builder;
+public module color_utils;
+public module hyperlink;
+
+// Re-exports
+public mount .color.{Color, Rgb, Hsl, Lab};
+public mount .convert.{srgb_to_linear, linear_to_srgb, rgb_to_hsl, hsl_to_rgb, parse_hex_pair};
+public mount .modifier.Modifier;
+public mount .style.Style;
+public mount .theme.Theme;
+public mount .profile.{ColorProfile, adapt_color, darken, lighten, lerp_color, gradient};
+public mount .text_builder.{bold, italic, dim, underlined, crossed_out, reversed, fg, bg, red, green, blue, yellow, cyan, magenta, white, grey};
+public mount .color_utils.{hex, rgb, gray, hex_gradient};
+public mount .hyperlink.{HyperlinkSpan, write_hyperlink};

@@ -1,0 +1,21 @@
+// Test 2: Await expressions
+// Tests multiple await calls and chaining
+
+async fn add_async(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn multiply_async(a: Int, b: Int) -> Int {
+    a * b
+}
+
+async fn compute() -> Int {
+    let sum = add_async(10, 20).await;
+    let product = multiply_async(sum, 2).await;
+    product
+}
+
+fn main() {
+    let result = compute().await;
+    print(result);
+}

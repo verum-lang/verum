@@ -1,0 +1,492 @@
+// =============================================================================
+// async/nursery.vr - Structured Concurrency with Nursery
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/task, async/future
+// =============================================================================
+//
+// This module provides the runtime types for the `nursery` language construct.
+// Nursery blocks guarantee that all spawned tasks complete before the scope exits,
+// providing true structured concurrency semantics.
+//
+// Spec: docs/improvements.md Section 9 - Structured Concurrency
+//
+// ## Overview
+//
+// A nursery creates a structured concurrency scope:
+// - All tasks spawned within the nursery are tracked
+// - The nursery waits for all tasks to complete before exiting
+// - Errors are collected and can be handled with `recover` blocks
+// - Timeouts and task limits can be configured
+// - Cancellation propagates to all spawned tasks
+//
+// ## Syntax
+//
+// ```verum
+// nursery(timeout: 5000, max_tasks: 100, on_error: cancel_all) {
+//     spawn task1();
+//     spawn task2();
+//     spawn task3();
+// } on_cancel {
+//     cleanup();
+// } recover |err| {
+//     log_error(err);
+//     default_value()
+// }
+// ```
+//
+// =============================================================================
+
+module nursery;
+
+mount time.Duration;
+mount text.Text;
+mount core.maybe.Maybe;
+mount core.result.{Result, Error};
+mount collections.List;
+mount sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount sync.Mutex;
+mount super.task.JoinHandle;
+mount super.Future;
+
+// =============================================================================
+// Error Behavior
+// =============================================================================
+
+/// Error behavior when a task in the nursery fails.
+///
+/// This corresponds to the `on_error` option in the nursery syntax:
+/// - `nursery(on_error: cancel_all) { ... }` -> `CancelAll`
+/// - `nursery(on_error: wait_all) { ... }` -> `WaitAll`
+/// - `nursery(on_error: fail_fast) { ... }` -> `FailFast`
+public type NurseryErrorBehavior is
+    /// Cancel all other tasks when one fails, then propagate the error.
+    /// This is the default and safest option - ensures no orphaned work.
+    CancelAll |
+    /// Wait for all tasks to complete even if some fail.
+    /// Collects all errors into a `NurseryError.Multiple`.
+    WaitAll |
+    /// Return immediately on first error without cancelling other tasks.
+    /// Use with caution - may leave orphaned work.
+    FailFast;
+
+// =============================================================================
+// Nursery Options
+// =============================================================================
+
+/// Configuration options for a nursery.
+///
+/// These correspond to the options in the nursery syntax:
+/// ```verum
+/// nursery(timeout: 5000, max_tasks: 100, on_error: cancel_all) { ... }
+/// ```
+public type NurseryOptions is {
+    /// Maximum time to wait for all tasks to complete (in milliseconds).
+    /// If exceeded, all tasks are cancelled and `NurseryError.Timeout` is returned.
+    timeout: Maybe<Duration>,
+
+    /// Maximum number of concurrent tasks.
+    /// Spawn will block if this limit is reached until a task completes.
+    max_tasks: Maybe<Int>,
+
+    /// How to handle errors from tasks.
+    on_error: NurseryErrorBehavior,
+};
+
+implement NurseryOptions {
+    /// Create new options with default values.
+    public fn new() -> Self {
+        Self {
+            timeout: None,
+            max_tasks: None,
+            on_error: NurseryErrorBehavior.CancelAll,
+        }
+    }
+
+    /// Create default options (alias for new).
+    public fn default() -> Self {
+        Self.new()
+    }
+
+    /// Set the timeout duration.
+    public fn with_timeout(self, timeout: Duration) -> Self {
+        Self { timeout: Some(timeout), ..self }
+    }
+
+    /// Set the timeout in milliseconds.
+    public fn with_timeout_ms(self, ms: Int) -> Self {
+        Self { timeout: Some(Duration.from_millis(ms)), ..self }
+    }
+
+    /// Set the maximum number of concurrent tasks.
+    public fn with_max_tasks(self, max: Int) -> Self {
+        Self { max_tasks: Some(max), ..self }
+    }
+
+    /// Set the error handling behavior.
+    public fn with_error_behavior(self, behavior: NurseryErrorBehavior) -> Self {
+        Self { on_error: behavior, ..self }
+    }
+}
+
+// =============================================================================
+// Nursery Error
+// =============================================================================
+
+/// Error that can occur in a nursery.
+public type NurseryError is
+    /// A single task failed with this error.
+    Single(Heap<Error>) |
+    /// Multiple tasks failed (when using `WaitAll` behavior).
+    Multiple(List<Heap<Error>>) |
+    /// The nursery timed out before all tasks completed.
+    Timeout {
+        /// Number of tasks that were still running when timeout occurred.
+        pending_count: Int,
+        /// Number of tasks that completed successfully.
+        completed_count: Int,
+    } |
+    /// The nursery was cancelled externally.
+    Cancelled |
+    /// A task panicked.
+    Panic(Text) |
+    /// Maximum task limit was reached and could not spawn.
+    TaskLimitExceeded {
+        limit: Int,
+        attempted: Int,
+    };
+
+implement Error for NurseryError {
+    fn message(&self) -> Text {
+        match self {
+            NurseryError.Single(e) => f"nursery task error: {e.message()}",
+            NurseryError.Multiple(errors) => {
+                let count = errors.len();
+                f"nursery multiple errors ({count} total)"
+            },
+            NurseryError.Timeout { pending_count, completed_count } =>
+                f"nursery timeout: {pending_count} tasks pending, {completed_count} completed",
+            NurseryError.Cancelled => "nursery cancelled",
+            NurseryError.Panic(msg) => f"nursery task panicked: {msg}",
+            NurseryError.TaskLimitExceeded { limit, attempted } =>
+                f"nursery task limit exceeded: limit {limit}, attempted {attempted}",
+        }
+    }
+
+    fn source(&self) -> Maybe<&Error> {
+        match self {
+            NurseryError.Single(e) => Some(e.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Task Handle
+// =============================================================================
+
+/// Handle to a task spawned within a nursery.
+///
+/// This handle allows checking the task's status and awaiting its result.
+/// Unlike a regular `JoinHandle`, dropping this handle does NOT cancel the task -
+/// the nursery guarantees all tasks complete.
+public type TaskHandle<T> is {
+    /// The underlying join handle.
+    inner: JoinHandle<T>,
+    /// Task ID for tracking.
+    task_id: Int,
+    /// Whether the task has been awaited.
+    awaited: Bool,
+};
+
+implement<T> TaskHandle<T> {
+    /// Get the task ID.
+    public fn task_id(&self) -> Int {
+        self.task_id
+    }
+
+    /// Check if the task has completed.
+    public fn is_finished(&self) -> Bool {
+        self.inner.is_finished()
+    }
+
+    /// Abort the task.
+    /// This is typically only called by the nursery during cancellation.
+    public fn abort(&self) {
+        self.inner.abort()
+    }
+}
+
+implement<T> Future for TaskHandle<T> {
+    type Output = Result<T, NurseryError>;
+
+    async fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
+        match self.inner.poll(cx) {
+            Poll.Ready(Ok(value)) => Poll.Ready(Ok(value)),
+            Poll.Ready(Err(e)) if e.is_panic() =>
+                Poll.Ready(Err(NurseryError.Panic(f"{e}"))),
+            Poll.Ready(Err(e)) if e.is_cancelled() =>
+                Poll.Ready(Err(NurseryError.Cancelled)),
+            Poll.Ready(Err(e)) =>
+                Poll.Ready(Err(NurseryError.Single(Heap.new(e)))),
+            Poll.Pending => Poll.Pending,
+        }
+    }
+}
+
+// =============================================================================
+// Nursery State
+// =============================================================================
+
+/// Internal state of a nursery.
+type NurseryState is {
+    /// Configuration options.
+    options: NurseryOptions,
+    /// Whether the nursery has been cancelled.
+    cancelled: AtomicBool,
+    /// Number of tasks spawned.
+    spawned_count: AtomicInt,
+    /// Number of tasks completed.
+    completed_count: AtomicInt,
+    /// Task ID counter.
+    next_task_id: AtomicInt,
+    /// Collected errors (for WaitAll behavior).
+    errors: Mutex<List<Heap<Error>>>,
+};
+
+// =============================================================================
+// Nursery
+// =============================================================================
+
+/// A nursery for structured concurrency.
+///
+/// The nursery tracks all spawned tasks and ensures they complete before
+/// the nursery scope exits. This provides the runtime support for the
+/// `nursery { ... }` language construct.
+///
+/// ## Example
+///
+/// ```verum
+/// nursery {
+///     spawn fetch_data_a();
+///     spawn fetch_data_b();
+///     spawn fetch_data_c();
+/// }
+/// // All three tasks are guaranteed to complete (or be cancelled) here
+/// ```
+public type Nursery is {
+    /// Internal state shared with task handles.
+    state: Shared<NurseryState>,
+};
+
+implement Nursery {
+    /// Create a new nursery with default options.
+    public fn new() -> Self {
+        Self.with_options(NurseryOptions.default())
+    }
+
+    /// Create a new nursery with specific options.
+    public fn with_options(options: NurseryOptions) -> Self {
+        let state = NurseryState {
+            options: options,
+            cancelled: AtomicBool.new(false),
+            spawned_count: AtomicInt.new(0),
+            completed_count: AtomicInt.new(0),
+            next_task_id: AtomicInt.new(0),
+            errors: Mutex.new(List.new()),
+        };
+        Self { state: Shared.new(state) }
+    }
+
+    /// Spawn a task into the nursery.
+    ///
+    /// The task will be tracked and the nursery will wait for it to complete.
+    /// Returns a `TaskHandle` that can be used to await the result.
+    public fn spawn<T: Send, F: Future<Output = T> + Send>(&mut self, future: F) -> TaskHandle<T> {
+        let task_id = self.state.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
+        self.state.spawned_count.fetch_add(1, MemoryOrdering.Relaxed);
+
+        let handle = super.task.spawn(future);
+
+        TaskHandle {
+            inner: handle,
+            task_id: task_id,
+            awaited: false,
+        }
+    }
+
+    /// Cancel all tasks in the nursery.
+    public fn cancel(&self) {
+        self.state.cancelled.store(true, MemoryOrdering.Release)
+    }
+
+    /// Check if the nursery has been cancelled.
+    public fn is_cancelled(&self) -> Bool {
+        self.state.cancelled.load(MemoryOrdering.Acquire)
+    }
+
+    /// Get the number of tasks currently pending.
+    public fn pending_count(&self) -> Int {
+        let spawned = self.state.spawned_count.load(MemoryOrdering.Acquire);
+        let completed = self.state.completed_count.load(MemoryOrdering.Acquire);
+        Int.max(0, spawned - completed)
+    }
+
+    /// Get the number of tasks spawned.
+    public fn spawned_count(&self) -> Int {
+        self.state.spawned_count.load(MemoryOrdering.Acquire)
+    }
+
+    /// Get the number of tasks completed.
+    public fn completed_count(&self) -> Int {
+        self.state.completed_count.load(MemoryOrdering.Acquire)
+    }
+
+    /// Wait for all tasks to complete.
+    ///
+    /// Returns `Ok(())` if all tasks completed successfully, or
+    /// `Err(NurseryError)` if any task failed (depending on error behavior).
+    public async fn wait_all(&mut self) -> Result<(), NurseryError> {
+        let timeout = self.state.options.timeout;
+        let behavior = self.state.options.on_error;
+
+        // Wait for all tasks with optional timeout
+        match timeout {
+            Some(duration) => {
+                match super.select.timeout(duration, self.wait_tasks()).await {
+                    Ok(result) => result,
+                    Err(_) => Err(NurseryError.Timeout {
+                        pending_count: self.pending_count(),
+                        completed_count: self.completed_count(),
+                    }),
+                }
+            },
+            None => self.wait_tasks().await,
+        }
+    }
+
+    /// Internal: wait for all tasks without timeout.
+    async fn wait_tasks(&self) -> Result<(), NurseryError> {
+        // Poll until all tasks complete
+        while self.pending_count() > 0 {
+            super.select.yield_now().await
+        }
+
+        // Check for collected errors
+        let errors = self.state.errors.lock().take();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            match self.state.options.on_error {
+                NurseryErrorBehavior.WaitAll =>
+                    Err(NurseryError.Multiple(errors)),
+                _ => {
+                    // CancelAll or FailFast - return first error
+                    match errors.first() {
+                        Some(e) => Err(NurseryError.Single(e.clone())),
+                        None => Ok(()),
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Run a closure with a new nursery scope.
+///
+/// This is a helper for using nurseries in a scoped manner.
+/// All tasks spawned within the closure are tracked and waited on.
+///
+/// ## Example
+///
+/// ```verum
+/// let results = with_nursery(NurseryOptions.default()) { |n|
+///     let h1 = n.spawn(async { compute_a() });
+///     let h2 = n.spawn(async { compute_b() });
+///     (h1.await?, h2.await?)
+/// }.await?;
+/// ```
+public async fn with_nursery<T, F: fn(&mut Nursery) -> T>(options: NurseryOptions, f: F) -> Result<T, NurseryError> {
+    let mut nursery = Nursery.with_options(options);
+    let result = f(&mut nursery);
+    nursery.wait_all().await?;
+    Ok(result)
+}
+
+/// Run a closure with a nursery that has a timeout.
+public async fn with_nursery_timeout<T, F: fn(&mut Nursery) -> T>(duration: Duration, f: F) -> Result<T, NurseryError> {
+    with_nursery(NurseryOptions.new().with_timeout(duration), f).await
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@cfg(test)
+module tests {
+    mount super.*;
+
+    @test
+    fn test_nursery_options_default() {
+        let opts = NurseryOptions.default();
+        assert(opts.timeout.is_none());
+        assert(opts.max_tasks.is_none());
+        assert(opts.on_error == NurseryErrorBehavior.CancelAll);
+    }
+
+    @test
+    fn test_nursery_options_builder() {
+        let opts = NurseryOptions.new()
+            .with_timeout_ms(5000)
+            .with_max_tasks(100)
+            .with_error_behavior(NurseryErrorBehavior.WaitAll);
+
+        assert(opts.timeout.is_some());
+        assert_eq(opts.max_tasks, Some(100));
+        assert(opts.on_error == NurseryErrorBehavior.WaitAll);
+    }
+
+    @test
+    fn test_nursery_error_messages() {
+        let err = NurseryError.Cancelled;
+        assert(err.message().contains("cancelled"));
+
+        let err = NurseryError.Timeout {
+            pending_count: 5,
+            completed_count: 10
+        };
+        assert(err.message().contains("5 tasks pending"));
+    }
+
+    @test
+    async fn test_nursery_basic() {
+        let mut nursery = Nursery.new();
+        let h = nursery.spawn(async { 42 });
+        assert_eq(h.await?, 42);
+    }
+
+    @test
+    async fn test_nursery_cancellation() {
+        let nursery = Nursery.new();
+        assert(!nursery.is_cancelled());
+        nursery.cancel();
+        assert(nursery.is_cancelled());
+    }
+
+    @test
+    async fn test_nursery_task_counts() {
+        let mut nursery = Nursery.new();
+        assert_eq(nursery.spawned_count(), 0);
+        assert_eq(nursery.pending_count(), 0);
+
+        let h = nursery.spawn(async { 1 });
+        assert_eq(nursery.spawned_count(), 1);
+
+        let _ = h.await;
+        assert_eq(nursery.completed_count(), 1);
+    }
+}

@@ -1,0 +1,109 @@
+// Test: Match expressions with slice/array patterns
+
+fn test_slice_exact_match() {
+    let arr = [1, 2, 3];
+    let result = match arr {
+        [1, 2, 3] => "exact match",
+        _ => "no match"
+    };
+    result
+}
+
+fn test_slice_with_rest() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = match arr {
+        [first, ..] => first,
+        [] => 0
+    };
+    result
+}
+
+fn test_slice_first_and_last() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = match arr {
+        [first, .., last] => first + last,
+        [single] => single,
+        [] => 0
+    };
+    result
+}
+
+fn test_slice_middle() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = match arr {
+        [first, middle @ .., last] => middle.len(),
+        _ => 0
+    };
+    result
+}
+
+fn test_slice_head_tail() {
+    let arr = [1, 2, 3];
+    let result = match arr {
+        [head, tail @ ..] => head,
+        [] => 0
+    };
+    result
+}
+
+fn test_slice_specific_length() {
+    let arr = [1, 2];
+    let result = match arr {
+        [a, b] => a + b,
+        [a, b, c] => a + b + c,
+        _ => 0
+    };
+    result
+}
+
+fn test_slice_nested_patterns() {
+    let arr = [1, 2, 3, 4];
+    let result = match arr {
+        [1, rest @ ..] => "starts with one",
+        [_, 2, ..] => "second is two",
+        _ => "other"
+    };
+    result
+}
+
+fn test_slice_with_guards() {
+    let arr = [1, 2, 3];
+    let result = match arr {
+        [first, ..] if first > 0 => "positive first",
+        [first, ..] if first < 0 => "negative first",
+        _ => "other"
+    };
+    result
+}
+
+fn test_slice_empty() {
+    let arr = [];
+    let result = match arr {
+        [] => "empty",
+        [_] => "one element",
+        _ => "multiple elements"
+    };
+    result
+}
+
+fn test_slice_binding() {
+    let arr = [1, 2, 3, 4, 5];
+    let result = match arr {
+        [a, b, c, ..] => a + b + c,
+        _ => 0
+    };
+    result
+}
+
+fn main() {
+    println(test_slice_exact_match());
+    println(test_slice_with_rest());
+    println(test_slice_first_and_last());
+    println(test_slice_middle());
+    println(test_slice_head_tail());
+    println(test_slice_specific_length());
+    println(test_slice_nested_patterns());
+    println(test_slice_with_guards());
+    println(test_slice_empty());
+    println(test_slice_binding());
+}

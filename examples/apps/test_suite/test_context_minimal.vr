@@ -1,0 +1,23 @@
+// Minimal context system test
+
+context Logger {
+    fn log(msg: Text)
+}
+
+fn use_logger(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+fn main() {
+    print("Starting minimal context test");
+
+    provide Logger = Logger {
+        log: fn(msg: Text) {
+            print(f"[LOG] {msg}");
+        }
+    };
+
+    use_logger("Hello from context!");
+
+    print("Test complete");
+}

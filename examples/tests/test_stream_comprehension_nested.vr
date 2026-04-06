@@ -1,0 +1,44 @@
+// Test nested stream comprehensions
+
+fn main() -> Int {
+    // Test 1: Flatten matrix using stream with multiple for clauses
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let flattened_stream = stream[x for row in matrix for x in row];
+    // Expected stream: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    // Test 2: Cartesian product as stream
+    let xs = [1, 2, 3];
+    let ys = [10, 20];
+    let pair_stream = stream[(x, y) for x in xs for y in ys];
+    // Expected stream: [(1,10), (1,20), (2,10), (2,20), (3,10), (3,20)]
+
+    // Test 3: Nested stream with transformation
+    let sum_stream = stream[x + y for x in xs for y in ys];
+    // Expected stream: [11, 21, 12, 22, 13, 23]
+
+    // Test 4: Three-level nesting in stream
+    let cube = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    let flat_stream = stream[x for layer in cube for row in layer for x in row];
+    // Expected stream: [1, 2, 3, 4, 5, 6, 7, 8]
+
+    // Test 5: Nested stream with filter
+    let filtered_stream = stream[(x, y) for x in xs for y in ys if x + y > 15];
+    // Expected stream: [(1,20), (2,20), (3,20)]
+
+    // Test 6: Nested with let and filter
+    let complex_stream = stream[z for x in [1, 2]
+                                for y in [10, 20]
+                                let sum = x + y
+                                let z = sum * 2
+                                if z > 20];
+    // Expected stream: [22, 42, 24, 44]
+
+    // Test 7: Stream of streams (if supported)
+    // let stream_of_streams = stream[stream[y * x for y in ys] for x in xs];
+
+    // Test 8: Lazy evaluation - infinite stream (if supported)
+    // let infinite = stream[x for x in 1.. if x % 2 == 0];
+    // let first_ten = infinite.take(10);
+
+    0
+}

@@ -1,0 +1,13 @@
+// Step 4: Test nested generics (direct construction)
+
+type Box<T> is {
+    value: T
+}
+
+fn main() -> Int {
+    let inner_box = Box { value: 42 };
+    let outer_box = Box { value: inner_box };
+    let inner = outer_box.value;
+    let result = inner.value;
+    result
+}

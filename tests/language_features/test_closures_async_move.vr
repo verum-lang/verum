@@ -1,0 +1,29 @@
+// Test async and move closure features
+
+async fn main() {
+    print("=== Test 1: Async closure ===");
+    let async_double = async |x: Int| -> Int {
+        x * 2
+    };
+    let result = async_double(21).await;
+    print(f"Async double: {result}");
+
+    print("\n=== Test 2: Move closure ===");
+    let data = [1, 2, 3, 4, 5];
+    let moved = move |x: Int| -> Int {
+        let sum = data[0] + data[1] + data[2] + data[3] + data[4];
+        sum + x
+    };
+    print(f"Moved closure: {moved(10)}");
+
+    // Can we still access data? This should fail if move worked correctly
+    // print(f"Data after move: {data[0]}");
+
+    print("\n=== Test 3: Async + Move closure ===");
+    let value = 100;
+    let async_moved = async move |x: Int| -> Int {
+        value + x
+    };
+    let result2 = async_moved(50).await;
+    print(f"Async moved: {result2}");
+}

@@ -1,0 +1,84 @@
+// Test 5: Generic Constraints with Where Clause
+// Spec: 03-type-system.md Section 1.3 - Generic where clauses
+// Syntax: Generic parameters with protocol bounds and refinements
+
+// Test 5.1: Simple generic with protocol bound
+fn print_value<T>(value: T) where T: Display {
+    let _ = print(f"Value: {value}");
+}
+
+// Test 5.2: Generic with multiple bounds
+fn compare<T>(a: T, b: T) -> Bool where T: Eq + Ord {
+    a == b
+}
+
+// Test 5.3: Generic with refined type parameter
+fn process_positive_list<T>(list: List<T>) -> Int
+    where T: Display + Ord,
+    where requires list.len() > 0 {
+    list.len()
+}
+
+// Test 5.4: Generic function with refinement on parameter
+fn find_max<T>(items: List<T>) -> T
+    where T: Ord + Clone,
+    where requires items.len() > 0 {
+    let mut max = items[0].clone();
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] > max {
+            max = items[i].clone();
+        }
+        i = i + 1;
+    }
+    max
+}
+
+// Test 5.5: Generic type with refinement
+type NonEmptyList<T> is List<T> where it.len() > 0;
+
+fn first<T>(list: NonEmptyList<T>) -> T where T: Clone {
+    list[0].clone()
+}
+
+// Test 5.6: Generic with associated type constraint
+protocol Container {
+    type Item;
+    fn len(self: &Self) -> Int;
+    fn get(self: &Self, index: Int) -> Maybe<Self.Item>;
+}
+
+fn get_first<C>(container: &C) -> Maybe<C.Item>
+    where C: Container,
+    where requires container.len() > 0 {
+    container.get(0)
+}
+
+// Test 5.7: Multiple type parameters with constraints
+fn combine<A, B, C>(a: A, b: B) -> C
+    where A: Display,
+    where B: Display,
+    where C: Default {
+    C.default()
+}
+
+// Test 5.8: Test generic refinements
+fn main() {
+    // Test simple generic
+    print_value(42);
+    print_value("hello");
+
+    // Test comparison
+    let equal = compare(5, 5);
+    let _ = print(f"5 == 5: {equal}");
+
+    // Test find_max
+    let numbers = [1, 5, 3, 9, 2];
+    let max_num = find_max(numbers);
+    let _ = print(f"Maximum: {max_num}");
+
+    // Test non-empty list
+    let list: NonEmptyList<Int> = [1, 2, 3];
+    let first_item = first(list);
+    let _ = print(f"First item: {first_item}");
+}

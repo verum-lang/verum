@@ -1,0 +1,163 @@
+name: VCS Performance Regression
+description: Report a performance regression detected by VCS benchmarks
+title: "[VCS] Performance Regression: "
+labels: ["vcs", "performance-regression", "needs-investigation"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## VCS Performance Regression Report
+        Please provide details about the performance regression detected by VCS benchmarks.
+
+  - type: dropdown
+    id: benchmark-category
+    attributes:
+      label: Benchmark Category
+      description: Which benchmark category detected the regression?
+      options:
+        - CBGR (Memory Safety)
+        - Type Inference
+        - Compilation Throughput
+        - Runtime Performance
+        - Memory Overhead
+        - SMT/Verification
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: benchmark-name
+    attributes:
+      label: Benchmark Name
+      description: Specific benchmark that regressed
+      placeholder: "cbgr/tier0_check"
+    validations:
+      required: true
+
+  - type: input
+    id: baseline-value
+    attributes:
+      label: Baseline Value
+      description: Performance value before regression
+      placeholder: "12ns"
+    validations:
+      required: true
+
+  - type: input
+    id: current-value
+    attributes:
+      label: Current Value
+      description: Performance value after regression
+      placeholder: "18ns"
+    validations:
+      required: true
+
+  - type: input
+    id: regression-percent
+    attributes:
+      label: Regression Percentage
+      description: How much worse is the performance?
+      placeholder: "50%"
+    validations:
+      required: true
+
+  - type: input
+    id: target-value
+    attributes:
+      label: Target Value
+      description: What is the performance target (from CLAUDE.md)?
+      placeholder: "<15ns"
+    validations:
+      required: false
+
+  - type: input
+    id: commit
+    attributes:
+      label: Regressing Commit
+      description: Commit that introduced the regression (if known)
+      placeholder: "abc123..."
+    validations:
+      required: false
+
+  - type: input
+    id: baseline-commit
+    attributes:
+      label: Baseline Commit
+      description: Commit used as baseline for comparison
+      placeholder: "def456..."
+    validations:
+      required: false
+
+  - type: input
+    id: workflow-run
+    attributes:
+      label: Benchmark Workflow Run
+      description: Link to the benchmark GitHub Actions run
+      placeholder: "https://github.com/.../actions/runs/..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: On which platform(s) was this detected?
+      multiple: true
+      options:
+        - Linux (x64)
+        - macOS (x64)
+        - macOS (ARM64)
+        - All platforms
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark-output
+    attributes:
+      label: Benchmark Output
+      description: Relevant benchmark output or comparison report
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: suspected-cause
+    attributes:
+      label: Suspected Cause
+      description: If you have any idea what might have caused this regression
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this regression?
+      options:
+        - Critical (blocks release, exceeds targets significantly)
+        - High (exceeds targets, needs immediate attention)
+        - Medium (noticeable regression, should be fixed soon)
+        - Low (minor regression, can be addressed in regular development)
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have verified this regression is reproducible
+          required: true
+        - label: I have checked the benchmark report artifact
+          required: true
+        - label: I have searched for related performance issues
+          required: true

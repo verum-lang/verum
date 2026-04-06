@@ -1,0 +1,34 @@
+fn check_positive(x: Float) -> Text {
+    match x {
+        n where n > 0.0 => "positive",
+        n where n < 0.0 => "negative",
+        _ => "zero"
+    }
+}
+
+fn categorize_int(x: Int) -> Text {
+    match x {
+        n where n > 100 => "large",
+        n where n > 10 => "medium",
+        n where n > 0 => "small",
+        _ => "non-positive"
+    }
+}
+
+fn main() {
+    let pos = check_positive(5.0);
+    let neg = check_positive(-3.0);
+    let zero = check_positive(0.0);
+    let _ = print(f"check_positive(5.0) = {pos}");
+    let _ = print(f"check_positive(-3.0) = {neg}");
+    let _ = print(f"check_positive(0.0) = {zero}");
+
+    let cat1 = categorize_int(150);
+    let cat2 = categorize_int(50);
+    let cat3 = categorize_int(5);
+    let cat4 = categorize_int(-10);
+    let _ = print(f"categorize_int(150) = {cat1}");
+    let _ = print(f"categorize_int(50) = {cat2}");
+    let _ = print(f"categorize_int(5) = {cat3}");
+    let _ = print(f"categorize_int(-10) = {cat4}");
+}

@@ -1,0 +1,72 @@
+// Test module system - import/export
+// Tests module declarations, imports, and visibility
+
+// Note: Full module system requires multiple files
+// This tests the syntax for import/export statements
+
+// Import statements use . for path separators
+// import std.collections.List
+// import std.io.{print, println}
+// import mymodule.types.{Point, Rectangle}
+
+// Export statements
+// pub type MyType is { ... }
+// pub fn my_function() { ... }
+
+// Module-level type definitions (implicitly in current module)
+type LocalType is {
+    id: Int,
+    data: Text
+};
+
+// Public type (exported)
+pub type PublicType is {
+    value: Int
+};
+
+// Private function (not exported)
+fn private_helper(x: Int) -> Int {
+    x * 2
+}
+
+// Public function (exported)
+pub fn public_api(x: Int) -> Int {
+    private_helper(x) + 1
+}
+
+// Re-exporting types
+// pub use LocalType as ExportedLocal
+
+fn main() {
+    print("=== Module System Tests ===")
+
+    print("\nTest 1: Import syntax")
+    print("import std.collections.List")
+    print("import std.io.{print, println}")
+    print("import mymodule.types.Point")
+
+    print("\nTest 2: Path separator")
+    print("Uses . (dot) NOT :: for paths")
+    print("Example: std.collections.Map")
+
+    print("\nTest 3: Visibility")
+    print("pub type - exported type")
+    print("pub fn - exported function")
+    print("No pub - private to module")
+
+    print("\nTest 4: Selective imports")
+    print("import module.{Type1, Type2, fn1}")
+
+    print("\nTest 5: Module structure")
+    let local = LocalType { id: 1, data: "test" }
+    print(f"Local type: {local.id}")
+
+    let public = PublicType { value: 42 }
+    print(f"Public type: {public.value}")
+
+    let result = public_api(10)
+    print(f"Public API result: {result}")
+
+    print("\nModule tests complete (syntax verified)")
+    print("Full module system requires multi-file setup")
+}

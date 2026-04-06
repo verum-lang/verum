@@ -1,0 +1,210 @@
+// =============================================================================
+// interval.vr - Timer and Interval types
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Dependencies: core, time/duration, time/instant, async/poll, async/stream
+// =============================================================================
+//
+// Provides periodic timer types:
+//
+// - Interval: Blocking periodic timer
+// - AsyncInterval: Non-blocking async interval implementing Stream
+// - interval(): Convenience constructor for AsyncInterval
+//
+// # Example
+//
+// ```verum
+// // Blocking interval
+// let timer = Interval.new(Duration.millis(100));
+// timer.tick();   // Blocks for ~100ms
+// timer.tick();   // Blocks for ~100ms
+//
+// // Async interval as a stream
+// let stream = interval(Duration.secs(1));
+// // Each .next() yields () after the period elapses
+// ```
+//
+// =============================================================================
+
+module interval;
+
+mount core.*;
+mount core.time.{Duration, Instant, Time};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+// =============================================================================
+// Interval (Blocking)
+// =============================================================================
+
+/// A blocking periodic timer.
+///
+/// Each call to `tick()` sleeps until the next period boundary.
+/// The interval compensates for drift by tracking the expected next tick time.
+///
+/// # Example
+/// ```verum
+/// let timer = Interval.new(Duration.millis(50));
+/// let mut count = 0;
+/// while count < 10 {
+///     timer.tick();
+///     count = count + 1;
+///     print(f"tick {count}");
+/// }
+/// ```
+public type Interval is {
+    /// Period between ticks
+    period: Duration,
+    /// Next tick deadline (monotonic nanoseconds)
+    next_tick_ns: Int,
+};
+
+implement Interval {
+    /// Create a new blocking interval with the given period.
+    ///
+    /// The first tick will fire after one period has elapsed.
+    public fn new(period: Duration) -> Interval {
+        let now = Time.monotonic();
+        Interval {
+            period: period,
+            next_tick_ns: now + period.as_nanos(),
+        }
+    }
+
+    /// Create an interval that fires immediately on the first tick.
+    public fn immediate(period: Duration) -> Interval {
+        let now = Time.monotonic();
+        Interval {
+            period: period,
+            next_tick_ns: now,
+        }
+    }
+
+    /// Wait until the next tick. Blocks the current thread.
+    ///
+    /// Returns the number of periods that have elapsed since the last tick.
+    /// Normally returns 1, but can return more if the caller was slow and
+    /// missed one or more ticks.
+    public fn tick(&mut self) -> Int {
+        let now = Time.monotonic();
+        let period_ns = self.period.as_nanos();
+
+        if now < self.next_tick_ns {
+            // Sleep until next tick
+            let sleep_ns = self.next_tick_ns - now;
+            Time.sleep(Duration.from_nanos(sleep_ns));
+        }
+
+        // Calculate how many periods elapsed (handles drift)
+        let now_after = Time.monotonic();
+        let elapsed = now_after - (self.next_tick_ns - period_ns);
+        let periods = if period_ns > 0 {
+            elapsed / period_ns
+        } else {
+            1
+        };
+        let ticks = if periods < 1 { 1 } else { periods };
+
+        // Advance to next tick boundary
+        self.next_tick_ns = self.next_tick_ns + (ticks * period_ns);
+
+        ticks
+    }
+
+    /// Get the period of this interval.
+    public fn period(&self) -> Duration {
+        self.period
+    }
+
+    /// Reset the interval so the next tick fires after one full period.
+    public fn reset(&mut self) {
+        let now = Time.monotonic();
+        self.next_tick_ns = now + self.period.as_nanos();
+    }
+}
+
+// =============================================================================
+// AsyncInterval (Stream-based)
+// =============================================================================
+
+/// An asynchronous interval that implements the Stream protocol.
+///
+/// Each call to `poll_next()` yields `()` after the period elapses.
+/// Suitable for use with stream combinators and async for-loops.
+///
+/// # Example
+/// ```verum
+/// let ticks = interval(Duration.millis(100))
+///     .take(5)
+///     .for_each(|_| {
+///         print("tick");
+///     })
+///     .await;
+/// ```
+public type AsyncInterval is {
+    /// Period between ticks in nanoseconds
+    period_ns: Int,
+    /// Next tick deadline (monotonic nanoseconds)
+    next_tick_ns: Int,
+};
+
+implement AsyncInterval {
+    /// Create a new async interval with the given period.
+    public fn new(period: Duration) -> AsyncInterval {
+        let now = Time.monotonic();
+        let period_ns = period.as_nanos();
+        AsyncInterval {
+            period_ns: period_ns,
+            next_tick_ns: now + period_ns,
+        }
+    }
+
+    /// Reset the interval so the next tick fires after one full period.
+    public fn reset(&mut self) {
+        let now = Time.monotonic();
+        self.next_tick_ns = now + self.period_ns;
+    }
+}
+
+implement Stream for AsyncInterval {
+    type Item = ();
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<()>> {
+        let now = Time.monotonic();
+        if now >= self.next_tick_ns {
+            // Advance deadline
+            self.next_tick_ns = self.next_tick_ns + self.period_ns;
+            // If we fell behind, catch up to now
+            if self.next_tick_ns < now {
+                self.next_tick_ns = now + self.period_ns;
+            }
+            Poll.Ready(Some(()))
+        } else {
+            // Not ready yet — register waker for later notification
+            // In a real runtime, this would register a timer with the executor
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+// =============================================================================
+// Factory Functions
+// =============================================================================
+
+/// Create an async interval stream with the given period.
+///
+/// The stream yields `()` each time the period elapses.
+///
+/// # Example
+/// ```verum
+/// let ticker = interval(Duration.secs(1));
+/// ```
+public fn interval(period: Duration) -> AsyncInterval {
+    AsyncInterval.new(period)
+}
+
+/// Create an async interval stream from a millisecond count.
+public fn interval_ms(ms: Int) -> AsyncInterval {
+    AsyncInterval.new(Duration.millis(ms))
+}

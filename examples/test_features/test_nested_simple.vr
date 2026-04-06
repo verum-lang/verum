@@ -1,0 +1,6 @@
+// Simple test for nested array coercion
+fn main() {
+    // Test the simplest case first
+    let matrix: List<List<Int>> = [[1, 2], [3, 4]];
+    print("Success!");
+}

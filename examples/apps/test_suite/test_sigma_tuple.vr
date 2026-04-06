@@ -1,0 +1,8 @@
+// Test sigma-type with tuple
+
+type ValidPair is p: (Int, Int) where p.0 > 0 && p.1 > 0;
+
+fn main() {
+    let pair: ValidPair = (3, 4);
+    let _ = print(f"Pair created");
+}

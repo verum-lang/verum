@@ -1,0 +1,5 @@
+// Test 3D nested array coercion
+fn main() {
+    let cube: List<List<List<Int>>> = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    print("3D array coercion works!");
+}

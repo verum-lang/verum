@@ -1,0 +1,27 @@
+// Test 4: Multiple concurrent tasks
+// Tests spawning and awaiting multiple tasks concurrently
+
+async fn task_a() -> Int {
+    10
+}
+
+async fn task_b() -> Int {
+    20
+}
+
+async fn task_c() -> Int {
+    30
+}
+
+fn main() {
+    let handle_a = spawn async { task_a().await };
+    let handle_b = spawn async { task_b().await };
+    let handle_c = spawn async { task_c().await };
+
+    let result_a = handle_a.await;
+    let result_b = handle_b.await;
+    let result_c = handle_c.await;
+
+    let total = result_a + result_b + result_c;
+    print(total);
+}

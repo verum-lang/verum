@@ -1,0 +1,38 @@
+// Test closures and higher-order functions
+
+fn apply<T, R>(value: T, f: fn(T) -> R) -> R {
+    f(value)
+}
+
+fn map_int(x: Int, f: fn(Int) -> Int) -> Int {
+    f(x)
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |a| g(f(a))
+}
+
+fn main() {
+    let _ = print("Testing closures...");
+
+    // Basic closure
+    let double = |x: Int| x * 2;
+    let result = double(5);
+    let _ = print(f"double(5) = {result}");
+
+    // Closure with capture (if supported)
+    let multiplier = 3;
+    let triple = |x: Int| x * multiplier;
+    let result2 = triple(4);
+    let _ = print(f"triple(4) = {result2}");
+
+    // Higher-order function
+    let result3 = map_int(7, |x| x + 1);
+    let _ = print(f"map_int(7, inc) = {result3}");
+
+    // Apply with closure
+    let result4 = apply(10, |x: Int| x * x);
+    let _ = print(f"apply(10, square) = {result4}");
+
+    let _ = print("Done!");
+}

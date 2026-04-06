@@ -1,0 +1,126 @@
+// Math Utilities Application
+// Demonstrates: stdlib imports, mathematical functions, algorithms
+
+link std.math.sqrt;
+link std.math.sin;
+link std.math.cos;
+
+type Maybe<T> is Some(T) | None;
+
+// Constants
+fn pi() -> Float { 3.14159265358979 }
+fn e() -> Float { 2.71828182845905 }
+
+// Basic math operations
+fn abs(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn max(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+fn min(a: Float, b: Float) -> Float {
+    if a < b { a } else { b }
+}
+
+fn clamp(x: Float, low: Float, high: Float) -> Float {
+    min(max(x, low), high)
+}
+
+// Power function (integer exponent)
+fn pow(base: Float, exp: Float) -> Float {
+    if exp <= 0.0 {
+        1.0
+    } else {
+        let mut result = 1.0;
+        let mut i = 0.0;
+        while i < exp {
+            result = result * base;
+            i = i + 1.0;
+        }
+        result
+    }
+}
+
+// Factorial
+fn factorial(n: Float) -> Float {
+    if n <= 1.0 { 1.0 } else { n * factorial(n - 1.0) }
+}
+
+// GCD using Euclidean algorithm
+fn gcd(a: Float, b: Float) -> Float {
+    let mut x = abs(a);
+    let mut y = abs(b);
+    while y > 0.0 {
+        let temp = y;
+        y = x - (x / y) * y;  // Modulo approximation
+        x = temp;
+    }
+    x
+}
+
+// Distance calculation
+fn distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    sqrt(dx * dx + dy * dy)
+}
+
+// Quadratic formula (returns discriminant and roots status)
+fn quadratic_discriminant(a: Float, b: Float, c: Float) -> Float {
+    b * b - 4.0 * a * c
+}
+
+fn main() {
+    let _ = print("=== Math Utilities Demo ===");
+    let _ = print("");
+
+    // Constants
+    let _ = print("Constants:");
+    let _ = print(f"  π = {pi()}");
+    let _ = print(f"  e = {e()}");
+    let _ = print("");
+
+    // Basic operations
+    let _ = print("Basic Operations:");
+    let _ = print(f"  abs(-5) = {abs(-5.0)}");
+    let _ = print(f"  max(3, 7) = {max(3.0, 7.0)}");
+    let _ = print(f"  min(3, 7) = {min(3.0, 7.0)}");
+    let _ = print(f"  clamp(15, 0, 10) = {clamp(15.0, 0.0, 10.0)}");
+    let _ = print("");
+
+    // Powers and factorials
+    let _ = print("Powers and Factorials:");
+    let _ = print(f"  2^10 = {pow(2.0, 10.0)}");
+    let _ = print(f"  3^4 = {pow(3.0, 4.0)}");
+    let _ = print(f"  5! = {factorial(5.0)}");
+    let _ = print(f"  7! = {factorial(7.0)}");
+    let _ = print("");
+
+    // Stdlib math
+    let _ = print("Stdlib Math Functions:");
+    let _ = print(f"  sqrt(16) = {sqrt(16.0)}");
+    let _ = print(f"  sqrt(2) = {sqrt(2.0)}");
+    let _ = print(f"  sin(0) = {sin(0.0)}");
+    let _ = print(f"  cos(0) = {cos(0.0)}");
+    let _ = print("");
+
+    // Distance calculation
+    let _ = print("Distance Calculation:");
+    let d = distance(0.0, 0.0, 3.0, 4.0);
+    let _ = print(f"  Distance from (0,0) to (3,4) = {d}");
+    let _ = print("");
+
+    // Quadratic discriminant
+    let _ = print("Quadratic Equations (ax² + bx + c = 0):");
+    let disc1 = quadratic_discriminant(1.0, -5.0, 6.0);
+    let _ = print(f"  x² - 5x + 6: discriminant = {disc1} (two real roots)");
+    let disc2 = quadratic_discriminant(1.0, -2.0, 1.0);
+    let _ = print(f"  x² - 2x + 1: discriminant = {disc2} (one real root)");
+    let disc3 = quadratic_discriminant(1.0, 1.0, 1.0);
+    let _ = print(f"  x² + x + 1: discriminant = {disc3} (no real roots)");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

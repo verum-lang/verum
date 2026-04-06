@@ -1,0 +1,15 @@
+// Test: Basic try expression
+// Tests if try can wrap an expression that might fail
+
+fn may_fail(should_fail: Bool) -> Result<Int, Text> {
+    if should_fail {
+        Err("Operation failed")
+    } else {
+        Ok(42)
+    }
+}
+
+fn main() {
+    let result = may_fail(false)?;
+    print(result);
+}

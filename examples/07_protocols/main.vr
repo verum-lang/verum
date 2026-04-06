@@ -1,0 +1,98 @@
+// 07 — Protocols
+// Protocols are Verum's version of traits/interfaces.
+// Syntax: `type Name is protocol { ... };`
+// Implement: `implement Protocol for Type { ... }`
+
+// --- Define a protocol ---
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+// --- Define types ---
+type Circle is {
+    radius: Float
+};
+
+type Rectangle is {
+    width: Float,
+    height: Float
+};
+
+// --- Implement the protocol for each type ---
+implement Describable for Circle {
+    fn describe(&self) -> Text {
+        f"Circle with radius {self.radius}"
+    }
+}
+
+implement Describable for Rectangle {
+    fn describe(&self) -> Text {
+        f"Rectangle {self.width} x {self.height}"
+    }
+}
+
+// --- Protocol with associated type ---
+type Container is protocol {
+    type Item;
+    fn size(&self) -> Int;
+    fn get(&self, index: Int) -> Maybe<Self.Item>;
+};
+
+type IntStack is {
+    items: List<Int>
+};
+
+implement Container for IntStack {
+    type Item is Int;
+
+    fn size(&self) -> Int {
+        self.items.len()
+    }
+
+    fn get(&self, index: Int) -> Maybe<Int> {
+        if index >= 0 && index < self.items.len() {
+            Some(self.items[index])
+        } else {
+            None
+        }
+    }
+}
+
+// --- Own methods alongside protocol implementations ---
+implement Circle {
+    fn area(&self) -> Float {
+        3.14159 * self.radius * self.radius
+    }
+}
+
+implement Rectangle {
+    fn area(&self) -> Float {
+        self.width * self.height
+    }
+}
+
+// --- Generic function with protocol bound ---
+fn print_description<T: Describable>(item: &T) {
+    print(item.describe())
+}
+
+fn main() {
+    let c = Circle { radius: 5.0 }
+    let r = Rectangle { width: 3.0, height: 4.0 }
+
+    // Direct method calls
+    print(f"Circle area: {c.area()}")
+    print(f"Rectangle area: {r.area()}")
+
+    // Protocol method calls
+    print_description(&c)
+    print_description(&r)
+
+    // Associated type usage
+    let stack = IntStack { items: [10, 20, 30] }
+    print(f"Stack size: {stack.size()}")
+    match stack.get(1) {
+        Some(val) => print(f"Element at 1: {val}"),
+        None      => print("Not found")
+    }
+}

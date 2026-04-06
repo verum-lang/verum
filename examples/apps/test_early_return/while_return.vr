@@ -1,0 +1,17 @@
+// While loop early return test
+
+fn loop_return(n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if i > 5 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn main() {
+    print(f"loop_return(10) = {loop_return(10)}");
+    print(f"loop_return(3) = {loop_return(3)}");
+}

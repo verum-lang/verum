@@ -1,0 +1,12 @@
+// Test: Basic stream comprehension
+// Tests if stream[...] syntax is parsed and evaluated
+
+fn main() {
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled = stream[x * 2 for x in numbers];
+
+    // Try to consume the stream
+    for item in doubled {
+        print(item);
+    }
+}

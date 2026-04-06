@@ -1,0 +1,108 @@
+// In-Memory Metrics Provider
+//
+// Implements the Metrics context protocol with atomic counters and a
+// sliding window for request rate calculation.
+
+mount core.base.{Result, Text, Int, Float, Bool};
+mount core.sync.Mutex;
+mount core.time.unix_timestamp;
+
+mount crate.contexts.metrics.{Metrics, MetricsError, SystemMetrics};
+
+// ============================================================================
+// InMemoryMetricsProvider
+// ============================================================================
+
+type MetricsState is {
+    total_requests: Int,
+    total_duration_ms: Int,
+    active_connections: Int,
+    window_start: Int,
+    window_requests: Int,
+};
+
+pub type InMemoryMetricsProvider is {
+    state: Mutex<MetricsState>,
+};
+
+implement InMemoryMetricsProvider {
+    pub fn new() -> InMemoryMetricsProvider {
+        InMemoryMetricsProvider {
+            state: Mutex.new(MetricsState {
+                total_requests: 0,
+                total_duration_ms: 0,
+                active_connections: 0,
+                window_start: unix_timestamp(),
+                window_requests: 0,
+            }),
+        }
+    }
+
+    fn requests_per_second(s: &MetricsState) -> Float {
+        let now = unix_timestamp();
+        let elapsed = now - s.window_start;
+        if elapsed <= 0 {
+            0.0
+        } else {
+            (s.window_requests as Float) / (elapsed as Float)
+        }
+    }
+
+    fn avg_response_time(s: &MetricsState) -> Float {
+        if s.total_requests == 0 {
+            0.0
+        } else {
+            (s.total_duration_ms as Float) / (s.total_requests as Float)
+        }
+    }
+}
+
+implement Metrics for InMemoryMetricsProvider {
+    async fn get_current(self) -> Result<SystemMetrics, MetricsError> {
+        let s = self.state.lock();
+        Result.Ok(SystemMetrics {
+            requests_total: s.total_requests,
+            requests_per_second: InMemoryMetricsProvider.requests_per_second(&s),
+            avg_response_time_ms: InMemoryMetricsProvider.avg_response_time(&s),
+            active_connections: s.active_connections,
+            memory_usage_mb: 0,
+            cpu_usage_percent: 0.0,
+        })
+    }
+
+    async fn record_request(self, duration_ms: Int) -> Result<(), MetricsError> {
+        let mut s = self.state.lock();
+        s.total_requests = s.total_requests + 1;
+        s.total_duration_ms = s.total_duration_ms + duration_ms;
+        s.window_requests = s.window_requests + 1;
+
+        // Reset sliding window every 60 seconds
+        let now = unix_timestamp();
+        if now - s.window_start > 60 {
+            s.window_start = now;
+            s.window_requests = 1;
+        }
+
+        Result.Ok(())
+    }
+
+    async fn get_total_requests(self) -> Result<Int, MetricsError> {
+        let s = self.state.lock();
+        Result.Ok(s.total_requests)
+    }
+
+    async fn get_requests_per_second(self) -> Result<Float, MetricsError> {
+        let s = self.state.lock();
+        Result.Ok(InMemoryMetricsProvider.requests_per_second(&s))
+    }
+
+    async fn get_avg_response_time(self) -> Result<Float, MetricsError> {
+        let s = self.state.lock();
+        Result.Ok(InMemoryMetricsProvider.avg_response_time(&s))
+    }
+
+    async fn get_active_connections(self) -> Result<Int, MetricsError> {
+        let s = self.state.lock();
+        Result.Ok(s.active_connections)
+    }
+}

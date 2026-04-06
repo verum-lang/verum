@@ -1,0 +1,381 @@
+// =============================================================================
+// sumdb_service.vr — Checksum Database (Transparent Log) Service
+// =============================================================================
+// Spec: docs/detailed/15-cog-distribution-architecture.md Section 4.8
+//
+// Implements a Go-style transparent log using Merkle trees for
+// cryptographic verification of package checksums. Clients can verify
+// that a package+version corresponds to a specific checksum without
+// trusting the registry storage.
+//
+// Architecture:
+//   - Append-only log of (package, version, checksum) entries
+//   - Merkle tree for efficient inclusion proofs
+//   - Ed25519-signed tree heads for authenticity
+//   - Tile-based access for cache-friendly verification
+// =============================================================================
+
+module services.sumdb_service;
+
+mount core.collections.{List, Map};
+mount core.text.Text;
+mount core.time.DateTime;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// Entry in the transparent log.
+type SumdbEntry is {
+    /// Sequential entry ID (append-only).
+    entry_id: Int,
+    /// Package name (scoped).
+    package: Text,
+    /// SemVer version string.
+    version: Text,
+    /// SHA-256 hex digest of the source archive.
+    checksum: Text,
+    /// Hash of this entry (SHA-256 of package||version||checksum).
+    hash: Text,
+    /// Timestamp of insertion.
+    timestamp: DateTime,
+};
+
+/// Signed tree head — the root of the Merkle tree at a point in time.
+type TreeHead is {
+    /// Number of entries in the tree.
+    tree_size: Int,
+    /// Root hash of the Merkle tree.
+    root_hash: Text,
+    /// Timestamp of this tree head.
+    timestamp: DateTime,
+    /// Ed25519 signature over (tree_size || root_hash || timestamp).
+    signature: Text,
+};
+
+/// Merkle inclusion proof for a single entry.
+type InclusionProof is {
+    /// Index of the entry in the log.
+    entry_index: Int,
+    /// Tree size at the time of the proof.
+    tree_size: Int,
+    /// List of hashes forming the proof path.
+    proof_hashes: List<Text>,
+};
+
+/// Result of a sumdb lookup.
+type LookupResult is
+    | Found(SumdbEntry)
+    | NotFound;
+
+/// Result of a verification check.
+type VerifyResult is
+    | Valid
+    | Invalid { expected: Text, actual: Text }
+    | Missing;
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+/// Sumdb service — manages the transparent checksum log.
+///
+/// Uses context [Database] for persistence and [Logger] for audit trail.
+type SumdbService is {};
+
+implement SumdbService {
+    /// Create a new sumdb service.
+    fn new() -> Self {
+        Self {}
+    }
+
+    /// Append a new entry to the transparent log.
+    ///
+    /// Computes the entry hash, inserts into the log, and updates
+    /// the Merkle tree. Returns the assigned entry ID.
+    fn append(
+        package: Text,
+        version: Text,
+        checksum: Text,
+    ) -> Result<Int, Text>
+        using [Database, Logger]
+    {
+        // Compute entry hash: SHA-256(package || "@" || version || ":" || checksum)
+        let entry_data = f"{package}@{version}:{checksum}";
+        let hash = sha256_hex(entry_data);
+
+        let now = DateTime.now();
+
+        // Insert into append-only log
+        let entry_id = Database.execute(
+            f"INSERT INTO sumdb_entries (package, version, checksum, hash, timestamp) VALUES ('{package}', '{version}', '{checksum}', '{hash}', '{now}') RETURNING entry_id"
+        )?;
+
+        // Update Merkle tree (rebuild affected path)
+        update_merkle_tree(entry_id, hash)?;
+
+        Logger.info(f"sumdb: appended entry {entry_id} for {package}@{version}");
+
+        Ok(entry_id)
+    }
+
+    /// Look up the checksum for a specific package version.
+    ///
+    /// Returns the entry if found, NotFound otherwise.
+    /// This is the primary API called by `verum add` and `verum build`.
+    fn lookup(package: Text, version: Text) -> Result<LookupResult, Text>
+        using [Database, Cache]
+    {
+        // Check cache first (checksums are immutable)
+        let cache_key = f"sumdb:{package}@{version}";
+        match Cache.get(cache_key) {
+            Some(entry) => return Ok(Found(entry)),
+            None => {},
+        };
+
+        // Query database
+        let rows = Database.query(
+            f"SELECT entry_id, package, version, checksum, hash, timestamp FROM sumdb_entries WHERE package = '{package}' AND version = '{version}'"
+        )?;
+
+        if rows.is_empty() {
+            return Ok(NotFound);
+        }
+
+        let row = rows.first().unwrap();
+        let entry = SumdbEntry {
+            entry_id: row.get_int("entry_id"),
+            package: row.get_text("package"),
+            version: row.get_text("version"),
+            checksum: row.get_text("checksum"),
+            hash: row.get_text("hash"),
+            timestamp: row.get_datetime("timestamp"),
+        };
+
+        // Cache for future lookups (immutable, long TTL)
+        Cache.set(cache_key, entry, Duration.days(365));
+
+        Ok(Found(entry))
+    }
+
+    /// Verify that a downloaded package matches the sumdb record.
+    ///
+    /// Called by `verum build` after downloading from ANY source (CDN, IPFS, Git).
+    fn verify(package: Text, version: Text, actual_checksum: Text) -> Result<VerifyResult, Text>
+        using [Database]
+    {
+        match Self.lookup(package, version)? {
+            Found(entry) => {
+                if entry.checksum == actual_checksum {
+                    Ok(Valid)
+                } else {
+                    Ok(Invalid {
+                        expected: entry.checksum,
+                        actual: actual_checksum,
+                    })
+                }
+            }
+            NotFound => Ok(Missing),
+        }
+    }
+
+    /// Get the current signed tree head.
+    ///
+    /// Clients use this to verify log consistency between requests.
+    fn get_tree_head() -> Result<TreeHead, Text>
+        using [Database]
+    {
+        let rows = Database.query(
+            "SELECT tree_size, root_hash, timestamp, signature FROM sumdb_tree_head ORDER BY tree_size DESC LIMIT 1"
+        )?;
+
+        if rows.is_empty() {
+            return Ok(TreeHead {
+                tree_size: 0,
+                root_hash: "",
+                timestamp: DateTime.now(),
+                signature: "",
+            });
+        }
+
+        let row = rows.first().unwrap();
+        Ok(TreeHead {
+            tree_size: row.get_int("tree_size"),
+            root_hash: row.get_text("root_hash"),
+            timestamp: row.get_datetime("timestamp"),
+            signature: row.get_text("signature"),
+        })
+    }
+
+    /// Get a Merkle tile for proof verification.
+    ///
+    /// Tiles contain 256 hashes each, enabling efficient caching
+    /// and incremental verification.
+    fn get_tile(level: Int, index: Int) -> Result<List<Text>, Text>
+        using [Database, Cache]
+    {
+        let cache_key = f"sumdb:tile:{level}:{index}";
+        match Cache.get(cache_key) {
+            Some(tile) => return Ok(tile),
+            None => {},
+        };
+
+        let start = index * 256;
+        let end_idx = start + 256;
+
+        let rows = Database.query(
+            f"SELECT hash FROM sumdb_entries WHERE entry_id >= {start} AND entry_id < {end_idx} ORDER BY entry_id"
+        )?;
+
+        let hashes = rows.iter().map(fn(r) { r.get_text("hash") }).collect();
+
+        // Tiles are immutable (append-only log), cache forever
+        Cache.set(cache_key, hashes, Duration.days(365));
+
+        Ok(hashes)
+    }
+
+    /// Generate an inclusion proof for a specific entry.
+    ///
+    /// The proof consists of sibling hashes along the path from the
+    /// entry's leaf to the root of the Merkle tree.
+    fn prove_inclusion(entry_index: Int) -> Result<InclusionProof, Text>
+        using [Database]
+    {
+        let head = Self.get_tree_head()?;
+        let tree_size = head.tree_size;
+
+        if entry_index >= tree_size {
+            return Err(f"Entry {entry_index} is beyond tree size {tree_size}");
+        }
+
+        // Collect sibling hashes along the path to root
+        let mut proof_hashes = List.new();
+        let mut idx = entry_index;
+        let mut level_size = tree_size;
+
+        while level_size > 1 {
+            // Sibling index
+            let sibling = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+
+            if sibling < level_size {
+                let rows = Database.query(
+                    f"SELECT hash FROM sumdb_merkle WHERE level = {proof_hashes.len()} AND node_index = {sibling}"
+                )?;
+                if !rows.is_empty() {
+                    proof_hashes.push(rows.first().unwrap().get_text("hash"));
+                }
+            }
+
+            idx = idx / 2;
+            level_size = (level_size + 1) / 2;
+        }
+
+        Ok(InclusionProof {
+            entry_index: entry_index,
+            tree_size: tree_size,
+            proof_hashes: proof_hashes,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Compute SHA-256 hex digest of a string.
+fn sha256_hex(data: Text) -> Text {
+    // Delegates to core/intrinsics or C runtime
+    let bytes = data.as_bytes();
+    let hash = sha256(bytes);
+    hex_encode(hash)
+}
+
+/// Update the Merkle tree after appending a new entry.
+fn update_merkle_tree(entry_id: Int, entry_hash: Text) -> Result<(), Text>
+    using [Database]
+{
+    // Insert leaf node
+    Database.execute(
+        f"INSERT INTO sumdb_merkle (level, node_index, hash) VALUES (0, {entry_id}, '{entry_hash}')"
+    )?;
+
+    // Rebuild parent nodes up to root
+    let mut level = 0;
+    let mut idx = entry_id;
+
+    while idx > 0 || level == 0 {
+        let sibling = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+        let parent_idx = idx / 2;
+
+        // Get sibling hash (may not exist for odd-numbered last entry)
+        let rows = Database.query(
+            f"SELECT hash FROM sumdb_merkle WHERE level = {level} AND node_index = {sibling}"
+        )?;
+
+        let parent_hash = if rows.is_empty() {
+            // No sibling — promote this hash
+            entry_hash
+        } else {
+            let sibling_hash = rows.first().unwrap().get_text("hash");
+            if idx % 2 == 0 {
+                sha256_hex(f"{entry_hash}{sibling_hash}")
+            } else {
+                sha256_hex(f"{sibling_hash}{entry_hash}")
+            }
+        };
+
+        level = level + 1;
+        idx = parent_idx;
+
+        // Upsert parent node
+        Database.execute(
+            f"INSERT INTO sumdb_merkle (level, node_index, hash) VALUES ({level}, {idx}, '{parent_hash}') ON CONFLICT (level, node_index) DO UPDATE SET hash = '{parent_hash}'"
+        )?;
+
+        if idx == 0 {
+            // Reached root — update tree head
+            let tree_size = entry_id + 1;
+            let signature = sign_tree_head(tree_size, parent_hash)?;
+            Database.execute(
+                f"INSERT INTO sumdb_tree_head (tree_size, root_hash, timestamp, signature) VALUES ({tree_size}, '{parent_hash}', '{DateTime.now()}', '{signature}')"
+            )?;
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+/// Sign a tree head with the registry's Ed25519 key.
+fn sign_tree_head(tree_size: Int, root_hash: Text) -> Result<Text, Text> {
+    // In production, this reads the signing key from secure storage
+    // For now, return a placeholder
+    let message = f"{tree_size}:{root_hash}";
+    Ok(sha256_hex(message))
+}
+
+/// Hex-encode a byte array.
+fn hex_encode(bytes: List<Int>) -> Text {
+    let mut result = Text.new();
+    for b in bytes {
+        let hi = (b / 16) % 16;
+        let lo = b % 16;
+        result.push(hex_char(hi));
+        result.push(hex_char(lo));
+    }
+    result
+}
+
+/// Convert nibble to hex character.
+fn hex_char(n: Int) -> Char {
+    if n < 10 { ('0' as Int + n) as Char }
+    else { ('a' as Int + n - 10) as Char }
+}
+
+/// SHA-256 hash function (delegates to intrinsic).
+fn sha256(data: List<Int>) -> List<Int> {
+    // Delegates to core/intrinsics/crypto
+    // Returns 32-byte hash
+    intrinsic_sha256(data)
+}

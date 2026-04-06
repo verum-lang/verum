@@ -1,0 +1,50 @@
+// @test: cbgr-generation
+// @tier: 1, 2, 3
+// @level: L0
+// @tags: cbgr, memory-safety, generation-tracking
+// @timeout: 5000
+// @expect-ir: "verum_cbgr_check" OR "verum_cbgr_validate"
+// @description: Verify CBGR generation checks are emitted for heap references
+
+type Point is { x: Float, y: Float };
+
+// This function takes a reference that could be invalidated
+// CBGR check MUST be generated before accessing through the reference
+fn access_point(p: &Point) -> Float {
+    // Generation check should happen here
+    p.x + p.y
+}
+
+// Multiple accesses should generate multiple checks (or CSE them)
+fn multiple_access(p: &Point) -> Float {
+    let x = p.x;  // Check here
+    let y = p.y;  // Check here (may be CSE'd)
+    x * y
+}
+
+// Nested reference access
+fn nested_access(points: &List<Point>) -> Float {
+    // Check for points reference
+    let first = points[0];  // Check here
+    // Access through dereferenced value
+    first.x + first.y
+}
+
+fn main() -> Int {
+    let point = Heap(Point { x: 3.0, y: 4.0 });
+    let result1 = access_point(&point);
+    let result2 = multiple_access(&point);
+
+    let points = Heap(List.from([
+        Point { x: 1.0, y: 2.0 },
+        Point { x: 3.0, y: 4.0 },
+    ]));
+    let result3 = nested_access(&points);
+
+    // Verify results
+    assert(result1 == 7.0);
+    assert(result2 == 12.0);
+    assert(result3 == 3.0);
+
+    0
+}

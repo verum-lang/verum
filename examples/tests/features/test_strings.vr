@@ -1,0 +1,26 @@
+// Test string operations
+
+fn main() {
+    let _ = print("=== String Tests ===");
+
+    // String literals
+    let hello = "Hello";
+    let world = "World";
+    let _ = print(hello);
+    let _ = print(world);
+
+    // Format strings
+    let name = "Verum";
+    let version = 1.0;
+    let _ = print(f"Language: {name}, Version: {version}");
+
+    // Multiline test
+    let multi = "Line 1\nLine 2\nLine 3";
+    let _ = print(multi);
+
+    // Escape sequences
+    let escaped = "Tab:\there Quote:\"done\"";
+    let _ = print(escaped);
+
+    let _ = print("=== Done ===");
+}

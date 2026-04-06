@@ -1,0 +1,40 @@
+// Test 6: Defer Statements
+
+fn test_defer() {
+    let _ = println("Before defer");
+
+    defer {
+        let _ = println("Defer executed (cleanup)");
+    }
+
+    let _ = println("After defer declaration");
+}
+
+fn test_multiple_defers() {
+    let _ = println("Multiple defers test:");
+
+    defer {
+        let _ = println("  Defer 1 (last)");
+    }
+
+    defer {
+        let _ = println("  Defer 2 (middle)");
+    }
+
+    defer {
+        let _ = println("  Defer 3 (first)");
+    }
+
+    let _ = println("  Main execution");
+}
+
+fn main() {
+    let _ = println("=== Testing Defer Statements ===");
+
+    test_defer();
+    let _ = println("");
+
+    test_multiple_defers();
+
+    let _ = println("=== PASSED ===");
+}

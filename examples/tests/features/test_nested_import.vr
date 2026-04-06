@@ -1,0 +1,8 @@
+// Test nested import syntax
+link std.math.{sqrt, sin, cos};
+
+fn main() {
+    let _ = print(f"sqrt(16) = {sqrt(16.0)}");
+    let _ = print(f"sin(0) = {sin(0.0)}");
+    let _ = print(f"cos(0) = {cos(0.0)}");
+}

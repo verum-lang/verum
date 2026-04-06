@@ -1,0 +1,321 @@
+// =============================================================================
+// style/color.vr - Complete color system with adaptive downscaling
+// =============================================================================
+// Color sum type supporting Reset, Base16, Ansi256, True Color (Rgb), and HSL.
+// Includes CIELAB-based perceptual distance for accurate downscaling.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
+// =============================================================================
+
+module color;
+
+mount core.math.{sqrt, pow, abs};
+mount super.convert.{srgb_to_linear, linear_to_srgb, rgb_to_hsl, hsl_to_rgb, parse_hex_pair};
+
+// =============================================================================
+// Color — universal sum type supporting all terminal color levels
+// =============================================================================
+
+/// Color represents any terminal color at any fidelity level.
+/// Adaptive downscaling converts higher-fidelity colors to match the
+/// terminal's capabilities (True Color -> Ansi256 -> Base16 -> NoColor).
+public type Color is
+    | Reset
+    | Black | DarkGrey
+    | Red | DarkRed
+    | Green | DarkGreen
+    | Yellow | DarkYellow
+    | Blue | DarkBlue
+    | Magenta | DarkMagenta
+    | Cyan | DarkCyan
+    | White | Grey
+    | Ansi256(Int)
+    | Rgb(Rgb)
+    | Hsl(Hsl);
+
+// =============================================================================
+// Rgb — 24-bit true color
+// =============================================================================
+
+/// RGB color with 8 bits per channel.
+public type Rgb is {
+    r: UInt8,
+    g: UInt8,
+    b: UInt8,
+};
+
+// =============================================================================
+// Hsl — hue/saturation/lightness for easy manipulation
+// =============================================================================
+
+/// HSL color for convenient manipulation (adjust brightness, saturation).
+public type Hsl is {
+    h: Float,   // Hue [0, 360)
+    s: Float,   // Saturation [0, 1]
+    l: Float,   // Lightness [0, 1]
+};
+
+// =============================================================================
+// Lab — CIELAB for perceptual comparison
+// =============================================================================
+
+/// CIELAB color for perceptual distance calculations.
+/// Not typically used directly; internal to downscaling algorithms.
+public type Lab is {
+    l: Float,   // Lightness [0, 100]
+    a: Float,   // Green-Red axis [-128, 127]
+    b: Float,   // Blue-Yellow axis [-128, 127]
+};
+
+// =============================================================================
+// Rgb implementation
+// =============================================================================
+
+implement Rgb {
+    /// Create a new Rgb color from components.
+    public fn new(r: UInt8, g: UInt8, b: UInt8) -> Rgb {
+        Rgb { r: r, g: g, b: b }
+    }
+
+    /// Parse a hex color string into Rgb.
+    /// Accepts "#FF8800" or "FF8800" formats.
+    /// Returns None for invalid input.
+    public fn from_hex(hex: &Text) -> Maybe<Rgb> {
+        let s = if hex.starts_with("#") { hex.slice(1, hex.len()) } else { hex.clone() };
+        if s.len() != 6 { return None; }
+        let r = parse_hex_pair(&s.slice(0, 2))?;
+        let g = parse_hex_pair(&s.slice(2, 4))?;
+        let b = parse_hex_pair(&s.slice(4, 6))?;
+        Some(Rgb { r: r, g: g, b: b })
+    }
+
+    /// Convert to CIELAB color space for perceptual comparison.
+    /// Uses the sRGB -> Linear RGB -> XYZ D65 -> CIELAB pipeline.
+    public fn to_lab(&self) -> Lab {
+        // sRGB to linear RGB
+        let rl = srgb_to_linear(self.r as Float / 255.0);
+        let gl = srgb_to_linear(self.g as Float / 255.0);
+        let bl = srgb_to_linear(self.b as Float / 255.0);
+
+        // Linear RGB to XYZ (D65 illuminant)
+        let x = 0.4124564 * rl + 0.3575761 * gl + 0.1804375 * bl;
+        let y = 0.2126729 * rl + 0.7151522 * gl + 0.0721750 * bl;
+        let z = 0.0193339 * rl + 0.1191920 * gl + 0.9503041 * bl;
+
+        // Normalize to D65 reference white
+        let xn = x / 0.95047;
+        let yn = y / 1.0;
+        let zn = z / 1.08883;
+
+        // XYZ to CIELAB
+        let fx = lab_f(xn);
+        let fy = lab_f(yn);
+        let fz = lab_f(zn);
+
+        Lab {
+            l: 116.0 * fy - 16.0,
+            a: 500.0 * (fx - fy),
+            b: 200.0 * (fy - fz),
+        }
+    }
+
+    /// Darken color by factor [0.0, 1.0].
+    public fn darken(&self, factor: Float) -> Rgb {
+        let f = factor.clamp(0.0, 1.0);
+        Rgb.new(
+            (self.r as Float * (1.0 - f)) as UInt8,
+            (self.g as Float * (1.0 - f)) as UInt8,
+            (self.b as Float * (1.0 - f)) as UInt8,
+        )
+    }
+
+    /// Lighten color by factor [0.0, 1.0].
+    public fn lighten(&self, factor: Float) -> Rgb {
+        let f = factor.clamp(0.0, 1.0);
+        Rgb.new(
+            (self.r as Float + (255.0 - self.r as Float) * f) as UInt8,
+            (self.g as Float + (255.0 - self.g as Float) * f) as UInt8,
+            (self.b as Float + (255.0 - self.b as Float) * f) as UInt8,
+        )
+    }
+
+    /// Linear interpolation between two colors.
+    public fn lerp(&self, other: &Rgb, t: Float) -> Rgb {
+        let t = t.clamp(0.0, 1.0);
+        Rgb.new(
+            (self.r as Float * (1.0 - t) + other.r as Float * t) as UInt8,
+            (self.g as Float * (1.0 - t) + other.g as Float * t) as UInt8,
+            (self.b as Float * (1.0 - t) + other.b as Float * t) as UInt8,
+        )
+    }
+
+    /// Generate gradient palette of N colors between two Rgb values.
+    public fn gradient(from: Rgb, to: Rgb, steps: Int) -> List<Rgb> {
+        let mut result = List.with_capacity(steps);
+        for i in 0..steps {
+            let t = if steps > 1 { i as Float / (steps - 1) as Float } else { 0.0 };
+            result.push(from.lerp(&to, t));
+        }
+        result
+    }
+
+    /// Perceptual distance to another Rgb color using CIE76 (Euclidean in CIELAB).
+    /// Lower values indicate more similar colors; 0.0 means identical.
+    /// Values < 2.3 are considered imperceptible by most observers.
+    public fn perceptual_distance(&self, other: &Rgb) -> Float {
+        let lab1 = self.to_lab();
+        let lab2 = other.to_lab();
+        let dl = lab1.l - lab2.l;
+        let da = lab1.a - lab2.a;
+        let db = lab1.b - lab2.b;
+        sqrt(dl * dl + da * da + db * db)
+    }
+
+    /// Downscale True Color to the best matching Ansi256 palette index.
+    /// Compares against both the 6x6x6 color cube and the 24-step grayscale
+    /// ramp, choosing the perceptually closest match.
+    public fn to_ansi256(&self) -> Int {
+        // Check grayscale ramp (indices 232-255)
+        let gray_avg = (self.r as Float * 0.299
+                      + self.g as Float * 0.587
+                      + self.b as Float * 0.114);
+        let gray_idx = ((gray_avg - 8.0) / 10.0).round().clamp(0.0, 23.0) as Int;
+        let gray_color = 232 + gray_idx;
+
+        // Snap to 6x6x6 color cube (indices 16-231)
+        let cube_levels = [0, 0x5F, 0x87, 0xAF, 0xD7, 0xFF];
+        let cr = nearest_cube_index(self.r as Int, &cube_levels);
+        let cg = nearest_cube_index(self.g as Int, &cube_levels);
+        let cb = nearest_cube_index(self.b as Int, &cube_levels);
+        let cube_color = 16 + 36 * cr + 6 * cg + cb;
+
+        // Compare perceptual distance to pick the best match
+        let cube_rgb = Rgb {
+            r: cube_levels[cr] as UInt8,
+            g: cube_levels[cg] as UInt8,
+            b: cube_levels[cb] as UInt8,
+        };
+        let gray_val = (8 + 10 * gray_idx) as UInt8;
+        let gray_rgb = Rgb { r: gray_val, g: gray_val, b: gray_val };
+
+        if self.perceptual_distance(&cube_rgb) <= self.perceptual_distance(&gray_rgb) {
+            cube_color
+        } else {
+            gray_color
+        }
+    }
+
+    /// Downscale True Color to the nearest Base16 ANSI color.
+    /// Uses CIELAB perceptual distance against standard 16-color palette.
+    public fn to_base16(&self) -> Color {
+        let ansi16 = [
+            Rgb.new(0, 0, 0),       Rgb.new(170, 0, 0),
+            Rgb.new(0, 170, 0),     Rgb.new(170, 85, 0),
+            Rgb.new(0, 0, 170),     Rgb.new(170, 0, 170),
+            Rgb.new(0, 170, 170),   Rgb.new(170, 170, 170),
+            Rgb.new(85, 85, 85),    Rgb.new(255, 85, 85),
+            Rgb.new(85, 255, 85),   Rgb.new(255, 255, 85),
+            Rgb.new(85, 85, 255),   Rgb.new(255, 85, 255),
+            Rgb.new(85, 255, 255),  Rgb.new(255, 255, 255),
+        ];
+
+        let mut best_idx = 0;
+        let mut best_dist = self.perceptual_distance(&ansi16[0]);
+        for i in 1..16 {
+            let d = self.perceptual_distance(&ansi16[i]);
+            if d < best_dist {
+                best_dist = d;
+                best_idx = i;
+            }
+        }
+
+        match best_idx {
+            0  => Color.Black,       1  => Color.DarkRed,
+            2  => Color.DarkGreen,   3  => Color.DarkYellow,
+            4  => Color.DarkBlue,    5  => Color.DarkMagenta,
+            6  => Color.DarkCyan,    7  => Color.Grey,
+            8  => Color.DarkGrey,    9  => Color.Red,
+            10 => Color.Green,       11 => Color.Yellow,
+            12 => Color.Blue,        13 => Color.Magenta,
+            14 => Color.Cyan,        15 => Color.White,
+            _  => Color.White,
+        }
+    }
+
+    /// Convert Rgb to HSL color space.
+    public fn to_hsl(&self) -> Hsl {
+        let (h, s, l) = rgb_to_hsl(
+            self.r as Float / 255.0,
+            self.g as Float / 255.0,
+            self.b as Float / 255.0,
+        );
+        Hsl { h: h, s: s, l: l }
+    }
+
+    /// Compute the relative luminance (Y) per ITU-R BT.709.
+    /// Returns a value in [0, 1] where 0 is black and 1 is white.
+    public fn luminance(&self) -> Float {
+        let rl = srgb_to_linear(self.r as Float / 255.0);
+        let gl = srgb_to_linear(self.g as Float / 255.0);
+        let bl = srgb_to_linear(self.b as Float / 255.0);
+        0.2126 * rl + 0.7152 * gl + 0.0722 * bl
+    }
+}
+
+// =============================================================================
+// Hsl implementation
+// =============================================================================
+
+implement Hsl {
+    /// Create a new HSL color.
+    /// h: hue [0, 360), s: saturation [0, 1], l: lightness [0, 1].
+    public fn new(h: Float, s: Float, l: Float) -> Hsl {
+        Hsl { h: h, s: s, l: l }
+    }
+
+    /// Convert HSL to Rgb.
+    public fn to_rgb(&self) -> Rgb {
+        let (r, g, b) = hsl_to_rgb(self.h, self.s, self.l);
+        Rgb {
+            r: (r * 255.0).round().clamp(0.0, 255.0) as UInt8,
+            g: (g * 255.0).round().clamp(0.0, 255.0) as UInt8,
+            b: (b * 255.0).round().clamp(0.0, 255.0) as UInt8,
+        }
+    }
+
+    /// Create an HSL color from an Rgb value.
+    public fn from_rgb(rgb: &Rgb) -> Hsl {
+        rgb.to_hsl()
+    }
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+/// CIELAB transfer function.
+/// For values above the threshold, applies cube root; below, applies linear ramp.
+fn lab_f(t: Float) -> Float {
+    let epsilon = 216.0 / 24389.0;  // 0.008856...
+    let kappa = 24389.0 / 27.0;     // 903.3...
+    if t > epsilon {
+        pow(t, 1.0 / 3.0)
+    } else {
+        (kappa * t + 16.0) / 116.0
+    }
+}
+
+/// Find the index of the nearest value in the 6-level cube array.
+/// Used for mapping an 8-bit channel value to the 6x6x6 Ansi256 cube.
+fn nearest_cube_index(val: Int, levels: &List<Int>) -> Int {
+    let mut best = 0;
+    let mut best_diff = abs(val - levels[0]);
+    for i in 1..6 {
+        let diff = abs(val - levels[i]);
+        if diff < best_diff {
+            best_diff = diff;
+            best = i;
+        }
+    }
+    best
+}

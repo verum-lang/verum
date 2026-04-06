@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_mutability/src/main.vr": {
+      "hash": "a3275eb44813c9f3c9c2c229dcb34469d38740d16d8e14626fb0f4ded4f43119",
+      "timestamp": {
+        "secs_since_epoch": 1765105709,
+        "nanos_since_epoch": 646324151
+      },
+      "size": 466
+    }
+  },
+  "artifacts": {}
+}

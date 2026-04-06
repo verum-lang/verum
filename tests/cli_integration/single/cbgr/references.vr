@@ -1,0 +1,51 @@
+// Test: CB-001 through CB-008 - CBGR Three-Tier Reference Model
+// Priority: Critical/High
+// Expected output: Reference operations at different tiers
+
+// Tier 0: Managed references (&T) - ~15ns overhead
+fn sum(arr: &List<Int>) -> Int {
+    let mut total = 0;
+    for x in arr {
+        total = total + x;
+    }
+    total
+}
+
+// Mutable managed reference
+fn increment(x: &mut Int) {
+    *x = *x + 1;
+}
+
+// Self reference in method
+type Counter is { value: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn main() {
+    // Managed reference to list
+    let nums = [1, 2, 3, 4, 5];
+    print(f"Sum: {sum(&nums)}");
+
+    // Mutable reference
+    let mut n = 10;
+    increment(&mut n);
+    print(f"After increment: {n}");
+
+    // Self reference in methods
+    let mut c = Counter.new();
+    c.increment();
+    c.increment();
+    print(f"Counter: {c.get()}");
+}

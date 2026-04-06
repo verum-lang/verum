@@ -1,0 +1,82 @@
+[package]
+name = "proof_stability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "VCS Proof Stability Testing Infrastructure"
+
+[[bin]]
+name = "proof-stability"
+path = "src/main.rs"
+
+[lib]
+name = "proof_stability"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies
+verum_common.workspace = true
+
+# CLI and argument parsing
+clap.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Async runtime
+tokio = { workspace = true, features = ["full", "rt-multi-thread", "process", "time", "fs", "io-util"] }
+futures.workspace = true
+
+# Regex for parsing
+regex.workspace = true
+once_cell.workspace = true
+
+# Glob pattern matching for file discovery
+glob.workspace = true
+walkdir.workspace = true
+
+# Terminal output and colors
+colored.workspace = true
+indicatif.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# Hashing for proof fingerprinting
+sha2.workspace = true
+blake3.workspace = true
+
+# Random for seed control
+rand.workspace = true
+
+# Statistics
+statrs.workspace = true
+
+# UUID for proof IDs
+uuid.workspace = true
+
+# CPU detection
+num_cpus.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+pretty_assertions.workspace = true
+
+[features]
+default = []
+# Enable Z3 backend integration
+z3-backend = []
+# Enable CVC5 backend integration
+cvc5-backend = []
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+// Test pipeline operator |>
+// This test verifies that the pipeline operator correctly chains function calls
+
+fn double(x: Int) -> Int { x * 2 }
+fn triple(x: Int) -> Int { x * 3 }
+
+fn main() {
+    let result = 5 |> double |> triple
+    println(f"Result: {result}")
+}

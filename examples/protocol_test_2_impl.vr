@@ -1,0 +1,23 @@
+// Test 2: Implement a protocol for a custom type
+
+type Printable is protocol {
+    fn to_text(self) -> Text;
+}
+
+type Point is {
+    x: Int,
+    y: Int
+}
+
+implement Printable for Point {
+    fn to_text(self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+fn main() {
+    print("Test 2: Protocol implementation for custom type");
+    let p = Point { x: 10, y: 20 };
+    print("Created Point { x: 10, y: 20 }");
+    print("SUCCESS: Protocol implementation compiled");
+}

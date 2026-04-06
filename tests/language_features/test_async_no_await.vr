@@ -1,0 +1,14 @@
+// Test async without await
+async fn compute(x: Int) -> Int {
+    x * 2
+}
+
+fn main() {
+    // Call async without await - should get Future
+    let future = compute(21);
+    print(f"Future type: {future}");
+
+    // Now await it
+    let result = future.await;
+    print(f"Awaited result: {result}");
+}

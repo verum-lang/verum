@@ -1,0 +1,4 @@
+// Simple test file to debug interpreter
+fn main() {
+    print("Hello from interpreter!");
+}

@@ -1,0 +1,16 @@
+// Test 5: Generic context
+context Storage<T> {
+    fn save(self, value: T)
+    fn load(self) -> T
+}
+
+fn save_value<T>(val: T) using Storage<T> {
+    Storage.save(val);
+}
+
+type MemoryStorage<T> is { data: Maybe<T> };
+
+fn main() {
+    provide Storage<Int> = MemoryStorage { data: Maybe.None };
+    save_value(42);
+}

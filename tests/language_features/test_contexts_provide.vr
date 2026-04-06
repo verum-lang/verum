@@ -1,0 +1,16 @@
+// Test provide statement
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn main() {
+    // Test provide syntax with record literal
+    provide Logger = {
+        fn log(message: Text) {
+            print(f"[LOG] {message}");
+        }
+    };
+
+    print("Provide statement works");
+}

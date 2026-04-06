@@ -1,0 +1,18 @@
+// Test compound expressions
+
+fn main() {
+    let _ = print("=== Compound Tests ===");
+
+    let a = 10.0;
+    let b = 3.0;
+
+    // Compound
+    let result = (a + b) * (a - b);
+    let _ = print(f"compound = {result}");
+
+    // Negation
+    let neg = -a;
+    let _ = print(f"negation = {neg}");
+
+    let _ = print("=== Done ===");
+}

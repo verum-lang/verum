@@ -1,0 +1,17 @@
+// Test async protocol method
+
+type AsyncFetcher is protocol {
+    async fn fetch(&self) -> Text;
+};
+
+type DummyFetcher is { url: Text };
+
+implement AsyncFetcher for DummyFetcher {
+    async fn fetch(&self) -> Text {
+        f"Fetching from {self.url}"
+    }
+}
+
+fn main() {
+    print("Async protocol parsed successfully");
+}

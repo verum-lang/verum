@@ -1,0 +1,111 @@
+//! Project information for meta functions
+//!
+//! Provides project metadata from Verum.toml for compile-time access.
+
+use verum_common::{List, Map, Text};
+
+/// Project information for ProjectInfo context
+#[derive(Debug, Clone, Default)]
+pub struct ProjectInfoData {
+    /// Cog name
+    pub name: Text,
+    /// Cog version
+    pub version: Text,
+    /// Authors
+    pub authors: List<Text>,
+    /// Description
+    pub description: Option<Text>,
+    /// License
+    pub license: Option<Text>,
+    /// Repository URL
+    pub repository: Option<Text>,
+    /// Dependencies (name -> version)
+    pub dependencies: Map<Text, Text>,
+    /// Dev dependencies (name -> version)
+    pub dev_dependencies: Map<Text, Text>,
+    /// Enabled features
+    pub enabled_features: List<Text>,
+    /// Default features
+    pub default_features: List<Text>,
+    /// Target triple
+    pub target_triple: Text,
+    /// Target OS
+    pub target_os: Text,
+    /// Target architecture
+    pub target_arch: Text,
+    /// Debug build?
+    pub is_debug: bool,
+    /// Optimization level (0-3)
+    pub opt_level: u32,
+    /// Project root directory
+    pub project_root: Text,
+    /// Source directory
+    pub source_dir: Text,
+    /// Output directory
+    pub output_dir: Text,
+    /// Manifest path (Verum.toml)
+    pub manifest_path: Text,
+}
+
+impl ProjectInfoData {
+    /// Create a new project info with defaults
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the project name
+    #[inline]
+    pub fn with_name(mut self, name: impl Into<Text>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Set the version
+    #[inline]
+    pub fn with_version(mut self, version: impl Into<Text>) -> Self {
+        self.version = version.into();
+        self
+    }
+
+    /// Add an author
+    #[inline]
+    pub fn with_author(mut self, author: impl Into<Text>) -> Self {
+        self.authors.push(author.into());
+        self
+    }
+
+    /// Set the description
+    #[inline]
+    pub fn with_description(mut self, description: impl Into<Text>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Add a dependency
+    #[inline]
+    pub fn with_dependency(mut self, name: impl Into<Text>, version: impl Into<Text>) -> Self {
+        self.dependencies.insert(name.into(), version.into());
+        self
+    }
+
+    /// Set the target triple
+    #[inline]
+    pub fn with_target(mut self, triple: impl Into<Text>) -> Self {
+        self.target_triple = triple.into();
+        self
+    }
+
+    /// Set debug mode
+    #[inline]
+    pub fn with_debug(mut self, is_debug: bool) -> Self {
+        self.is_debug = is_debug;
+        self
+    }
+
+    /// Set project root
+    #[inline]
+    pub fn with_project_root(mut self, root: impl Into<Text>) -> Self {
+        self.project_root = root.into();
+        self
+    }
+}

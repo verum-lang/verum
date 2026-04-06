@@ -1,0 +1,667 @@
+module sys.darwin.thread;
+
+// =============================================================================
+// sys/darwin/thread.vr - macOS Thread Creation and Synchronization
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/darwin/libsystem, sys/darwin/tls
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+//
+// This module provides thread management using pthread on macOS.
+// Unlike Linux which uses clone/clone3 syscalls directly, macOS requires
+// going through the pthread API in libSystem.B.dylib.
+//
+// Features:
+// - Thread creation with automatic TLS initialization
+// - Mutex (pthread_mutex)
+// - Condition variable (pthread_cond)
+// - Spin lock (atomic-based for low-contention scenarios)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.OSError;
+mount core.intrinsics.{
+    spin_hint,
+    atomic_load_u32, atomic_store_u32, atomic_cas_u32,
+    atomic_fetch_add_u32,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+mount super.libsystem.{
+    PthreadT, PthreadAttr, PthreadMutex, PthreadMutexAttr,
+    PthreadCond, PthreadCondAttr, Timespec,
+    pthread_self, pthread_create, pthread_join, pthread_detach, pthread_exit,
+    pthread_mutex_init, pthread_mutex_destroy, pthread_mutex_lock,
+    pthread_mutex_trylock, pthread_mutex_unlock,
+    pthread_cond_init, pthread_cond_destroy, pthread_cond_wait,
+    pthread_cond_timedwait, pthread_cond_signal, pthread_cond_broadcast,
+    pthread_threadid_np,
+    __ulock_wait, __ulock_wake,
+    errno,
+};
+mount super.tls.{create_thread_tls, cleanup_thread_tls};
+
+// =============================================================================
+// Error Type
+// =============================================================================
+
+/// Thread operation error
+public type ThreadError is
+    | CreateFailed { code: Int }
+    | JoinFailed { code: Int }
+    | DetachFailed { code: Int }
+    | MutexInitFailed { code: Int }
+    | MutexLockFailed { code: Int }
+    | CondInitFailed { code: Int }
+    | CondWaitFailed { code: Int }
+    | TlsInitFailed
+    | AlreadyJoined
+    | AlreadyDetached
+    ;
+
+implement ThreadError {
+    public fn message(&self) -> Text {
+        match self {
+            CreateFailed { code } => f"Failed to create thread (code={code})",
+            JoinFailed { code } => f"Failed to join thread (code={code})",
+            DetachFailed { code } => f"Failed to detach thread (code={code})",
+            MutexInitFailed { code } => f"Failed to initialize mutex (code={code})",
+            MutexLockFailed { code } => f"Failed to lock mutex (code={code})",
+            CondInitFailed { code } => f"Failed to initialize condvar (code={code})",
+            CondWaitFailed { code } => f"Failed to wait on condvar (code={code})",
+            TlsInitFailed => "Failed to initialize TLS for new thread",
+            AlreadyJoined => "Thread has already been joined",
+            AlreadyDetached => "Thread has already been detached",
+        }
+    }
+}
+
+// =============================================================================
+// Thread Type
+// =============================================================================
+
+/// Thread handle
+public type Thread is {
+    /// pthread handle
+    handle: PthreadT,
+    /// Thread ID (cached)
+    tid: UInt64,
+    /// Whether thread has been joined/detached
+    finished: Bool,
+};
+
+/// Thread function type
+public type ThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
+
+/// Thread entry wrapper data
+type ThreadEntryData is {
+    func: ThreadFn,
+    arg: &unsafe Byte,
+};
+
+/// Internal thread entry point that initializes TLS
+fn thread_entry(data: &unsafe Byte) -> &unsafe Byte {
+    let entry_data = data as &ThreadEntryData;
+
+    // Initialize TLS for this thread
+    match create_thread_tls() {
+        Ok(_) => {}
+        Err(_) => {
+            // TLS init failed - cannot proceed safely
+            return 0 as &unsafe Byte;
+        }
+    }
+
+    // Call the actual thread function
+    let result = (entry_data.func)(entry_data.arg);
+
+    // Cleanup TLS before thread exit
+    let _ = cleanup_thread_tls();
+
+    result
+}
+
+implement Thread {
+    /// Spawn a new thread.
+    ///
+    /// The thread function will be called with TLS already initialized.
+    public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+        // Allocate entry data (leaked - thread will use it)
+        // In a real implementation, this would use proper allocation
+        let entry_data = ThreadEntryData {
+            func: func,
+            arg: arg,
+        };
+
+        let mut handle = PthreadT(0);
+        let attr = PthreadAttr { _opaque: [0; 8] };  // Default attributes
+
+        let result = unsafe {
+            pthread_create(
+                &mut handle,
+                &attr,
+                thread_entry,
+                &entry_data as &unsafe Byte,
+            )
+        };
+
+        if result != 0 {
+            return Err(CreateFailed { code: result });
+        }
+
+        // Get thread ID
+        let mut tid: UInt64 = 0;
+        unsafe { pthread_threadid_np(handle, &mut tid) };
+
+        Ok(Thread {
+            handle: handle,
+            tid: tid,
+            finished: false,
+        })
+    }
+
+    /// Wait for thread to finish and get its return value.
+    public fn join(&mut self) -> Result<&unsafe Byte, ThreadError> {
+        if self.finished {
+            return Err(AlreadyJoined);
+        }
+
+        let mut retval: &unsafe Byte = 0 as &unsafe Byte;
+        let result = unsafe { pthread_join(self.handle, &mut retval) };
+
+        if result != 0 {
+            return Err(JoinFailed { code: result });
+        }
+
+        self.finished = true;
+        Ok(retval)
+    }
+
+    /// Detach thread (will be cleaned up automatically when done).
+    public fn detach(&mut self) -> Result<(), ThreadError> {
+        if self.finished {
+            return Err(AlreadyDetached);
+        }
+
+        let result = unsafe { pthread_detach(self.handle) };
+
+        if result != 0 {
+            return Err(DetachFailed { code: result });
+        }
+
+        self.finished = true;
+        Ok(())
+    }
+
+    /// Get the thread ID.
+    public fn id(&self) -> UInt64 {
+        self.tid
+    }
+
+    /// Check if thread has been joined or detached.
+    public fn is_finished(&self) -> Bool {
+        self.finished
+    }
+}
+
+/// Get the current thread's pthread handle.
+public fn current_thread() -> PthreadT {
+    unsafe { pthread_self() }
+}
+
+/// Get the current thread's ID.
+public fn current_tid() -> UInt64 {
+    let mut tid: UInt64 = 0;
+    unsafe { pthread_threadid_np(PthreadT(0), &mut tid) };
+    tid
+}
+
+/// Convenience function to spawn a thread.
+public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+    Thread.spawn(func, arg)
+}
+
+// =============================================================================
+// Mutex
+// =============================================================================
+
+/// Mutex (mutual exclusion lock)
+public type Mutex is {
+    inner: PthreadMutex,
+    initialized: Bool,
+};
+
+implement Mutex {
+    /// Create a new mutex.
+    public fn new() -> Result<Mutex, ThreadError> {
+        let mut mutex = Mutex {
+            inner: PthreadMutex { _opaque: [0; 8] },
+            initialized: false,
+        };
+
+        let attr = PthreadMutexAttr { _opaque: [0; 2] };
+        let result = unsafe { pthread_mutex_init(&mut mutex.inner, &attr) };
+
+        if result != 0 {
+            return Err(MutexInitFailed { code: result });
+        }
+
+        mutex.initialized = true;
+        Ok(mutex)
+    }
+
+    /// Lock the mutex (blocking).
+    public fn lock(&mut self) -> Result<(), ThreadError> {
+        let result = unsafe { pthread_mutex_lock(&mut self.inner) };
+        if result != 0 {
+            Err(MutexLockFailed { code: result })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Try to lock the mutex (non-blocking).
+    ///
+    /// Returns true if lock acquired, false if already locked.
+    public fn try_lock(&mut self) -> Bool {
+        let result = unsafe { pthread_mutex_trylock(&mut self.inner) };
+        result == 0
+    }
+
+    /// Unlock the mutex.
+    public fn unlock(&mut self) {
+        unsafe { pthread_mutex_unlock(&mut self.inner) };
+    }
+
+    /// Execute a function while holding the lock.
+    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, ThreadError> {
+        self.lock()?;
+        let result = f();
+        self.unlock();
+        Ok(result)
+    }
+}
+
+implement Drop for Mutex {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe { pthread_mutex_destroy(&mut self.inner) };
+            self.initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// Condition Variable
+// =============================================================================
+
+/// Condition variable for thread synchronization
+public type Condvar is {
+    inner: PthreadCond,
+    initialized: Bool,
+};
+
+implement Condvar {
+    /// Create a new condition variable.
+    public fn new() -> Result<Condvar, ThreadError> {
+        let mut cond = Condvar {
+            inner: PthreadCond { _opaque: [0; 6] },
+            initialized: false,
+        };
+
+        let attr = PthreadCondAttr { _opaque: [0; 2] };
+        let result = unsafe { pthread_cond_init(&mut cond.inner, &attr) };
+
+        if result != 0 {
+            return Err(CondInitFailed { code: result });
+        }
+
+        cond.initialized = true;
+        Ok(cond)
+    }
+
+    /// Wait on the condition variable.
+    ///
+    /// The mutex must be locked before calling. It will be unlocked
+    /// while waiting and re-locked before returning.
+    public fn wait(&mut self, mutex: &mut Mutex) -> Result<(), ThreadError> {
+        let result = unsafe { pthread_cond_wait(&mut self.inner, &mut mutex.inner) };
+        if result != 0 {
+            Err(CondWaitFailed { code: result })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Wait on the condition variable with timeout.
+    ///
+    /// Returns Ok(true) if signaled, Ok(false) if timed out.
+    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ms: Int) -> Result<Bool, ThreadError> {
+        // Calculate absolute timeout
+        let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+        unsafe { super.libsystem.clock_gettime(0, &mut ts) };  // CLOCK_REALTIME
+        ts.tv_sec += timeout_ms / 1000;
+        ts.tv_nsec += (timeout_ms % 1000) * 1_000_000;
+        if ts.tv_nsec >= 1_000_000_000 {
+            ts.tv_sec += 1;
+            ts.tv_nsec -= 1_000_000_000;
+        }
+
+        let result = unsafe { pthread_cond_timedwait(&mut self.inner, &mut mutex.inner, &ts) };
+
+        if result == 0 {
+            Ok(true)
+        } else if result == 60 {  // ETIMEDOUT on macOS
+            Ok(false)
+        } else {
+            Err(CondWaitFailed { code: result })
+        }
+    }
+
+    /// Signal one waiting thread.
+    public fn signal(&mut self) {
+        unsafe { pthread_cond_signal(&mut self.inner) };
+    }
+
+    /// Signal all waiting threads.
+    public fn broadcast(&mut self) {
+        unsafe { pthread_cond_broadcast(&mut self.inner) };
+    }
+}
+
+implement Drop for Condvar {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe { pthread_cond_destroy(&mut self.inner) };
+            self.initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// SpinLock
+// =============================================================================
+
+/// Spin lock for very short critical sections
+public type SpinLock is {
+    locked: UInt32,  // 0 = unlocked, 1 = locked
+};
+
+implement SpinLock {
+    /// Create a new spin lock.
+    public fn new() -> SpinLock {
+        SpinLock { locked: 0 }
+    }
+
+    /// Acquire the spin lock (busy-wait).
+    @inline
+    public fn lock(&mut self) {
+        loop {
+            // Try to acquire lock with atomic compare-and-swap
+            let (_, success) = atomic_cas_u32(&mut self.locked, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+            if success {
+                break;
+            }
+            // Spin hint for CPU
+            spin_hint();
+        }
+    }
+
+    /// Try to acquire the spin lock (non-blocking).
+    @inline
+    public fn try_lock(&mut self) -> Bool {
+        let (_, success) = atomic_cas_u32(&mut self.locked, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        success
+    }
+
+    /// Release the spin lock.
+    @inline
+    public fn unlock(&mut self) {
+        atomic_store_u32(&mut self.locked, 0, ORDERING_RELEASE);
+    }
+
+    /// Check if lock is held (for debugging only).
+    public fn is_locked(&self) -> Bool {
+        atomic_load_u32(&self.locked, ORDERING_RELAXED) != 0
+    }
+}
+
+// =============================================================================
+// Once (one-time initialization)
+// =============================================================================
+
+/// One-time initialization primitive
+public type Once is {
+    state: UInt32,  // 0 = not run, 1 = running, 2 = complete
+    mutex: PthreadMutex,
+};
+
+public const ONCE_INIT: UInt32 = 0;
+public const ONCE_RUNNING: UInt32 = 1;
+public const ONCE_COMPLETE: UInt32 = 2;
+
+implement Once {
+    /// Create a new Once.
+    public fn new() -> Once {
+        Once {
+            state: ONCE_INIT,
+            mutex: PthreadMutex { _opaque: [0; 8] },
+        }
+    }
+
+    /// Run the initialization function exactly once.
+    public fn call_once(&mut self, init_fn: fn()) {
+        // Fast path: already initialized
+        if atomic_load_u32(&self.state, ORDERING_ACQUIRE) == ONCE_COMPLETE {
+            return;
+        }
+
+        // Slow path: need to initialize or wait
+        unsafe { pthread_mutex_lock(&mut self.mutex) };
+
+        match atomic_load_u32(&self.state, ORDERING_RELAXED) {
+            0 => {  // ONCE_INIT
+                atomic_store_u32(&mut self.state, ONCE_RUNNING, ORDERING_RELAXED);
+                init_fn();
+                atomic_store_u32(&mut self.state, ONCE_COMPLETE, ORDERING_RELEASE);
+            }
+            1 => {  // ONCE_RUNNING - another thread is initializing
+                // Just wait for it to complete
+            }
+            _ => {}  // ONCE_COMPLETE - already done
+        }
+
+        unsafe { pthread_mutex_unlock(&mut self.mutex) };
+    }
+
+    /// Check if initialization is complete.
+    public fn is_complete(&self) -> Bool {
+        atomic_load_u32(&self.state, ORDERING_ACQUIRE) == ONCE_COMPLETE
+    }
+}
+
+// =============================================================================
+// Futex-equivalent operations via __ulock (macOS XNU)
+// =============================================================================
+// These provide the same API as sys/linux/thread.futex_wait/futex_wake,
+// enabling cross-platform futex code with @cfg(target_os) imports.
+//
+// macOS __ulock operations (from XNU):
+// - UL_COMPARE_AND_WAIT (1): compare *addr with value, sleep if equal
+// - ULF_NO_ERRNO (0x01000000): return negative errno instead of setting errno
+// - ULF_WAKE_ALL (0x100): wake all waiters instead of one
+// =============================================================================
+
+/// UL_COMPARE_AND_WAIT operation code
+const UL_COMPARE_AND_WAIT: UInt32 = 1;
+
+/// ULF_NO_ERRNO flag — return -errno instead of setting errno
+const ULF_NO_ERRNO: UInt32 = 0x01000000;
+
+/// ULF_WAKE_ALL flag — wake all waiters
+const ULF_WAKE_ALL: UInt32 = 0x00000100;
+
+/// macOS ETIMEDOUT
+const ETIMEDOUT: Int = 60;
+
+/// Wait on a futex-like address if value matches expected.
+///
+/// Blocks until:
+/// - The value at `addr` differs from `expected`
+/// - The timeout expires (if timeout_ns is Some)
+/// - Another thread calls futex_wake on the same address
+///
+/// Compatible with sys/linux/thread.futex_wait signature.
+public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
+    let timeout_us: UInt32 = match timeout_ns {
+        Some(ns) => {
+            let us = ns / 1000;
+            if us > 0xFFFFFFFF { 0xFFFFFFFF } else { us as UInt32 }
+        }
+        None => 0,  // 0 = infinite wait for __ulock_wait
+    };
+
+    let result = unsafe {
+        __ulock_wait(
+            UL_COMPARE_AND_WAIT | ULF_NO_ERRNO,
+            addr as &unsafe Byte,
+            expected as UInt64,
+            timeout_us,
+        )
+    };
+
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
+/// Wake threads waiting on a futex-like address.
+///
+/// Wakes up to `count` threads blocked in futex_wait on the same address.
+/// Compatible with sys/linux/thread.futex_wake signature.
+public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
+    // __ulock_wake with UL_COMPARE_AND_WAIT wakes one thread.
+    // For wake-all, add ULF_WAKE_ALL flag.
+    let op = if count <= 1 {
+        UL_COMPARE_AND_WAIT | ULF_NO_ERRNO
+    } else {
+        UL_COMPARE_AND_WAIT | ULF_NO_ERRNO | ULF_WAKE_ALL
+    };
+
+    let result = unsafe {
+        __ulock_wake(op, addr as &unsafe Byte, 0)
+    };
+
+    if result < 0 {
+        // -ENOENT means no waiters — not an error for wake
+        if -result == 2 {  // ENOENT on macOS = 2
+            return Ok(0);
+        }
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(count)
+    }
+}
+
+// =============================================================================
+// Futex-based Mutex (same algorithm as Linux, using ulock)
+// =============================================================================
+
+/// Futex-based mutex (sleeps on contention via __ulock).
+public type FutexMutex is {
+    state: UInt32,  // 0 = unlocked, 1 = locked, 2 = locked with waiters
+};
+
+implement FutexMutex {
+    public fn new() -> FutexMutex {
+        FutexMutex { state: 0 }
+    }
+
+    public fn lock(&mut self) {
+        // Fast path: try to acquire
+        let (_, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        if success {
+            return;
+        }
+
+        // Slow path: set waiter flag and sleep
+        loop {
+            let old = atomic_swap_u32_impl(&mut self.state, 2, ORDERING_ACQUIRE);
+            if old == 0 {
+                return;
+            }
+            // Sleep until woken — uses __ulock_wait
+            let _ = futex_wait(&self.state as &Int, 2 as Int, None);
+        }
+    }
+
+    public fn try_lock(&mut self) -> Bool {
+        let (_, success) = atomic_cas_u32(&mut self.state, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        success
+    }
+
+    public fn unlock(&mut self) {
+        let old = atomic_swap_u32_impl(&mut self.state, 0, ORDERING_RELEASE);
+        if old == 2 {
+            let _ = futex_wake(&self.state as &Int, 1);
+        }
+    }
+}
+
+// Atomic swap for UInt32 using CAS loop
+fn atomic_swap_u32_impl(ptr: &mut UInt32, new_val: UInt32, ordering: UInt8) -> UInt32 {
+    loop {
+        let current = atomic_load_u32(ptr as *const UInt32, ordering);
+        let (old, success) = atomic_cas_u32(ptr, current, new_val, ordering, ORDERING_RELAXED);
+        if success {
+            return old;
+        }
+    }
+}
+
+// =============================================================================
+// Futex-based Condition Variable (same algorithm as Linux, using ulock)
+// =============================================================================
+
+/// Futex-based condition variable (sleeps via __ulock instead of pthread_cond).
+public type FutexCondvar is {
+    seq: UInt32,  // Sequence counter
+};
+
+implement FutexCondvar {
+    public fn new() -> FutexCondvar {
+        FutexCondvar { seq: 0 }
+    }
+
+    public fn wait(&mut self, mutex: &mut FutexMutex) {
+        let seq = self.seq;
+        mutex.unlock();
+        let _ = futex_wait(&self.seq as &Int, seq as Int, None);
+        mutex.lock();
+    }
+
+    public fn wait_timeout(&mut self, mutex: &mut FutexMutex, timeout_ns: UInt64) -> Bool {
+        let seq = self.seq;
+        mutex.unlock();
+        let result = futex_wait(&self.seq as &Int, seq as Int, Some(timeout_ns));
+        mutex.lock();
+
+        match result {
+            Err(e) if e.code == ETIMEDOUT => false,
+            _ => true,
+        }
+    }
+
+    public fn notify_one(&mut self) {
+        atomic_fetch_add_u32(&mut self.seq, 1, ORDERING_RELEASE);
+        let _ = futex_wake(&self.seq as &Int, 1);
+    }
+
+    public fn notify_all(&mut self) {
+        atomic_fetch_add_u32(&mut self.seq, 1, ORDERING_RELEASE);
+        let _ = futex_wake(&self.seq as &Int, Int.MAX);
+    }
+}

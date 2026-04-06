@@ -1,0 +1,164 @@
+// =============================================================================
+// rect.vr - Rect, Margin, Position types
+// =============================================================================
+// Core geometric primitives for terminal layout. Rect represents a rectangular
+// area in cell coordinates. Margin defines spacing around a rectangle.
+// Position is a simple (x, y) point.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#8.1
+// =============================================================================
+
+module rect;
+
+/// Rectangular area in the terminal (cell coordinates).
+public type Rect is {
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+};
+
+implement Rect {
+    public fn new(x: Int, y: Int, width: Int, height: Int) -> Rect {
+        Rect { x: x, y: y, width: width.max(0), height: height.max(0) }
+    }
+
+    public fn area(&self) -> Int { self.width * self.height }
+    public fn left(&self) -> Int { self.x }
+    public fn right(&self) -> Int { self.x + self.width }
+    public fn top(&self) -> Int { self.y }
+    public fn bottom(&self) -> Int { self.y + self.height }
+    public fn is_empty(&self) -> Bool { self.width == 0 || self.height == 0 }
+
+    /// Returns inner area accounting for margin.
+    public fn inner(&self, margin: Margin) -> Rect {
+        Rect {
+            x: self.x + margin.left,
+            y: self.y + margin.top,
+            width: (self.width - margin.left - margin.right).max(0),
+            height: (self.height - margin.top - margin.bottom).max(0),
+        }
+    }
+
+    /// Intersection with another rectangle.
+    public fn intersection(&self, other: &Rect) -> Rect {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        Rect {
+            x: x, y: y,
+            width: (right - x).max(0),
+            height: (bottom - y).max(0),
+        }
+    }
+
+    /// Union bounding box of two rectangles.
+    public fn union(&self, other: &Rect) -> Rect {
+        if self.is_empty() { return *other; }
+        if other.is_empty() { return *self; }
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let right = self.right().max(other.right());
+        let bottom = self.bottom().max(other.bottom());
+        Rect.new(x, y, right - x, bottom - y)
+    }
+
+    /// Check if point is inside the rectangle.
+    public fn contains(&self, x: Int, y: Int) -> Bool {
+        x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
+    }
+
+    /// Clamp a position to within the rect bounds.
+    public fn clamp_position(&self, x: Int, y: Int) -> (Int, Int) {
+        let cx = x.clamp(self.x, (self.right() - 1).max(self.x));
+        let cy = y.clamp(self.y, (self.bottom() - 1).max(self.y));
+        (cx, cy)
+    }
+
+    /// Split into columns (left, right) at x offset from left edge.
+    public fn split_horizontal(&self, at: Int) -> (Rect, Rect) {
+        let left_width = at.clamp(0, self.width);
+        (
+            Rect.new(self.x, self.y, left_width, self.height),
+            Rect.new(self.x + left_width, self.y, self.width - left_width, self.height),
+        )
+    }
+
+    /// Split into rows (top, bottom) at y offset from top edge.
+    public fn split_vertical(&self, at: Int) -> (Rect, Rect) {
+        let top_height = at.clamp(0, self.height);
+        (
+            Rect.new(self.x, self.y, self.width, top_height),
+            Rect.new(self.x, self.y + top_height, self.width, self.height - top_height),
+        )
+    }
+
+    /// Create a rect centered within this rect with given dimensions.
+    public fn centered(&self, width: Int, height: Int) -> Rect {
+        let w = width.min(self.width);
+        let h = height.min(self.height);
+        let cx = self.x + (self.width - w) / 2;
+        let cy = self.y + (self.height - h) / 2;
+        Rect.new(cx, cy, w, h)
+    }
+}
+
+/// Margin around a rectangle (top, right, bottom, left).
+public type Margin is {
+    top: Int,
+    right: Int,
+    bottom: Int,
+    left: Int,
+};
+
+implement Margin {
+    public const ZERO: Margin = Margin { top: 0, right: 0, bottom: 0, left: 0 };
+
+    public fn uniform(n: Int) -> Margin {
+        Margin { top: n, right: n, bottom: n, left: n }
+    }
+
+    public fn horizontal(n: Int) -> Margin {
+        Margin { top: 0, right: n, bottom: 0, left: n }
+    }
+
+    public fn vertical(n: Int) -> Margin {
+        Margin { top: n, right: 0, bottom: n, left: 0 }
+    }
+
+    public fn symmetric(h: Int, v: Int) -> Margin {
+        Margin { top: v, right: h, bottom: v, left: h }
+    }
+
+    /// Total horizontal margin (left + right).
+    public fn total_horizontal(&self) -> Int {
+        self.left + self.right
+    }
+
+    /// Total vertical margin (top + bottom).
+    public fn total_vertical(&self) -> Int {
+        self.top + self.bottom
+    }
+}
+
+/// A point position in cell coordinates.
+public type Position is {
+    x: Int,
+    y: Int,
+};
+
+implement Position {
+    public fn new(x: Int, y: Int) -> Position {
+        Position { x: x, y: y }
+    }
+
+    public fn origin() -> Position {
+        Position { x: 0, y: 0 }
+    }
+
+    /// Manhattan distance to another position.
+    public fn distance(&self, other: &Position) -> Int {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
+    }
+}

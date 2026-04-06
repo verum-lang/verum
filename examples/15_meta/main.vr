@@ -1,0 +1,94 @@
+// 15 — Meta-programming
+// Compile-time constructs: @derive, @cfg, @repr, meta fn, quote/unquote.
+// All compile-time constructs use the @ prefix.
+
+// --- @derive: auto-generate protocol implementations ---
+
+@derive(Eq, Hash, Clone)
+type Color is {
+    r: Int,
+    g: Int,
+    b: Int
+};
+
+@derive(Eq, Clone)
+type Shape is
+    Circle(Float)
+    | Rectangle(Float, Float)
+    | Triangle(Float, Float, Float);
+
+// --- @repr: control memory layout ---
+
+@repr(C)
+type CPoint is {
+    x: Float,
+    y: Float
+};
+
+// --- @cfg: conditional compilation ---
+
+@cfg(target_os = "linux")
+fn platform_name() -> Text { "Linux" }
+
+@cfg(target_os = "macos")
+fn platform_name() -> Text { "macOS" }
+
+@cfg(target_os = "windows")
+fn platform_name() -> Text { "Windows" }
+
+// --- meta fn: compile-time computation ---
+// meta functions run during compilation, not at runtime.
+
+meta fn factorial(n: Integer) -> Integer {
+    if n <= 1 { 1 }
+    else { n * factorial(n - 1) }
+}
+
+// Used at compile time to produce a constant
+const FACT_10: Integer = factorial(10);
+
+// --- meta fn with type introspection ---
+
+meta fn field_count(ty: Type) -> Integer {
+    type_fields(ty).len()
+}
+
+// --- @inline, @cold, @likely: optimization hints ---
+
+@inline
+fn fast_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+@cold
+fn handle_error(msg: Text) {
+    print(f"FATAL: {msg}")
+    panic(msg)
+}
+
+fn main() {
+    print("=== Meta-programming ===")
+
+    // @derive generated Eq, so we can compare
+    let red = Color { r: 255, g: 0, b: 0 }
+    let also_red = Color { r: 255, g: 0, b: 0 }
+    print(f"red == also_red: {red == also_red}")
+
+    // Shapes with derived Eq
+    let c = Circle(5.0)
+    let r = Rectangle(3.0, 4.0)
+    print(f"Circle(5) == Circle(5): {c == Circle(5.0)}")
+    print(f"Circle(5) == Rect(3,4): {c == r}")
+
+    print("")
+    print("@derive(Eq, Hash, Clone)  — auto-generate protocols")
+    print("@repr(C)                  — C-compatible memory layout")
+    print("@cfg(target_os = 'linux') — conditional compilation")
+    print("meta fn factorial(...)    — compile-time computation")
+    print("@inline / @cold           — optimization hints")
+    print("")
+    print("All compile-time constructs use @ prefix.")
+    print("No Rust-style ! macros anywhere in Verum.")
+
+    print("\nMeta-programming demo complete")
+}

@@ -1,0 +1,17 @@
+// Test multiple contexts with brackets
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+fn test_function(msg: Text) using [Logger, Database] {
+    let x = 42;
+}
+
+fn main() {
+    let y = 10;
+}

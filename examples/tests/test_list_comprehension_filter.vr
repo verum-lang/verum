@@ -1,0 +1,31 @@
+// Test filtered list comprehensions: [x for x in list if condition]
+
+fn main() -> Int {
+    // Test 1: Filter positive numbers
+    let numbers = [-2, -1, 0, 1, 2, 3];
+    let positives = [x for x in numbers if x > 0];
+    // Expected: [1, 2, 3]
+
+    // Test 2: Filter even numbers
+    let all_nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = [x for x in all_nums if x % 2 == 0];
+    // Expected: [2, 4, 6, 8, 10]
+
+    // Test 3: Multiple filters (chained if clauses)
+    let filtered = [x for x in all_nums if x > 3 if x < 8];
+    // Expected: [4, 5, 6, 7]
+
+    // Test 4: Filter with complex condition
+    let complex_filter = [x for x in all_nums if x % 2 == 0 if x > 5];
+    // Expected: [6, 8, 10]
+
+    // Test 5: Filter that eliminates all elements
+    let none = [x for x in all_nums if x > 100];
+    // Expected: []
+
+    // Test 6: Filter that keeps all elements
+    let all = [x for x in all_nums if x >= 0];
+    // Expected: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    0
+}

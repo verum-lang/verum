@@ -1,0 +1,221 @@
+name: Fuzz Testing
+
+on:
+  # Run on schedule (daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration in seconds'
+        required: false
+        default: '3600'
+
+  # Run on pull requests to critical parsing components
+  pull_request:
+    paths:
+      - 'crates/verum_parser/**'
+      - 'crates/verum_lexer/**'
+      - 'crates/verum_cbgr/**'
+      - 'scripts/fuzz.sh'
+      - '.github/workflows/fuzz.yml'
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fuzz-parser:
+    name: Fuzz verum_parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run parser fuzzer
+        run: ./scripts/fuzz.sh verum_parser fuzz_target_1 3600
+        continue-on-error: true
+
+      - name: Upload parser artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: parser-fuzz-artifacts
+          path: crates/verum_parser/fuzz/artifacts/
+          retention-days: 30
+
+  fuzz-lexer:
+    name: Fuzz verum_lexer
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run lexer fuzzer
+        run: ./scripts/fuzz.sh verum_lexer fuzz_target_1 3600
+        continue-on-error: true
+
+      - name: Upload lexer artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: lexer-fuzz-artifacts
+          path: crates/verum_lexer/fuzz/artifacts/
+          retention-days: 30
+
+  fuzz-cbgr:
+    name: Fuzz verum_cbgr
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      matrix:
+        target:
+          - fuzz_target_allocate_deallocate
+          - fuzz_target_concurrent_access
+          - fuzz_target_wraparound
+          - fuzz_target_capabilities
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run CBGR fuzzer (${{ matrix.target }})
+        run: ./scripts/fuzz.sh verum_cbgr ${{ matrix.target }} 3600
+        continue-on-error: true
+
+      - name: Upload CBGR artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: cbgr-fuzz-artifacts-${{ matrix.target }}
+          path: crates/verum_cbgr/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+
+  report:
+    name: Fuzz Test Report
+    runs-on: ubuntu-latest
+    needs: [fuzz-parser, fuzz-lexer, fuzz-cbgr]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Analyze results
+        run: |
+          echo "# Fuzz Testing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if find . -name "crash-*" -type f | grep -q .; then
+            echo "❌ **Crashes Found!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following crashes were discovered during fuzzing:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            find . -name "crash-*" -type f -exec echo "- {}" \; >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "These artifacts are available for 30 days for reproduction and debugging." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ **No Crashes Found**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All fuzz targets ran successfully without finding crashes." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if crashes found
+        if: failure()
+        run: exit 1

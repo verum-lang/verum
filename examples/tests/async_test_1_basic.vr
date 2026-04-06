@@ -1,0 +1,19 @@
+// Comprehensive Test 1: Basic async functions
+
+async fn simple_async() -> Int {
+    42
+}
+
+async fn async_with_params(x: Int, y: Int) -> Int {
+    x + y
+}
+
+async fn async_returning_string() -> Text {
+    "hello async"
+}
+
+fn main() -> Int {
+    print("Test 1: Basic async function definitions");
+    print("✓ All async functions compiled successfully");
+    0
+}

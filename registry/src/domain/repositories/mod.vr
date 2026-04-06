@@ -1,0 +1,31 @@
+// Repository Protocols Module
+//
+// This module defines the repository protocols (interfaces) for domain entities.
+// Following the Repository Pattern from Domain-Driven Design, these protocols
+// abstract data persistence from domain logic, enabling:
+//
+// - Testability: Domain layer can be tested without database
+// - Flexibility: Storage implementations can be swapped (PostgreSQL, SQLite, etc.)
+// - Separation of Concerns: Domain logic decoupled from infrastructure
+//
+// All repositories use:
+// - Context protocols for dependency injection
+// - Async functions for non-blocking I/O
+// - Result types for explicit error handling
+// - Refinement types for type-safe domain identifiers
+//
+// Implementation Philosophy:
+// - Protocols define WHAT operations are needed
+// - Infrastructure layer implements HOW they're executed
+// - Domain layer remains pure and storage-agnostic
+
+module package_repository;
+module version_repository;
+module user_repository;
+module token_repository;
+
+// Re-export all repository protocols
+pub import .package_repository.PackageRepository;
+pub import .version_repository.PackageVersionRepository;
+pub import .user_repository.UserRepository;
+pub import .token_repository.TokenRepository;

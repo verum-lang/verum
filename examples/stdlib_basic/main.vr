@@ -1,0 +1,176 @@
+// stdlib_basic/main.vr
+// Basic stdlib usage demonstrating Lists, Maps, and core operations
+
+// Import core types (implicit - List, Map, Text, Int are always available)
+
+fn main() {
+    print("=== Basic Stdlib Example ===")
+    print("")
+
+    // Test 1: List operations
+    test_list_operations()
+
+    // Test 2: Map operations
+    test_map_operations()
+
+    // Test 3: Maybe type for safe null handling
+    test_maybe_type()
+
+    // Test 4: Result type for error handling
+    test_result_type()
+
+    print("")
+    print("=== All Basic Tests Completed ===")
+}
+
+fn test_list_operations() {
+    print("--- List Operations ---")
+
+    // Create a list using literal syntax
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Original list: {numbers}")
+    print(f"List length: {numbers.len()}")
+
+    // Access elements
+    let first = numbers.get(0)
+    match first {
+        Maybe.Some(val) => print(f"First element: {val}"),
+        Maybe.None => print("List is empty"),
+    }
+
+    // Sum elements using fold
+    let sum = numbers.fold(0, |acc, x| acc + x)
+    print(f"Sum of elements: {sum}")
+
+    // Map: square all numbers
+    let squared = numbers.map(|x| x * x)
+    print(f"Squared: {squared}")
+
+    // Filter: keep only even numbers
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"Even numbers: {evens}")
+
+    // Chaining operations
+    let result = numbers
+        .filter(|x| x > 2)
+        .map(|x| x * 10)
+        .fold(0, |acc, x| acc + x)
+    print(f"Filtered, mapped, and summed: {result}")
+
+    print("")
+}
+
+fn test_map_operations() {
+    print("--- Map Operations ---")
+
+    // Create a map (dictionary)
+    let mut scores = Map.new<Text, Int>()
+
+    // Insert key-value pairs
+    scores.insert("Alice", 95)
+    scores.insert("Bob", 87)
+    scores.insert("Charlie", 92)
+
+    print(f"Map size: {scores.len()}")
+
+    // Lookup values
+    let alice_score = scores.get("Alice")
+    match alice_score {
+        Maybe.Some(score) => print(f"Alice's score: {score}"),
+        Maybe.None => print("Alice not found"),
+    }
+
+    // Check for key existence
+    let has_bob = scores.contains_key("Bob")
+    print(f"Map contains Bob: {has_bob}")
+
+    // Update a value
+    scores.insert("Bob", 90)
+    print(f"Bob's updated score: {scores.get('Bob').unwrap_or(0)}")
+
+    // Remove a key
+    let removed = scores.remove("Charlie")
+    match removed {
+        Maybe.Some(score) => print(f"Removed Charlie with score: {score}"),
+        Maybe.None => print("Charlie not in map"),
+    }
+
+    print(f"Final map size: {scores.len()}")
+    print("")
+}
+
+fn test_maybe_type() {
+    print("--- Maybe Type (Option) ---")
+
+    // Maybe represents optional values - safer than null
+    let some_value: Maybe<Int> = Maybe.Some(42)
+    let no_value: Maybe<Int> = Maybe.None
+
+    // Pattern matching on Maybe
+    match some_value {
+        Maybe.Some(val) => print(f"Got value: {val}"),
+        Maybe.None => print("No value"),
+    }
+
+    // Provide default with unwrap_or
+    let default_result = no_value.unwrap_or(100)
+    print(f"Default value: {default_result}")
+
+    // Transform with map
+    let doubled = some_value.map(|x| x * 2)
+    match doubled {
+        Maybe.Some(val) => print(f"Doubled: {val}"),
+        Maybe.None => print("Nothing to double"),
+    }
+
+    // Chain Maybe operations
+    let chained = some_value
+        .map(|x| x + 10)
+        .map(|x| x * 2)
+        .unwrap_or(0)
+    print(f"Chained operations result: {chained}")
+
+    print("")
+}
+
+fn test_result_type() {
+    print("--- Result Type (Error Handling) ---")
+
+    // Result represents operations that can fail
+    let success = safe_divide(10, 2)
+    let failure = safe_divide(10, 0)
+
+    // Handle success case
+    match success {
+        Result.Ok(val) => print(f"10 / 2 = {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    // Handle error case
+    match failure {
+        Result.Ok(val) => print(f"10 / 0 = {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    // Transform successful results with map
+    let mapped = success.map(|x| x * 3)
+    match mapped {
+        Result.Ok(val) => print(f"Result * 3 = {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    // Provide default on error with unwrap_or
+    let with_default = failure.unwrap_or(-1)
+    print(f"Failed division with default: {with_default}")
+
+    print("")
+}
+
+// Helper function that returns Result
+fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}

@@ -1,0 +1,14 @@
+// Test async function definition
+async fn fetch_data() -> Text {
+    "data"
+}
+
+// Test await
+async fn process() -> Text {
+    let data = fetch_data().await;
+    data
+}
+
+fn main() {
+    let _ = print("Async test");
+}

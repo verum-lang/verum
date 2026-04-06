@@ -1,0 +1,99 @@
+// Test: Macro System
+// Tests Verum's hygienic macro system
+
+// Simple expression macro
+macro simple_add(a, b) {
+    quote { $a + $b }
+}
+
+// Statement macro
+macro log_and_return(value) {
+    quote {
+        println(f"Returning: {$value}")
+        $value
+    }
+}
+
+// Macro with pattern matching
+macro when(condition, then_branch, else_branch) {
+    quote {
+        if $condition {
+            $then_branch
+        } else {
+            $else_branch
+        }
+    }
+}
+
+// Macro for repeated code
+macro repeat_3(code) {
+    quote {
+        $code;
+        $code;
+        $code
+    }
+}
+
+// Macro that generates a function
+macro define_getter(name, field) {
+    quote {
+        fn $name(self) -> Int {
+            self.$field
+        }
+    }
+}
+
+// Variadic macro (if supported)
+macro sum(...args) {
+    let mut result = quote { 0 }
+    for arg in args {
+        result = quote { $result + $arg }
+    }
+    result
+}
+
+fn test_expression_macros() {
+    println("=== Expression Macros ===")
+
+    let result = simple_add!(10, 20)
+    println(f"Simple add: {result}")
+
+    let logged = log_and_return!(42)
+    println(f"Logged value: {logged}")
+}
+
+fn test_control_flow_macros() {
+    println("\n=== Control Flow Macros ===")
+
+    let x = 10
+    let result = when!(x > 5, "large", "small")
+    println(f"When result: {result}")
+}
+
+fn test_repetition_macros() {
+    println("\n=== Repetition Macros ===")
+
+    let mut counter = 0
+    repeat_3!({
+        counter = counter + 1
+        println(f"Counter: {counter}")
+    })
+}
+
+fn test_variadic_macros() {
+    println("\n=== Variadic Macros ===")
+
+    let total = sum!(1, 2, 3, 4, 5)
+    println(f"Sum: {total}")
+}
+
+fn main() {
+    println("=== Macro System Tests ===")
+
+    test_expression_macros()
+    test_control_flow_macros()
+    test_repetition_macros()
+    // test_variadic_macros()  // May not be supported yet
+
+    println("\nMacro tests completed")
+}

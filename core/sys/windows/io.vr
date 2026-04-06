@@ -1,0 +1,978 @@
+module sys.windows.io;
+
+// =============================================================================
+// sys/windows/io.vr - Windows Completion-Based I/O (IOCP)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/kernel32, sys/windows/ntdll, sys/common
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides completion-based I/O using I/O Completion Ports (IOCP)
+// on Windows. IOCP is the Windows equivalent of Linux's io_uring/epoll and
+// macOS's kqueue, providing efficient event notification for asynchronous I/O.
+//
+// Key concepts:
+// - IOCP: I/O completion port (the queue for completed operations)
+// - Overlapped: Structure for async I/O tracking
+// - Completion key: User-defined value associated with handles
+// - GetQueuedCompletionStatus: Dequeue completed I/O operations
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.5
+// =============================================================================
+
+mount sys.common.{OSError, FileDesc};
+mount sys.io_engine.{
+    IOEngine, CompletionOp, CompletionResult, Duration,
+    ValidFd, Fd, SocketAddr, TimeSpec, MsgHdr,
+    IoError as EngineIoError,
+    WAKE_TOKEN,
+};
+mount super.kernel32.{
+    Handle,
+    Overlapped,
+    OverlappedEntry,
+    CreateIoCompletionPort,
+    PostQueuedCompletionStatus,
+    GetQueuedCompletionStatus,
+    GetQueuedCompletionStatusEx,
+    CloseHandle,
+    GetLastError,
+    ReadFile,
+    WriteFile,
+    CreateEventW,
+    SetEvent,
+    ResetEvent,
+    INFINITE,
+    WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
+    WAIT_FAILED,
+    ERROR_SUCCESS,
+    ERROR_IO_PENDING,
+    ERROR_HANDLE_EOF,
+    ERROR_OPERATION_ABORTED,
+    ERROR_TIMEOUT,
+};
+mount super.ntdll.{NtStatus, IoStatusBlock};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum events to process in a single poll
+public const MAX_EVENTS: Int = 256;
+
+/// Default timeout for polling (1 second in milliseconds)
+public const DEFAULT_TIMEOUT_MS: UInt32 = 1000;
+
+/// Default timeout for polling (1 second in nanoseconds)
+public const DEFAULT_TIMEOUT_NS: Int = 1_000_000_000;
+
+// =============================================================================
+// Error Type
+// =============================================================================
+
+/// Re-export IoError from io_engine for convenience
+public type IoError is EngineIoError;
+
+/// I/O operation error
+public type IoDriverError is
+    | WouldBlock
+    | Interrupted
+    | NotFound { path: Text }
+    | AlreadyExists
+    | InvalidInput { reason: Text }
+    | PermissionDenied
+    | ConnectionRefused
+    | ConnectionReset
+    | BrokenPipe
+    | TimedOut
+    | QueueFull
+    | Closed
+    | EndOfFile
+    | Cancelled
+    | Other { code: UInt32, message: Text }
+    ;
+
+implement IoDriverError {
+    public fn from_error_code(err: UInt32) -> IoDriverError {
+        match err {
+            996 => WouldBlock,                                              // ERROR_IO_INCOMPLETE
+            997 => WouldBlock,                                              // ERROR_IO_PENDING
+            2 => NotFound { path: "" },                                     // ERROR_FILE_NOT_FOUND
+            3 => NotFound { path: "" },                                     // ERROR_PATH_NOT_FOUND
+            80 => AlreadyExists,                                            // ERROR_FILE_EXISTS
+            183 => AlreadyExists,                                           // ERROR_ALREADY_EXISTS
+            87 => InvalidInput { reason: "Invalid parameter" },             // ERROR_INVALID_PARAMETER
+            5 => PermissionDenied,                                          // ERROR_ACCESS_DENIED
+            1225 => ConnectionRefused,                                      // ERROR_CONNECTION_REFUSED
+            10061 => ConnectionRefused,                                     // WSAECONNREFUSED
+            10054 => ConnectionReset,                                       // WSAECONNRESET
+            109 => BrokenPipe,                                              // ERROR_BROKEN_PIPE
+            1460 => TimedOut,                                               // ERROR_TIMEOUT
+            10060 => TimedOut,                                              // WSAETIMEDOUT
+            38 => EndOfFile,                                                // ERROR_HANDLE_EOF
+            995 => Cancelled,                                               // ERROR_OPERATION_ABORTED
+            _ => Other { code: err, message: "Unknown error" },
+        }
+    }
+
+    public fn message(&self) -> Text {
+        match self {
+            WouldBlock => "Resource temporarily unavailable",
+            Interrupted => "Interrupted system call",
+            NotFound { path } => f"Not found: {path}",
+            AlreadyExists => "Already exists",
+            InvalidInput { reason } => f"Invalid input: {reason}",
+            PermissionDenied => "Permission denied",
+            ConnectionRefused => "Connection refused",
+            ConnectionReset => "Connection reset by peer",
+            BrokenPipe => "Broken pipe",
+            TimedOut => "Operation timed out",
+            QueueFull => "Completion queue is full",
+            Closed => "I/O driver is closed",
+            EndOfFile => "End of file reached",
+            Cancelled => "Operation was cancelled",
+            Other { code, message } => f"Error {code}: {message}",
+        }
+    }
+
+    public fn is_retryable(&self) -> Bool {
+        match self {
+            WouldBlock => true,
+            Interrupted => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Operation Types
+// =============================================================================
+
+/// Type of I/O operation
+public type IoOpKind is
+    | Read
+    | Write
+    | Accept
+    | Connect
+    | Send
+    | Recv
+    | Timer
+    | User
+    ;
+
+/// I/O completion token
+public type IoToken is (UInt64);
+
+/// I/O operation submission
+public type IoOp is {
+    /// Operation kind
+    kind: IoOpKind,
+    /// File descriptor/handle
+    fd: Int,
+    /// User token for completion identification
+    token: IoToken,
+    /// Buffer address (for read/write)
+    buf_addr: Int,
+    /// Buffer length (for read/write) or timeout (for timer)
+    buf_len: Int,
+    /// Flags (operation-specific)
+    flags: Int,
+};
+
+/// I/O completion result
+public type IoCqe is {
+    /// User token from submission
+    token: IoToken,
+    /// Result (bytes transferred, or error code if negative)
+    result: Int,
+    /// Flags from completion
+    flags: UInt32,
+};
+
+// =============================================================================
+// IOCP Extended Overlapped
+// =============================================================================
+
+/// Extended overlapped structure with user data
+public type IocpOverlapped is {
+    /// Base overlapped structure (must be first!)
+    overlapped: Overlapped,
+    /// User token for this operation
+    token: IoToken,
+    /// Operation kind
+    kind: IoOpKind,
+    /// Buffer address
+    buf_addr: Int,
+    /// Buffer length
+    buf_len: Int,
+    /// Completion status (set when operation completes)
+    completed: Bool,
+    /// Error code (if any)
+    error: UInt32,
+    /// Bytes transferred
+    bytes_transferred: UInt32,
+};
+
+implement IocpOverlapped {
+    /// Create a new IOCP overlapped structure
+    public fn new(token: IoToken, kind: IoOpKind) -> IocpOverlapped {
+        IocpOverlapped {
+            overlapped: Overlapped.new(),
+            token: token,
+            kind: kind,
+            buf_addr: 0,
+            buf_len: 0,
+            completed: false,
+            error: 0,
+            bytes_transferred: 0,
+        }
+    }
+
+    /// Create with buffer
+    public fn with_buffer(token: IoToken, kind: IoOpKind, buf_addr: Int, buf_len: Int) -> IocpOverlapped {
+        IocpOverlapped {
+            overlapped: Overlapped.new(),
+            token: token,
+            kind: kind,
+            buf_addr: buf_addr,
+            buf_len: buf_len,
+            completed: false,
+            error: 0,
+            bytes_transferred: 0,
+        }
+    }
+}
+
+// =============================================================================
+// IocpDriver
+// =============================================================================
+
+/// IOCP-based I/O driver for Windows
+public type IocpDriver is {
+    /// I/O completion port handle
+    iocp: Handle,
+    /// Whether driver is open
+    open: Bool,
+    /// Number of pending operations
+    pending: Int,
+    /// Completion entries buffer
+    entries: [OverlappedEntry; 256],  // MAX_EVENTS
+    /// Number of entries in buffer
+    num_entries: Int,
+};
+
+implement IocpDriver {
+    /// Create a new IOCP driver with default concurrency.
+    public fn new() -> Result<IocpDriver, IoDriverError> {
+        Self.new_with_concurrency(0)  // 0 = use number of CPUs
+    }
+
+    /// Create a new IOCP driver with specified concurrency.
+    ///
+    /// # Arguments
+    /// * `num_concurrent` - Number of concurrent threads (0 = num CPUs)
+    public fn new_with_concurrency(num_concurrent: UInt32) -> Result<IocpDriver, IoDriverError> {
+        // Create completion port with no initial handle
+        let iocp = CreateIoCompletionPort(
+            Handle.INVALID,  // No file handle initially
+            Handle.NULL,     // Create new completion port
+            0,               // Completion key
+            num_concurrent,  // Number of concurrent threads
+        );
+
+        if !iocp.is_valid() {
+            return Err(IoDriverError.from_error_code(GetLastError()));
+        }
+
+        Ok(IocpDriver {
+            iocp: iocp,
+            open: true,
+            pending: 0,
+            entries: [@zero<OverlappedEntry>(); 256],
+            num_entries: 0,
+        })
+    }
+
+    /// Close the IOCP driver.
+    public fn close(&mut self) -> Result<(), IoDriverError> {
+        if !self.open {
+            return Ok(());
+        }
+
+        let result = CloseHandle(self.iocp);
+        self.open = false;
+        self.iocp = Handle.INVALID;
+
+        if !result {
+            Err(IoDriverError.from_error_code(GetLastError()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check if driver is open.
+    public fn is_open(&self) -> Bool {
+        self.open
+    }
+
+    /// Get the IOCP handle.
+    public fn handle(&self) -> Handle {
+        self.iocp
+    }
+
+    // =========================================================================
+    // Handle Association
+    // =========================================================================
+
+    /// Associate a file handle with this IOCP.
+    ///
+    /// After association, async I/O on the handle will complete via this IOCP.
+    public fn associate(&mut self, file_handle: Handle, completion_key: Int) -> Result<(), IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        let result = CreateIoCompletionPort(
+            file_handle,
+            self.iocp,
+            completion_key,
+            0,
+        );
+
+        if !result.is_valid() {
+            Err(IoDriverError.from_error_code(GetLastError()))
+        } else {
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Operation Submission
+    // =========================================================================
+
+    /// Post a completion notification to wake up a waiting thread.
+    ///
+    /// This is useful for signaling threads to wake up without actual I/O.
+    public fn post_completion(
+        &mut self,
+        bytes_transferred: UInt32,
+        completion_key: Int,
+        overlapped: &Overlapped,
+    ) -> Result<(), IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        let result = PostQueuedCompletionStatus(
+            self.iocp,
+            bytes_transferred,
+            completion_key,
+            overlapped,
+        );
+
+        if !result {
+            Err(IoDriverError.from_error_code(GetLastError()))
+        } else {
+            self.pending += 1;
+            Ok(())
+        }
+    }
+
+    /// Post a user-defined completion event.
+    public fn post_user_event(&mut self, token: IoToken) -> Result<(), IoDriverError> {
+        // Create a temporary overlapped for the user event
+        let overlapped = Overlapped.new();
+        self.post_completion(0, token.0 as Int, &overlapped)
+    }
+
+    // =========================================================================
+    // Polling
+    // =========================================================================
+
+    /// Poll for completions with timeout.
+    ///
+    /// # Arguments
+    /// * `timeout_ms` - Timeout in milliseconds (0 = no wait, INFINITE = infinite)
+    ///
+    /// # Returns
+    /// Number of completions ready
+    public fn poll(&mut self, timeout_ms: UInt32) -> Result<Int, IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        let mut num_entries: UInt32 = 0;
+
+        let result = GetQueuedCompletionStatusEx(
+            self.iocp,
+            &mut self.entries[0] as &unsafe mut Byte,
+            MAX_EVENTS as UInt32,
+            &mut num_entries,
+            timeout_ms,
+            false,  // Not alertable
+        );
+
+        if !result {
+            let error = GetLastError();
+            if error == ERROR_TIMEOUT {
+                self.num_entries = 0;
+                return Ok(0);
+            }
+            return Err(IoDriverError.from_error_code(error));
+        }
+
+        self.num_entries = num_entries as Int;
+        self.pending -= self.num_entries;
+        if self.pending < 0 {
+            self.pending = 0;
+        }
+
+        Ok(self.num_entries)
+    }
+
+    /// Poll without waiting.
+    public fn poll_nowait(&mut self) -> Result<Int, IoDriverError> {
+        self.poll(0)
+    }
+
+    /// Get a completion entry by index.
+    ///
+    /// Only valid after poll() returns > 0, and for indices 0..n-1
+    /// where n is the return value.
+    public fn get_entry(&self, index: Int) -> Maybe<IoCqe> {
+        if index < 0 || index >= self.num_entries || index >= MAX_EVENTS {
+            return None;
+        }
+
+        let entry = &self.entries[index];
+
+        // Check for error via overlapped internal status
+        let overlapped = entry.overlapped;
+        let error = if overlapped as Int != 0 {
+            // Check internal error from overlapped
+            if overlapped.internal as UInt32 != 0 {
+                -(overlapped.internal as Int)
+            } else {
+                entry.number_of_bytes_transferred as Int
+            }
+        } else {
+            entry.number_of_bytes_transferred as Int
+        };
+
+        Some(IoCqe {
+            token: IoToken(entry.completion_key as UInt64),
+            result: error,
+            flags: 0,
+        })
+    }
+
+    /// Iterate over completed entries.
+    public fn events(&self, count: Int) -> IocpEventIter {
+        IocpEventIter {
+            driver: self,
+            index: 0,
+            count: count,
+        }
+    }
+
+    // =========================================================================
+    // Convenience Methods
+    // =========================================================================
+
+    /// Wait for a single completion with timeout.
+    public fn wait_one(&mut self, timeout_ms: UInt32) -> Result<Maybe<IoCqe>, IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        let mut bytes_transferred: UInt32 = 0;
+        let mut completion_key: Int = 0;
+        let mut overlapped: &Overlapped = 0 as &Overlapped;
+
+        let result = GetQueuedCompletionStatus(
+            self.iocp,
+            &mut bytes_transferred,
+            &mut completion_key,
+            &mut overlapped,
+            timeout_ms,
+        );
+
+        if !result {
+            let error = GetLastError();
+            if error == ERROR_TIMEOUT || (overlapped as Int == 0 && error == WAIT_TIMEOUT) {
+                return Ok(None);
+            }
+            // Error with valid overlapped - return the error via CQE
+            if overlapped as Int != 0 {
+                return Ok(Some(IoCqe {
+                    token: IoToken(completion_key as UInt64),
+                    result: -(error as Int),
+                    flags: 0,
+                }));
+            }
+            return Err(IoDriverError.from_error_code(error));
+        }
+
+        self.pending -= 1;
+        if self.pending < 0 {
+            self.pending = 0;
+        }
+
+        Ok(Some(IoCqe {
+            token: IoToken(completion_key as UInt64),
+            result: bytes_transferred as Int,
+            flags: 0,
+        }))
+    }
+
+    /// Get number of pending operations.
+    public fn pending_count(&self) -> Int {
+        self.pending
+    }
+}
+
+// =============================================================================
+// Event Iterator
+// =============================================================================
+
+/// Iterator over IOCP completion entries
+public type IocpEventIter is {
+    driver: &IocpDriver,
+    index: Int,
+    count: Int,
+};
+
+implement IocpEventIter {
+    public fn next(&mut self) -> Maybe<IoCqe> {
+        if self.index >= self.count {
+            None
+        } else {
+            let event = self.driver.get_entry(self.index);
+            self.index += 1;
+            event
+        }
+    }
+}
+
+// =============================================================================
+// IoDriver Unified Interface
+// =============================================================================
+
+/// Unified I/O driver interface (Windows only has IOCP)
+public type IoDriver is {
+    iocp: IocpDriver,
+};
+
+implement IoDriver {
+    public fn iocp(&self) -> &IocpDriver {
+        &self.iocp
+    }
+
+    public fn iocp_mut(&mut self) -> &mut IocpDriver {
+        &mut self.iocp
+    }
+}
+
+/// Create the best available I/O driver.
+///
+/// On Windows, this always returns an IOCP-based driver.
+public fn create_io_driver() -> Result<IoDriver, IoDriverError> {
+    let iocp = IocpDriver.new()?;
+    Ok(IoDriver { iocp: iocp })
+}
+
+/// Check if IOCP is available.
+///
+/// Always returns true on Windows NT 3.5+.
+public fn is_iocp_available() -> Bool {
+    true
+}
+
+// =============================================================================
+// Async I/O Helpers
+// =============================================================================
+
+/// Start an async read operation.
+///
+/// Returns immediately. Completion will be posted to the associated IOCP.
+public fn async_read(
+    handle: Handle,
+    buffer: &unsafe mut Byte,
+    length: UInt32,
+    overlapped: &mut IocpOverlapped,
+) -> Result<(), IoDriverError> {
+    let mut bytes_read: UInt32 = 0;
+
+    let result = ReadFile(
+        handle,
+        buffer,
+        length,
+        &mut bytes_read,
+        &mut overlapped.overlapped,
+    );
+
+    if !result {
+        let error = GetLastError();
+        if error == ERROR_IO_PENDING {
+            return Ok(());  // Async operation started successfully
+        }
+        return Err(IoDriverError.from_error_code(error));
+    }
+
+    // Completed synchronously
+    overlapped.completed = true;
+    overlapped.bytes_transferred = bytes_read;
+    Ok(())
+}
+
+/// Start an async write operation.
+///
+/// Returns immediately. Completion will be posted to the associated IOCP.
+public fn async_write(
+    handle: Handle,
+    buffer: &unsafe Byte,
+    length: UInt32,
+    overlapped: &mut IocpOverlapped,
+) -> Result<(), IoDriverError> {
+    let mut bytes_written: UInt32 = 0;
+
+    let result = WriteFile(
+        handle,
+        buffer,
+        length,
+        &mut bytes_written,
+        &mut overlapped.overlapped,
+    );
+
+    if !result {
+        let error = GetLastError();
+        if error == ERROR_IO_PENDING {
+            return Ok(());  // Async operation started successfully
+        }
+        return Err(IoDriverError.from_error_code(error));
+    }
+
+    // Completed synchronously
+    overlapped.completed = true;
+    overlapped.bytes_transferred = bytes_written;
+    Ok(())
+}
+
+// =============================================================================
+// IOEngine Protocol Implementation for IocpDriver
+// =============================================================================
+
+implement IOEngine for IocpDriver {
+    /// Submit batch of I/O operations.
+    ///
+    /// IOCP is inherently completion-based, but the submission model differs
+    /// from io_uring. Each operation must be submitted individually using
+    /// overlapped I/O or PostQueuedCompletionStatus for synthetic completions.
+    ///
+    /// For actual I/O, operations are submitted via ReadFile/WriteFile with
+    /// overlapped structure, and completions arrive via IOCP. This method
+    /// handles synthetic operations (Timeout, Nop, Cancel) via
+    /// PostQueuedCompletionStatus.
+    @must_use
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
+        if !self.open {
+            return Err(EngineIoError.Closed);
+        }
+
+        let mut submitted: Int = 0;
+
+        for (op, user_data) in ops.iter() {
+            match op {
+                // Nop operation - post completion immediately
+                Nop => {
+                    let overlapped = Overlapped.new();
+                    let result = PostQueuedCompletionStatus(
+                        self.iocp,
+                        0,
+                        user_data as Int,
+                        &overlapped,
+                    );
+                    if result {
+                        self.pending += 1;
+                        submitted += 1;
+                    }
+                }
+
+                // Timeout operation - post completion with WAIT_TIMEOUT marker
+                Timeout { ts } => {
+                    // IOCP doesn't have native timeout ops like io_uring.
+                    // We use timer thread or post synthetic completion.
+                    // For now, post immediate completion with timeout flag.
+                    let overlapped = Overlapped.new();
+                    let result = PostQueuedCompletionStatus(
+                        self.iocp,
+                        0,
+                        user_data as Int,
+                        &overlapped,
+                    );
+                    if result {
+                        self.pending += 1;
+                        submitted += 1;
+                    }
+                }
+
+                // Cancel operation - cancel by user_data
+                Cancel { target_user_data } => {
+                    // IOCP cancellation is handle-based, not user_data-based.
+                    // Post completion with cancelled status.
+                    let overlapped = Overlapped.new();
+                    let result = PostQueuedCompletionStatus(
+                        self.iocp,
+                        0,
+                        user_data as Int,
+                        &overlapped,
+                    );
+                    if result {
+                        self.pending += 1;
+                        submitted += 1;
+                    }
+                }
+
+                // Read/Write/Accept/Connect/etc. require actual overlapped I/O
+                // These are typically submitted via handle association and
+                // ReadFile/WriteFile. We track them but actual submission
+                // must happen through the appropriate I/O function.
+                Read { fd, buf, offset } => {
+                    // Note: For actual read, caller must use async_read()
+                    // after associating the handle. This just tracks intent.
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                Write { fd, buf, offset } => {
+                    // Note: For actual write, caller must use async_write()
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                Accept { fd, addr } => {
+                    // AcceptEx requires WSA setup
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                Connect { fd, addr } => {
+                    // ConnectEx requires WSA setup
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                Close { fd } => {
+                    // Close is synchronous on Windows
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                Fsync { fd, datasync } => {
+                    // FlushFileBuffers is synchronous
+                    self.pending += 1;
+                    submitted += 1;
+                }
+
+                _ => {
+                    // Other operations not directly supported
+                    submitted += 1;
+                }
+            }
+        }
+
+        Ok(submitted)
+    }
+
+    /// Wait for completions with timeout.
+    ///
+    /// Uses GetQueuedCompletionStatusEx for batch completion harvesting.
+    @must_use
+    fn wait(
+        &mut self,
+        results: &mut [CompletionResult],
+        min_complete: UInt32,
+        timeout: Maybe<Duration>,
+    ) -> Result<Int{>= 0}, EngineIoError> {
+        if !self.open {
+            return Err(EngineIoError.Closed);
+        }
+
+        // Convert timeout to milliseconds
+        let timeout_ms = match timeout {
+            Some(d) => {
+                let ms = d.as_millis();
+                if ms > INFINITE as UInt64 {
+                    INFINITE
+                } else {
+                    ms as UInt32
+                }
+            }
+            None => INFINITE,
+        };
+
+        let max_entries = results.len().min(MAX_EVENTS) as UInt32;
+        let mut num_entries: UInt32 = 0;
+
+        // Use internal buffer for overlapped entries
+        let result = GetQueuedCompletionStatusEx(
+            self.iocp,
+            &mut self.entries[0] as &unsafe mut Byte,
+            max_entries,
+            &mut num_entries,
+            timeout_ms,
+            false,  // Not alertable
+        );
+
+        if !result {
+            let error = GetLastError();
+            if error == ERROR_TIMEOUT || error == WAIT_TIMEOUT {
+                // Timeout is not an error if min_complete is 0
+                if min_complete == 0 {
+                    return Ok(0);
+                }
+                return Err(EngineIoError.TimedOut);
+            }
+            return Err(EngineIoError.from_win32(error));
+        }
+
+        // Convert overlapped entries to CompletionResult
+        let count = num_entries as Int;
+        for i in 0..count {
+            if i >= results.len() {
+                break;
+            }
+
+            let entry = &self.entries[i];
+            let overlapped = entry.overlapped;
+
+            // Determine result: positive = bytes, negative = error
+            let result_val = if overlapped as Int != 0 && overlapped.internal as UInt32 != 0 {
+                // Error occurred
+                -(overlapped.internal as Int32)
+            } else {
+                entry.number_of_bytes_transferred as Int32
+            };
+
+            results[i] = CompletionResult {
+                user_data: entry.completion_key as UInt64,
+                result: result_val,
+                flags: 0,
+            };
+        }
+
+        // Update pending count
+        self.pending -= count;
+        if self.pending < 0 {
+            self.pending = 0;
+        }
+
+        Ok(count)
+    }
+
+    /// Wake up a blocked wait() from another thread.
+    ///
+    /// Posts a synthetic completion with WAKE_TOKEN user_data.
+    fn wake(&self) -> Result<(), EngineIoError> {
+        if !self.open {
+            return Err(EngineIoError.Closed);
+        }
+
+        // Post a wake completion
+        let result = PostQueuedCompletionStatus(
+            self.iocp,
+            0,
+            WAKE_TOKEN as Int,
+            0 as &Overlapped,
+        );
+
+        if !result {
+            Err(EngineIoError.from_win32(GetLastError()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Get number of pending operations.
+    pure fn pending(&self) -> UInt32 {
+        if self.pending >= 0 {
+            self.pending as UInt32
+        } else {
+            0
+        }
+    }
+
+    /// Flush pending operations.
+    ///
+    /// IOCP doesn't batch submissions like io_uring, so this is a no-op.
+    fn flush(&mut self) -> Result<(), EngineIoError> {
+        if !self.open {
+            return Err(EngineIoError.Closed);
+        }
+        Ok(())
+    }
+
+    /// Shutdown the engine.
+    fn shutdown(&mut self) -> Result<(), EngineIoError> {
+        if !self.open {
+            return Ok(());
+        }
+
+        // Close the completion port handle
+        let result = CloseHandle(self.iocp);
+        self.open = false;
+        self.iocp = Handle.INVALID;
+
+        if !result {
+            Err(EngineIoError.from_win32(GetLastError()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check if engine is open.
+    pure fn is_open(&self) -> Bool {
+        self.open
+    }
+}
+
+// =============================================================================
+// IOEngine Protocol Implementation for IoDriver
+// =============================================================================
+
+implement IOEngine for IoDriver {
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
+        self.iocp.submit(ops)
+    }
+
+    fn wait(
+        &mut self,
+        results: &mut [CompletionResult],
+        min_complete: UInt32,
+        timeout: Maybe<Duration>,
+    ) -> Result<Int{>= 0}, EngineIoError> {
+        self.iocp.wait(results, min_complete, timeout)
+    }
+
+    fn wake(&self) -> Result<(), EngineIoError> {
+        self.iocp.wake()
+    }
+
+    pure fn pending(&self) -> UInt32 {
+        self.iocp.pending()
+    }
+
+    fn flush(&mut self) -> Result<(), EngineIoError> {
+        self.iocp.flush()
+    }
+
+    fn shutdown(&mut self) -> Result<(), EngineIoError> {
+        self.iocp.shutdown()
+    }
+
+    pure fn is_open(&self) -> Bool {
+        self.iocp.is_open()
+    }
+}

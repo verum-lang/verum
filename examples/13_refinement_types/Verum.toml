@@ -1,0 +1,7 @@
+[package]
+name = "refinement_types"
+version = "0.1.0"
+description = "Refinement types and compile-time verification"
+
+[language]
+profile = "application"

@@ -1,0 +1,31 @@
+// Test: Negative Bounds - T: !Protocol constraints
+// Status: Working - Basic tests only
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// Protocol definitions
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+// Negative bound function
+fn consume<T>(value: T) where type T: !Clone {
+    print(f"Consumed");
+}
+
+// Test type
+type NonCloneType is { data: Int };
+
+fn test_negative_bounds() {
+    print(f"Testing negative bounds");
+    let non_clone = NonCloneType { data: 42 };
+    consume(non_clone);
+}
+
+fn main() {
+    print(f"Negative bounds test");
+    test_negative_bounds();
+    print(f"Done");
+}

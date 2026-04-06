@@ -1,0 +1,19 @@
+async fn fetch_user(id: Int) -> Text {
+    "User_{id}"
+}
+
+async fn fetch_posts(user: Text) -> List<Text> {
+    ["post1", "post2", "post3"]
+}
+
+async fn main() {
+    print("Fetching user...");
+    let user = fetch_user(42).await;
+    print(user);
+
+    print("Fetching posts...");
+    let posts = fetch_posts(user).await;
+    print(posts);
+
+    print("Done!");
+}

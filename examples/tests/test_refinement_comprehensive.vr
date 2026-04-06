@@ -1,0 +1,70 @@
+// Comprehensive refinement type test
+// Tests all syntax variants together
+
+// Named predicates
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn in_range(x: Int) -> Bool {
+    x >= 0 && x <= 100
+}
+
+// Type aliases with refinements
+type PositiveInt = Int{> 0};
+type Percent = Int{>= 0, <= 100};
+type NonZero = Int{!= 0};
+
+// Sigma types
+type BoundedValue = x: Int where x >= 10 && x <= 90;
+
+// Functions with inline refinements
+fn get_positive() -> Int{> 0} {
+    42
+}
+
+fn get_percent() -> Int{>= 0, <= 100} {
+    75
+}
+
+// Functions with where clause
+fn get_bounded() -> Int where it >= 10 && it <= 90 {
+    50
+}
+
+// Functions with named predicates
+fn get_validated() -> Int where is_positive {
+    25
+}
+
+// Functions using type aliases
+fn make_positive() -> PositiveInt {
+    100
+}
+
+fn make_percent() -> Percent {
+    80
+}
+
+// Function with refined parameters
+fn process_positive(x: Int{> 0}) -> Int {
+    x * 2
+}
+
+fn process_bounded(x: Int where it >= 0 && it <= 100) -> Int {
+    x + 10
+}
+
+fn main() {
+    let p1 = get_positive();
+    let p2 = get_percent();
+    let p3 = get_bounded();
+    let p4 = get_validated();
+    let p5 = make_positive();
+    let p6 = make_percent();
+
+    let result1 = process_positive(p1);
+    let result2 = process_bounded(p2);
+
+    result1 + result2
+}

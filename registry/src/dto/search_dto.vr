@@ -1,0 +1,197 @@
+// Search DTOs
+//
+// API-facing types for search operations.
+// These types are optimized for JSON serialization and API contracts.
+
+mount core.collections.{List};
+mount core.base.{Text, Int, Float, Maybe};
+
+// ============================================================================
+// Response DTOs
+// ============================================================================
+
+/// Search result item for API
+pub type SearchResultDto is {
+    name: Text,
+    version: Text,
+    description: Text,
+    downloads: Int,
+    license: Text,
+    score: Float,
+    published_at: Text,        // ISO 8601 timestamp
+    category: Maybe<Text>,     // Package category
+};
+
+/// Search filters
+pub type SearchFiltersDto is {
+    license: Maybe<Text>,
+    min_downloads: Maybe<Int>,
+    category: Maybe<Text>,
+    owner: Maybe<Text>,
+};
+
+/// Sort order options
+pub type SortOrderDto is
+    | Relevance
+    | Downloads
+    | Recent
+    | Alphabetical;
+
+// ============================================================================
+// Request DTOs
+// ============================================================================
+
+/// Search request
+pub type SearchRequestDto is {
+    query: Text,
+    page: Int,
+    limit: Int,
+    filters: Maybe<SearchFiltersDto>,
+    sort_by: SortOrderDto,
+};
+
+/// Search response
+pub type SearchResponseDto is {
+    results: List<SearchResultDto>,
+    total: Int,
+    page: Int,
+    per_page: Int,
+    took_ms: Int,
+};
+
+// ============================================================================
+// Implementations
+// ============================================================================
+
+implement SearchResultDto {
+    pub fn new(
+        name: Text,
+        version: Text,
+        description: Text,
+        downloads: Int,
+        license: Text,
+        score: Float,
+        published_at: Text,
+        category: Maybe<Text>
+    ) -> SearchResultDto {
+        SearchResultDto {
+            name: name,
+            version: version,
+            description: description,
+            downloads: downloads,
+            license: license,
+            score: score,
+            published_at: published_at,
+            category: category,
+        }
+    }
+}
+
+implement SearchFiltersDto {
+    pub fn empty() -> SearchFiltersDto {
+        SearchFiltersDto {
+            license: Maybe.None,
+            min_downloads: Maybe.None,
+            category: Maybe.None,
+            owner: Maybe.None,
+        }
+    }
+
+    pub fn with_license(self, license: Text) -> SearchFiltersDto {
+        SearchFiltersDto {
+            license: Maybe.Some(license),
+            min_downloads: self.min_downloads,
+            category: self.category,
+            owner: self.owner,
+        }
+    }
+
+    pub fn with_min_downloads(self, min: Int) -> SearchFiltersDto {
+        SearchFiltersDto {
+            license: self.license,
+            min_downloads: Maybe.Some(min),
+            category: self.category,
+            owner: self.owner,
+        }
+    }
+}
+
+implement SortOrderDto {
+    pub fn to_string(self) -> Text {
+        match self {
+            SortOrderDto.Relevance => "relevance",
+            SortOrderDto.Downloads => "downloads",
+            SortOrderDto.Recent => "recent",
+            SortOrderDto.Alphabetical => "alphabetical",
+        }
+    }
+
+    pub fn from_string(s: Text) -> SortOrderDto {
+        match s {
+            "downloads" => SortOrderDto.Downloads,
+            "recent" => SortOrderDto.Recent,
+            "alphabetical" => SortOrderDto.Alphabetical,
+            _ => SortOrderDto.Relevance,
+        }
+    }
+}
+
+implement SearchRequestDto {
+    pub fn new(query: Text, page: Int, limit: Int) -> SearchRequestDto {
+        SearchRequestDto {
+            query: query,
+            page: page,
+            limit: limit,
+            filters: Maybe.None,
+            sort_by: SortOrderDto.Relevance,
+        }
+    }
+
+    pub fn with_filters(self, filters: SearchFiltersDto) -> SearchRequestDto {
+        SearchRequestDto {
+            query: self.query,
+            page: self.page,
+            limit: self.limit,
+            filters: Maybe.Some(filters),
+            sort_by: self.sort_by,
+        }
+    }
+
+    pub fn with_sort(self, sort_by: SortOrderDto) -> SearchRequestDto {
+        SearchRequestDto {
+            query: self.query,
+            page: self.page,
+            limit: self.limit,
+            filters: self.filters,
+            sort_by: sort_by,
+        }
+    }
+}
+
+implement SearchResponseDto {
+    pub fn new(
+        results: List<SearchResultDto>,
+        total: Int,
+        page: Int,
+        per_page: Int,
+        took_ms: Int
+    ) -> SearchResponseDto {
+        SearchResponseDto {
+            results: results,
+            total: total,
+            page: page,
+            per_page: per_page,
+            took_ms: took_ms,
+        }
+    }
+
+    pub fn empty(page: Int, per_page: Int) -> SearchResponseDto {
+        SearchResponseDto {
+            results: List.new(),
+            total: 0,
+            page: page,
+            per_page: per_page,
+            took_ms: 0,
+        }
+    }
+}

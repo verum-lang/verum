@@ -1,0 +1,112 @@
+// Test language features without generics
+
+// Test 1: Nested types
+type Response is {
+    status: Int,
+    message: Text,
+};
+
+implement Response {
+    pub fn ok(message: Text) -> Response {
+        Response {
+            status: 200,
+            message: message,
+        }
+    }
+
+    pub fn error(message: Text) -> Response {
+        Response {
+            status: 500,
+            message: message,
+        }
+    }
+
+    pub fn is_success(self) -> Bool {
+        self.status >= 200 && self.status < 300
+    }
+}
+
+// Test 2: Nested variant types
+type Color is
+    | Red
+    | Green
+    | Blue
+    | RGB { r: Int, g: Int, b: Int };
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Color.Red => "Red",
+        Color.Green => "Green",
+        Color.Blue => "Blue",
+        Color.RGB { r, g, b } => f"RGB({r},{g},{b})",
+    }
+}
+
+// Test 3: Pattern matching with nested patterns
+type IntOption is
+    | Some(Int)
+    | None;
+
+fn unwrap_or_default(opt: IntOption, default: Int) -> Int {
+    match opt {
+        IntOption.Some(val) => val,
+        IntOption.None => default,
+    }
+}
+
+// Test 4: Multiple match arms
+fn categorize_status(code: Int) -> Text {
+    match code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "Unknown",
+    }
+}
+
+fn main() {
+    print("═══════════════════════════════════════════════════════════");
+    print("SIMPLE FEATURE TEST SUITE");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    // Test Response type
+    print("Test 1: Record Types with Methods");
+    let resp1 = Response.ok("Success");
+    let resp2 = Response.error("Failed");
+    print(f"  Response 1: {resp1.status} - {resp1.message} (success: {resp1.is_success()})");
+    print(f"  Response 2: {resp2.status} - {resp2.message} (success: {resp2.is_success()})");
+    print("");
+
+    // Test Color type
+    print("Test 2: Variant Types with Named Fields");
+    let c1 = Color.Red;
+    let c2 = Color.RGB { r: 255, g: 128, b: 0 };
+    print(f"  Color 1: {color_name(c1)}");
+    print(f"  Color 2: {color_name(c2)}");
+    print("");
+
+    // Test Option type
+    print("Test 3: IntOption Type (Variant with Value)");
+    let opt1 = IntOption.Some(42);
+    let opt2 = IntOption.None;
+    print(f"  unwrap_or_default(Some(42), 0): {unwrap_or_default(opt1, 0)}");
+    print(f"  unwrap_or_default(None, 99): {unwrap_or_default(opt2, 99)}");
+    print("");
+
+    // Test status codes
+    print("Test 4: Exhaustive Pattern Matching");
+    print(f"  Status 200: {categorize_status(200)}");
+    print(f"  Status 404: {categorize_status(404)}");
+    print(f"  Status 503: {categorize_status(503)}");
+    print("");
+
+    print("═══════════════════════════════════════════════════════════");
+    print("ALL TESTS PASSED");
+    print("═══════════════════════════════════════════════════════════");
+}

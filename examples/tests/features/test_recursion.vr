@@ -1,0 +1,29 @@
+// Test recursive functions
+
+fn factorial(n: Float) -> Float {
+    if n <= 1.0 {
+        1.0
+    } else {
+        n * factorial(n - 1.0)
+    }
+}
+
+fn fibonacci(n: Float) -> Float {
+    if n <= 1.0 {
+        n
+    } else {
+        fibonacci(n - 1.0) + fibonacci(n - 2.0)
+    }
+}
+
+fn main() {
+    let _ = print("=== Recursion Tests ===");
+
+    let _ = print(f"factorial(5) = {factorial(5.0)}");
+    let _ = print(f"factorial(10) = {factorial(10.0)}");
+
+    let _ = print(f"fibonacci(10) = {fibonacci(10.0)}");
+    let _ = print(f"fibonacci(15) = {fibonacci(15.0)}");
+
+    let _ = print("=== Done ===");
+}

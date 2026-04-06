@@ -1,0 +1,295 @@
+// =============================================================================
+// core/intrinsics/tensor.vr - Tensor Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides tensor operations that map to VBC tensor opcodes.
+// All operations work on opaque TensorHandle values managed by the runtime.
+//
+// # Operations
+//
+// - Creation: tensor_new, tensor_fill, tensor_from_slice, tensor_from_array
+// - Factory: tensor_arange, tensor_linspace, tensor_eye, tensor_rand
+// - Shape: tensor_reshape, tensor_transpose, tensor_permute, tensor_squeeze
+// - Indexing: tensor_slice, tensor_index, tensor_gather, tensor_concat, tensor_stack
+// - Arithmetic: tensor_binop, tensor_unop
+// - Linear algebra: tensor_matmul, tensor_dot, tensor_bmm, tensor_outer
+// - Decomposition: tensor_svd, tensor_qr, tensor_lu, tensor_cholesky, tensor_eig
+// - Solvers: tensor_solve, tensor_tri_solve, tensor_inverse, tensor_det, tensor_trace
+// - Reduction: tensor_reduce, tensor_reduce_all, tensor_argmax, tensor_topk
+// - Normalization: tensor_softmax, tensor_layer_norm, tensor_batch_norm, tensor_rms_norm
+// - Utility: tensor_clone, tensor_cast, tensor_contiguous, tensor_get_scalar
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.tensor;
+
+// =============================================================================
+// SECTION 1: Tensor Creation
+// =============================================================================
+
+/// Create uninitialized tensor with shape and dtype
+public fn tensor_new<S, D>(shape: S, dtype: D) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+
+/// Create tensor filled with a scalar value
+public fn tensor_fill<S, V, D>(shape: S, value: V, dtype: D) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+
+/// Create tensor from slice data
+public fn tensor_from_slice<T, S, D>(data: T, shape: S, dtype: D) -> Int { @intrinsic("TENSOR_FROM_SLICE", data, shape, dtype) }
+
+/// Create tensor from array data
+public fn tensor_from_array<T>(data: T) -> Int { @intrinsic("TENSOR_FROM_ARRAY", data) }
+
+// =============================================================================
+// SECTION 2: Factory Functions
+// =============================================================================
+
+/// Create tensor with evenly spaced values
+public fn tensor_arange<S, E, T>(start: S, end: E, step: T) -> Int { @intrinsic("TENSOR_ARANGE", start, end, step) }
+
+/// Create tensor with evenly spaced values over interval
+public fn tensor_linspace<S, E>(start: S, end: E, steps: Int) -> Int { @intrinsic("TENSOR_LINSPACE", start, end, steps) }
+
+/// Create random tensor (uniform [0,1))
+public fn tensor_rand<S>(shape: S) -> Int { @intrinsic("TENSOR_RAND", shape) }
+
+/// Create random tensor (normal distribution)
+public fn tensor_randn<S>(shape: S) -> Int { @intrinsic("TENSOR_RANDN", shape) }
+
+/// Create random integer tensor
+public fn tensor_randint<S>(low: Int, high: Int, shape: S) -> Int { @intrinsic("TENSOR_RANDINT", low, high, shape) }
+
+/// Clone tensor (deep copy)
+public fn tensor_clone(t: Int) -> Int { @intrinsic("TENSOR_CLONE", t) }
+
+/// Create identity matrix
+public fn tensor_eye(n: Int) -> Int { @intrinsic("TENSOR_EYE", n) }
+
+// =============================================================================
+// SECTION 3: Shape Operations
+// =============================================================================
+
+/// Reshape tensor to new shape
+public fn tensor_reshape<S>(t: Int, shape: S) -> Int { @intrinsic("TENSOR_RESHAPE", t, shape) }
+
+/// Transpose tensor (swap last two dimensions)
+public fn tensor_transpose(t: Int) -> Int { @intrinsic("TENSOR_TRANSPOSE", t) }
+
+/// Permute tensor dimensions
+public fn tensor_permute<P>(t: Int, perm: P) -> Int { @intrinsic("TENSOR_PERMUTE", t, perm) }
+
+/// Remove dimensions of size 1
+public fn tensor_squeeze(t: Int) -> Int { @intrinsic("TENSOR_SQUEEZE", t) }
+
+/// Add dimension of size 1
+public fn tensor_unsqueeze(t: Int, dim: Int) -> Int { @intrinsic("TENSOR_UNSQUEEZE", t, dim) }
+
+/// Repeat tensor along dimensions
+public fn tensor_repeat<R>(t: Int, repeats: R) -> Int { @intrinsic("TENSOR_REPEAT", t, repeats) }
+
+/// Make tensor contiguous in memory
+public fn tensor_contiguous(t: Int) -> Int { @intrinsic("TENSOR_CONTIGUOUS", t) }
+
+// =============================================================================
+// SECTION 4: Indexing and Slicing
+// =============================================================================
+
+/// Slice tensor
+public fn tensor_slice<S>(t: Int, slices: S) -> Int { @intrinsic("TENSOR_SLICE", t, slices) }
+
+/// Index tensor
+public fn tensor_index<I>(t: Int, indices: I) -> Int { @intrinsic("TENSOR_INDEX", t, indices) }
+
+/// Select along dimension using indices
+public fn tensor_index_select<I>(t: Int, dim: Int, indices: I) -> Int { @intrinsic("TENSOR_INDEX_SELECT", t, dim, indices) }
+
+/// Gather elements along axis
+public fn tensor_gather(t: Int, dim: Int, indices: Int) -> Int { @intrinsic("TENSOR_GATHER", t, dim, indices) }
+
+/// Concatenate tensors along axis
+public fn tensor_concat(tensors: Int, dim: Int) -> Int { @intrinsic("TENSOR_CONCAT", tensors, dim) }
+
+/// Stack tensors along new axis
+public fn tensor_stack(tensors: Int, dim: Int) -> Int { @intrinsic("TENSOR_STACK", tensors, dim) }
+
+/// Split tensor into chunks
+public fn tensor_split(t: Int, chunks: Int, dim: Int) -> Int { @intrinsic("TENSOR_SPLIT", t, chunks, dim) }
+
+/// Broadcast tensor to target shape
+public fn tensor_broadcast<S>(t: Int, shape: S) -> Int { @intrinsic("TENSOR_BROADCAST", t, shape) }
+
+// =============================================================================
+// SECTION 5: Element-wise Operations
+// =============================================================================
+
+/// Element-wise binary operation (op: 0=add, 1=sub, 2=mul, 3=div, 4=pow, 5=mod)
+public fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+
+/// Element-wise unary operation (op: 0=neg, 1=abs, 2=exp, 3=log, 4=sqrt, 5=sin, 6=cos, 7=tanh, 8=sigmoid, 9=relu)
+public fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
+
+/// Element-wise comparison (op: 0=eq, 1=ne, 2=lt, 3=le, 4=gt, 5=ge)
+public fn tensor_cmp(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_CMP", a, b, op) }
+
+/// Conditional selection: where(cond, a, b)
+public fn tensor_where(cond: Int, a: Int, b: Int) -> Int { @intrinsic("TENSOR_WHERE", cond, a, b) }
+
+/// Clamp values to [min, max]
+public fn tensor_clamp(t: Int, min_val: Int, max_val: Int) -> Int { @intrinsic("TENSOR_CLAMP", t, min_val, max_val) }
+
+/// Cast tensor to different dtype
+public fn tensor_cast<D>(t: Int, dtype: D) -> Int { @intrinsic("TENSOR_CAST", t, dtype) }
+
+/// Fill masked positions
+public fn tensor_masked_fill(t: Int, mask: Int, value: Int) -> Int { @intrinsic("TENSOR_MASKED_FILL", t, mask, value) }
+
+/// Linear interpolation
+public fn tensor_lerp(a: Int, b: Int, weight: Int) -> Int { @intrinsic("TENSOR_LERP", a, b, weight) }
+
+// =============================================================================
+// SECTION 6: Linear Algebra
+// =============================================================================
+
+/// Matrix multiplication
+public fn tensor_matmul(a: Int, b: Int) -> Int { @intrinsic("TENSOR_MATMUL", a, b) }
+
+/// Matrix-matrix multiply (alias)
+public fn tensor_mm(a: Int, b: Int) -> Int { @intrinsic("TENSOR_MM", a, b) }
+
+/// Matrix-vector multiply
+public fn tensor_mv(mat: Int, vec: Int) -> Int { @intrinsic("TENSOR_MV", mat, vec) }
+
+/// Batched matrix multiplication
+public fn tensor_bmm(a: Int, b: Int) -> Int { @intrinsic("TENSOR_BMM", a, b) }
+
+/// Vector dot product
+public fn tensor_dot(a: Int, b: Int) -> Int { @intrinsic("TENSOR_DOT", a, b) }
+
+/// Outer product
+public fn tensor_outer(a: Int, b: Int) -> Int { @intrinsic("TENSOR_OUTER", a, b) }
+
+/// Einstein summation
+public fn tensor_einsum<E>(expr: E, tensors: Int) -> Int { @intrinsic("TENSOR_EINSUM", expr, tensors) }
+
+// =============================================================================
+// SECTION 7: Matrix Decomposition
+// =============================================================================
+
+/// Singular Value Decomposition
+public fn tensor_svd(t: Int) -> Int { @intrinsic("TENSOR_SVD", t) }
+
+/// QR Decomposition
+public fn tensor_qr(t: Int) -> Int { @intrinsic("TENSOR_QR", t) }
+
+/// LU Decomposition
+public fn tensor_lu(t: Int) -> Int { @intrinsic("TENSOR_LU", t) }
+
+/// Cholesky Decomposition
+public fn tensor_cholesky(t: Int) -> Int { @intrinsic("TENSOR_CHOLESKY", t) }
+
+/// Eigenvalue decomposition
+public fn tensor_eig(t: Int) -> Int { @intrinsic("TENSOR_EIG", t) }
+
+/// Symmetric eigenvalue decomposition
+public fn tensor_eigh(t: Int) -> Int { @intrinsic("TENSOR_EIGH", t) }
+
+// =============================================================================
+// SECTION 8: Linear System Solvers
+// =============================================================================
+
+/// Solve linear system Ax = b
+public fn tensor_solve(a: Int, b: Int) -> Int { @intrinsic("TENSOR_SOLVE", a, b) }
+
+/// Solve triangular linear system
+public fn tensor_tri_solve(a: Int, b: Int) -> Int { @intrinsic("TENSOR_TRI_SOLVE", a, b) }
+
+/// Matrix inverse
+public fn tensor_inverse(t: Int) -> Int { @intrinsic("TENSOR_INVERSE", t) }
+
+/// Matrix determinant
+public fn tensor_det(t: Int) -> Int { @intrinsic("TENSOR_DET", t) }
+
+/// Matrix trace
+public fn tensor_trace(t: Int) -> Int { @intrinsic("TENSOR_TRACE", t) }
+
+// =============================================================================
+// SECTION 9: Reduction Operations
+// =============================================================================
+
+/// Reduce along axis (op: 0=sum, 1=mean, 2=max, 3=min, 4=prod)
+public fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+/// Reduce all elements (op: 0=sum, 1=mean, 2=max, 3=min, 4=prod)
+public fn tensor_reduce_all(t: Int, op: Int) -> Int { @intrinsic("TENSOR_REDUCE_ALL", t, op) }
+
+/// Argmax along axis
+public fn tensor_argmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_ARGMAX", t, axis) }
+
+/// Top-k values and indices along axis
+public fn tensor_topk(t: Int, k: Int, axis: Int) -> Int { @intrinsic("TENSOR_TOPK", t, k, axis) }
+
+/// Cumulative operation along axis (op: 0=sum, 1=prod)
+public fn tensor_cumulative(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_CUMULATIVE", t, op, axis) }
+
+// =============================================================================
+// SECTION 10: Normalization and Activation
+// =============================================================================
+
+/// Softmax activation along axis
+public fn tensor_softmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_SOFTMAX", t, axis) }
+
+/// Log-softmax activation along axis
+public fn tensor_log_softmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_LOG_SOFTMAX", t, axis) }
+
+/// Layer normalization
+public fn tensor_layer_norm(t: Int, normalized_shape: Int, weight: Int, bias: Int) -> Int { @intrinsic("TENSOR_LAYER_NORM", t, normalized_shape, weight, bias) }
+
+/// Batch normalization
+public fn tensor_batch_norm(t: Int, mean: Int, var_t: Int, weight: Int, bias: Int) -> Int { @intrinsic("TENSOR_BATCH_NORM", t, mean, var_t, weight, bias) }
+
+/// RMS normalization
+public fn tensor_rms_norm(t: Int, weight: Int) -> Int { @intrinsic("TENSOR_RMS_NORM", t, weight) }
+
+// =============================================================================
+// SECTION 11: Scalar Access
+// =============================================================================
+
+/// Get scalar value from tensor at index
+public fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+
+/// Set scalar value in tensor at index
+public fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+
+// =============================================================================
+// SECTION 12: Convolution
+// =============================================================================
+
+/// 1D Convolution
+public fn tensor_conv(input: Int, kernel: Int) -> Int { @intrinsic("TENSOR_CONV", input, kernel) }
+
+/// 2D Convolution
+public fn tensor_conv2d(input: Int, kernel: Int) -> Int { @intrinsic("TENSOR_CONV2D", input, kernel) }
+
+// =============================================================================
+// SECTION 13: Advanced Operations
+// =============================================================================
+
+/// Scatter operation
+public fn tensor_scatter(t: Int, dim: Int, indices: Int, src: Int) -> Int { @intrinsic("TENSOR_SCATTER", t, dim, indices, src) }
+
+/// Non-zero element indices
+public fn tensor_nonzero(t: Int) -> Int { @intrinsic("TENSOR_NONZERO", t) }
+
+/// One-hot encoding
+public fn tensor_one_hot(indices: Int, num_classes: Int) -> Int { @intrinsic("TENSOR_ONE_HOT", indices, num_classes) }
+
+/// Fast Fourier Transform
+public fn tensor_fft(t: Int) -> Int { @intrinsic("TENSOR_FFT", t) }
+
+/// Flash attention
+public fn tensor_flash_attention(q: Int, k: Int, v: Int) -> Int { @intrinsic("TENSOR_FLASH_ATTENTION", q, k, v) }
+
+/// Tensor norm
+public fn tensor_norm(t: Int, p: Int, dim: Int) -> Int { @intrinsic("TENSOR_NORM", t, p, dim) }

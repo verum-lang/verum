@@ -1,0 +1,24 @@
+// PostgreSQL Repository Implementations Module
+//
+// This module provides concrete PostgreSQL implementations for all repository protocols.
+// Each implementation uses the Database context for data access.
+//
+// Architecture:
+// - Zero-state implementations (no fields needed - uses Database context)
+// - Pure functions that delegate to Database context
+// - Row mapping functions to convert database rows to domain entities
+//
+// Error Handling:
+// - DatabaseError → RegistryError conversion
+// - Proper error propagation with context
+
+module package_repository;
+module user_repository;
+module token_repository;
+module version_repository;
+
+// Re-export all implementations
+pub import .package_repository.PostgresPackageRepository;
+pub import .user_repository.PostgresUserRepository;
+pub import .token_repository.PostgresTokenRepository;
+pub import .version_repository.PostgresPackageVersionRepository;

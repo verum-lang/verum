@@ -1,0 +1,20 @@
+// Test: Try-finally expression
+// Tests if finally block is executed
+
+fn may_fail(should_fail: Bool) -> Result<Int, Text> {
+    if should_fail {
+        Err("Operation failed")
+    } else {
+        Ok(42)
+    }
+}
+
+fn main() {
+    let result = try {
+        may_fail(false)?
+    } finally {
+        print("Finally block executed");
+    };
+
+    print(result);
+}

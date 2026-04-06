@@ -1,0 +1,682 @@
+// Verum Registry - Package Integration Tests
+//
+// Comprehensive integration tests for the complete package lifecycle
+// Tests all package-related API endpoints end-to-end
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// Import test utilities
+mount super.super.test_utils.{
+    create_test_user,
+    create_test_package,
+    login_test_user,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    setup_test_db,
+    cleanup_test_db,
+    generate_test_tarball,
+};
+
+// Import domain types
+mount super.super.src.domain.package.{Package, PackageVersion};
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.src.dto.package_dto.{
+    PublishRequestDto,
+    PublishResponseDto,
+    YankRequestDto,
+    PackageListResponseDto,
+    UpdatePackageMetadataDto,
+    DownloadArtifactResponseDto,
+    PackageStatsDto,
+};
+
+// Import handlers
+mount super.super.src.handlers.packages.{
+    publish_package,
+    get_package,
+    yank_package,
+    list_packages,
+    list_package_versions,
+    update_package_metadata,
+    download_package_artifact,
+    get_package_stats,
+};
+
+// ============================================================================
+// Package Publish and Retrieve Tests
+// ============================================================================
+
+@test
+fn test_package_publish_and_retrieve() {
+    // Setup: Create user and login
+    setup_test_db();
+    let user = create_test_user("alice");
+    let token = login_test_user("alice", "password123");
+
+    // Create publish request
+    let mut req = PublishRequestDto {
+        name: "test-package",
+        version: "1.0.0",
+        description: "A test package for integration testing",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "https://github.com/test/package",
+        repository: "https://github.com/test/package",
+    };
+
+    // Publish the package
+    let publish_result = publish_package(req, token.clone()).await;
+    assert_ok(&publish_result);
+
+    let publish_response = publish_result.unwrap();
+    assert_eq(&publish_response.success, &true);
+    assert_eq(&publish_response.package_name, &"test-package");
+    assert_eq(&publish_response.version, &"1.0.0");
+
+    // Retrieve the package
+    let get_result = get_package("test-package", "1.0.0").await;
+    assert_ok(&get_result);
+
+    let package_dto = get_result.unwrap();
+    assert_eq(&package_dto.version, &"1.0.0");
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_publish_duplicate_version() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    let req = PublishRequestDto {
+        name: "duplicate-test",
+        version: "1.0.0",
+        description: "Testing duplicate version",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    // Publish first time - should succeed
+    let first_publish = publish_package(req.clone(), token.clone()).await;
+    assert_ok(&first_publish);
+
+    // Publish same version again - should fail
+    let second_publish = publish_package(req, token).await;
+    assert_err(&second_publish);
+
+    match second_publish {
+        Result.Err(RegistryError.PackageAlreadyExists { name }) => {
+            assert_eq(&name, &"duplicate-test");
+        },
+        _ => panic("Expected PackageAlreadyExists error"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_publish_validation_errors() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Test invalid package name (too short)
+    let invalid_name = PublishRequestDto {
+        name: "a",  // Too short
+        version: "1.0.0",
+        description: "Test",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    let result = publish_package(invalid_name, token.clone()).await;
+    assert_err(&result);
+
+    // Test invalid version format
+    let invalid_version = PublishRequestDto {
+        name: "valid-name",
+        version: "1.0",  // Missing patch version
+        description: "Test",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    let result2 = publish_package(invalid_version, token.clone()).await;
+    assert_err(&result2);
+
+    // Test empty description
+    let empty_description = PublishRequestDto {
+        name: "valid-name",
+        version: "1.0.0",
+        description: "",  // Empty
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    let result3 = publish_package(empty_description, token).await;
+    assert_err(&result3);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Version Listing Tests
+// ============================================================================
+
+@test
+fn test_package_version_listing() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish multiple versions
+    let versions = ["1.0.0", "1.0.1", "1.1.0", "2.0.0"];
+
+    for version in versions {
+        let req = PublishRequestDto {
+            name: "multi-version-pkg",
+            version: version.clone(),
+            description: f"Version {version}",
+            license: "MIT",
+            tarball: generate_test_tarball(),
+            dependencies: List.new(),
+            dev_dependencies: List.new(),
+            keywords: List.new(),
+            categories: List.new(),
+            homepage: "",
+            repository: "",
+        };
+
+        let result = publish_package(req, token.clone()).await;
+        assert_ok(&result);
+    }
+
+    // List all versions
+    let list_result = list_package_versions("multi-version-pkg").await;
+    assert_ok(&list_result);
+
+    let versions_response = list_result.unwrap();
+    assert_eq(&versions_response.total, &4);
+    assert_eq(&versions_response.versions.len(), &4);
+
+    // Verify versions are in descending order (newest first)
+    assert_eq(&versions_response.versions[0].version, &"2.0.0");
+    assert_eq(&versions_response.versions[1].version, &"1.1.0");
+    assert_eq(&versions_response.versions[2].version, &"1.0.1");
+    assert_eq(&versions_response.versions[3].version, &"1.0.0");
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_version_listing_nonexistent() {
+    setup_test_db();
+
+    // Try to list versions for non-existent package
+    let result = list_package_versions("nonexistent-package").await;
+    assert_err(&result);
+
+    match result {
+        Result.Err(RegistryError.PackageNotFound { name }) => {
+            assert_eq(&name, &"nonexistent-package");
+        },
+        _ => panic("Expected PackageNotFound error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Download Tests
+// ============================================================================
+
+@test
+fn test_package_download_increments_counter() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish package
+    let req = PublishRequestDto {
+        name: "download-test",
+        version: "1.0.0",
+        description: "Testing download counter",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    publish_package(req, token).await;
+
+    // Get initial stats
+    let initial_stats = get_package_stats("download-test").await;
+    assert_ok(&initial_stats);
+    let initial_downloads = initial_stats.unwrap().total_downloads;
+
+    // Download package (should increment counter)
+    let download1 = download_package_artifact("download-test", "1.0.0").await;
+    assert_ok(&download1);
+
+    // Download again
+    let download2 = download_package_artifact("download-test", "1.0.0").await;
+    assert_ok(&download2);
+
+    // Verify counter incremented by 2
+    let final_stats = get_package_stats("download-test").await;
+    assert_ok(&final_stats);
+    let final_downloads = final_stats.unwrap().total_downloads;
+
+    assert_eq(&final_downloads, &(initial_downloads + 2));
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_download_returns_valid_url() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish package
+    let req = PublishRequestDto {
+        name: "url-test",
+        version: "1.0.0",
+        description: "Testing download URL",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    publish_package(req, token).await;
+
+    // Download package
+    let download_result = download_package_artifact("url-test", "1.0.0").await;
+    assert_ok(&download_result);
+
+    let download_response = download_result.unwrap();
+
+    // Verify URL is not empty
+    assert_ne(&download_response.download_url, &"");
+
+    // Verify checksum is present
+    assert_ne(&download_response.checksum, &"");
+
+    // Verify version matches
+    assert_eq(&download_response.version, &"1.0.0");
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Yank Tests
+// ============================================================================
+
+@test
+fn test_package_yank_prevents_download() {
+    setup_test_db();
+    let token = login_test_user("admin", "admin123");  // Admin user
+
+    // Publish package
+    let req = PublishRequestDto {
+        name: "yank-test",
+        version: "1.0.0",
+        description: "Testing yank functionality",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    publish_package(req, token.clone()).await;
+
+    // Download should work before yank
+    let download_before = download_package_artifact("yank-test", "1.0.0").await;
+    assert_ok(&download_before);
+
+    // Yank the version
+    let yank_req = YankRequestDto {
+        name: "yank-test",
+        version: "1.0.0",
+    };
+
+    let yank_result = yank_package(yank_req, token).await;
+    assert_ok(&yank_result);
+
+    // Download should fail after yank
+    let download_after = download_package_artifact("yank-test", "1.0.0").await;
+    assert_err(&download_after);
+
+    match download_after {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"version");
+            assert(&message.contains("yanked"));
+        },
+        _ => panic("Expected ValidationError for yanked version"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_yank_requires_admin() {
+    setup_test_db();
+    let regular_token = login_test_user("alice", "password123");  // Regular user
+
+    // Publish package as regular user
+    let req = PublishRequestDto {
+        name: "yank-auth-test",
+        version: "1.0.0",
+        description: "Testing yank authorization",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    publish_package(req, regular_token.clone()).await;
+
+    // Try to yank as regular user (should fail)
+    let yank_req = YankRequestDto {
+        name: "yank-auth-test",
+        version: "1.0.0",
+    };
+
+    let yank_result = yank_package(yank_req, regular_token).await;
+    assert_err(&yank_result);
+
+    match yank_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            assert(&message.contains("permissions"));
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Metadata Update Tests
+// ============================================================================
+
+@test
+fn test_package_metadata_update() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish package
+    let req = PublishRequestDto {
+        name: "metadata-test",
+        version: "1.0.0",
+        description: "Original description",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "https://example.com/old",
+        repository: "https://github.com/old/repo",
+    };
+
+    publish_package(req, token.clone()).await;
+
+    // Update metadata
+    let mut keywords = List.new();
+    keywords.push("testing");
+    keywords.push("integration");
+
+    let mut categories = List.new();
+    categories.push("development");
+
+    let update_req = UpdatePackageMetadataDto {
+        description: "Updated description with new features",
+        homepage: "https://example.com/new",
+        repository: "https://github.com/new/repo",
+        keywords: keywords,
+        categories: categories,
+    };
+
+    let update_result = update_package_metadata("metadata-test", update_req, token).await;
+    assert_ok(&update_result);
+
+    let update_response = update_result.unwrap();
+    assert_eq(&update_response.success, &true);
+    assert_eq(&update_response.package_name, &"metadata-test");
+
+    // TODO: Retrieve package and verify changes
+    // Would require a get_package_metadata endpoint
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_metadata_update_authorization() {
+    setup_test_db();
+    let alice_token = login_test_user("alice", "password123");
+    let bob_token = login_test_user("bob", "password456");
+
+    // Alice publishes package
+    let req = PublishRequestDto {
+        name: "auth-metadata-test",
+        version: "1.0.0",
+        description: "Testing metadata update auth",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    publish_package(req, alice_token).await;
+
+    // Bob tries to update Alice's package (should fail)
+    let update_req = UpdatePackageMetadataDto {
+        description: "Bob's unauthorized update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    };
+
+    let update_result = update_package_metadata("auth-metadata-test", update_req, bob_token).await;
+    assert_err(&update_result);
+
+    match update_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            assert(&message.contains("owner") || &message.contains("admin"));
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Search Tests
+// ============================================================================
+
+@test
+fn test_package_search_basic() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish packages with different names
+    let packages = [
+        ("http-client", "HTTP client library"),
+        ("http-server", "HTTP server framework"),
+        ("json-parser", "JSON parsing library"),
+        ("crypto-utils", "Cryptographic utilities"),
+    ];
+
+    for (name, desc) in packages {
+        let req = PublishRequestDto {
+            name: name.clone(),
+            version: "1.0.0",
+            description: desc.clone(),
+            license: "MIT",
+            tarball: generate_test_tarball(),
+            dependencies: List.new(),
+            dev_dependencies: List.new(),
+            keywords: List.new(),
+            categories: List.new(),
+            homepage: "",
+            repository: "",
+        };
+
+        publish_package(req, token.clone()).await;
+    }
+
+    // Search for "http" - should find http-client and http-server
+    // TODO: Implement when search handler is available
+    // let search_result = search_packages("http", 1, 10).await;
+    // assert_ok(&search_result);
+    // assert_eq(&search_result.unwrap().total, &2);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_package_search_pagination() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish 25 packages
+    for i in 1..26 {
+        let req = PublishRequestDto {
+            name: f"package-{i}",
+            version: "1.0.0",
+            description: f"Package number {i}",
+            license: "MIT",
+            tarball: generate_test_tarball(),
+            dependencies: List.new(),
+            dev_dependencies: List.new(),
+            keywords: List.new(),
+            categories: List.new(),
+            homepage: "",
+            repository: "",
+        };
+
+        publish_package(req, token.clone()).await;
+    }
+
+    // Test pagination with list_packages
+    let page1 = list_packages(1, 10).await;
+    assert_ok(&page1);
+    assert_eq(&page1.unwrap().packages.len(), &10);
+
+    let page2 = list_packages(2, 10).await;
+    assert_ok(&page2);
+    assert_eq(&page2.unwrap().packages.len(), &10);
+
+    let page3 = list_packages(3, 10).await;
+    assert_ok(&page3);
+    assert_eq(&page3.unwrap().packages.len(), &5);  // Remaining packages
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Package Stats Tests
+// ============================================================================
+
+@test
+fn test_package_stats() {
+    setup_test_db();
+    let token = login_test_user("alice", "password123");
+
+    // Publish package with multiple versions
+    let versions = ["1.0.0", "1.1.0", "2.0.0"];
+
+    for version in versions {
+        let req = PublishRequestDto {
+            name: "stats-test",
+            version: version.clone(),
+            description: f"Version {version}",
+            license: "MIT",
+            tarball: generate_test_tarball(),
+            dependencies: List.new(),
+            dev_dependencies: List.new(),
+            keywords: List.new(),
+            categories: List.new(),
+            homepage: "",
+            repository: "",
+        };
+
+        publish_package(req, token.clone()).await;
+    }
+
+    // Download different versions to create stats
+    download_package_artifact("stats-test", "1.0.0").await;
+    download_package_artifact("stats-test", "1.0.0").await;
+    download_package_artifact("stats-test", "1.1.0").await;
+    download_package_artifact("stats-test", "2.0.0").await;
+
+    // Get stats
+    let stats_result = get_package_stats("stats-test").await;
+    assert_ok(&stats_result);
+
+    let stats = stats_result.unwrap();
+    assert_eq(&stats.package_name, &"stats-test");
+    assert_eq(&stats.total_downloads, &4);
+
+    // Verify version breakdown
+    assert_eq(&stats.version_breakdown.len(), &3);
+
+    // Version 1.0.0 should have 2 downloads (most popular)
+    let v1_stats = stats.version_breakdown.iter()
+        .find(|v| v.version == "1.0.0")
+        .unwrap();
+    assert_eq(&v1_stats.downloads, &2);
+
+    cleanup_test_db();
+}

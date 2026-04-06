@@ -1,0 +1,774 @@
+/// # Stack-Based Allocators for No-Heap Environments
+///
+/// Spec: docs/architecture/new-arch-spec.md#embedded-support
+///
+/// Provides memory allocation strategies for environments without heap support:
+/// - Real-time systems with deterministic memory requirements
+/// - Safety-critical systems (DO-178C, ISO 26262)
+/// - Bare-metal embedded systems (Cortex-M, RISC-V)
+/// - WebAssembly with limited memory
+///
+/// ## Architecture
+///
+/// ```
+/// ┌────────────────────────────────────────────────────────────────────────────┐
+/// │                       STACK ALLOCATION ARCHITECTURE                        │
+/// ├────────────────────────────────────────────────────────────────────────────┤
+/// │                                                                            │
+/// │  ┌─────────────────────────────────────────────────────────────────────┐   │
+/// │  │                        STACK ALLOCATOR                              │   │
+/// │  │  • Fixed-size buffer (compile-time or linker-defined)               │   │
+/// │  │  • Bump allocation (O(1), deterministic)                            │   │
+/// │  │  • Stack-like deallocation (LIFO)                                   │   │
+/// │  │  • Optional watermark tracking                                      │   │
+/// │  └──────────────────────────────────────────────────────────────────────┘   │
+/// │                                    │                                       │
+/// │                                    ▼                                       │
+/// │  ┌──────────────────────────────────────────────────────────────────────┐   │
+/// │  │                        ARENA ALLOCATOR                               │   │
+/// │  │  • Multiple arenas for lifetime-scoped allocation                   │   │
+/// │  │  • Bulk deallocation (free entire arena at once)                    │   │
+/// │  │  • Sub-arena support for nested scopes                              │   │
+/// │  └──────────────────────────────────────────────────────────────────────┘   │
+/// │                                    │                                       │
+/// │                                    ▼                                       │
+/// │  ┌──────────────────────────────────────────────────────────────────────┐   │
+/// │  │                        POOL ALLOCATOR                                │   │
+/// │  │  • Fixed-size block allocation                                      │   │
+/// │  │  • O(1) alloc/free (freelist-based)                                 │   │
+/// │  │  • No fragmentation                                                 │   │
+/// │  └──────────────────────────────────────────────────────────────────────┘   │
+/// │                                                                            │
+/// └────────────────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// ## Performance Characteristics
+///
+/// | Allocator        | Alloc Time | Free Time | Fragmentation | Use Case          |
+/// |------------------|------------|-----------|---------------|-------------------|
+/// | StackAllocator   | O(1) ~5ns  | O(1) ~2ns | None (LIFO)   | Scratch buffers   |
+/// | ArenaAllocator   | O(1) ~8ns  | O(1) ~1ns | None (bulk)   | Request handling  |
+/// | PoolAllocator    | O(1) ~10ns | O(1) ~5ns | None (fixed)  | Connection pools  |
+///
+/// ## Safety Guarantees
+///
+/// - No undefined behavior on out-of-memory (returns AllocError)
+/// - No fragmentation (predictable memory layout)
+/// - Deterministic allocation time (suitable for hard real-time)
+/// - Optional bounds checking (controlled via CBGR tier)
+
+module runtime.stack_alloc;
+
+mount mem.{Alloc, Layout, AllocError};
+mount sync.{AtomicInt, MemoryOrdering};
+mount core.{Maybe, Result};
+mount core.intrinsics.{memcpy};
+
+// =============================================================================
+// StackAllocator - Bump Allocator
+// =============================================================================
+
+/// Stack-based bump allocator with LIFO deallocation
+///
+/// Provides deterministic O(1) allocation by maintaining a single bump pointer.
+/// Deallocation follows LIFO order (most recent allocation freed first).
+///
+/// ## Memory Layout
+///
+/// ```
+/// ┌───────────────────────────────────────────────────────────────┐
+/// │                      STACK BUFFER                             │
+/// ├───────────────────────────────────────────────────────────────┤
+/// │ [allocated region]  │  [free region]     │                   │
+/// │ ◀─────────────────▶ │ ◀───────────────▶  │                   │
+/// │        used          │      available     │                   │
+/// │                      ▲                                        │
+/// │                      │                                        │
+/// │                   top (bump pointer)                          │
+/// └───────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// ## Thread Safety
+///
+/// StackAllocator is NOT thread-safe. Each thread/task should have its own
+/// allocator instance. For multi-threaded scenarios, use thread-local storage
+/// or explicit synchronization.
+public type StackAllocator<const SIZE: Int> is {
+    /// Fixed-size buffer (compile-time sized)
+    buffer: [Byte; SIZE],
+
+    /// Current allocation position (bump pointer)
+    top: Int,
+
+    /// High watermark (maximum usage recorded)
+    watermark: Int,
+
+    /// Allocation count (for debugging)
+    alloc_count: Int,
+};
+
+implement<const SIZE: Int> StackAllocator<SIZE> {
+    /// Create a new stack allocator with zeroed buffer
+    ///
+    /// ## Performance
+    /// - ~0ns (compile-time constant initialization)
+    ///
+    /// ## Example
+    /// ```verum
+    /// // 4KB stack allocator
+    /// let mut alloc = StackAllocator<4096>.new();
+    /// ```
+    public fn new() -> Self {
+        Self {
+            buffer: [0; SIZE],
+            top: 0,
+            watermark: 0,
+            alloc_count: 0,
+        }
+    }
+
+    /// Create from existing buffer (for linker-defined memory regions)
+    ///
+    /// ## Safety
+    /// Buffer must be properly aligned and sized.
+    public fn from_buffer(buffer: [Byte; SIZE]) -> Self {
+        Self {
+            buffer: buffer,
+            top: 0,
+            watermark: 0,
+            alloc_count: 0,
+        }
+    }
+
+    /// Get total capacity
+    @inline
+    public fn capacity(&self) -> Int {
+        SIZE
+    }
+
+    /// Get current usage
+    @inline
+    public fn used(&self) -> Int {
+        self.top
+    }
+
+    /// Get remaining space
+    @inline
+    public fn remaining(&self) -> Int {
+        SIZE - self.top
+    }
+
+    /// Get high watermark (maximum usage)
+    @inline
+    public fn watermark(&self) -> Int {
+        self.watermark
+    }
+
+    /// Get allocation count
+    @inline
+    public fn alloc_count(&self) -> Int {
+        self.alloc_count
+    }
+
+    /// Reset allocator to empty state
+    ///
+    /// ## Safety
+    /// All previous allocations become invalid. Caller must ensure
+    /// no references to allocated memory are still in use.
+    public fn reset(&mut self) {
+        self.top = 0;
+        self.alloc_count = 0;
+        // Note: watermark is NOT reset (tracks lifetime maximum)
+    }
+
+    /// Reset allocator and clear watermark
+    public fn reset_all(&mut self) {
+        self.top = 0;
+        self.watermark = 0;
+        self.alloc_count = 0;
+    }
+
+    /// Allocate memory with specified layout
+    ///
+    /// ## Performance
+    /// - O(1), ~5ns
+    ///
+    /// ## Returns
+    /// - Ok(ptr): Pointer to allocated memory
+    /// - Err(AllocError): Not enough space
+    public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        // Calculate aligned position
+        let align = layout.align();
+        let aligned_top = (self.top + align - 1) & !(align - 1);
+
+        // Check if we have space
+        let new_top = aligned_top + layout.size();
+        if new_top > SIZE {
+            return Err(AllocError.OutOfMemory {
+                requested: layout.size(),
+                available: SIZE - aligned_top,
+            });
+        }
+
+        // Bump the pointer
+        self.top = new_top;
+        self.alloc_count += 1;
+
+        // Update watermark
+        if self.top > self.watermark {
+            self.watermark = self.top;
+        }
+
+        // Return pointer to allocated region
+        let ptr = &mut self.buffer[aligned_top] as *mut Byte;
+        Ok(ptr)
+    }
+
+    /// Deallocate memory (LIFO only)
+    ///
+    /// ## Safety
+    /// Deallocation must happen in LIFO order. Deallocating memory that
+    /// wasn't the most recent allocation results in memory leaks.
+    ///
+    /// ## Performance
+    /// - O(1), ~2ns
+    public fn dealloc(&mut self, ptr: *mut Byte, layout: Layout) {
+        // Calculate the start position of this allocation
+        let ptr_offset = (ptr as Int) - (&self.buffer[0] as *const Byte as Int);
+
+        // Only deallocate if this was the most recent allocation
+        let expected_top = ptr_offset + layout.size();
+        if self.top == expected_top {
+            self.top = ptr_offset;
+            self.alloc_count = self.alloc_count.saturating_sub(1);
+        }
+        // Otherwise: silent no-op (LIFO violation, memory leaked)
+    }
+
+    /// Create a save point for stack unwinding
+    ///
+    /// ## Returns
+    /// Current stack position that can be restored later
+    ///
+    /// ## Example
+    /// ```verum
+    /// let mut alloc = StackAllocator<1024>.new();
+    /// let savepoint = alloc.save();
+    ///
+    /// // Allocate temporary data
+    /// let ptr = alloc.alloc(Layout.new<[Byte; 100]>()).unwrap();
+    /// // ... use ptr ...
+    ///
+    /// // Restore to savepoint (frees all allocations since save)
+    /// alloc.restore(savepoint);
+    /// ```
+    @inline
+    public fn save(&self) -> StackSavepoint {
+        StackSavepoint {
+            top: self.top,
+            alloc_count: self.alloc_count,
+        }
+    }
+
+    /// Restore to a previous save point
+    ///
+    /// ## Safety
+    /// All allocations made after the savepoint become invalid.
+    @inline
+    public fn restore(&mut self, savepoint: StackSavepoint) {
+        self.top = savepoint.top;
+        self.alloc_count = savepoint.alloc_count;
+    }
+}
+
+implement<const SIZE: Int> Alloc for StackAllocator<SIZE> {
+    fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        Self.alloc(self, layout)
+    }
+
+    fn dealloc(&mut self, ptr: *mut Byte, layout: Layout) {
+        Self.dealloc(self, ptr, layout);
+    }
+
+    fn realloc(
+        &mut self,
+        ptr: *mut Byte,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<*mut Byte, AllocError> {
+        // Stack allocators don't support true realloc
+        // Only allow in-place growth if this is the most recent allocation
+        let ptr_offset = (ptr as Int) - (&self.buffer[0] as *const Byte as Int);
+        let expected_top = ptr_offset + old_layout.size();
+
+        if self.top == expected_top {
+            // This is the most recent allocation, try to grow in place
+            let new_top = ptr_offset + new_layout.size();
+            if new_top <= SIZE {
+                self.top = new_top;
+                if self.top > self.watermark {
+                    self.watermark = self.top;
+                }
+                return Ok(ptr);
+            }
+        }
+
+        // Can't grow in place, need fresh allocation
+        let new_ptr = self.alloc(new_layout)?;
+
+        // Copy old data
+        let copy_size = old_layout.size().min(new_layout.size());
+        memcpy(new_ptr, ptr, copy_size);
+
+        Ok(new_ptr)
+    }
+}
+
+/// Save point for stack allocator
+public type StackSavepoint is {
+    top: Int,
+    alloc_count: Int,
+};
+
+// =============================================================================
+// ArenaAllocator - Bulk Deallocation
+// =============================================================================
+
+/// Arena allocator for lifetime-scoped allocation with bulk deallocation
+///
+/// Arenas are useful when multiple allocations share a common lifetime
+/// (e.g., request handling, parser state). All allocations in an arena
+/// are freed together when the arena is dropped.
+///
+/// ## Memory Layout
+///
+/// ```
+/// ┌───────────────────────────────────────────────────────────────┐
+/// │                        ARENA                                  │
+/// ├───────────────────────────────────────────────────────────────┤
+/// │ [chunk 1]     │ [chunk 2]     │ [chunk 3]     │ ...           │
+/// │ ┌───────────┐ │ ┌───────────┐ │ ┌───────────┐ │               │
+/// │ │ alloc 1   │ │ │ alloc 4   │ │ │ alloc 7   │ │               │
+/// │ │ alloc 2   │ │ │ alloc 5   │ │ │ alloc 8   │ │               │
+/// │ │ alloc 3   │ │ │ alloc 6   │ │ │ ...       │ │               │
+/// │ │ [free]    │ │ │ [free]    │ │ │           │ │               │
+/// │ └───────────┘ │ └───────────┘ │ └───────────┘ │               │
+/// └───────────────────────────────────────────────────────────────┘
+/// ```
+public type ArenaAllocator<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> is {
+    /// Chunk storage
+    chunks: [[Byte; CHUNK_SIZE]; MAX_CHUNKS],
+
+    /// Current chunk index
+    current_chunk: Int,
+
+    /// Position within current chunk
+    chunk_pos: Int,
+
+    /// Total bytes allocated
+    total_allocated: Int,
+};
+
+implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ArenaAllocator<CHUNK_SIZE, MAX_CHUNKS> {
+    /// Create new arena allocator
+    public fn new() -> Self {
+        Self {
+            chunks: [[0; CHUNK_SIZE]; MAX_CHUNKS],
+            current_chunk: 0,
+            chunk_pos: 0,
+            total_allocated: 0,
+        }
+    }
+
+    /// Get total capacity
+    @inline
+    public fn capacity(&self) -> Int {
+        CHUNK_SIZE * MAX_CHUNKS
+    }
+
+    /// Get current usage
+    @inline
+    public fn used(&self) -> Int {
+        self.total_allocated
+    }
+
+    /// Get remaining space in current chunk
+    @inline
+    public fn remaining_in_chunk(&self) -> Int {
+        CHUNK_SIZE - self.chunk_pos
+    }
+
+    /// Allocate memory
+    ///
+    /// ## Performance
+    /// - O(1), ~8ns
+    public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        let size = layout.size();
+        let align = layout.align();
+
+        // Align current position
+        let aligned_pos = (self.chunk_pos + align - 1) & !(align - 1);
+
+        // Check if fits in current chunk
+        if aligned_pos + size <= CHUNK_SIZE {
+            let ptr = &mut self.chunks[self.current_chunk][aligned_pos] as *mut Byte;
+            self.chunk_pos = aligned_pos + size;
+            self.total_allocated += size;
+            return Ok(ptr);
+        }
+
+        // Need new chunk
+        if self.current_chunk + 1 >= MAX_CHUNKS {
+            return Err(AllocError.OutOfMemory {
+                requested: size,
+                available: self.remaining_in_chunk(),
+            });
+        }
+
+        // Move to next chunk
+        self.current_chunk += 1;
+        self.chunk_pos = 0;
+
+        // Allocate from fresh chunk
+        let aligned_pos = (align - 1) & !(align - 1); // Align from start
+        if aligned_pos + size > CHUNK_SIZE {
+            return Err(AllocError.AllocationTooLarge {
+                requested: size,
+                max_size: CHUNK_SIZE,
+            });
+        }
+
+        let ptr = &mut self.chunks[self.current_chunk][aligned_pos] as *mut Byte;
+        self.chunk_pos = aligned_pos + size;
+        self.total_allocated += size;
+        Ok(ptr)
+    }
+
+    /// Reset arena (bulk deallocation)
+    ///
+    /// ## Performance
+    /// - O(1), ~1ns
+    ///
+    /// ## Safety
+    /// All allocations become invalid. Caller must ensure no references
+    /// to arena memory are still in use.
+    public fn reset(&mut self) {
+        self.current_chunk = 0;
+        self.chunk_pos = 0;
+        self.total_allocated = 0;
+    }
+
+    /// Create a sub-arena for nested scopes
+    ///
+    /// Returns a savepoint that can be used to restore the arena state.
+    @inline
+    public fn save(&self) -> ArenaSavepoint {
+        ArenaSavepoint {
+            chunk: self.current_chunk,
+            pos: self.chunk_pos,
+            total: self.total_allocated,
+        }
+    }
+
+    /// Restore to a savepoint (free allocations since savepoint)
+    @inline
+    public fn restore(&mut self, savepoint: ArenaSavepoint) {
+        self.current_chunk = savepoint.chunk;
+        self.chunk_pos = savepoint.pos;
+        self.total_allocated = savepoint.total;
+    }
+}
+
+implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> Alloc for ArenaAllocator<CHUNK_SIZE, MAX_CHUNKS> {
+    fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        Self.alloc(self, layout)
+    }
+
+    fn dealloc(&mut self, _ptr: *mut Byte, _layout: Layout) {
+        // No-op: arena allocators don't support individual deallocation
+    }
+
+    fn realloc(
+        &mut self,
+        _ptr: *mut Byte,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<*mut Byte, AllocError> {
+        // Arena doesn't support realloc, just allocate fresh
+        let new_ptr = self.alloc(new_layout)?;
+
+        // Copy old data (if ptr is non-null)
+        if !_ptr.is_null() {
+            let copy_size = old_layout.size().min(new_layout.size());
+            memcpy(new_ptr, _ptr, copy_size);
+        }
+
+        Ok(new_ptr)
+    }
+}
+
+/// Savepoint for arena allocator
+public type ArenaSavepoint is {
+    chunk: Int,
+    pos: Int,
+    total: Int,
+};
+
+// =============================================================================
+// PoolAllocator - Fixed-Size Blocks
+// =============================================================================
+
+/// Pool allocator for fixed-size block allocation
+///
+/// Optimal for allocating many objects of the same size (connections,
+/// request contexts, etc.). Provides O(1) allocation and deallocation
+/// with zero fragmentation.
+///
+/// ## Memory Layout
+///
+/// ```
+/// ┌───────────────────────────────────────────────────────────────┐
+/// │                         POOL                                  │
+/// ├───────────────────────────────────────────────────────────────┤
+/// │ [block 0] │ [block 1] │ [block 2] │ ... │ [block N-1]         │
+/// │ ┌───────┐ │ ┌───────┐ │ ┌───────┐ │     │ ┌───────┐           │
+/// │ │ data  │ │ │ next→ │ │ │ next→ │ │ ... │ │ next→ │           │
+/// │ │       │ │ │ (free)│ │ │ (free)│ │     │ │ null  │           │
+/// │ └───────┘ │ └───────┘ │ └───────┘ │     │ └───────┘           │
+/// │   (used)  │           │           │     │                     │
+/// │           │           ▲           │     │                     │
+/// │           │           │           │     │                     │
+/// │           └───────────┘           │     │                     │
+/// │                       freelist ───┘     │                     │
+/// └───────────────────────────────────────────────────────────────┘
+/// ```
+public type PoolAllocator<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> is {
+    /// Block storage
+    blocks: [[Byte; BLOCK_SIZE]; BLOCK_COUNT],
+
+    /// Free list head (index, or BLOCK_COUNT if empty)
+    freelist_head: Int,
+
+    /// Number of allocated blocks
+    allocated_count: Int,
+};
+
+implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> PoolAllocator<BLOCK_SIZE, BLOCK_COUNT> {
+    /// Create new pool allocator with initialized freelist
+    public fn new() -> Self {
+        let mut pool = Self {
+            blocks: [[0; BLOCK_SIZE]; BLOCK_COUNT],
+            freelist_head: 0,
+            allocated_count: 0,
+        };
+
+        // Initialize freelist: each block points to the next
+        for i in 0..(BLOCK_COUNT - 1) {
+            // Store next free index in first bytes of block
+            let next_index = i + 1;
+            pool.blocks[i][0..8].copy_from_slice(&(next_index as UInt64).to_le_bytes());
+        }
+        // Last block points to BLOCK_COUNT (end marker)
+        pool.blocks[BLOCK_COUNT - 1][0..8].copy_from_slice(&(BLOCK_COUNT as UInt64).to_le_bytes());
+
+        pool
+    }
+
+    /// Get block size
+    @inline
+    public fn block_size(&self) -> Int {
+        BLOCK_SIZE
+    }
+
+    /// Get total block count
+    @inline
+    public fn block_count(&self) -> Int {
+        BLOCK_COUNT
+    }
+
+    /// Get number of allocated blocks
+    @inline
+    public fn allocated(&self) -> Int {
+        self.allocated_count
+    }
+
+    /// Get number of available blocks
+    @inline
+    public fn available(&self) -> Int {
+        BLOCK_COUNT - self.allocated_count
+    }
+
+    /// Allocate a block
+    ///
+    /// ## Performance
+    /// - O(1), ~10ns
+    ///
+    /// ## Returns
+    /// - Ok(ptr): Pointer to block
+    /// - Err: Pool exhausted
+    public fn alloc_block(&mut self) -> Result<*mut Byte, AllocError> {
+        if self.freelist_head >= BLOCK_COUNT {
+            return Err(AllocError.OutOfMemory {
+                requested: BLOCK_SIZE,
+                available: 0,
+            });
+        }
+
+        // Pop from freelist
+        let block_index = self.freelist_head;
+        let next_bytes = &self.blocks[block_index][0..8];
+        let next_index = UInt64.from_le_bytes(next_bytes.try_into().unwrap()) as Int;
+        self.freelist_head = next_index;
+        self.allocated_count += 1;
+
+        // Return pointer to block
+        let ptr = &mut self.blocks[block_index][0] as *mut Byte;
+        Ok(ptr)
+    }
+
+    /// Free a block
+    ///
+    /// ## Performance
+    /// - O(1), ~5ns
+    ///
+    /// ## Safety
+    /// ptr must be a pointer previously returned by alloc_block
+    public fn free_block(&mut self, ptr: *mut Byte) {
+        // Calculate block index from pointer
+        let base_ptr = &self.blocks[0][0] as *const Byte as Int;
+        let ptr_val = ptr as Int;
+        let offset = ptr_val - base_ptr;
+        let block_index = offset / BLOCK_SIZE;
+
+        // Sanity check
+        if block_index >= BLOCK_COUNT {
+            return; // Invalid pointer, ignore
+        }
+
+        // Push to freelist
+        let next_bytes = (self.freelist_head as UInt64).to_le_bytes();
+        self.blocks[block_index][0..8].copy_from_slice(&next_bytes);
+        self.freelist_head = block_index;
+        self.allocated_count = self.allocated_count.saturating_sub(1);
+    }
+}
+
+implement<const BLOCK_SIZE: Int, const BLOCK_COUNT: Int> Alloc for PoolAllocator<BLOCK_SIZE, BLOCK_COUNT> {
+    fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        if layout.size() > BLOCK_SIZE {
+            return Err(AllocError.AllocationTooLarge {
+                requested: layout.size(),
+                max_size: BLOCK_SIZE,
+            });
+        }
+        self.alloc_block()
+    }
+
+    fn dealloc(&mut self, ptr: *mut Byte, _layout: Layout) {
+        self.free_block(ptr);
+    }
+
+    fn realloc(
+        &mut self,
+        ptr: *mut Byte,
+        _old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<*mut Byte, AllocError> {
+        if new_layout.size() > BLOCK_SIZE {
+            return Err(AllocError.AllocationTooLarge {
+                requested: new_layout.size(),
+                max_size: BLOCK_SIZE,
+            });
+        }
+        // Pool blocks are fixed size, so realloc is a no-op if size fits
+        Ok(ptr)
+    }
+}
+
+// =============================================================================
+// Scoped Allocator Helpers
+// =============================================================================
+
+/// RAII guard that restores allocator state on drop
+public type ScopedStack<const SIZE: Int> is {
+    allocator: &mut StackAllocator<SIZE>,
+    savepoint: StackSavepoint,
+};
+
+implement<const SIZE: Int> ScopedStack<SIZE> {
+    /// Create scoped stack that auto-restores on drop
+    public fn new(allocator: &mut StackAllocator<SIZE>) -> Self {
+        let savepoint = allocator.save();
+        Self {
+            allocator: allocator,
+            savepoint: savepoint,
+        }
+    }
+
+    /// Allocate from the scoped region
+    @inline
+    public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        self.allocator.alloc(layout)
+    }
+}
+
+implement<const SIZE: Int> Drop for ScopedStack<SIZE> {
+    fn drop(&mut self) {
+        self.allocator.restore(self.savepoint);
+    }
+}
+
+/// RAII guard for arena allocator
+public type ScopedArena<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> is {
+    allocator: &mut ArenaAllocator<CHUNK_SIZE, MAX_CHUNKS>,
+    savepoint: ArenaSavepoint,
+};
+
+implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> ScopedArena<CHUNK_SIZE, MAX_CHUNKS> {
+    public fn new(allocator: &mut ArenaAllocator<CHUNK_SIZE, MAX_CHUNKS>) -> Self {
+        let savepoint = allocator.save();
+        Self {
+            allocator: allocator,
+            savepoint: savepoint,
+        }
+    }
+
+    @inline
+    public fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError> {
+        self.allocator.alloc(layout)
+    }
+}
+
+implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> Drop for ScopedArena<CHUNK_SIZE, MAX_CHUNKS> {
+    fn drop(&mut self) {
+        self.allocator.restore(self.savepoint);
+    }
+}
+
+// =============================================================================
+// Type Aliases for Common Configurations
+// =============================================================================
+
+/// 1KB stack allocator (tiny, single function scope)
+public type TinyStackAllocator is StackAllocator<1024>;
+
+/// 4KB stack allocator (small, typical embedded)
+public type SmallStackAllocator is StackAllocator<4096>;
+
+/// 16KB stack allocator (medium, RTOS task)
+public type MediumStackAllocator is StackAllocator<16384>;
+
+/// 64KB stack allocator (large, complex operations)
+public type LargeStackAllocator is StackAllocator<65536>;
+
+/// Small arena (4KB chunks, 16 chunks = 64KB total)
+public type SmallArena is ArenaAllocator<4096, 16>;
+
+/// Medium arena (16KB chunks, 32 chunks = 512KB total)
+public type MediumArena is ArenaAllocator<16384, 32>;
+
+/// Connection pool (1KB blocks, 128 connections)
+public type ConnectionPool is PoolAllocator<1024, 128>;
+
+/// Request context pool (256B blocks, 256 contexts)
+public type RequestContextPool is PoolAllocator<256, 256>;

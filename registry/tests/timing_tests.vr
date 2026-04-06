@@ -1,0 +1,86 @@
+// Comprehensive timing tests for std.time module
+
+mount core.time.{unix_timestamp, unix_timestamp_millis};
+
+@test
+fn test_unix_timestamp() {
+    let ts = unix_timestamp();
+    assert(ts > 0, "Unix timestamp should be positive");
+    print(f"Current Unix timestamp: {ts}");
+}
+
+@test
+fn test_unix_timestamp_millis() {
+    let ts_millis = unix_timestamp_millis();
+    assert(ts_millis > 0, "Unix timestamp millis should be positive");
+    print(f"Current Unix timestamp (ms): {ts_millis}");
+}
+
+@test
+fn test_timestamp_consistency() {
+    let ts_seconds = unix_timestamp();
+    let ts_millis = unix_timestamp_millis();
+
+    // Millis should be roughly seconds * 1000
+    let expected_millis = ts_seconds * 1000;
+    let diff = if ts_millis > expected_millis {
+        ts_millis - expected_millis
+    } else {
+        expected_millis - ts_millis
+    };
+
+    // Allow up to 2 seconds difference (2000ms)
+    assert(diff < 2000, "Millis and seconds timestamps should be consistent");
+    print(f"Timestamp consistency: {ts_seconds}s = {ts_millis}ms (diff: {diff}ms)");
+}
+
+@test
+fn test_multiple_timestamp_calls() {
+    let ts1 = unix_timestamp();
+
+    // Do some work
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum = sum + i;
+    }
+
+    let ts2 = unix_timestamp();
+
+    assert(ts2 >= ts1, "Timestamps should not go backward");
+    print(f"Multiple calls: {ts1}s -> {ts2}s (work result: {sum})");
+}
+
+@test
+fn test_timestamp_millis_precision() {
+    let ts1 = unix_timestamp_millis();
+    let ts2 = unix_timestamp_millis();
+    let ts3 = unix_timestamp_millis();
+
+    // All timestamps should be valid
+    assert(ts1 > 0, "ts1 should be positive");
+    assert(ts2 > 0, "ts2 should be positive");
+    assert(ts3 > 0, "ts3 should be positive");
+
+    // Timestamps should not decrease
+    assert(ts2 >= ts1, "ts2 should be >= ts1");
+    assert(ts3 >= ts2, "ts3 should be >= ts2");
+
+    print(f"Timestamp precision: {ts1}ms -> {ts2}ms -> {ts3}ms");
+}
+
+@test
+fn test_timestamp_with_computation() {
+    let start_ts = unix_timestamp();
+
+    // Perform a computation
+    let mut result = 1;
+    for i in 1..100 {
+        result = result + (i * 2);
+    }
+
+    let end_ts = unix_timestamp();
+
+    assert(end_ts >= start_ts, "End timestamp should be >= start timestamp");
+    assert(result > 0, "Computation should produce result");
+    print(f"Computation from {start_ts}s to {end_ts}s, result: {result}");
+}

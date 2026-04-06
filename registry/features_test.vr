@@ -1,0 +1,76 @@
+// Test various language features in the interpreter
+
+// Test 1: Generic types
+type Container<T> is {
+    value: T,
+};
+
+implement<T> Container<T> {
+    pub fn new(value: T) -> Container<T> {
+        Container { value: value }
+    }
+
+    pub fn get(self) -> T {
+        self.value
+    }
+}
+
+// Test 2: Nested match expressions
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+fn handle_result(res: Result<Int, Text>) -> Text {
+    match res {
+        Result.Ok(val) => f"Success: {val}",
+        Result.Err(msg) => f"Error: {msg}",
+    }
+}
+
+// Test 3: Closures (if supported)
+// fn test_closure() {
+//     let x = 5;
+//     let add_x = |y| x + y;
+//     add_x(10)
+// }
+
+// Test 4: Pattern matching with guards
+fn classify_number(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        n if n > 0 => "positive",
+        _ => "negative",
+    }
+}
+
+fn main() {
+    print("═══════════════════════════════════════════════════════════");
+    print("FEATURE TEST SUITE");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    // Test generics
+    print("Test 1: Generic Types");
+    let container: Container<Int> = Container.new(42);
+    print(f"  Container value: {container.get()}");
+    print("");
+
+    // Test Result type
+    print("Test 2: Result Type");
+    let res1: Result<Int, Text> = Result.Ok(100);
+    let res2: Result<Int, Text> = Result.Err("Something went wrong");
+    print(f"  {handle_result(res1)}");
+    print(f"  {handle_result(res2)}");
+    print("");
+
+    // Test pattern matching with guards
+    print("Test 3: Pattern Matching with Guards");
+    print(f"  classify_number(0): {classify_number(0)}");
+    print(f"  classify_number(5): {classify_number(5)}");
+    print(f"  classify_number(-3): {classify_number(-3)}");
+    print("");
+
+    print("═══════════════════════════════════════════════════════════");
+    print("TESTS COMPLETE");
+    print("═══════════════════════════════════════════════════════════");
+}

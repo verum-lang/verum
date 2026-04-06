@@ -1,0 +1,17 @@
+fn main() {
+    // Test nested lists which use Generic internally
+    let nested_lists = [[1, 2, 3], [4, 5], [6, 7, 8, 9]];
+    let _ = println(f"Nested lists length: {nested_lists.len()}");
+
+    // Test deeply nested lists
+    let deep = [[[1, 2]], [[3, 4]], [[5, 6]]];
+    let _ = println(f"Deep nested length: {deep.len()}");
+
+    // Test with type annotation
+    let typed: [[Int]] = [[10, 20], [30, 40]];
+    let _ = println(f"Typed nested length: {typed.len()}");
+
+    // Test accessing nested elements
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    let _ = println(f"Matrix[0] length: {matrix[0].len()}");
+}

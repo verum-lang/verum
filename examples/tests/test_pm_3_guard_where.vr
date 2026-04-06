@@ -1,0 +1,13 @@
+// Test 3: Pattern guard with where
+
+fn test() -> Text {
+    let x = 5;
+    match x {
+        n where n > 0 => "PASS",
+        _ => "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

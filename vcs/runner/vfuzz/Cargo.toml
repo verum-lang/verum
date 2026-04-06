@@ -1,0 +1,79 @@
+[package]
+name = "verum_vfuzz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "VCS fuzzer for property-based testing of the Verum compiler"
+keywords = ["fuzzing", "testing", "compiler", "verum", "property-based"]
+categories = ["development-tools::testing"]
+
+[lib]
+name = "verum_vfuzz"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vfuzz"
+path = "src/main.rs"
+
+[dependencies]
+# Random number generation
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+colored = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Parallel execution
+rayon = { workspace = true, optional = true }
+num_cpus = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Directory traversal
+walkdir = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# Hashing for deduplication
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Progress bar
+indicatif = { workspace = true }
+
+# Regex for pattern matching
+regex = { workspace = true }
+
+# Signal handling
+ctrlc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+# Enable coverage-guided fuzzing
+coverage = []
+# Enable parallel fuzzing with all CPU cores
+parallel = ["rayon"]
+# Enable sanitizer integration
+sanitizers = []
+
+[lints]
+workspace = true

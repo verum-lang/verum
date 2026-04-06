@@ -1,0 +1,370 @@
+// Comprehensive Closure and Higher-Order Function Test Suite
+// Tests: Basic closures, type annotations, capturing, passing, returning closures
+
+// ============================================================================
+// 1. BASIC CLOSURE SYNTAX
+// ============================================================================
+
+fn test_basic_closures() {
+    let _ = println("Test 1: Basic closure syntax");
+
+    // Simple closure with single parameter
+    let double = |x| x * 2;
+    let result1 = double(5);
+    let _ = println(f"  |x| x * 2 applied to 5 = {result1}");
+
+    // Closure with multiple parameters
+    let add = |x, y| x + y;
+    let result2 = add(10, 20);
+    let _ = println(f"  |x, y| x + y applied to (10, 20) = {result2}");
+
+    // Closure with block body
+    let complex = |x| {
+        let temp = x * 2;
+        temp + 1
+    };
+    let result3 = complex(7);
+    let _ = println(f"  Complex closure applied to 7 = {result3}");
+
+    // Closure with no parameters
+    let get_constant = || 42;
+    let result4 = get_constant();
+    let _ = println(f"  || 42 returns {result4}");
+}
+
+// ============================================================================
+// 2. CLOSURES WITH TYPE ANNOTATIONS
+// ============================================================================
+
+fn test_typed_closures() {
+    let _ = println("Test 2: Closures with type annotations");
+
+    // Explicit input type
+    let square: fn(Int) -> Int = |x: Int| x * x;
+    let result1 = square(6);
+    let _ = println(f"  |x: Int| x * x applied to 6 = {result1}");
+
+    // Full type annotation with return type
+    let increment: fn(Int) -> Int = |x: Int| -> Int { x + 1 };
+    let result2 = increment(99);
+    let _ = println(f"  |x: Int| -> Int {{ x + 1 }} applied to 99 = {result2}");
+
+    // Multiple typed parameters
+    let multiply: fn(Int, Int) -> Int = |a: Int, b: Int| -> Int { a * b };
+    let result3 = multiply(7, 8);
+    let _ = println(f"  |a: Int, b: Int| -> Int {{ a * b }} applied to (7, 8) = {result3}");
+
+    // Float closure
+    let half: fn(Float) -> Float = |x: Float| -> Float { x / 2.0 };
+    let result4 = half(10.0);
+    let _ = println(f"  |x: Float| -> Float {{ x / 2.0 }} applied to 10.0 = {result4}");
+}
+
+// ============================================================================
+// 3. CLOSURES CAPTURING VARIABLES
+// ============================================================================
+
+fn test_capturing_closures() {
+    let _ = println("Test 3: Closures capturing variables");
+
+    // Capture single variable
+    let multiplier = 10;
+    let scale = |x| x * multiplier;
+    let result1 = scale(5);
+    let _ = println(f"  Captured multiplier=10, scale(5) = {result1}");
+
+    // Capture multiple variables
+    let a = 3;
+    let b = 7;
+    let compute = |x| x * a + b;
+    let result2 = compute(4);
+    let _ = println(f"  Captured a=3, b=7, compute(4) = {result2}");
+
+    // Nested closures with capture
+    let outer_val = 100;
+    let outer = |x| {
+        let inner = |y| y + outer_val;
+        inner(x)
+    };
+    let result3 = outer(23);
+    let _ = println(f"  Nested closure with outer_val=100, outer(23) = {result3}");
+
+    // Capture in block
+    let factor = 2;
+    let offset = 5;
+    let transform = |x| {
+        let scaled = x * factor;
+        scaled + offset
+    };
+    let result4 = transform(10);
+    let _ = println(f"  Captured factor=2, offset=5, transform(10) = {result4}");
+}
+
+// ============================================================================
+// 4. PASSING CLOSURES TO FUNCTIONS
+// ============================================================================
+
+fn apply_operation(x: Int, op: fn(Int) -> Int) -> Int {
+    op(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn map_value<T>(value: T, f: fn(T) -> T) -> T {
+    f(value)
+}
+
+fn combine(a: Int, b: Int, op: fn(Int, Int) -> Int) -> Int {
+    op(a, b)
+}
+
+fn test_passing_closures() {
+    let _ = println("Test 4: Passing closures to functions");
+
+    // Pass simple closure
+    let result1 = apply_operation(5, |x| x * 2);
+    let _ = println(f"  apply_operation(5, |x| x * 2) = {result1}");
+
+    // Pass closure to apply_twice
+    let result2 = apply_twice(|x| x + 1, 10);
+    let _ = println(f"  apply_twice(|x| x + 1, 10) = {result2}");
+
+    // Pass closure to generic function
+    let result3 = map_value(7, |x| x * x);
+    let _ = println(f"  map_value(7, |x| x * x) = {result3}");
+
+    // Pass closure with two parameters
+    let result4 = combine(15, 3, |a, b| a - b);
+    let _ = println(f"  combine(15, 3, |a, b| a - b) = {result4}");
+
+    // Pass closure that captures
+    let multiplier = 5;
+    let result5 = apply_operation(4, |x| x * multiplier);
+    let _ = println(f"  apply_operation(4, |x| x * multiplier) with multiplier=5 = {result5}");
+}
+
+// ============================================================================
+// 5. RETURNING CLOSURES FROM FUNCTIONS
+// ============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(factor: Int) -> fn(Int) -> Int {
+    |x| x * factor
+}
+
+fn make_predicate(limit: Int) -> fn(Int) -> Bool {
+    |x| x > limit
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn make_transformer(scale: Int, offset: Int) -> fn(Int) -> Int {
+    |x| x * scale + offset
+}
+
+fn test_returning_closures() {
+    let _ = println("Test 5: Returning closures from functions");
+
+    // Return basic closure
+    let add10 = make_adder(10);
+    let result1 = add10(5);
+    let _ = println(f"  make_adder(10) returns closure, applied to 5 = {result1}");
+
+    // Return multiplier closure
+    let triple = make_multiplier(3);
+    let result2 = triple(7);
+    let _ = println(f"  make_multiplier(3) returns closure, applied to 7 = {result2}");
+
+    // Return predicate closure
+    let is_big = make_predicate(50);
+    let result3 = is_big(75);
+    let result4 = is_big(25);
+    let _ = println(f"  make_predicate(50) returns closure");
+    let _ = println(f"    is_big(75) = {result3}");
+    let _ = println(f"    is_big(25) = {result4}");
+
+    // Function composition
+    let double = |x| x * 2;
+    let add5 = |x| x + 5;
+    let composed = compose(double, add5);
+    let result5 = composed(10);
+    let _ = println(f"  compose(double, add5) applied to 10 = {result5}");
+
+    // Return closure capturing multiple values
+    let transform = make_transformer(2, 10);
+    let result6 = transform(5);
+    let _ = println(f"  make_transformer(2, 10) applied to 5 = {result6}");
+}
+
+// ============================================================================
+// 6. PRACTICAL EXAMPLES
+// ============================================================================
+
+fn filter_numbers(nums: List<Int>, predicate: fn(Int) -> Bool) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < nums.len() {
+        if predicate(nums[i]) {
+            result = result.push(nums[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn map_numbers(nums: List<Int>, mapper: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < nums.len() {
+        result = result.push(mapper(nums[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_numbers(nums: List<Int>, initial: Int, combiner: fn(Int, Int) -> Int) -> Int {
+    let mut acc = initial;
+    let mut i = 0;
+    while i < nums.len() {
+        acc = combiner(acc, nums[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_practical_examples() {
+    let _ = println("Test 6: Practical examples with closures");
+
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Filter even numbers
+    let evens = filter_numbers(numbers, |x| x % 2 == 0);
+    let _ = println("  Filter evens: [1..10] -> [2, 4, 6, 8, 10]");
+
+    // Map to squares
+    let squares = map_numbers(numbers, |x| x * x);
+    let _ = println("  Map to squares: [1..10] -> [1, 4, 9, 16, 25, ...]");
+
+    // Sum all numbers
+    let sum = fold_numbers(numbers, 0, |acc, x| acc + x);
+    let _ = println(f"  Sum of [1..10] = {sum}");
+
+    // Product of first 5 numbers
+    let first_five = [1, 2, 3, 4, 5];
+    let product = fold_numbers(first_five, 1, |acc, x| acc * x);
+    let _ = println(f"  Product of [1..5] = {product}");
+
+    // Chain operations
+    let threshold = 5;
+    let filtered = filter_numbers(numbers, |x| x > threshold);
+    let doubled = map_numbers(filtered, |x| x * 2);
+    let _ = println(f"  Numbers > {threshold}, doubled: [12, 14, 16, 18, 20]");
+}
+
+// ============================================================================
+// 7. CURRYING AND PARTIAL APPLICATION
+// ============================================================================
+
+fn curry_add(a: Int) -> fn(Int) -> Int {
+    |b| a + b
+}
+
+fn curry_multiply(a: Int) -> fn(Int) -> fn(Int) -> Int {
+    |b| |c| a * b * c
+}
+
+fn test_currying() {
+    let _ = println("Test 7: Currying and partial application");
+
+    // Basic currying
+    let add5 = curry_add(5);
+    let result1 = add5(10);
+    let _ = println(f"  curry_add(5) then apply to 10 = {result1}");
+
+    // Multi-level currying
+    let multiply3 = curry_multiply(2);
+    let multiply3_4 = multiply3(3);
+    let result2 = multiply3_4(4);
+    let _ = println(f"  curry_multiply(2)(3)(4) = {result2}");
+
+    // Partial application with captured context
+    let base = 100;
+    let add_to_base = |x| x + base;
+    let result3 = add_to_base(23);
+    let _ = println(f"  Partial application with base=100, add_to_base(23) = {result3}");
+}
+
+// ============================================================================
+// 8. CLOSURES WITH DIFFERENT TYPES
+// ============================================================================
+
+fn apply_float_op(x: Float, op: fn(Float) -> Float) -> Float {
+    op(x)
+}
+
+fn apply_text_op(s: Text, op: fn(Text) -> Text) -> Text {
+    op(s)
+}
+
+fn test_closures_with_types() {
+    let _ = println("Test 8: Closures with different types");
+
+    // Float closures
+    let result1 = apply_float_op(5.5, |x| x * 2.0);
+    let _ = println(f"  Float closure: 5.5 * 2.0 = {result1}");
+
+    let result2 = apply_float_op(10.0, |x| x / 3.0);
+    let _ = println(f"  Float closure: 10.0 / 3.0 = {result2}");
+
+    // Text closures
+    let result3 = apply_text_op("hello", |s| f"{s} world");
+    let _ = println(f"  Text closure: 'hello' -> '{result3}'");
+
+    // Bool predicates
+    let is_even = |x| x % 2 == 0;
+    let result4 = is_even(42);
+    let result5 = is_even(13);
+    let _ = println(f"  Bool predicate: is_even(42) = {result4}, is_even(13) = {result5}");
+}
+
+// ============================================================================
+// MAIN TEST RUNNER
+// ============================================================================
+
+fn main() {
+    let _ = println("=== VERUM CLOSURE AND HIGHER-ORDER FUNCTION TESTS ===");
+    let _ = println("");
+
+    test_basic_closures();
+    let _ = println("");
+
+    test_typed_closures();
+    let _ = println("");
+
+    test_capturing_closures();
+    let _ = println("");
+
+    test_passing_closures();
+    let _ = println("");
+
+    test_returning_closures();
+    let _ = println("");
+
+    test_practical_examples();
+    let _ = println("");
+
+    test_currying();
+    let _ = println("");
+
+    test_closures_with_types();
+    let _ = println("");
+
+    let _ = println("=== ALL CLOSURE TESTS COMPLETE ===");
+}

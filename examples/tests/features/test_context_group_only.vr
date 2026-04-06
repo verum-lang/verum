@@ -1,0 +1,15 @@
+// Test context group definition
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+using WebContext = [Logger, Database];
+
+fn main() {
+    let x = 42;
+}

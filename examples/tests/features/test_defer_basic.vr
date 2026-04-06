@@ -1,0 +1,51 @@
+// Test: Defer statements
+// Tests defer blocks that execute at scope exit
+
+fn test_simple_defer() -> Int {
+    println("Test 1: Simple defer");
+
+    defer println("Defer executed at end");
+
+    println("Before return");
+
+    42
+}
+
+fn test_multiple_defers() -> Int {
+    println("Test 2: Multiple defers (LIFO order)");
+
+    defer println("First defer");
+    defer println("Second defer");
+
+    println("In function body");
+
+    100
+}
+
+fn test_defer_block() -> Int {
+    println("Test 3: Defer with block");
+
+    defer {
+        println("Defer block line 1");
+        println("Defer block line 2");
+    }
+
+    println("Normal execution");
+
+    200
+}
+
+fn main() -> Int {
+    let result1 = test_simple_defer();
+    println(f"Result 1: {result1}");
+    println("");
+
+    let result2 = test_multiple_defers();
+    println(f"Result 2: {result2}");
+    println("");
+
+    let result3 = test_defer_block();
+    println(f"Result 3: {result3}");
+
+    result1 + result2 + result3
+}

@@ -1,0 +1,152 @@
+// Comprehensive Generics Test - Working Features Only
+// Tests all currently working generic features in Verum
+
+// ===== 1. Simple Generic Functions =====
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first<A, B>(a: A, b: B) -> A {
+    a
+}
+
+fn second<A, B>(a: A, b: B) -> B {
+    b
+}
+
+// ===== 2. Generic Record Types =====
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+type Triple<A, B, C> is {
+    x: A,
+    y: B,
+    z: C
+}
+
+type Box<T> is {
+    value: T
+}
+
+// ===== 3. Generic Variant Types =====
+
+type Maybe<T> is
+  | Just(T)
+  | Nothing
+
+type Result<T, E> is
+  | Ok(T)
+  | Err(E)
+
+// ===== 4. Functions Operating on Generic Types =====
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn unwrap_box<T>(b: Box<T>) -> T {
+    b.value
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Just(val) => val,
+        Nothing => default
+    }
+}
+
+fn is_just<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Just(_) => true,
+        Nothing => false
+    }
+}
+
+fn is_ok<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+// ===== 5. Generic Protocols (Definition Only - Impl Has Issues) =====
+
+type Show<T> is protocol {
+    fn show(&self) -> Text;
+}
+
+type Container<T> is protocol {
+    fn get(&self) -> T;
+}
+
+// ===== 6. Test Functions =====
+
+fn test_identity() -> Int {
+    let a = identity(42);
+    let b = identity(true);
+    let c = identity(99);
+    a
+}
+
+fn test_first_second() -> Int {
+    let a = first(10, 20);
+    let b = second(30, 40);
+    a + b
+}
+
+fn test_pair() -> Int {
+    let p = make_pair(5, 10);
+    let q = swap(p);
+    q.first + q.second
+}
+
+fn test_triple() -> Int {
+    let t = Triple { x: 1, y: 2, z: 3 };
+    t.x + t.y + t.z
+}
+
+fn test_box() -> Int {
+    let b = Box { value: 42 };
+    let v = unwrap_box(b);
+    v
+}
+
+fn test_maybe() -> Int {
+    let m1 = Just(10);
+    let m2 = Nothing;
+    let r1 = unwrap_or(m1, 0);
+    let r2 = unwrap_or(m2, 99);
+    let b1 = is_just(m1);
+    let b2 = is_just(m2);
+    r1 + r2
+}
+
+fn test_result() -> Int {
+    let ok = Ok(100);
+    let err = Err(200);
+    let b1 = is_ok(ok);
+    let b2 = is_ok(err);
+    100
+}
+
+// ===== Main Entry Point =====
+
+fn main() -> Int {
+    let t1 = test_identity();
+    let t2 = test_first_second();
+    let t3 = test_pair();
+    let t4 = test_triple();
+    let t5 = test_box();
+    let t6 = test_maybe();
+    let t7 = test_result();
+
+    t1 + t2 + t3 + t4 + t5 + t6 + t7
+}

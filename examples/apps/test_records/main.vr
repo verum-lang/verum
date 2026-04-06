@@ -1,0 +1,58 @@
+// Records and Field Access Test
+
+type Point is { x: Float, y: Float };
+type Rectangle is { origin: Point, width: Float, height: Float };
+type Person is { name: Text, age: Int, active: Bool };
+
+fn create_point(x: Float, y: Float) -> Point {
+    Point { x: x, y: y }
+}
+
+fn distance(p1: Point, p2: Point) -> Float {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    // Using manual sqrt approximation since stdlib import not working
+    let sq = dx * dx + dy * dy;
+    sq  // Return squared distance for now
+}
+
+fn area(rect: Rectangle) -> Float {
+    rect.width * rect.height
+}
+
+fn describe_person(p: Person) -> Text {
+    let status = if p.active { "active" } else { "inactive" };
+    f"{p.name} is {p.age} years old ({status})"
+}
+
+fn main() {
+    print("=== Records Test ===");
+
+    // Simple record
+    let p1 = Point { x: 0.0, y: 0.0 };
+    let p2 = create_point(3.0, 4.0);
+    print(f"Point 1: ({p1.x}, {p1.y})");
+    print(f"Point 2: ({p2.x}, {p2.y})");
+
+    // Distance squared (since no sqrt)
+    let dist_sq = distance(p1, p2);
+    print(f"Distance squared: {dist_sq}");
+
+    // Nested record - create inner first
+    let origin = Point { x: 10.0, y: 20.0 };
+    let rect = Rectangle {
+        origin: origin,
+        width: 5.0,
+        height: 3.0
+    };
+    print(f"Rectangle origin: ({rect.origin.x}, {rect.origin.y})");
+    print(f"Rectangle area: {area(rect)}");
+
+    // Record with different types
+    let alice = Person { name: "Alice", age: 30, active: true };
+    let bob = Person { name: "Bob", age: 25, active: false };
+    print(describe_person(alice));
+    print(describe_person(bob));
+
+    print("=== Done ===");
+}

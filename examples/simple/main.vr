@@ -1,0 +1,17 @@
+// Simple Hello World in Verum
+// Tests basic interpreter and JIT execution
+
+fn main() -> Int {
+    // Basic arithmetic
+    let x = 42;
+    let y = 8;
+    let sum = x + y;
+
+    // Verify the sum is correct (42 + 8 = 50)
+    // Return 0 for success, non-zero for failure
+    if sum == 50 {
+        0
+    } else {
+        1
+    }
+}

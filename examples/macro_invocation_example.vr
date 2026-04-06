@@ -1,0 +1,42 @@
+// Example demonstrating macro invocation syntax in Verum
+// This showcases the three forms of macro invocation:
+// - macro!(args)   - parentheses
+// - macro![args]   - brackets
+// - macro!{args}   - braces
+
+fn main() {
+    // Basic macro invocation with parentheses
+    println!("Hello, Verum macros!");
+
+    // Macro with multiple arguments
+    format!("Value: {}", 42);
+
+    // Vector macro with bracket syntax
+    let numbers = vec![1, 2, 3, 4, 5];
+
+    // Assert macro with brace syntax
+    assert!{ numbers.len() == 5 };
+
+    // Qualified path macro invocation
+    std.println!("Using qualified path");
+
+    // Nested macro invocations
+    println!("{:?}", vec![1, 2, 3]);
+
+    // Empty macro invocation
+    debug!();
+
+    // Complex macro with nested delimiters
+    assert_eq!(vec![1, 2], vec![1, 2]);
+
+    // Macro with format string and interpolation
+    let name = "Verum";
+    println!("Welcome to {}!", name);
+}
+
+// This file demonstrates that the parser can now handle:
+// 1. All three delimiter styles: (), [], {}
+// 2. Qualified macro paths: std.println!
+// 3. Nested delimiter structures
+// 4. Empty macro arguments
+// 5. Macros as expressions in various contexts

@@ -1,0 +1,133 @@
+// Comprehensive test suite for type alias support
+//
+// Tests the implementation of type aliases per the requirements:
+// - Simple aliases: type Int is i64
+// - Chained aliases: type A is B; type B is C
+// - Alias resolution in type checking
+// - Equivalence between alias and target type
+
+// ============================================================================
+// Test 1: Simple aliases to primitives
+// ============================================================================
+
+pub type Int is i64;
+pub type Float is f64;
+pub type Byte is u8;
+
+fn test_simple_aliases(a: Int, b: Float, c: Byte) -> Int {
+    a
+}
+
+// ============================================================================
+// Test 2: Chained aliases
+// ============================================================================
+
+pub type MyInt is Int;      // MyInt -> Int -> i64
+pub type Number is MyInt;   // Number -> MyInt -> Int -> i64
+
+fn test_chained_aliases(n: Number) -> Number {
+    n
+}
+
+// ============================================================================
+// Test 3: Type equivalence
+// Int and i64 should be equivalent for type checking
+// ============================================================================
+
+fn test_equivalence(x: Int, y: i64) -> i64 {
+    x  // Should work: Int === i64
+}
+
+fn test_equivalence_reverse(x: i64, y: Int) -> Int {
+    x  // Should work: i64 === Int
+}
+
+// ============================================================================
+// Test 4: Mixed usage in function calls
+// ============================================================================
+
+fn takes_i64(x: i64) -> i64 {
+    x
+}
+
+fn takes_int(x: Int) -> Int {
+    x
+}
+
+fn test_mixed_calls() {
+    let x: Int = 42;
+    let y: i64 = 100;
+
+    // These should all work due to type equivalence
+    let r1 = takes_i64(x);   // Int -> i64 (alias resolves)
+    let r2 = takes_int(y);   // i64 -> Int (alias resolves)
+    let r3 = takes_i64(y);   // i64 -> i64
+    let r4 = takes_int(x);   // Int -> Int
+}
+
+// ============================================================================
+// Test 5: Variable bindings with aliases
+// ============================================================================
+
+fn test_variable_bindings() {
+    let a: Int = 42;
+    let b: i64 = 100;
+    let c: MyInt = 50;
+    let d: Number = 25;
+
+    // All should be compatible
+    let sum1 = takes_i64(a);
+    let sum2 = takes_i64(b);
+    let sum3 = takes_i64(c);
+    let sum4 = takes_i64(d);
+}
+
+// ============================================================================
+// Test 6: Return type aliases
+// ============================================================================
+
+fn returns_int() -> Int {
+    42
+}
+
+fn returns_i64() -> i64 {
+    100
+}
+
+fn test_return_types() {
+    let x: Int = returns_int();
+    let y: i64 = returns_i64();
+
+    // Cross-assignments should work
+    let z: Int = returns_i64();
+    let w: i64 = returns_int();
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    // Test 1
+    let x: Int = 42;
+    let y: Float = 3.14;
+    let z: Byte = 255;
+    let r1 = test_simple_aliases(x, y, z);
+
+    // Test 2
+    let n: Number = 100;
+    let r2 = test_chained_aliases(n);
+
+    // Test 3
+    let r3 = test_equivalence(x, 100);
+    let r4 = test_equivalence_reverse(100, x);
+
+    // Test 4
+    test_mixed_calls();
+
+    // Test 5
+    test_variable_bindings();
+
+    // Test 6
+    test_return_types();
+}

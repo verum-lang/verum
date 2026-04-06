@@ -1,0 +1,13 @@
+// Test yield with Stream return type
+fn generator() -> Stream<Int> {
+    yield 1;
+    yield 2;
+    yield 3;
+    0
+}
+
+fn main() {
+    println("Testing yield with Stream<Int>");
+    let gen = generator();
+    println("Generator created");
+}

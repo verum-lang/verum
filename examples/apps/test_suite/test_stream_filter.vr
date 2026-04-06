@@ -1,0 +1,11 @@
+// Test: Stream comprehension with filter
+// Tests if stream[... if condition] syntax works
+
+fn main() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = stream[x for x in numbers if x % 2 == 0];
+
+    for item in evens {
+        print(item);
+    }
+}

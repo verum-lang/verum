@@ -1,0 +1,426 @@
+name: CI - Build and Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+# Automatically cancel previous runs for the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # PRE-BUILD: Environment Setup and Validation
+  # ============================================================================
+
+  pre-build:
+    name: Pre-Build Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better caching
+
+      - name: Validate workspace structure
+        run: |
+          echo "## Workspace Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check for required files
+          REQUIRED_FILES=("Cargo.toml" "Cargo.lock" "rust-toolchain.toml" "clippy.toml" "deny.toml")
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ Found: $file" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Missing: $file" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+          done
+
+          # Count workspace members
+          MEMBER_COUNT=$(grep -c "crates/" Cargo.toml || echo "0")
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Workspace members: $MEMBER_COUNT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cache validation
+        run: |
+          echo "## Cache Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Registry: \`~/.cargo/registry\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Git: \`~/.cargo/git\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: \`target/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Hash: \`${{ hashFiles('**/Cargo.lock') }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # BUILD: Multi-Platform Build Matrix
+  # ============================================================================
+
+  build:
+    name: Build (${{ matrix.os }}, ${{ matrix.rust }})
+    needs: pre-build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-12, macos-13, macos-14, windows-2022]
+        rust: [stable, beta]
+        include:
+          # Nightly build on Linux only
+          - os: ubuntu-22.04
+            rust: nightly
+          # Platform-specific configurations
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-12
+            target: x86_64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      # Platform-specific dependency installation
+      - name: Install system dependencies (Ubuntu 22.04)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            llvm-14-dev \
+            libz3-dev \
+            clang-14 \
+            cmake
+
+          # Verify installations
+          llvm-config-14 --version
+          z3 --version
+
+      - name: Install system dependencies (Ubuntu 24.04)
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            llvm-16-dev \
+            libz3-dev \
+            clang-16 \
+            cmake
+
+          llvm-config-16 --version
+          z3 --version
+
+      - name: Install system dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew update
+          brew install llvm@21 z3 pkg-config openssl cmake
+
+          # Set environment variables for LLVM
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+          echo "$(brew --prefix llvm@21)/bin" >> $GITHUB_PATH
+
+          # Verify installations
+          llvm-config --version
+          z3 --version
+
+      - name: Install system dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        run: |
+          # Install LLVM via Chocolatey
+          choco install llvm --version=21.1.0 -y
+          choco install z3 -y
+
+          # Verify installations
+          llvm-config --version
+          z3 --version
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: ${{ matrix.os }}-${{ matrix.rust }}
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Check Cargo.toml formatting
+        run: |
+          cargo tree --depth=1
+          echo "✅ Cargo.toml is valid"
+
+      - name: Build workspace (debug)
+        run: |
+          cargo build --workspace --all-targets --verbose
+          echo "✅ Debug build completed"
+
+      - name: Build workspace (release)
+        run: |
+          cargo build --workspace --release --verbose
+          echo "✅ Release build completed"
+
+      - name: Build with all features
+        run: |
+          cargo build --workspace --all-features --verbose
+          echo "✅ All-features build completed"
+
+      - name: Build with no default features
+        run: |
+          cargo build --workspace --no-default-features --verbose
+          echo "✅ No-default-features build completed"
+
+      - name: Check build artifacts
+        shell: bash
+        run: |
+          echo "## Build Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # List all built binaries
+          if [ -d "target/release" ]; then
+            echo "### Release Binaries" >> $GITHUB_STEP_SUMMARY
+            find target/release -maxdepth 1 -type f -executable 2>/dev/null | while read file; do
+              SIZE=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "unknown")
+              echo "- \`$(basename $file)\`: $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
+
+      - name: Upload build artifacts
+        if: matrix.rust == 'stable'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            target/release/verum*
+            target/release/*.exe
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ============================================================================
+  # TEST: Comprehensive Test Suite
+  # ============================================================================
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.rust }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+        rust: [stable]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Platform-specific dependencies (same as build)
+      - name: Install system dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Install system dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install system dependencies (Windows)
+        if: matrix.os == 'windows-2022'
+        run: |
+          choco install llvm z3 -y
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: ${{ matrix.os }}-test
+
+      - name: Run unit tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          cargo test --workspace --lib --verbose -- --nocapture
+
+      - name: Run integration tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          cargo test --workspace --test '*' --verbose -- --nocapture
+
+      - name: Run documentation tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          cargo test --workspace --doc --verbose
+
+      - name: Run tests with all features
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          cargo test --workspace --all-features --verbose
+
+      - name: Generate test report
+        if: always()
+        shell: bash
+        run: |
+          echo "## Test Results (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- OS: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Rust: ${{ matrix.rust }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # CROSS-COMPILATION: Additional Targets
+  # ============================================================================
+
+  cross-compile:
+    name: Cross-Compile (${{ matrix.target }})
+    needs: pre-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-musl
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cross-compile
+        run: |
+          cross build --workspace --target ${{ matrix.target }} --verbose
+          echo "✅ Cross-compilation for ${{ matrix.target }} completed"
+
+  # ============================================================================
+  # VERIFICATION: Additional Checks
+  # ============================================================================
+
+  verify:
+    name: Verification Checks
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev
+
+      - name: Check workspace dependencies
+        run: |
+          cargo tree --workspace --duplicates
+          cargo tree --workspace --edges features
+
+      - name: Verify no warnings in production
+        run: |
+          RUSTFLAGS="-D warnings" cargo check --workspace --release
+
+      - name: Check for unused dependencies
+        run: |
+          cargo install cargo-udeps --locked || true
+          cargo +nightly udeps --workspace || echo "Udeps check completed with warnings"
+
+  # ============================================================================
+  # SUMMARY: CI Pipeline Status
+  # ============================================================================
+
+  ci-success:
+    name: CI Success
+    needs: [pre-build, build, test, verify]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check all jobs
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check job results
+          if [ "${{ needs.pre-build.result }}" != "success" ]; then
+            echo "❌ Pre-build validation failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ Build stage failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "❌ Test stage failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ "${{ needs.verify.result }}" != "success" ]; then
+            echo "❌ Verification stage failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "✅ All CI stages passed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stage Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-build: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Test: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify: ✅" >> $GITHUB_STEP_SUMMARY

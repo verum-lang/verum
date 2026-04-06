@@ -1,0 +1,155 @@
+// =============================================================================
+// gauge.vr - Progress bar / gauge widget with Unicode sub-cell precision
+// =============================================================================
+module gauge;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.Block;
+mount super.paragraph.Span;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+/// Gauge — horizontal progress bar using Unicode block characters.
+/// Supports smooth sub-cell rendering with ▏▎▍▌▋▊▉█ when use_unicode is true.
+/// Label is a Maybe<Span> for styled label text, centered over the gauge.
+public type Gauge is {
+    ratio: Float,           // Progress [0.0, 1.0]
+    label: Maybe<Span>,     // Optional styled label (e.g., Span.styled("42%", style))
+    block: Maybe<Block>,
+    style: Style,
+    gauge_style: Style,
+    use_unicode: Bool,      // Use Unicode sub-cell characters for smooth progress
+};
+
+implement Gauge {
+    public fn new() -> Gauge {
+        Gauge {
+            ratio: 0.0,
+            label: None,
+            block: None,
+            style: Style.DEFAULT,
+            gauge_style: Style.new().fg(Color.Green),
+            use_unicode: true,
+        }
+    }
+
+    /// Set progress ratio [0.0, 1.0].
+    public fn ratio(self, r: Float) -> Gauge {
+        Gauge { ratio: r.clamp(0.0, 1.0), ..self }
+    }
+
+    /// Set progress as percentage [0, 100].
+    public fn percent(self, p: Int) -> Gauge {
+        Gauge { ratio: (p as Float / 100.0).clamp(0.0, 1.0), ..self }
+    }
+
+    /// Set a styled label Span.
+    public fn label(self, label: Span) -> Gauge {
+        Gauge { label: Some(label), ..self }
+    }
+
+    /// Set a plain text label (creates an unstyled Span).
+    public fn label_text(self, text: Text) -> Gauge {
+        Gauge { label: Some(Span.raw(text)), ..self }
+    }
+
+    /// Set the block wrapper.
+    public fn block(self, block: Block) -> Gauge {
+        Gauge { block: Some(block), ..self }
+    }
+
+    /// Set the style of the filled portion.
+    public fn gauge_style(self, style: Style) -> Gauge {
+        Gauge { gauge_style: style, ..self }
+    }
+
+    /// Set the overall gauge style.
+    public fn style(self, style: Style) -> Gauge {
+        Gauge { style: style, ..self }
+    }
+
+    /// Enable or disable Unicode sub-cell rendering.
+    public fn use_unicode(self, enabled: Bool) -> Gauge {
+        Gauge { use_unicode: enabled, ..self }
+    }
+}
+
+implement Widget for Gauge {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let gauge_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if gauge_area.width < 1 || gauge_area.height < 1 { return; }
+
+        buf.set_style(gauge_area, self.style);
+
+        // Calculate filled width
+        let filled_width_f = gauge_area.width as Float * self.ratio;
+        let filled_width = filled_width_f as Int;
+        let remainder = filled_width_f - filled_width as Float;
+
+        // Unicode sub-cell progress characters: ▏▎▍▌▋▊▉█
+        let fill_chars = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+
+        let y = gauge_area.y;
+
+        // Draw each column
+        for x in gauge_area.x..gauge_area.right() {
+            let col = x - gauge_area.x;
+            if col < filled_width {
+                // Fully filled column
+                buf.get_mut(x, y).set_char("█", self.gauge_style);
+            } else if col == filled_width && self.use_unicode && remainder > 0.0 {
+                // Partial column using sub-cell character
+                let idx = (remainder * 8.0) as Int;
+                let ch = fill_chars[idx.min(7)];
+                buf.get_mut(x, y).set_char(ch, self.gauge_style);
+            }
+        }
+
+        // Determine label text
+        let label_text = match self.label {
+            Some(ref l) => l.content.clone(),
+            None => {
+                let pct = (self.ratio * 100.0) as Int;
+                f"{pct}%"
+            }
+        };
+
+        let label_style = match self.label {
+            Some(ref l) => l.style,
+            None => self.style,
+        };
+
+        // Center label over the gauge
+        let label_len = label_text.len();
+        if label_len <= gauge_area.width {
+            let label_x = gauge_area.x + (gauge_area.width - label_len) / 2;
+            let mut i = 0;
+            let mut x = label_x;
+            while i < label_len && x < gauge_area.right() {
+                let ch = label_text.slice(i, i + 1);
+                let col = x - gauge_area.x;
+                // Invert style where label overlaps the filled portion
+                let char_style = if col < filled_width {
+                    Style.new()
+                        .fg(self.gauge_style.bg ?? Some(Color.Reset))
+                        .bg(self.gauge_style.fg ?? Some(Color.Reset))
+                } else {
+                    label_style
+                };
+                buf.get_mut(x, y).set_char(&ch, char_style);
+                x = x + 1;
+                i = i + 1;
+            }
+        }
+    }
+}

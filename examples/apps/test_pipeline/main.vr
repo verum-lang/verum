@@ -1,0 +1,24 @@
+// Pipeline Operator Test
+
+fn double(x: Int) -> Int { x * 2 }
+fn add_one(x: Int) -> Int { x + 1 }
+fn square(x: Int) -> Int { x * x }
+
+fn main() {
+    print("=== Pipeline Operator Test ===");
+
+    // Basic pipeline
+    let result = 5 |> double |> add_one;
+    print(f"5 |> double |> add_one = {result}");
+
+    // Longer pipeline
+    let chain = 3 |> double |> square |> add_one;
+    print(f"3 |> double |> square |> add_one = {chain}");
+
+    // Pipeline with named closure
+    let add_five = |x: Int| -> Int { x + 5 };
+    let mapped = 10 |> add_five;
+    print(f"10 |> add_five = {mapped}");
+
+    print("=== Done ===");
+}

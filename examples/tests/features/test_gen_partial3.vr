@@ -1,0 +1,371 @@
+// Comprehensive Test: Generic Features in Verum
+// This test covers all generic features based on verum.ebnf grammar
+// Tests: generic functions, types, variants, bounds, where clauses, meta parameters, inference
+
+// ==============================================================================
+// 1. Generic Functions (Basic)
+// ==============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn swap_pair<A, B>(a: A, b: B) -> (B, A) {
+    (b, a)
+}
+
+fn first<T>(a: T, b: T) -> T {
+    a
+}
+
+fn const_fn<T, U>(x: T, y: U) -> T {
+    x
+}
+
+// ==============================================================================
+// 2. Generic Types (Record)
+// ==============================================================================
+
+type Box<T> is { value: T };
+
+type Pair<A, B> is { first: A, second: B };
+
+type Triple<X, Y, Z> is { x: X, y: Y, z: Z };
+
+// ==============================================================================
+// 3. Generic Variants
+// ==============================================================================
+
+type Maybe<T> is Some(T) | None;
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Either<L, R> is Left(L) | Right(R);
+
+// ==============================================================================
+// 4. Generic Functions with Pattern Matching
+// ==============================================================================
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None
+    }
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(x) => x,
+        None => default
+    }
+}
+
+fn is_some<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false
+    }
+}
+
+fn result_map<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(x) => Ok(f(x)),
+        Err(e) => Err(e)
+    }
+}
+
+fn result_unwrap_or<T, E>(r: Result<T, E>, default: T) -> T {
+    match r {
+        Ok(x) => x,
+        Err(_) => default
+    }
+}
+
+// ==============================================================================
+// 5. Type Bounds (Protocol Constraints)
+// NOTE: This section tests type bounds syntax, but may not execute correctly
+// if the protocols are not implemented in the type system yet
+// ==============================================================================
+
+// Simple bound - commented out if protocols not ready
+// fn show<T: Display>(x: T) -> Text {
+//     format(x)
+// }
+
+// Multiple bounds - commented out if protocols not ready
+// fn debug_and_display<T: Display + Debug>(x: T) -> Text {
+//     format(x)
+// }
+
+// Bounds in where clause - commented out if protocols not ready
+// fn complex_bound<T>() -> Text where type T: Clone {
+//     "complex"
+// }
+
+// ==============================================================================
+// 6. Where Clauses (Pattern Guards)
+// ==============================================================================
+
+fn check_positive(x: Float) -> Text {
+    match x {
+        n where n > 0.0 => "positive",
+        n where n < 0.0 => "negative",
+        _ => "zero"
+    }
+}
+
+fn categorize_int(x: Int) -> Text {
+    match x {
+        n where n > 100 => "large",
+        n where n > 10 => "medium",
+        n where n > 0 => "small",
+        _ => "non-positive"
+    }
+}
+
+// ==============================================================================
+// 7. Meta Parameters (Compile-time Integers)
+// NOTE: Meta parameters may not be fully implemented yet
+// Syntax based on grammar: meta_param = identifier ':' 'meta' type_expr
+// ==============================================================================
+
+// Test if meta parameters work - may need adjustment
+// fn fixed_array<N: meta Int>() -> Int {
+//     N
+// }
+
+// fn bounded_meta<N: meta Int>() -> Int where meta N > 0 {
+//     N
+// }
+
+// ==============================================================================
+// 8. Generic Method Calls (Higher-order functions)
+// ==============================================================================
+
+fn apply<A, B>(x: A, f: fn(A) -> B) -> B {
+    f(x)
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| -> C { g(f(x)) }
+}
+
+// ==============================================================================
+// 9. Nested Generics
+// ==============================================================================
+
+// BUG: Nested variant constructors cause "infinite type" error
+// fn nested_maybe() -> Maybe<Maybe<Int>> {
+//     Some(Some(42))
+// }
+//
+// fn nested_result() -> Result<Maybe<Int>, Text> {
+//     Ok(Some(100))
+// }
+//
+// fn complex_nested() -> Maybe<Result<Int, Text>> {
+//     Some(Ok(999))
+// }
+
+fn box_maybe<T>(x: T) -> Box<Maybe<T>> {
+    Box { value: Some(x) }
+}
+
+fn pair_of_boxes<A, B>(a: A, b: B) -> Pair<Box<A>, Box<B>> {
+    Pair {
+        first: Box { value: a },
+        second: Box { value: b }
+    }
+}
+
+// ==============================================================================
+// 10. Type Inference with Generics
+// ==============================================================================
+
+fn infer_from_usage() -> Int {
+    let x = identity(42);           // Infer T = Int
+    let _ = identity(3.14);         // Infer T = Float (separate call)
+    let _ = identity("hello");      // Infer T = Text (separate call)
+    x
+}
+
+fn infer_from_return() -> Maybe<Int> {
+    Some(42)                         // Infer T = Int from context
+}
+
+fn infer_nested() -> Box<Int> {
+    Box { value: 100 }               // Infer T = Int
+}
+
+// ==============================================================================
+// 11. Complex Generic Scenarios
+// ==============================================================================
+
+fn chain_maybe<A, B, C>(
+    m: Maybe<A>,
+    f: fn(A) -> Maybe<B>,
+    g: fn(B) -> Maybe<C>
+) -> Maybe<C> {
+    match m {
+        Some(x) => match f(x) {
+            Some(y) => g(y),
+            None => None
+        },
+        None => None
+    }
+}
+
+// Array syntax with generics not yet supported
+// fn sequence_maybe<T>(list: [Maybe<T>; 3]) -> Maybe<[T; 3]] {
+//     None
+// }
+
+// ==============================================================================
+// 12. Generic Swap and Transform
+// ==============================================================================
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn transform_pair<A, B, C, D>(
+    pair: Pair<A, B>,
+    fa: fn(A) -> C,
+    fb: fn(B) -> D
+) -> Pair<C, D> {
+    Pair { first: fa(pair.first), second: fb(pair.second) }
+}
+
+// ==============================================================================
+// MAIN: Test Runner
+// ==============================================================================
+
+fn main() {
+    let _ = print("=============================================================");
+    let _ = print("  COMPREHENSIVE GENERICS TEST SUITE");
+    let _ = print("=============================================================\n");
+
+    // Test 1: Generic Functions
+    let _ = print("Test 1: Generic Functions");
+    let _ = print("---------------------------");
+    let int_id = identity(42);
+    let float_id = identity(3.14);
+    let text_id = identity("hello");
+    let bool_id = identity(true);
+    let _ = print(f"identity(42) = {int_id}");
+    let _ = print(f"identity(3.14) = {float_id}");
+    let _ = print(f"identity(\"hello\") = {text_id}");
+    let _ = print(f"identity(true) = {bool_id}");
+
+    let swapped = swap_pair(10, "ten");
+    let _ = print("swap_pair(10, \"ten\") - swapped successfully\n");
+
+    // Test 2: Generic Record Types
+    let _ = print("Test 2: Generic Record Types");
+    let _ = print("-----------------------------");
+    let box_int: Box<Int> = Box { value: 100 };
+    let box_text: Box<Text> = Box { value: "boxed" };
+    let _ = print(f"Box<Int>.value = {box_int.value}");
+    let _ = print(f"Box<Text>.value = {box_text.value}");
+
+    let pair_nums: Pair<Int, Float> = Pair { first: 42, second: 3.14 };
+    let _ = print(f"Pair<Int, Float>: ({pair_nums.first}, {pair_nums.second})");
+
+    let triple: Triple<Int, Text, Bool> = Triple { x: 1, y: "two", z: true };
+    let _ = print(f"Triple: ({triple.x}, {triple.y}, {triple.z})\n");
+
+    // Test 3: Generic Variant Types
+    let _ = print("Test 3: Generic Variant Types");
+    let _ = print("------------------------------");
+    let some_int: Maybe<Int> = Some(42);
+    let none_int: Maybe<Int> = None;
+    let check1 = is_some(some_int);
+    let check2 = is_some(none_int);
+    let _ = print(f"is_some(Some(42)) = {check1}");
+    let _ = print(f"is_some(None) = {check2}");
+
+    let ok_val: Result<Int, Text> = Ok(100);
+    let err_val: Result<Int, Text> = Err("error");
+    match ok_val {
+        Ok(v) => { let _ = print(f"Result Ok: {v}"); },
+        Err(e) => { let _ = print(f"Result Err: {e}"); }
+    }
+    match err_val {
+        Ok(v) => { let _ = print(f"Result Ok: {v}"); },
+        Err(e) => { let _ = print(f"Result Err: {e}"); }
+    }
+    let _ = print("");
+
+    // Test 4: Generic Functions with Pattern Matching
+    let _ = print("Test 4: Generic Pattern Matching");
+    let _ = print("---------------------------------");
+    let some_val: Maybe<Int> = Some(5);
+    let doubled = map_maybe(some_val, |x: Int| -> Int { x * 2 });
+    match doubled {
+        Some(v) => { let _ = print(f"map_maybe(Some(5), *2) = Some({v})"); },
+        None => { let _ = print("map_maybe resulted in None"); }
+    }
+
+    let none_val: Maybe<Int> = None;
+    let none_doubled = map_maybe(none_val, |x: Int| -> Int { x * 2 });
+    match none_doubled {
+        Some(v) => { let _ = print(f"Unexpected Some({v})"); },
+        None => { let _ = print("map_maybe(None, *2) = None"); }
+    }
+
+    let unwrapped1 = unwrap_or(some_val, 0);
+    let unwrapped2 = unwrap_or(none_val, -1);
+    let _ = print(f"unwrap_or(Some(5), 0) = {unwrapped1}");
+    let _ = print(f"unwrap_or(None, -1) = {unwrapped2}\n");
+
+    // Test 5: Result Mapping
+    let _ = print("Test 5: Result Type Operations");
+    let _ = print("-------------------------------");
+    let ok_result: Result<Int, Text> = Ok(10);
+    let mapped_ok = result_map(ok_result, |x: Int| -> Int { x + 5 });
+    match mapped_ok {
+        Ok(v) => { let _ = print(f"result_map(Ok(10), +5) = Ok({v})"); },
+        Err(e) => { let _ = print(f"Unexpected Err({e})"); }
+    }
+
+    let err_result: Result<Int, Text> = Err("failed");
+    let mapped_err = result_map(err_result, |x: Int| -> Int { x + 5 });
+    match mapped_err {
+        Ok(v) => { let _ = print(f"Unexpected Ok({v})"); },
+        Err(e) => { let _ = print(f"result_map(Err(\"failed\"), +5) = Err(\"{e}\")"); }
+    }
+
+    let unwrap_ok = result_unwrap_or(ok_result, 999);
+    let unwrap_err = result_unwrap_or(err_result, 999);
+    let _ = print(f"unwrap_or(Ok(10), 999) = {unwrap_ok}");
+    let _ = print(f"unwrap_or(Err(...), 999) = {unwrap_err}\n");
+
+    // Test 6: Where Clauses (Pattern Guards)
+    let _ = print("Test 6: Where Clause Pattern Guards");
+    let _ = print("------------------------------------");
+    let pos = check_positive(5.0);
+    let neg = check_positive(-3.0);
+    let zero = check_positive(0.0);
+    let _ = print(f"check_positive(5.0) = {pos}");
+    let _ = print(f"check_positive(-3.0) = {neg}");
+    let _ = print(f"check_positive(0.0) = {zero}");
+
+    let cat1 = categorize_int(150);
+    let cat2 = categorize_int(50);
+    let cat3 = categorize_int(5);
+    let cat4 = categorize_int(-10);
+    let _ = print(f"categorize_int(150) = {cat1}");
+    let _ = print(f"categorize_int(50) = {cat2}");
+    let _ = print(f"categorize_int(5) = {cat3}");
+    let _ = print(f"categorize_int(-10) = {cat4}\n");
+
+    // Test 7: Higher-order Functions
+    let _ = print("Test 7: Higher-order Generic Functions");
+    let _ = print("---------------------------------------");
+    let applied = apply(42, |x: Int| -> Int { x * 2 });
+    let _ = print(f"apply(42, *2) = {applied}");
+
+    let add_one = |x: Int| -> Int { x + 1 };
+    let times_two = |x: Int| -> Int { x * 2 };
+    let composed = compose(add_one, times_two);
+}

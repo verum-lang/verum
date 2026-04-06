@@ -1,0 +1,206 @@
+// =============================================================================
+// input.vr - Single-line text input widget
+// =============================================================================
+module input;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.block.Block;
+mount super.super.render.buffer.Buffer;
+mount super.super.render.frame.Frame;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+/// Single-line text input with cursor.
+public type TextInput is {
+    block: Maybe<Block>,
+    style: Style,
+    cursor_style: Style,
+    placeholder: Maybe<Text>,
+    placeholder_style: Style,
+    mask_char: Maybe<Char>,
+};
+
+implement TextInput {
+    public fn new() -> TextInput {
+        TextInput {
+            block: None,
+            style: Style.DEFAULT,
+            cursor_style: Style.new().reversed(),
+            placeholder: None,
+            placeholder_style: Style.new().dim(),
+            mask_char: None,
+        }
+    }
+
+    // Builder API
+    public fn block(self, block: Block) -> TextInput {
+        TextInput { block: Some(block), ..self }
+    }
+
+    public fn placeholder(self, text: Text) -> TextInput {
+        TextInput { placeholder: Some(text), ..self }
+    }
+
+    public fn placeholder_style(self, style: Style) -> TextInput {
+        TextInput { placeholder_style: style, ..self }
+    }
+
+    public fn cursor_style(self, style: Style) -> TextInput {
+        TextInput { cursor_style: style, ..self }
+    }
+
+    public fn mask(self, ch: Char) -> TextInput {
+        TextInput { mask_char: Some(ch), ..self }
+    }
+}
+
+implement Styled for TextInput {
+    fn style(self, style: Style) -> TextInput {
+        TextInput { style: style, ..self }
+    }
+}
+
+/// State for the text input.
+public type TextInputState is {
+    value: Text,
+    cursor_position: Int,
+    scroll_offset: Int,
+};
+
+implement TextInputState {
+    public fn new() -> TextInputState {
+        TextInputState {
+            value: "",
+            cursor_position: 0,
+            scroll_offset: 0,
+        }
+    }
+
+    public fn with_value(value: Text) -> TextInputState {
+        let len = value.len();
+        TextInputState {
+            value: value,
+            cursor_position: len,
+            scroll_offset: 0,
+        }
+    }
+
+    /// Insert a character at cursor position.
+    public fn insert_char(&mut self, ch: Char) {
+        let before = self.value.slice(0, self.cursor_position);
+        let after = self.value.slice(self.cursor_position, self.value.len());
+        let ch_str = ch.to_text();
+        self.value = before + &ch_str + &after;
+        self.cursor_position = self.cursor_position + 1;
+    }
+
+    /// Delete character before cursor (backspace).
+    public fn delete_backward(&mut self) {
+        if self.cursor_position > 0 {
+            let before = self.value.slice(0, self.cursor_position - 1);
+            let after = self.value.slice(self.cursor_position, self.value.len());
+            self.value = before + &after;
+            self.cursor_position = self.cursor_position - 1;
+        }
+    }
+
+    /// Delete character at cursor (delete key).
+    public fn delete_forward(&mut self) {
+        if self.cursor_position < self.value.len() {
+            let before = self.value.slice(0, self.cursor_position);
+            let after = self.value.slice(self.cursor_position + 1, self.value.len());
+            self.value = before + &after;
+        }
+    }
+
+    /// Move cursor left.
+    public fn move_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position = self.cursor_position - 1;
+        }
+    }
+
+    /// Move cursor right.
+    public fn move_right(&mut self) {
+        if self.cursor_position < self.value.len() {
+            self.cursor_position = self.cursor_position + 1;
+        }
+    }
+
+    /// Move cursor to start.
+    public fn move_home(&mut self) {
+        self.cursor_position = 0;
+    }
+
+    /// Move cursor to end.
+    public fn move_end(&mut self) {
+        self.cursor_position = self.value.len();
+    }
+
+    /// Clear the input.
+    public fn clear(&mut self) {
+        self.value = "";
+        self.cursor_position = 0;
+        self.scroll_offset = 0;
+    }
+}
+
+implement StatefulWidget for TextInput {
+    type State = TextInputState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut TextInputState) {
+        let text_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if text_area.width < 1 || text_area.height < 1 { return; }
+
+        buf.set_style(text_area, self.style);
+
+        // Determine display text (with optional masking)
+        let display_text = match self.mask_char {
+            Some(ch) => {
+                let mut masked = "";
+                for _ in 0..state.value.len() {
+                    masked = masked + &ch.to_text();
+                }
+                masked
+            }
+            None => state.value.clone(),
+        };
+
+        // Adjust scroll offset to keep cursor visible
+        if state.cursor_position < state.scroll_offset {
+            state.scroll_offset = state.cursor_position;
+        }
+        if state.cursor_position >= state.scroll_offset + text_area.width {
+            state.scroll_offset = state.cursor_position - text_area.width + 1;
+        }
+
+        if display_text.is_empty() {
+            // Show placeholder
+            match self.placeholder {
+                Some(ph) => {
+                    buf.set_string(text_area.x, text_area.y, &ph, self.placeholder_style);
+                }
+                None => {}
+            }
+        } else {
+            // Show visible portion
+            let end = (state.scroll_offset + text_area.width).min(display_text.len());
+            let visible = display_text.slice(state.scroll_offset, end);
+            buf.set_string(text_area.x, text_area.y, &visible, self.style);
+        }
+
+        // Draw cursor
+        let cursor_x = text_area.x + state.cursor_position - state.scroll_offset;
+        if cursor_x >= text_area.x && cursor_x < text_area.right() {
+            buf.get_mut(cursor_x, text_area.y).style = self.cursor_style;
+        }
+    }
+}

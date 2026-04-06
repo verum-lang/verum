@@ -1,0 +1,575 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================================================
+  # VALIDATION: Pre-Release Checks
+  # ============================================================================
+
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version information
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            IS_PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            # Extract from tag
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            # Check if it's a pre-release (contains alpha, beta, rc)
+            if echo "$VERSION" | grep -qE "(alpha|beta|rc)"; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+          echo "## Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: **$VERSION**" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-release: **$IS_PRERELEASE**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Check semantic versioning format
+          if ! echo "$VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+"; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Must follow semantic versioning: MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          echo "✅ Version format is valid" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check if version exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Check if tag already exists (for workflow_dispatch)
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "❌ Version v$VERSION already exists!"
+            exit 1
+          fi
+
+          echo "✅ Version is new" >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify Cargo.toml version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CARGO_VERSION=$(grep "^version" Cargo.toml | head -1 | cut -d'"' -f2)
+
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "❌ Version mismatch!"
+            echo "Tag version: $VERSION"
+            echo "Cargo.toml version: $CARGO_VERSION"
+            exit 1
+          fi
+
+          echo "✅ Cargo.toml version matches" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # BUILD: Multi-Platform Release Binaries
+  # ============================================================================
+
+  build-release:
+    name: Build (${{ matrix.name }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: verum
+            asset_name: verum-linux-x86_64
+
+          # Linux aarch64
+          - name: linux-aarch64
+            os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            artifact_name: verum
+            asset_name: verum-linux-aarch64
+            use_cross: true
+
+          # macOS x86_64
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: verum
+            asset_name: verum-macos-x86_64
+
+          # macOS aarch64 (Apple Silicon)
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: verum
+            asset_name: verum-macos-aarch64
+
+          # Windows x86_64
+          - name: windows-x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact_name: verum.exe
+            asset_name: verum-windows-x86_64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Install dependencies based on OS
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            llvm-14-dev \
+            libz3-dev \
+            clang-14
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 pkg-config openssl
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          choco install llvm --version=21.1.0 -y
+          choco install z3 -y
+
+      # Cross-compilation setup
+      - name: Install cross
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      # Build release binary
+      - name: Build release (native)
+        if: matrix.use_cross != true
+        run: |
+          cargo build --release --target ${{ matrix.target }} --bin verum_cli
+          echo "✅ Release build completed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build release (cross)
+        if: matrix.use_cross == true
+        run: |
+          cross build --release --target ${{ matrix.target }} --bin verum_cli
+          echo "✅ Cross-compilation completed" >> $GITHUB_STEP_SUMMARY
+
+      # Strip binaries (reduce size)
+      - name: Strip binary (Linux/macOS)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      # Package binary
+      - name: Package binary (Linux/macOS)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+          sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+
+      - name: Package binary (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: powershell
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ${{ matrix.asset_name }}.zip
+          Get-FileHash ${{ matrix.asset_name }}.zip -Algorithm SHA256 | Select-Object -ExpandProperty Hash | Out-File ${{ matrix.asset_name }}.zip.sha256
+
+      # Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.*
+          retention-days: 7
+
+  # ============================================================================
+  # TEST: Release Binary Validation
+  # ============================================================================
+
+  test-release:
+    name: Test Release (${{ matrix.name }})
+    needs: build-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            asset_name: verum-linux-x86_64
+          - name: macos-x86_64
+            os: macos-13
+            asset_name: verum-macos-x86_64
+          - name: macos-aarch64
+            os: macos-14
+            asset_name: verum-macos-aarch64
+          - name: windows-x86_64
+            os: windows-2022
+            asset_name: verum-windows-x86_64
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+
+      - name: Extract binary (Linux/macOS)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          tar xzf ${{ matrix.asset_name }}.tar.gz
+          chmod +x verum
+
+      - name: Extract binary (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: powershell
+        run: |
+          Expand-Archive -Path ${{ matrix.asset_name }}.zip -DestinationPath .
+
+      - name: Test binary (Linux/macOS)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          ./verum --version
+          ./verum --help
+
+      - name: Test binary (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: powershell
+        run: |
+          .\verum.exe --version
+          .\verum.exe --help
+
+      - name: Verify checksum (Linux/macOS)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          sha256sum -c ${{ matrix.asset_name }}.tar.gz.sha256
+
+      - name: Verify checksum (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: powershell
+        run: |
+          $expected = Get-Content ${{ matrix.asset_name }}.zip.sha256
+          $actual = (Get-FileHash ${{ matrix.asset_name }}.zip -Algorithm SHA256).Hash
+          if ($expected -ne $actual) {
+            Write-Error "Checksum mismatch!"
+            exit 1
+          }
+
+  # ============================================================================
+  # PACKAGE: Create Distribution Packages
+  # ============================================================================
+
+  package:
+    name: Create Packages
+    needs: [validate, test-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dpkg-dev \
+            rpm \
+            alien
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Debian package
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          mkdir -p debian/usr/bin
+          mkdir -p debian/DEBIAN
+
+          # Extract Linux binary
+          cd artifacts/verum-linux-x86_64
+          tar xzf verum-linux-x86_64.tar.gz
+          mv verum ../../debian/usr/bin/
+          cd ../..
+
+          # Create control file
+          cat > debian/DEBIAN/control << EOF
+          Package: verum
+          Version: $VERSION
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Verum Team <team@verum-lang.org>
+          Description: Verum programming language compiler and tools
+           The Verum language platform with CBGR memory safety system.
+          EOF
+
+          # Build package
+          dpkg-deb --build debian verum_${VERSION}_amd64.deb
+
+      - name: Create RPM package
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          alien --to-rpm verum_${VERSION}_amd64.deb
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            *.deb
+            *.rpm
+          retention-days: 7
+
+  # ============================================================================
+  # PUBLISH: Create GitHub Release
+  # ============================================================================
+
+  create-release:
+    name: Create GitHub Release
+    needs: [validate, build-release, test-release, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD >> CHANGELOG.md
+          else
+            echo "## Initial Release" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "First release of Verum v$VERSION" >> CHANGELOG.md
+          fi
+
+          # Add release notes
+          cat >> CHANGELOG.md << 'EOF'
+
+          ## Features
+
+          - Complete Verum language implementation
+          - CBGR memory safety system
+          - Multi-platform support (Linux, macOS, Windows)
+          - LLVM-based code generation
+          - Z3-powered SMT verification
+
+          ## Installation
+
+          ### Linux (Debian/Ubuntu)
+          ```bash
+          dpkg -i verum_VERSION_amd64.deb
+          ```
+
+          ### Linux (RPM-based)
+          ```bash
+          rpm -i verum-VERSION.rpm
+          ```
+
+          ### macOS
+          ```bash
+          tar xzf verum-macos-ARCH.tar.gz
+          sudo mv verum /usr/local/bin/
+          ```
+
+          ### Windows
+          Extract the ZIP file and add to your PATH.
+
+          ## Verification
+
+          All binaries include SHA256 checksums for verification.
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.validate.outputs.version }}
+          name: Verum v${{ needs.validate.outputs.version }}
+          body_path: CHANGELOG.md
+          prerelease: ${{ needs.validate.outputs.is_prerelease }}
+          draft: false
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.tar.gz.sha256
+            artifacts/**/*.zip
+            artifacts/**/*.zip.sha256
+            artifacts/packages/*.deb
+            artifacts/packages/*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # PUBLISH: Crates.io
+  # ============================================================================
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: create-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only publish from main branch and for non-prerelease versions
+    if: github.ref == 'refs/heads/main' && needs.validate.outputs.is_prerelease == 'false'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev
+
+      - name: Publish crates (in dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Publish in correct dependency order
+          CRATES=(
+            "verum_core"
+            "verum_derive"
+            "verum_cbgr"
+            "verum_std"
+            "verum_ast"
+            "verum_lexer"
+            "verum_parser"
+            "verum_diagnostics"
+            "verum_error"
+            "verum_types"
+            "verum_smt"
+            "verum_modules"
+            "verum_runtime"
+            "verum_codegen"
+            "verum_context"
+            "verum_context_macros"
+            "verum_resolve"
+            "verum_verification"
+            "verum_interpreter"
+            "verum_compiler"
+            "verum_lsp"
+            "verum_cli"
+          )
+
+          for crate in "${CRATES[@]}"; do
+            echo "Publishing $crate..."
+            cd crates/$crate
+
+            # Check if already published
+            VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+            if cargo search $crate --limit 1 | grep -q "^$crate = \"$VERSION\""; then
+              echo "Skipping $crate (already published)"
+            else
+              cargo publish --no-verify || echo "Failed to publish $crate (may already exist)"
+              sleep 30  # Wait for crates.io to update
+            fi
+
+            cd ../..
+          done
+
+  # ============================================================================
+  # SUMMARY: Release Status
+  # ============================================================================
+
+  release-success:
+    name: Release Complete
+    needs: [validate, create-release, publish-crates]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: **${{ needs.validate.outputs.version }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-release: **${{ needs.validate.outputs.is_prerelease }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.create-release.result }}" = "success" ]; then
+            echo "✅ GitHub Release created" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ GitHub Release failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.publish-crates.result }}" = "success" ]; then
+            echo "✅ Published to crates.io" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.publish-crates.result }}" = "skipped" ]; then
+            echo "⏭️ crates.io publishing skipped (pre-release)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ crates.io publishing failed" >> $GITHUB_STEP_SUMMARY
+          fi

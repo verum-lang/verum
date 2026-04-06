@@ -1,0 +1,28 @@
+// Minimal test to identify the issue
+
+type Positive is Int{> 0};
+type Even is Int where |x| x % 2 == 0;
+type InRange is n: Int where n >= 0 && n <= 100;
+
+fn test_inline() {
+    let pos: Positive = 5;
+    let _ = print(f"Positive: {pos}");
+}
+
+fn test_lambda() {
+    let even: Even = 10;
+    let _ = print(f"Even: {even}");
+}
+
+fn test_sigma() {
+    let n: InRange = 50;
+    let _ = print(f"InRange: {n}");
+}
+
+fn main() {
+    let _ = print("=== Minimal Refinement Test ===");
+    test_inline();
+    test_lambda();
+    test_sigma();
+    let _ = print("=== All tests passed ===");
+}

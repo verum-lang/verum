@@ -1,0 +1,10 @@
+// Test just the imports
+link std.collections.{List, Map};
+link core.base.{Result, Maybe, Text, Int, Bool};
+link std.time.unix_timestamp;
+
+fn main() {
+    print("Imports successful!");
+    let ts = unix_timestamp();
+    print(f"Unix timestamp: {ts}");
+}

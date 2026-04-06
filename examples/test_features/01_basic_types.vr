@@ -1,0 +1,22 @@
+// Test basic types and literals
+fn main() {
+    // Integer
+    let x: Int = 42
+    print(f"Int: {x}")
+    
+    // Float
+    let pi: Float = 3.14159
+    print(f"Float: {pi}")
+    
+    // Bool
+    let flag: Bool = true
+    print(f"Bool: {flag}")
+    
+    // Text (string)
+    let name: Text = "Verum"
+    print(f"Text: {name}")
+    
+    // Type inference
+    let inferred = 100
+    print(f"Inferred: {inferred}")
+}

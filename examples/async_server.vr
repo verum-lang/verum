@@ -1,0 +1,275 @@
+// async_server.vr
+// Demonstrates async/await, HTTP server, and concurrent request handling
+
+link std.net.http;
+link std.async.*;
+link std.json.*;
+
+// User data type
+type User is {
+    id: Int,
+    name: Text,
+    email: Text
+};
+
+// In-memory database (simplified)
+type Database is {
+    users: Map<Int, User>
+};
+
+implement Database {
+    fn new() -> Database {
+        Database { users: #{} }
+    }
+
+    fn get_user(self, id: Int) -> Maybe<User> {
+        self.users.get(id)
+    }
+
+    fn add_user(self, user: User) -> Database {
+        Database { users: self.users.insert(user.id, user) }
+    }
+
+    fn list_users(self) -> List<User> {
+        self.users.values().collect()
+    }
+}
+
+// Context definitions
+context Logger {
+    fn log(level: Level, message: Text)
+}
+
+context DB {
+    async fn get_user(id: Int) -> Maybe<User>
+    async fn add_user(user: User) -> Result<(), Text>
+    async fn list_users() -> List<User>
+}
+
+// HTTP handlers
+async fn handle_list_users() -> Response
+    using [DB, Logger]
+{
+    Logger.log(Level.Info, "Listing all users")
+
+    let users = DB.list_users().await
+
+    let json = Json.array(
+        users.map(|u| Json.object([
+            ("id", Json.int(u.id)),
+            ("name", Json.text(u.name)),
+            ("email", Json.text(u.email))
+        ]))
+    )
+
+    Response.json(json)
+}
+
+async fn handle_get_user(id: Int) -> Response
+    using [DB, Logger]
+{
+    Logger.log(Level.Info, f"Getting user {id}")
+
+    match DB.get_user(id).await {
+        Some(user) => {
+            let json = Json.object([
+                ("id", Json.int(user.id)),
+                ("name", Json.text(user.name)),
+                ("email", Json.text(user.email))
+            ])
+            Response.json(json)
+        },
+        None => {
+            Response.not_found(f"User {id} not found")
+        }
+    }
+}
+
+async fn handle_create_user(req: Request) -> Response
+    using [DB, Logger]
+{
+    Logger.log(Level.Info, "Creating new user")
+
+    // Parse JSON body
+    let body = req.body_json()?
+
+    let user = User {
+        id: body.get("id").as_int()?,
+        name: body.get("name").as_text()?,
+        email: body.get("email").as_text()?
+    }
+
+    match DB.add_user(user).await {
+        Ok(_) => {
+            Logger.log(Level.Info, f"Created user {user.id}")
+            Response.created(Json.object([
+                ("message", Json.text("User created successfully")),
+                ("id", Json.int(user.id))
+            ]))
+        },
+        Err(e) => {
+            Logger.log(Level.Error, f"Failed to create user: {e}")
+            Response.bad_request(e)
+        }
+    }
+}
+
+// Simulate external API call
+async fn fetch_external_data(url: Text) -> Result<Text, Text> {
+    let response = http_get(url).await
+        .map_err(|e| f"Request failed: {e}")?
+
+    if response.status == 200 {
+        Ok(response.body)
+    } else {
+        Err(f"HTTP {response.status}")
+    }
+}
+
+// Concurrent data fetching
+async fn fetch_multiple_sources() -> List<Result<Text, Text>> {
+    let urls = [
+        "https://api.example.com/data1",
+        "https://api.example.com/data2",
+        "https://api.example.com/data3"
+    ]
+
+    // Spawn concurrent tasks
+    let tasks = urls.map(|url| spawn async {
+        fetch_external_data(url).await
+    })
+
+    // Wait for all tasks
+    let results = []
+    for task in tasks {
+        results = results.push(task.await)
+    }
+
+    results
+}
+
+// Rate limiting middleware
+type RateLimiter is {
+    max_requests: Int,
+    window: Duration,
+    counts: Map<Text, Int>
+};
+
+async fn rate_limit_middleware(req: Request, next: Request -> Response) -> Response {
+    let client_ip = req.headers.get("X-Forwarded-For")
+        .unwrap_or(req.remote_addr)
+
+    // Check rate limit (simplified)
+    // In production, use a proper rate limiting algorithm
+
+    next(req).await
+}
+
+// Main server
+async fn main() {
+    print("Starting Verum HTTP Server on http://127.0.0.1:8080")
+
+    // Create database
+    let db = Database.new()
+        .add_user(User { id: 1, name: "Alice", email: "alice@example.com" })
+        .add_user(User { id: 2, name: "Bob", email: "bob@example.com" })
+
+    // Create logger
+    let logger = ConsoleLogger.new()
+
+    // Provide contexts
+    provide Logger = logger {
+        provide DB = db {
+            // Create server
+            let server = HttpServer.bind("127.0.0.1:8080").await?
+
+            // Register routes
+            server.get("/users", |req| handle_list_users().await)
+
+            server.get("/users/:id", |req| {
+                let id = req.params.get("id").parse_int()?
+                handle_get_user(id).await
+            })
+
+            server.post("/users", |req| handle_create_user(req).await)
+
+            server.get("/", |req| {
+                Response.ok("Welcome to Verum API Server!")
+            })
+
+            server.get("/health", |req| {
+                Response.json(Json.object([
+                    ("status", Json.text("healthy")),
+                    ("timestamp", Json.int(Time.now().unix_timestamp()))
+                ]))
+            })
+
+            // Run server
+            Logger.log(Level.Info, "Server started successfully")
+            server.run().await?
+        }
+    }
+}
+
+// Example client code
+async fn example_client() {
+    print("=== Testing API ===\n")
+
+    // List users
+    print("GET /users")
+    let response = http_get("http://127.0.0.1:8080/users").await?
+    print(f"Response: {response.body}\n")
+
+    // Get specific user
+    print("GET /users/1")
+    let response = http_get("http://127.0.0.1:8080/users/1").await?
+    print(f"Response: {response.body}\n")
+
+    // Create user
+    print("POST /users")
+    let new_user = Json.object([
+        ("id", Json.int(3)),
+        ("name", Json.text("Charlie")),
+        ("email", Json.text("charlie@example.com"))
+    ])
+
+    let response = http_post(
+        "http://127.0.0.1:8080/users",
+        body: new_user.to_string(),
+        headers: #{ "Content-Type": "application/json" }
+    ).await?
+
+    print(f"Response: {response.body}\n")
+}
+
+// Concurrent request example
+async fn stress_test() {
+    print("=== Stress Testing ===\n")
+
+    let num_requests = 100
+
+    let tasks = []
+    for i in 0..num_requests {
+        tasks = tasks.push(spawn async {
+            http_get("http://127.0.0.1:8080/health").await
+        })
+    }
+
+    print(f"Spawned {num_requests} concurrent requests...")
+
+    let mut success = 0
+    let mut failed = 0
+
+    for task in tasks {
+        match task.await {
+            Ok(response) => if response.status == 200 {
+                success = success + 1
+            } else {
+                failed = failed + 1
+            },
+            Err(_) => failed = failed + 1
+        }
+    }
+
+    print(f"Results: {success} succeeded, {failed} failed")
+}

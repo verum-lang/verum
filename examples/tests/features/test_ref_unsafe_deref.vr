@@ -1,0 +1,12 @@
+// Test: Dereferencing unsafe references
+
+fn test_unsafe_deref(x: &unsafe Int) -> Int {
+    *x
+}
+
+fn main() -> Int {
+    let value = 42;
+    let result = test_unsafe_deref(&unsafe value);
+    println(f"Result: {result}");
+    result
+}

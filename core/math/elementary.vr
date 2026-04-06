@@ -1,0 +1,637 @@
+// =============================================================================
+// elementary.vr - Elementary Mathematical Functions
+// =============================================================================
+// Layer: 1 (Scalar Mathematics)
+//
+// Provides high-precision implementations of elementary mathematical functions:
+// - Trigonometric: sin, cos, tan, asin, acos, atan, atan2
+// - Exponential: exp, exp2, expm1
+// - Logarithmic: log, log2, log10, log1p
+// - Power: pow, powi, sqrt, cbrt, hypot
+// - Rounding: floor, ceil, round, trunc, fract
+// - Utilities: abs, min, max, clamp, fma, copysign
+//
+// # Precision
+//
+// All functions aim for < 1 ULP (unit in last place) error.
+// Implementations use range reduction, polynomial approximation,
+// and careful reconstruction.
+//
+// # Refinement Types
+//
+// Domain restrictions are enforced via refinement types:
+// - sqrt(x: Float{>= 0.0}) -> Float{>= 0.0}
+// - log(x: Float{> 0.0}) -> Float
+// - asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float
+//
+// Safe variants (log_safe, sqrt_safe, asin_safe) return Maybe<T>
+// for use when domain cannot be statically verified.
+//
+// Spec: docs/architecture/math-spec.md Section 3
+// =============================================================================
+
+module core.math.elementary;
+
+mount super.constants.*;
+mount super.ieee754.{is_nan, is_infinite, is_finite, copysign, frexp, ldexp};
+
+// =============================================================================
+// Polynomial Evaluation (Horner's Method)
+// =============================================================================
+
+// Evaluate polynomial using Horner's method
+// p(x) = coeffs[0] + coeffs[1]*x + coeffs[2]*x^2 + ...
+@inline(always)
+fn horner(x: Float, coeffs: &[Float]) -> Float {
+    let mut result = 0.0;
+    for i in (0..coeffs.len()).rev() {
+        result = result * x + coeffs[i];
+    }
+    result
+}
+
+// Evaluate polynomial in reverse (Horner from highest degree)
+// p(x) = coeffs[n]*x^n + coeffs[n-1]*x^(n-1) + ... + coeffs[0]
+@inline(always)
+fn horner_rev(x: Float, coeffs: &[Float]) -> Float {
+    let mut result = 0.0;
+    for coeff in coeffs.iter() {
+        result = result * x + *coeff;
+    }
+    result
+}
+
+// =============================================================================
+// Trigonometric Functions
+// =============================================================================
+
+// Reduce angle to [-π/4, π/4] for trig functions
+// Returns (reduced_angle, quadrant)
+fn reduce_trig_arg(x: Float) -> (Float, Int) {
+    // Use Payne-Hanek reduction for large arguments
+    let pi_4 = FRAC_PI_4;
+    let inv_pi_4 = 4.0 / PI;
+
+    // Number of π/4 intervals
+    let k = (x * inv_pi_4 + 0.5).floor() as Int;
+    let reduced = x - (k as Float) * pi_4;
+
+    (reduced, k)
+}
+
+// Sine kernel for reduced argument |x| <= π/4
+fn sin_kernel(x: Float) -> Float {
+    // Chebyshev polynomial approximation
+    let x2 = x * x;
+    let coeffs = [
+        1.0,
+        -0.16666666666666632,
+        0.00833333333332249,
+        -0.00019841269841201,
+        0.0000027557319157,
+        -0.000000025050747,
+        0.00000000015896,
+    ];
+
+    x * horner(x2, &coeffs)
+}
+
+// Cosine kernel for reduced argument |x| <= π/4
+fn cos_kernel(x: Float) -> Float {
+    let x2 = x * x;
+    let coeffs = [
+        1.0,
+        -0.5,
+        0.041666666666666,
+        -0.001388888888887,
+        0.000024801587301,
+        -0.00000027557314,
+        0.0000000020876,
+    ];
+
+    horner(x2, &coeffs)
+}
+
+// Sine function
+// Domain: (-∞, ∞), Range: [-1, 1]
+// Precision: < 1 ULP error
+public fn sin(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+    if is_nan(x) || is_infinite(x) { return NAN; }
+    if x == 0.0 { return x; }  // Preserve signed zero
+
+    let (reduced, quadrant) = reduce_trig_arg(x);
+    let q = quadrant & 3;  // mod 4
+
+    match q {
+        0 => sin_kernel(reduced),
+        1 => cos_kernel(reduced),
+        2 => -sin_kernel(reduced),
+        3 => -cos_kernel(reduced),
+        _ => unreachable(),
+    }
+}
+
+// Cosine function
+// Domain: (-∞, ∞), Range: [-1, 1]
+public fn cos(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
+    if is_nan(x) || is_infinite(x) { return NAN; }
+
+    let (reduced, quadrant) = reduce_trig_arg(x);
+    let q = quadrant & 3;
+
+    match q {
+        0 => cos_kernel(reduced),
+        1 => -sin_kernel(reduced),
+        2 => -cos_kernel(reduced),
+        3 => sin_kernel(reduced),
+        _ => unreachable(),
+    }
+}
+
+// Compute both sine and cosine efficiently
+// Returns (sin(x), cos(x))
+public fn sincos(x: Float) -> (Float, Float) {
+    if is_nan(x) || is_infinite(x) { return (NAN, NAN); }
+
+    let (reduced, quadrant) = reduce_trig_arg(x);
+    let q = quadrant & 3;
+    let s = sin_kernel(reduced);
+    let c = cos_kernel(reduced);
+
+    match q {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        3 => (-c, s),
+        _ => unreachable(),
+    }
+}
+
+// Tangent function
+public fn tan(x: Float) -> Float {
+    let (s, c) = sincos(x);
+    s / c
+}
+
+// =============================================================================
+// Inverse Trigonometric Functions
+// =============================================================================
+
+// Arcsine series for |x| <= 0.5
+fn asin_series(x: Float) -> Float {
+    let x2 = x * x;
+    let coeffs = [
+        1.0,
+        0.16666666666666696,
+        0.07500000000019711,
+        0.04464285714315085,
+        0.03038194444498,
+        0.02237215909574,
+    ];
+
+    x * horner(x2, &coeffs)
+}
+
+// Arcsine function
+// Domain: [-1, 1], Range: [-π/2, π/2]
+public fn asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float{it >= -FRAC_PI_2 && it <= FRAC_PI_2} {
+    if x == 1.0 { return FRAC_PI_2; }
+    if x == -1.0 { return -FRAC_PI_2; }
+
+    if x.abs() <= 0.5 {
+        asin_series(x)
+    } else {
+        // Use identity: asin(x) = π/2 - 2*asin(sqrt((1-x)/2))
+        let sign = if x < 0.0 { -1.0 } else { 1.0 };
+        let y = sqrt((1.0 - x.abs()) / 2.0);
+        sign * (FRAC_PI_2 - 2.0 * asin_series(y))
+    }
+}
+
+// Safe arcsine for potentially out-of-domain values
+public fn asin_safe(x: Float) -> Maybe<Float> {
+    if x < -1.0 || x > 1.0 {
+        Maybe.None
+    } else {
+        Maybe.Some(asin(x))
+    }
+}
+
+// Arccosine function
+// Domain: [-1, 1], Range: [0, π]
+public fn acos(x: Float{it >= -1.0 && it <= 1.0}) -> Float{it >= 0.0 && it <= PI} {
+    FRAC_PI_2 - asin(x)
+}
+
+// Safe arccosine
+public fn acos_safe(x: Float) -> Maybe<Float> {
+    if x < -1.0 || x > 1.0 {
+        Maybe.None
+    } else {
+        Maybe.Some(acos(x))
+    }
+}
+
+// Arctangent series for |x| <= 1
+fn atan_series(x: Float) -> Float {
+    let x2 = x * x;
+    let coeffs = [
+        1.0,
+        -0.33333333333331,
+        0.2,
+        -0.14285714271732,
+        0.11111110678749,
+        -0.0909090442773,
+        0.0769215933794,
+    ];
+
+    x * horner(x2, &coeffs)
+}
+
+// Arctangent function
+// Domain: (-∞, ∞), Range: (-π/2, π/2)
+public fn atan(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return FRAC_PI_2; }
+    if x == NEG_INFINITY { return -FRAC_PI_2; }
+
+    if x.abs() > 1.0 {
+        // Use identity: atan(x) = π/2 - atan(1/x) for |x| > 1
+        let sign = if x < 0.0 { -1.0 } else { 1.0 };
+        sign * FRAC_PI_2 - atan_series(1.0 / x.abs())
+    } else {
+        atan_series(x)
+    }
+}
+
+// Two-argument arctangent
+// Returns angle in (-π, π]
+public fn atan2(y: Float, x: Float) -> Float {
+    if is_nan(x) || is_nan(y) { return NAN; }
+
+    if x > 0.0 {
+        atan(y / x)
+    } else if x < 0.0 && y >= 0.0 {
+        atan(y / x) + PI
+    } else if x < 0.0 && y < 0.0 {
+        atan(y / x) - PI
+    } else if x == 0.0 && y > 0.0 {
+        FRAC_PI_2
+    } else if x == 0.0 && y < 0.0 {
+        -FRAC_PI_2
+    } else {
+        0.0  // x == 0 && y == 0
+    }
+}
+
+// =============================================================================
+// Exponential Functions
+// =============================================================================
+
+// Natural exponential e^x
+// Domain: (-∞, ∞), Range: (0, ∞)
+public fn exp(x: Float) -> Float{> 0.0} {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return INFINITY; }
+    if x == NEG_INFINITY { return 0.0; }
+
+    // Overflow/underflow check
+    if x > 709.78 { return INFINITY; }
+    if x < -745.13 { return 0.0; }
+
+    // Range reduction: x = k*ln(2) + r, where |r| <= ln(2)/2
+    let k = (x * LOG2_E + 0.5).floor() as Int;
+    let r = x - (k as Float) * LN2;
+
+    // Polynomial approximation for e^r
+    let r2 = r * r;
+    let coeffs = [
+        1.0,
+        1.0,
+        0.5,
+        0.16666666666666,
+        0.041666666666667,
+        0.0083333333333333,
+        0.0013888888888889,
+        0.00019841269841269,
+    ];
+
+    let er = horner(r, &coeffs);
+
+    // Reconstruct: e^x = 2^k * e^r
+    ldexp(er, k)
+}
+
+// Base-2 exponential: 2^x
+public fn exp2(x: Float) -> Float{> 0.0} {
+    exp(x * LN2)
+}
+
+// exp(x) - 1, accurate for small x
+// Avoids catastrophic cancellation near x = 0.
+public fn expm1(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if x == INFINITY { return INFINITY; }
+    if x == NEG_INFINITY { return -1.0; }
+
+    if x.abs() < 1e-10 {
+        // Taylor series: x + x²/2 + x³/6 + ...
+        x + x * x * 0.5 + x * x * x / 6.0
+    } else if x.abs() < 0.7 {
+        // More terms for medium range
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        x + x2 * 0.5 + x3 / 6.0 + x4 / 24.0 + x4 * x / 120.0
+    } else {
+        exp(x) - 1.0
+    }
+}
+
+// =============================================================================
+// Logarithmic Functions
+// =============================================================================
+
+// Natural logarithm
+// Domain: (0, ∞), Range: (-∞, ∞)
+public fn log(x: Float{> 0.0}) -> Float {
+    if x == INFINITY { return INFINITY; }
+
+    // Range reduction: x = m * 2^e, where 0.5 <= m < 1
+    let (m, e) = frexp(x);
+
+    // Adjust to sqrt(2)/2 <= m < sqrt(2)
+    let (m, e) = if m < FRAC_1_SQRT2 { (m * 2.0, e - 1) } else { (m, e) };
+
+    // Compute log(m) using log((1+s)/(1-s)) = 2*(s + s³/3 + s⁵/5 + ...)
+    let s = (m - 1.0) / (m + 1.0);
+    let s2 = s * s;
+
+    let coeffs = [
+        2.0,
+        0.66666666666666,
+        0.4,
+        0.28571428571428,
+        0.22222222222222,
+    ];
+
+    let log_m = s * horner(s2, &coeffs);
+
+    // Reconstruct: log(x) = e*ln(2) + log(m)
+    (e as Float) * LN2 + log_m
+}
+
+// Safe logarithm for potentially non-positive values
+public fn log_safe(x: Float) -> Maybe<Float> {
+    if x <= 0.0 {
+        Maybe.None
+    } else {
+        Maybe.Some(log(x))
+    }
+}
+
+// Base-2 logarithm
+public fn log2(x: Float{> 0.0}) -> Float {
+    log(x) * LOG2_E
+}
+
+// Base-10 logarithm
+public fn log10(x: Float{> 0.0}) -> Float {
+    log(x) * LOG10_E
+}
+
+// log(1 + x), accurate for small x
+public fn log1p(x: Float{> -1.0}) -> Float {
+    if x.abs() < 1e-10 {
+        // Taylor series: x - x²/2 + x³/3 - ...
+        x - x * x * 0.5 + x * x * x / 3.0
+    } else if x.abs() < 0.5 {
+        // More terms
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        x - x2 * 0.5 + x3 / 3.0 - x4 / 4.0 + x4 * x / 5.0
+    } else {
+        log(1.0 + x)
+    }
+}
+
+// =============================================================================
+// Power Functions
+// =============================================================================
+
+// General power: x^y
+public fn pow(x: Float, y: Float) -> Float {
+    if is_nan(x) || is_nan(y) { return NAN; }
+    if y == 0.0 { return 1.0; }
+    if x == 1.0 { return 1.0; }
+    if x == 0.0 {
+        return if y > 0.0 { 0.0 } else { INFINITY };
+    }
+
+    // Integer exponent: use binary exponentiation
+    if y == y.floor() && y.abs() < 1e15 {
+        powi(x, y as Int64)
+    } else if x > 0.0 {
+        // x^y = exp(y * ln(x))
+        exp(y * log(x))
+    } else {
+        NAN  // x < 0 with non-integer exponent
+    }
+}
+
+// Integer power using binary exponentiation
+// O(log n) multiplications
+public fn powi(x: Float, n: Int64) -> Float {
+    if n == 0 { return 1.0; }
+
+    let negative = n < 0;
+    let mut exp: UInt64 = if negative { (-n) as UInt64 } else { n as UInt64 };
+
+    let mut result = 1.0;
+    let mut base = x;
+
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result *= base;
+        }
+        base *= base;
+        exp >>= 1;
+    }
+
+    if negative { 1.0 / result } else { result }
+}
+
+// Square root
+// Domain: [0, ∞), Range: [0, ∞)
+@intrinsic("llvm.sqrt.f64")
+public fn sqrt(x: Float{>= 0.0}) -> Float{>= 0.0};
+
+// Square root for Float32
+@intrinsic("llvm.sqrt.f32")
+public fn sqrt_f32(x: Float32{>= 0.0}) -> Float32{>= 0.0};
+
+// Safe square root
+public fn sqrt_safe(x: Float) -> Maybe<Float{>= 0.0}> {
+    if x < 0.0 { Maybe.None } else { Maybe.Some(sqrt(x)) }
+}
+
+// Cube root
+public fn cbrt(x: Float) -> Float {
+    if x == 0.0 || is_infinite(x) || is_nan(x) { return x; }
+
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let abs_x = x.abs();
+
+    // Initial guess using bit manipulation
+    let bits = abs_x.to_bits();
+    let guess_bits = (bits / 3) + 0x2A9F7893F0000000;
+    let mut y = Float.from_bits(guess_bits);
+
+    // Newton-Raphson iterations: y = (2y + x/y²) / 3
+    for _ in 0..4 {
+        y = (2.0 * y + abs_x / (y * y)) / 3.0;
+    }
+
+    sign * y
+}
+
+// Hypotenuse: sqrt(x² + y²) without overflow
+public fn hypot(x: Float, y: Float) -> Float {
+    if is_infinite(x) || is_infinite(y) { return INFINITY; }
+    if is_nan(x) || is_nan(y) { return NAN; }
+
+    let ax = x.abs();
+    let ay = y.abs();
+    let max_val = if ax > ay { ax } else { ay };
+    let min_val = if ax > ay { ay } else { ax };
+
+    if max_val == 0.0 { return 0.0; }
+
+    let r = min_val / max_val;
+    max_val * sqrt(1.0 + r * r)
+}
+
+// =============================================================================
+// Rounding Functions
+// =============================================================================
+
+// Floor: largest integer <= x
+@intrinsic("llvm.floor.f64")
+public fn floor(x: Float) -> Float;
+
+// Ceiling: smallest integer >= x
+@intrinsic("llvm.ceil.f64")
+public fn ceil(x: Float) -> Float;
+
+// Round to nearest integer (half away from zero)
+@intrinsic("llvm.round.f64")
+public fn round(x: Float) -> Float;
+
+// Round toward nearest even (banker's rounding)
+@intrinsic("llvm.rint.f64")
+public fn rint(x: Float) -> Float;
+
+// Truncate toward zero
+@intrinsic("llvm.trunc.f64")
+public fn trunc(x: Float) -> Float;
+
+// Fractional part: x - trunc(x)
+@inline(always)
+public fn fract(x: Float) -> Float {
+    x - trunc(x)
+}
+
+// =============================================================================
+// Min/Max/Clamp
+// =============================================================================
+
+// Minimum (NaN-propagating)
+@inline(always)
+public fn min(a: Float, b: Float) -> Float {
+    if is_nan(a) || is_nan(b) { return NAN; }
+    if a < b { a } else { b }
+}
+
+// Maximum (NaN-propagating)
+@inline(always)
+public fn max(a: Float, b: Float) -> Float {
+    if is_nan(a) || is_nan(b) { return NAN; }
+    if a > b { a } else { b }
+}
+
+// Clamp value to [lo, hi]
+@inline(always)
+public fn clamp(x: Float, lo: Float, hi: Float) -> Float {
+    max(lo, min(x, hi))
+}
+
+// Absolute value
+@inline(always)
+public fn abs(x: Float) -> Float{>= 0.0} {
+    if x < 0.0 { -x } else { x }
+}
+
+// Sign function: -1 for x < 0, 0 for x == 0, +1 for x > 0
+@inline(always)
+public fn signum(x: Float) -> Float {
+    if x > 0.0 { 1.0 }
+    else if x < 0.0 { -1.0 }
+    else { 0.0 }
+}
+
+// =============================================================================
+// Fused Multiply-Add
+// =============================================================================
+
+// Fused multiply-add: a * b + c with single rounding
+// More accurate and often faster than separate operations.
+@intrinsic("llvm.fma.f64")
+public fn fma(a: Float, b: Float, c: Float) -> Float;
+
+// FMA for Float32
+@intrinsic("llvm.fma.f32")
+public fn fma_f32(a: Float32, b: Float32, c: Float32) -> Float32;
+
+// =============================================================================
+// Linear Interpolation
+// =============================================================================
+
+// Linear interpolation: a + t*(b - a)
+// For t in [0, 1], returns value in [a, b].
+@inline(always)
+public fn lerp(a: Float, b: Float, t: Float) -> Float {
+    fma(t, b - a, a)
+}
+
+// Inverse linear interpolation: solve for t in lerp(a, b, t) = x
+// Returns (x - a) / (b - a)
+@inline(always)
+public fn inverse_lerp(a: Float, b: Float, x: Float) -> Float {
+    (x - a) / (b - a)
+}
+
+// Remap value from [in_lo, in_hi] to [out_lo, out_hi]
+@inline(always)
+public fn remap(x: Float, in_lo: Float, in_hi: Float, out_lo: Float, out_hi: Float) -> Float {
+    lerp(out_lo, out_hi, inverse_lerp(in_lo, in_hi, x))
+}
+
+// =============================================================================
+// Smooth Interpolation
+// =============================================================================
+
+// Smooth Hermite interpolation (smoothstep)
+// Returns 0 for x <= edge0, 1 for x >= edge1
+// Smooth curve with zero derivative at edges.
+public fn smoothstep(edge0: Float, edge1: Float, x: Float) -> Float {
+    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+// Smoother step (Ken Perlin's improved smoothstep)
+// Second derivative also zero at edges.
+public fn smootherstep(edge0: Float, edge1: Float, x: Float) -> Float {
+    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}

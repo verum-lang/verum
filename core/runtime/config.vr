@@ -1,0 +1,1103 @@
+/// # RuntimeConfig Protocol and Configurations
+///
+/// Spec: docs/architecture/new-arch-spec.md#10-modular-runtime-architecture
+///
+/// Provides pluggable runtime configurations for diverse target platforms:
+///
+/// | Configuration      | Async | Heap  | Threads | IO Driver | Target                     |
+/// |--------------------|-------|-------|---------|-----------|----------------------------|
+/// | FullRuntime        | ✓     | ✓     | ✓       | Completion| Desktop/Server             |
+/// | SingleThreadRuntime| ✓     | ✓     | ✗       | Poll      | WASM, Single-core embedded |
+/// | SyncRuntime        | ✗     | ✓     | ✓       | Blocking  | Legacy, Simple utilities   |
+/// | EmbeddedRuntime    | ✗     | ✗     | ✗       | None      | Microcontrollers (Cortex-M)|
+///
+/// ## Zero-Overhead Principle
+///
+/// Each runtime configuration compiles to exactly what's needed:
+/// - Unused features are completely eliminated (no dead code)
+/// - Conditional compilation removes overhead at compile-time
+/// - VBC intrinsics provide direct syscall access
+///
+/// ## VBC Opcode Integration
+///
+/// System operations map directly to VBC opcodes:
+/// - 0xF0: syscall (direct kernel call)
+/// - 0xF1: mmap/munmap (memory operations)
+/// - 0xF2: atomic operations
+/// - 0xF3: futex (thread synchronization)
+/// - 0xF4: io_uring/kqueue submit
+/// - 0xF5: clock_gettime
+
+module runtime.config;
+
+mount sys.{
+    num_cpus,
+    monotonic_nanos,
+    mmap,
+    munmap,
+    PageSize,
+};
+mount sys.common.init_runtime;
+mount core.intrinsics.{
+    future_poll_sync,
+    executor_spawn,
+    executor_block_on,
+    single_thread_block_on,
+};
+mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator, StackAllocator};
+mount core.{Result, Text};
+
+// =============================================================================
+// Initialization Errors
+// =============================================================================
+
+/// Runtime initialization error
+@repr(UInt8)
+public type InitError is
+    /// Thread-local storage initialization failed
+    | TlsInitFailed
+    /// Allocator initialization failed
+    | AllocatorInitFailed(AllocError)
+    /// I/O driver initialization failed
+    | IoDriverInitFailed(Text)
+    /// Executor initialization failed
+    | ExecutorInitFailed(Text)
+    /// Platform not supported
+    | PlatformNotSupported
+    /// Already initialized
+    | AlreadyInitialized;
+
+implement InitError {
+    public fn message(&self) -> Text {
+        match self {
+            TlsInitFailed => "Failed to initialize thread-local storage",
+            AllocatorInitFailed(e) => f"Failed to initialize allocator: {e}",
+            IoDriverInitFailed(msg) => f"Failed to initialize I/O driver: {msg}",
+            ExecutorInitFailed(msg) => f"Failed to initialize executor: {msg}",
+            PlatformNotSupported => "Platform not supported for this runtime configuration",
+            AlreadyInitialized => "Runtime already initialized",
+        }
+    }
+}
+
+implement Debug for InitError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TlsInitFailed => f.write_str("InitError.TlsInitFailed"),
+            AllocatorInitFailed(_) => f.write_str("InitError.AllocatorInitFailed(..)"),
+            IoDriverInitFailed(msg) => f.write_str(f"InitError.IoDriverInitFailed({msg})"),
+            ExecutorInitFailed(msg) => f.write_str(f"InitError.ExecutorInitFailed({msg})"),
+            PlatformNotSupported => f.write_str("InitError.PlatformNotSupported"),
+            AlreadyInitialized => f.write_str("InitError.AlreadyInitialized"),
+        }
+    }
+}
+
+implement Display for InitError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message())
+    }
+}
+
+// =============================================================================
+// RuntimeConfig Protocol
+// =============================================================================
+
+/// Runtime configuration protocol
+///
+/// Defines the interface for pluggable runtime configurations.
+/// Each implementation provides its own allocator, executor, and I/O driver.
+///
+/// ## Associated Types
+///
+/// - `Allocator`: Memory allocation strategy
+/// - `Executor`: Task scheduling strategy (async runtimes only)
+/// - `IoDriver`: I/O completion strategy
+///
+/// ## Implementation Contract
+///
+/// Implementations must:
+/// 1. Initialize TLS on main thread via `sys.common.init_runtime()`
+/// 2. Initialize all components in dependency order
+/// 3. Provide clean shutdown with resource release
+/// 4. Be thread-safe for concurrent access
+public type RuntimeConfig is protocol {
+    /// Allocator type for this configuration
+    type Allocator: Alloc;
+
+    /// Executor type (use NoopExecutor for sync runtimes)
+    type Executor: AsyncExecutor;
+
+    /// I/O driver type (use NoopDriver for embedded)
+    type IoDriver: RuntimeIoDriver;
+
+    /// Initialize the runtime
+    ///
+    /// # Initialization Order
+    /// 1. TLS bootstrap (thread-local context slots)
+    /// 2. Allocator initialization
+    /// 3. I/O driver initialization
+    /// 4. Executor initialization
+    ///
+    /// # Errors
+    /// Returns InitError if any component fails to initialize.
+    fn init() -> Result<Self, InitError>;
+
+    /// Shutdown the runtime and release all resources
+    ///
+    /// # Shutdown Order (reverse of init)
+    /// 1. Stop executor (wait for tasks to complete)
+    /// 2. Shutdown I/O driver
+    /// 3. Shutdown allocator (release memory)
+    fn shutdown(&mut self);
+
+    /// Get reference to allocator
+    fn allocator_ref(&self) -> &Self.Allocator;
+
+    /// Get executor handle (async runtimes only)
+    @cfg(feature = "async")
+    fn executor_handle(&self) -> &Self.Executor;
+
+    /// Get I/O driver reference
+    @cfg(feature = "io")
+    fn io_driver_ref(&self) -> &Self.IoDriver;
+};
+
+// =============================================================================
+// Executor Protocol
+// =============================================================================
+
+/// Async executor protocol
+///
+/// Provides task scheduling for async runtimes.
+/// Implementations must support spawning, blocking, and shutdown.
+public type AsyncExecutor is protocol {
+    /// Spawn an async task
+    @cfg(feature = "async")
+    fn spawn<T: Send>(
+        &self,
+        future: Future<T>,
+    ) -> TaskHandle<T>;
+
+    /// Block current thread on a future
+    fn block_on<T>(&self, future: Future<T>) -> T;
+
+    /// Shutdown executor and wait for all tasks
+    fn shutdown(&self);
+
+    /// Get number of active tasks
+    fn active_tasks(&self) -> Int;
+};
+
+/// Noop executor for sync runtimes
+public type NoopExecutor is ();
+
+implement AsyncExecutor for NoopExecutor {
+    @cfg(feature = "async")
+    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
+        panic("spawn() called on sync runtime - use @cfg(feature = async) to gate async code")
+    }
+
+    fn block_on<T>(&self, future: Future<T>) -> T {
+        // For sync runtime, we execute synchronously via busy polling
+        future_poll_sync(future)
+    }
+
+    fn shutdown(&self) {
+        // Nothing to shutdown
+    }
+
+    fn active_tasks(&self) -> Int {
+        0
+    }
+}
+
+// =============================================================================
+// I/O Engine Protocol
+// =============================================================================
+
+/// I/O engine protocol for completion-based or blocking I/O
+///
+/// Spec: docs/architecture/new-arch-spec.md#7-async-runtime-verum-native
+public type RuntimeIoDriver is protocol {
+    /// Submit I/O operation
+    fn submit(&self, op: IoOp) -> Result<IoHandle, RuntimeIoError>;
+
+    /// Wait for I/O completion
+    fn wait(&self, handle: IoHandle) -> Result<IoResult, RuntimeIoError>;
+
+    /// Poll for completions (non-blocking)
+    fn poll(&self, completions: &mut [IoCompletion]) -> Int;
+
+    /// Shutdown I/O driver
+    fn shutdown(&self);
+};
+
+/// I/O operation type
+@repr(C)
+public type IoOp is
+    | Read { fd: Int32, buf: &mut [Byte], offset: Int64 }
+    | Write { fd: Int32, buf: &[Byte], offset: Int64 }
+    | Accept { fd: Int32 }
+    | Connect { fd: Int32, addr: &SocketAddr }
+    | Close { fd: Int32 };
+
+/// I/O operation handle
+public type IoHandle is {
+    id: UInt64,
+};
+
+/// I/O completion result
+public type IoCompletion is {
+    handle: IoHandle,
+    result: Result<Int, RuntimeIoError>,
+};
+
+/// I/O error type
+@repr(UInt8)
+public type RuntimeIoError is
+    | WouldBlock
+    | Interrupted
+    | InvalidFd
+    | PermissionDenied
+    | ConnectionRefused
+    | ConnectionReset
+    | NotConnected
+    | TimedOut
+    | Other(Int32);
+
+implement Debug for RuntimeIoError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WouldBlock => f.write_str("WouldBlock"),
+            Interrupted => f.write_str("Interrupted"),
+            InvalidFd => f.write_str("InvalidFd"),
+            PermissionDenied => f.write_str("PermissionDenied"),
+            ConnectionRefused => f.write_str("ConnectionRefused"),
+            ConnectionReset => f.write_str("ConnectionReset"),
+            NotConnected => f.write_str("NotConnected"),
+            TimedOut => f.write_str("TimedOut"),
+            Other(code) => f.write_str(f"Other({code})"),
+        }
+    }
+}
+
+implement Display for RuntimeIoError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WouldBlock => f.write_str("operation would block"),
+            Interrupted => f.write_str("operation interrupted"),
+            InvalidFd => f.write_str("invalid file descriptor"),
+            PermissionDenied => f.write_str("permission denied"),
+            ConnectionRefused => f.write_str("connection refused"),
+            ConnectionReset => f.write_str("connection reset"),
+            NotConnected => f.write_str("not connected"),
+            TimedOut => f.write_str("operation timed out"),
+            Other(code) => f.write_str(f"I/O error (code {code})"),
+        }
+    }
+}
+
+/// Noop I/O driver for embedded
+public type NoopDriver is ();
+
+implement RuntimeIoDriver for NoopDriver {
+    fn submit(&self, op: IoOp) -> Result<IoHandle, RuntimeIoError> {
+        Err(RuntimeIoError.Other(-1))
+    }
+
+    fn wait(&self, handle: IoHandle) -> Result<IoResult, RuntimeIoError> {
+        Err(RuntimeIoError.Other(-1))
+    }
+
+    fn poll(&self, completions: &mut [IoCompletion]) -> Int {
+        0
+    }
+
+    fn shutdown(&self) {
+        // Nothing to shutdown
+    }
+}
+
+// =============================================================================
+// FullRuntime - Desktop/Server Configuration
+// =============================================================================
+
+/// Full runtime with all features enabled
+///
+/// Target: Linux/Windows/macOS desktop and server applications
+///
+/// Features:
+/// - Work-stealing async executor with multiple workers
+/// - Tiered allocator (thread-local + global pools)
+/// - Completion-based I/O (io_uring/kqueue/IOCP)
+/// - Full CBGR memory safety
+///
+/// Performance:
+/// - Task spawn: ~150ns
+/// - Context switch: ~50ns
+/// - I/O submission: ~100ns
+@cfg(runtime = "full")
+public type FullRuntime is {
+    /// Tiered allocator for optimal performance
+    allocator: TieredAllocator,
+
+    /// Work-stealing executor
+    executor: WorkStealingExecutor,
+
+    /// Platform-specific I/O driver
+    io_driver: PlatformIOEngine,
+
+    /// Number of worker threads
+    worker_count: Int,
+};
+
+@cfg(runtime = "full")
+implement RuntimeConfig for FullRuntime {
+    type Allocator = TieredAllocator;
+    type Executor = WorkStealingExecutor;
+    type IoDriver = PlatformIOEngine;
+
+    fn init() -> Result<Self, InitError> {
+        // 1. Initialize TLS
+        init_runtime()
+            .map_err(|_| InitError.TlsInitFailed)?;
+
+        // 2. Initialize allocator
+        let allocator = TieredAllocator.init()
+            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+
+        // 3. Initialize I/O driver
+        let io_driver = PlatformIOEngine.init()
+            .map_err(|e| InitError.IoDriverInitFailed(e))?;
+
+        // 4. Initialize executor with worker count based on CPU cores
+        let worker_count = num_cpus();
+        let executor = WorkStealingExecutor.init(worker_count, &io_driver)
+            .map_err(|e| InitError.ExecutorInitFailed(e))?;
+
+        Ok(Self {
+            allocator,
+            executor,
+            io_driver,
+            worker_count,
+        })
+    }
+
+    fn shutdown(&mut self) {
+        // Reverse order of initialization
+        self.executor.shutdown();
+        self.io_driver.shutdown();
+        self.allocator.shutdown();
+    }
+
+    fn allocator_ref(&self) -> &TieredAllocator {
+        &self.allocator
+    }
+
+    @cfg(feature = "async")
+    fn executor_handle(&self) -> &WorkStealingExecutor {
+        &self.executor
+    }
+
+    @cfg(feature = "io")
+    fn io_driver_ref(&self) -> &PlatformIOEngine {
+        &self.io_driver
+    }
+}
+
+// =============================================================================
+// SingleThreadRuntime - WASM/Single-core Configuration
+// =============================================================================
+
+/// Single-threaded async runtime
+///
+/// Target: WASM, single-core embedded systems
+///
+/// Features:
+/// - Single-threaded async executor
+/// - Simple allocator (bump + freelist)
+/// - Poll-based I/O (for WASM) or completion (for native)
+/// - CBGR with simplified threading model
+///
+/// Performance:
+/// - Task spawn: ~100ns (no work-stealing)
+/// - Context switch: ~30ns (no thread sync)
+@cfg(runtime = "single_thread")
+public type SingleThreadRuntime is {
+    /// Simple allocator (no thread-local optimization needed)
+    allocator: SimpleAllocator,
+
+    /// Single-threaded executor
+    executor: SingleThreadExecutor,
+
+    /// Poll-based I/O driver
+    io_driver: PollDriver,
+};
+
+@cfg(runtime = "single_thread")
+implement RuntimeConfig for SingleThreadRuntime {
+    type Allocator = SimpleAllocator;
+    type Executor = SingleThreadExecutor;
+    type IoDriver = PollDriver;
+
+    fn init() -> Result<Self, InitError> {
+        // 1. Initialize TLS (still needed for context system)
+        init_runtime()
+            .map_err(|_| InitError.TlsInitFailed)?;
+
+        // 2. Initialize simple allocator
+        let allocator = SimpleAllocator.init()
+            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+
+        // 3. Initialize poll-based I/O driver
+        let io_driver = PollDriver.init()
+            .map_err(|e| InitError.IoDriverInitFailed(e))?;
+
+        // 4. Initialize single-threaded executor
+        let executor = SingleThreadExecutor.init(&io_driver)
+            .map_err(|e| InitError.ExecutorInitFailed(e))?;
+
+        Ok(Self {
+            allocator,
+            executor,
+            io_driver,
+        })
+    }
+
+    fn shutdown(&mut self) {
+        self.executor.shutdown();
+        self.io_driver.shutdown();
+        self.allocator.shutdown();
+    }
+
+    fn allocator_ref(&self) -> &SimpleAllocator {
+        &self.allocator
+    }
+
+    @cfg(feature = "async")
+    fn executor_handle(&self) -> &SingleThreadExecutor {
+        &self.executor
+    }
+
+    @cfg(feature = "io")
+    fn io_driver_ref(&self) -> &PollDriver {
+        &self.io_driver
+    }
+}
+
+// =============================================================================
+// SyncRuntime - Synchronous Configuration
+// =============================================================================
+
+/// Synchronous runtime without async
+///
+/// Target: Legacy code, simple utilities, scripts
+///
+/// Features:
+/// - Thread pool for parallel work
+/// - Tiered allocator
+/// - Blocking I/O
+/// - Full CBGR safety
+///
+/// Note: Async code is automatically transformed to blocking calls.
+@cfg(runtime = "no_async")
+public type SyncRuntime is {
+    /// Tiered allocator
+    allocator: TieredAllocator,
+
+    /// Thread pool for parallel work
+    thread_pool: ThreadPool,
+};
+
+@cfg(runtime = "no_async")
+implement RuntimeConfig for SyncRuntime {
+    type Allocator = TieredAllocator;
+    type Executor = NoopExecutor;
+    type IoDriver = NoopDriver;
+
+    fn init() -> Result<Self, InitError> {
+        // 1. Initialize TLS
+        init_runtime()
+            .map_err(|_| InitError.TlsInitFailed)?;
+
+        // 2. Initialize allocator
+        let allocator = TieredAllocator.init()
+            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+
+        // 3. Initialize thread pool
+        let thread_pool = ThreadPool.init(num_cpus())
+            .map_err(|e| InitError.ExecutorInitFailed(f"ThreadPool: {e}"))?;
+
+        Ok(Self {
+            allocator,
+            thread_pool,
+        })
+    }
+
+    fn shutdown(&mut self) {
+        self.thread_pool.shutdown();
+        self.allocator.shutdown();
+    }
+
+    fn allocator_ref(&self) -> &TieredAllocator {
+        &self.allocator
+    }
+
+    @cfg(feature = "async")
+    fn executor_handle(&self) -> &NoopExecutor {
+        &NoopExecutor
+    }
+
+    @cfg(feature = "io")
+    fn io_driver_ref(&self) -> &NoopDriver {
+        &NoopDriver
+    }
+}
+
+// =============================================================================
+// EmbeddedRuntime - Minimal Configuration
+// =============================================================================
+
+/// Minimal embedded runtime
+///
+/// Target: Microcontrollers (ARM Cortex-M, RISC-V)
+///
+/// Features:
+/// - Stack-only allocation (no heap)
+/// - No async (synchronous only)
+/// - No threads (single execution context)
+/// - No I/O driver (direct peripheral access)
+/// - Minimal CBGR (generation-only or unchecked)
+///
+/// Memory footprint: ~256 bytes runtime overhead
+@cfg(any(runtime = "no_heap", runtime = "embedded"))
+public type EmbeddedRuntime is {
+    /// Stack allocator with fixed buffer
+    allocator: StackAllocator,
+};
+
+@cfg(any(runtime = "no_heap", runtime = "embedded"))
+implement RuntimeConfig for EmbeddedRuntime {
+    type Allocator = StackAllocator;
+    type Executor = NoopExecutor;
+    type IoDriver = NoopDriver;
+
+    fn init() -> Result<Self, InitError> {
+        // No TLS in embedded (single-threaded)
+        // Just initialize stack allocator
+
+        // Stack buffer is compile-time allocated
+        let allocator = StackAllocator.init()
+            .map_err(|e| InitError.AllocatorInitFailed(e))?;
+
+        Ok(Self { allocator })
+    }
+
+    fn shutdown(&mut self) {
+        self.allocator.reset();
+    }
+
+    fn allocator_ref(&self) -> &StackAllocator {
+        &self.allocator
+    }
+
+    @cfg(feature = "async")
+    fn executor_handle(&self) -> &NoopExecutor {
+        &NoopExecutor
+    }
+
+    @cfg(feature = "io")
+    fn io_driver_ref(&self) -> &NoopDriver {
+        &NoopDriver
+    }
+}
+
+// =============================================================================
+// CustomRuntime - User-Provided Configuration
+// =============================================================================
+
+/// Custom runtime with user-provided components
+///
+/// Allows users to plug in their own allocator, executor, and I/O driver.
+///
+/// ## Example
+///
+/// ```verum
+/// type MyRuntime is CustomRuntime<MyAllocator, MyExecutor, MyDriver>;
+///
+/// implement RuntimeConfig for MyRuntime {
+///     // ...
+/// }
+///
+/// fn main() using [MyRuntime] {
+///     // Uses custom runtime via context injection
+/// }
+/// ```
+public type CustomRuntime<A: Alloc, E: AsyncExecutor, D: RuntimeIoDriver> is {
+    allocator: A,
+    executor: E,
+    io_driver: D,
+};
+
+// =============================================================================
+// Executor Implementations
+// =============================================================================
+
+/// Work-stealing executor for multi-threaded async
+///
+/// Implements Chase-Lev work-stealing deques for optimal task distribution.
+///
+/// ## Architecture
+///
+/// ```
+/// ┌─────────────────────────────────────────────────────────────────────┐
+/// │                    WORK-STEALING EXECUTOR                           │
+/// ├─────────────────────────────────────────────────────────────────────┤
+/// │                                                                     │
+/// │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐               │
+/// │  │ Worker0 │  │ Worker1 │  │ Worker2 │  │ Worker3 │  ...          │
+/// │  │ ┌─────┐ │  │ ┌─────┐ │  │ ┌─────┐ │  │ ┌─────┐ │               │
+/// │  │ │Deque│ │  │ │Deque│ │  │ │Deque│ │  │ │Deque│ │               │
+/// │  │ └─────┘ │  │ └─────┘ │  │ └─────┘ │  │ └─────┘ │               │
+/// │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘               │
+/// │       │ steal      │ steal      │ steal      │                     │
+/// │       └────────────┴────────────┴────────────┘                     │
+/// │                         │                                          │
+/// │                         ▼                                          │
+/// │                  ┌───────────┐                                     │
+/// │                  │Global Queue│ (overflow)                         │
+/// │                  └───────────┘                                     │
+/// └─────────────────────────────────────────────────────────────────────┘
+/// ```
+@cfg(runtime = "full")
+public type WorkStealingExecutor is {
+    /// Worker threads
+    workers: &[Worker],
+
+    /// Global task queue (for overflow and injection)
+    global_queue: &TaskQueue,
+
+    /// I/O driver reference for integrated polling
+    io_driver: &dyn RuntimeIoDriver,
+
+    /// Shutdown flag
+    shutdown_flag: AtomicBool,
+
+    /// Active task count
+    active_tasks: AtomicU64,
+};
+
+@cfg(runtime = "full")
+implement WorkStealingExecutor {
+    /// Initialize executor with specified worker count
+    public fn init(worker_count: Int, io_driver: &dyn RuntimeIoDriver) -> Result<Self, Text> {
+        let workers = allocate_workers(worker_count)?;
+        let global_queue = TaskQueue.new();
+
+        Ok(Self {
+            workers: workers,
+            global_queue: &global_queue,
+            io_driver: io_driver,
+            shutdown_flag: AtomicBool.new(false),
+            active_tasks: AtomicU64.new(0),
+        })
+    }
+}
+
+@cfg(runtime = "full")
+implement AsyncExecutor for WorkStealingExecutor {
+    @cfg(feature = "async")
+    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
+        self.active_tasks.fetch_add(1, MemoryOrdering.SeqCst);
+
+        // Get current worker or use global queue
+        let task = Task.new(future);
+
+        executor_spawn(self, task)
+    }
+
+    fn block_on<T>(&self, future: Future<T>) -> T {
+        executor_block_on(self, future)
+    }
+
+    fn shutdown(&self) {
+        self.shutdown_flag.store(true, MemoryOrdering.SeqCst);
+
+        // Wait for all workers to complete
+        for worker in self.workers {
+            worker.join();
+        }
+    }
+
+    fn active_tasks(&self) -> Int {
+        self.active_tasks.load(MemoryOrdering.SeqCst) as Int
+    }
+}
+
+/// Single-threaded executor
+@cfg(runtime = "single_thread")
+public type SingleThreadExecutor is {
+    /// Local task queue
+    task_queue: TaskQueue,
+
+    /// I/O driver for integrated polling
+    io_driver: &dyn RuntimeIoDriver,
+
+    /// Running flag
+    running: Bool,
+};
+
+@cfg(runtime = "single_thread")
+implement AsyncExecutor for SingleThreadExecutor {
+    @cfg(feature = "async")
+    fn spawn<T: Send>(&self, future: Future<T>) -> TaskHandle<T> {
+        let task = Task.new(future);
+        self.task_queue.push(task);
+        TaskHandle.new(task)
+    }
+
+    fn block_on<T>(&self, future: Future<T>) -> T {
+        single_thread_block_on(self, future)
+    }
+
+    fn shutdown(&self) {
+        self.running = false;
+    }
+
+    fn active_tasks(&self) -> Int {
+        self.task_queue.len()
+    }
+}
+
+// =============================================================================
+// I/O Driver Implementations
+// =============================================================================
+
+/// Platform-specific I/O engine
+///
+/// Selects optimal completion-based I/O for each platform:
+/// - Linux: io_uring (kernel 5.1+)
+/// - macOS: kqueue
+/// - Windows: IOCP
+@cfg(all(runtime = "full", target_os = "linux"))
+public type PlatformIOEngine is { inner: IoUringDriver };
+
+@cfg(all(runtime = "full", target_os = "macos"))
+public type PlatformIOEngine is { inner: KqueueDriver };
+
+@cfg(all(runtime = "full", target_os = "windows"))
+public type PlatformIOEngine is { inner: IocpDriver };
+
+/// Poll-based I/O driver for single-threaded runtime
+@cfg(runtime = "single_thread")
+public type PollDriver is {
+    /// File descriptor set for polling
+    fds: &[PollFd],
+
+    /// Registered operations
+    pending: &Map<IoHandle, IoOp>,
+};
+
+// =============================================================================
+// Thread Pool (for sync runtime)
+// =============================================================================
+
+/// Thread pool for parallel work in sync runtime
+@cfg(runtime = "no_async")
+public type ThreadPool is {
+    /// Worker threads
+    workers: &[Thread],
+
+    /// Job queue
+    job_queue: &JobQueue,
+
+    /// Shutdown flag
+    shutdown: AtomicBool,
+};
+
+@cfg(runtime = "no_async")
+implement ThreadPool {
+    public fn init(worker_count: Int) -> Result<Self, Text> {
+        let job_queue = &JobQueue.new();
+        let workers = allocate_thread_pool(worker_count, job_queue)?;
+
+        Ok(Self {
+            workers,
+            job_queue,
+            shutdown: AtomicBool.new(false),
+        })
+    }
+
+    public fn submit<F: FnOnce() + Send>(&self, job: F) {
+        self.job_queue.push(Job.new(job));
+    }
+
+    public fn shutdown(&self) {
+        self.shutdown.store(true, MemoryOrdering.SeqCst);
+        for worker in self.workers {
+            worker.join();
+        }
+    }
+}
+
+// =============================================================================
+// Supporting Type Definitions for @cfg-gated Runtime Configurations
+// =============================================================================
+// These types are used by the runtime configurations above.
+// They provide the concrete structures needed by WorkStealingExecutor,
+// SingleThreadExecutor, ThreadPool, and PollDriver.
+
+/// Worker thread for the work-stealing executor.
+///
+/// Each worker owns a local deque for tasks, a handle to the OS thread,
+/// and a reference to the global queue for work stealing.
+type Worker is {
+    /// OS thread handle (pthread_t on Unix, HANDLE on Windows)
+    thread_handle: Int,
+    /// Per-worker local task deque (LIFO push, FIFO steal)
+    local_deque: &Deque<Task>,
+    /// Reference to the shared global queue
+    global_queue: &TaskQueue,
+    /// Worker index (0..N-1)
+    index: Int,
+    /// Running flag — set to false during shutdown
+    running: Bool,
+};
+
+implement Worker {
+    /// Join this worker thread (blocks until the worker exits).
+    fn join(&self) {
+        @cfg(target_os = "linux") {
+            __syscall_join_thread(self.thread_handle);
+        }
+        @cfg(target_os = "macos") {
+            __pthread_join(self.thread_handle);
+        }
+        @cfg(target_os = "windows") {
+            __wait_for_single_object(self.thread_handle);
+        }
+    }
+}
+
+/// Bounded multi-producer multi-consumer task queue.
+///
+/// Backed by a ring buffer with atomic head/tail pointers.
+/// Capacity: 4096 tasks (power-of-two for efficient masking).
+type TaskQueue is {
+    /// Ring buffer storage
+    buffer: &[Task],
+    /// Capacity (always power of two)
+    capacity: Int,
+    /// Atomic head index (consumer side)
+    head: AtomicU64,
+    /// Atomic tail index (producer side)
+    tail: AtomicU64,
+};
+
+implement TaskQueue {
+    fn new() -> TaskQueue {
+        let cap = 4096;
+        TaskQueue {
+            buffer: alloc_array<Task>(cap),
+            capacity: cap,
+            head: AtomicU64.new(0),
+            tail: AtomicU64.new(0),
+        }
+    }
+
+    fn push(&self, task: Task) {
+        let tail = self.tail.fetch_add(1, MemoryOrdering.AcqRel) as Int;
+        let idx = tail % self.capacity;
+        self.buffer[idx] = task;
+    }
+
+    fn pop(&self) -> Maybe<Task> {
+        let head = self.head.load(MemoryOrdering.Acquire) as Int;
+        let tail = self.tail.load(MemoryOrdering.Acquire) as Int;
+        if head >= tail {
+            return None;
+        }
+        let idx = head % self.capacity;
+        self.head.fetch_add(1, MemoryOrdering.Release);
+        Some(self.buffer[idx])
+    }
+
+    fn len(&self) -> Int {
+        let head = self.head.load(MemoryOrdering.Relaxed) as Int;
+        let tail = self.tail.load(MemoryOrdering.Relaxed) as Int;
+        if tail >= head { tail - head } else { 0 }
+    }
+}
+
+/// Async task wrapper.
+///
+/// Encapsulates a future with its execution state and waker.
+type Task is {
+    /// Pointer to the boxed future (type-erased)
+    future_ptr: Int,
+    /// Task state: 0=Pending, 1=Running, 2=Complete, 3=Cancelled
+    state: AtomicU32,
+    /// Waker function pointer for rescheduling
+    waker_fn: Int,
+    /// Task priority (lower = higher priority)
+    priority: UInt16,
+};
+
+implement Task {
+    fn new<T>(future: Future<T>) -> Task {
+        Task {
+            future_ptr: future as Int,
+            state: AtomicU32.new(0),
+            waker_fn: 0,
+            priority: 0,
+        }
+    }
+}
+
+/// Handle to a spawned async task, used to await the result.
+///
+/// Generic over T — the return type of the future.
+type TaskHandle<T> is {
+    /// Pointer to the task's result slot
+    result_ptr: Int,
+    /// Atomic completion flag
+    completed: AtomicBool,
+};
+
+implement<T> TaskHandle<T> {
+    fn new(task: Task) -> TaskHandle<T> {
+        TaskHandle {
+            result_ptr: task.future_ptr,
+            completed: AtomicBool.new(false),
+        }
+    }
+}
+
+/// OS thread handle wrapper.
+type Thread is {
+    /// Native thread handle (pthread_t / HANDLE)
+    handle: Int,
+};
+
+implement Thread {
+    fn join(&self) {
+        @cfg(target_os = "linux") {
+            __syscall_join_thread(self.handle);
+        }
+        @cfg(target_os = "macos") {
+            __pthread_join(self.handle);
+        }
+        @cfg(target_os = "windows") {
+            __wait_for_single_object(self.handle);
+        }
+    }
+}
+
+/// Bounded job queue for the synchronous thread pool.
+///
+/// Similar to TaskQueue but for blocking jobs (FnOnce closures).
+type JobQueue is {
+    /// Ring buffer of jobs
+    buffer: &[Job],
+    /// Capacity
+    capacity: Int,
+    /// Atomic head/tail
+    head: AtomicU64,
+    tail: AtomicU64,
+};
+
+implement JobQueue {
+    fn new() -> JobQueue {
+        let cap = 4096;
+        JobQueue {
+            buffer: alloc_array<Job>(cap),
+            capacity: cap,
+            head: AtomicU64.new(0),
+            tail: AtomicU64.new(0),
+        }
+    }
+
+    fn push(&self, job: Job) {
+        let tail = self.tail.fetch_add(1, MemoryOrdering.AcqRel) as Int;
+        let idx = tail % self.capacity;
+        self.buffer[idx] = job;
+    }
+}
+
+/// Job wrapper for thread pool (type-erased FnOnce closure).
+type Job is {
+    /// Pointer to the closure data
+    closure_ptr: Int,
+    /// Function pointer to invoke the closure
+    invoke_fn: Int,
+};
+
+implement Job {
+    fn new<F: FnOnce() + Send>(f: F) -> Job {
+        Job {
+            closure_ptr: f as Int,
+            invoke_fn: 0,
+        }
+    }
+}
+
+/// Poll file descriptor for poll-based I/O.
+///
+/// Matches the POSIX `struct pollfd` layout.
+@repr(C)
+type PollFd is {
+    /// File descriptor
+    fd: Int32,
+    /// Requested events (POLLIN, POLLOUT, etc.)
+    events: Int16,
+    /// Returned events
+    revents: Int16,
+};
+
+/// Atomic boolean flag.
+///
+/// Backed by an atomic 32-bit integer (0=false, 1=true).
+type AtomicBool is {
+    value: AtomicU32,
+};
+
+implement AtomicBool {
+    fn new(initial: Bool) -> AtomicBool {
+        AtomicBool { value: AtomicU32.new(if initial { 1 } else { 0 }) }
+    }
+
+    fn load(&self, ordering: Ordering) -> Bool {
+        self.value.load(ordering) != 0
+    }
+
+    fn store(&self, val: Bool, ordering: Ordering) {
+        self.value.store(if val { 1 } else { 0 }, ordering);
+    }
+
+    fn compare_exchange(&self, expected: Bool, new_val: Bool, ordering: Ordering) -> Bool {
+        let exp = if expected { 1 } else { 0 };
+        let nv = if new_val { 1 } else { 0 };
+        self.value.compare_exchange(exp, nv, ordering) == exp
+    }
+}
+
+// OS thread intrinsics (wired to sys layer)
+@cfg(target_os = "linux")
+@intrinsic("syscall_join_thread")
+fn __syscall_join_thread(handle: Int);
+
+@cfg(target_os = "macos")
+@intrinsic("pthread_join")
+fn __pthread_join(handle: Int);
+
+@cfg(target_os = "windows")
+@intrinsic("wait_for_single_object")
+fn __wait_for_single_object(handle: Int);
+
+// Array allocation helper
+fn alloc_array<T>(count: Int) -> &[T] {
+    let size = count * @size_of(T);
+    let ptr = mem.alloc(size, @align_of(T));
+    unsafe { slice_from_raw_parts(ptr as &T, count) }
+}

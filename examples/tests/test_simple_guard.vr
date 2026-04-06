@@ -1,0 +1,9 @@
+// Simplest test for match with guard
+
+fn main() -> Int {
+    let x = 5;
+    match x {
+        n if n > 0 => 1,
+        _ => 0
+    }
+}

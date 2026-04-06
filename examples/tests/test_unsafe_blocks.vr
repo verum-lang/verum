@@ -1,0 +1,135 @@
+// Test: Unsafe blocks
+// Tests unsafe block syntax and usage patterns
+
+// Test 1: Simple unsafe block
+fn test_simple_unsafe() {
+    print("Test 1: Simple unsafe block");
+
+    unsafe {
+        let x = 42;
+        print("Inside unsafe block");
+        print(x);
+    }
+
+    print("Test 1 PASS");
+}
+
+// Test 2: Unsafe block with expressions
+fn test_unsafe_with_expr() {
+    print("Test 2: Unsafe block with expressions");
+
+    let result = unsafe {
+        let a = 10;
+        let b = 20;
+        a + b
+    };
+
+    print("Result from unsafe block: ");
+    print(result);
+    print("Test 2 PASS");
+}
+
+// Test 3: Nested unsafe blocks
+fn test_nested_unsafe() {
+    print("Test 3: Nested unsafe blocks");
+
+    unsafe {
+        print("Outer unsafe block");
+
+        unsafe {
+            print("Inner unsafe block");
+            let value = 100;
+            print(value);
+        }
+
+        print("Back to outer unsafe block");
+    }
+
+    print("Test 3 PASS");
+}
+
+// Test 4: Unsafe block in control flow
+fn test_unsafe_in_control_flow() {
+    print("Test 4: Unsafe block in control flow");
+
+    let condition = true;
+
+    if condition {
+        unsafe {
+            print("Unsafe block in if branch");
+        }
+    } else {
+        unsafe {
+            print("Unsafe block in else branch");
+        }
+    }
+
+    print("Test 4 PASS");
+}
+
+// Test 5: Unsafe block with early return
+fn test_unsafe_with_return() -> Int {
+    print("Test 5: Unsafe block with return");
+
+    let result = unsafe {
+        let value = 42;
+        value * 2
+    };
+
+    print("Returning from function with unsafe result");
+    result
+}
+
+// Test 6: Multiple statements in unsafe block
+fn test_unsafe_multiple_stmts() {
+    print("Test 6: Multiple statements in unsafe block");
+
+    unsafe {
+        let x = 1;
+        let y = 2;
+        let z = 3;
+        let sum = x + y + z;
+        print("Sum in unsafe block: ");
+        print(sum);
+    }
+
+    print("Test 6 PASS");
+}
+
+// Test 7: Unsafe block with match expression
+fn test_unsafe_with_match() {
+    print("Test 7: Unsafe block with match");
+
+    let value = 42;
+
+    unsafe {
+        match value {
+            42 => {
+                print("Matched 42 in unsafe block");
+            }
+            _ => {
+                print("No match in unsafe block");
+            }
+        }
+    }
+
+    print("Test 7 PASS");
+}
+
+fn main() {
+    print("=== Unsafe Block Test ===");
+
+    test_simple_unsafe();
+    test_unsafe_with_expr();
+    test_nested_unsafe();
+    test_unsafe_in_control_flow();
+
+    let return_value = test_unsafe_with_return();
+    print("Returned value: ");
+    print(return_value);
+
+    test_unsafe_multiple_stmts();
+    test_unsafe_with_match();
+
+    print("All unsafe block tests PASS");
+}

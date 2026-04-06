@@ -1,0 +1,23 @@
+// Test 3: Nested context usage
+context Config {
+    fn get_setting(self, key: Text) -> Text
+}
+
+fn read_config(key: Text) using Config -> Text {
+    Config.get_setting(key)
+}
+
+fn use_config() using Config {
+    let value = read_config("app_name");
+    // Config should propagate automatically
+}
+
+type AppConfig is { app_name: Text, version: Text };
+
+fn main() {
+    provide Config = AppConfig {
+        app_name: "MyApp",
+        version: "1.0"
+    };
+    use_config();
+}

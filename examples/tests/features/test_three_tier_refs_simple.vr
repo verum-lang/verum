@@ -1,0 +1,19 @@
+// Test: Simple three-tier reference creation (no dereferencing)
+
+fn main() -> Int {
+    let value = 42;
+
+    // Test creating managed reference
+    let r1 = &value;
+    println("Created managed ref");
+
+    // Test creating checked reference
+    let r2 = &checked value;
+    println("Created checked ref");
+
+    // Test creating unsafe reference
+    let r3 = &unsafe value;
+    println("Created unsafe ref");
+
+    0
+}

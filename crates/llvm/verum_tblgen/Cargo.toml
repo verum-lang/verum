@@ -1,0 +1,25 @@
+[package]
+name = "verum_tblgen"
+version = "21.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Verum Team", "Daan Vanoverloop", "Yota Toyama", "Edgar Luque"]
+description = "Safe Rust bindings for TableGen, built from local LLVM sources"
+repository = "https://github.com/luxquant/axiom"
+keywords = ["bindings", "llvm", "tablegen", "wrapper"]
+categories = ["development-tools::ffi"]
+exclude = ["doc/"]
+
+# Tells cargo this crate links to native TableGen libraries
+links = "verum-tblgen"
+
+[dependencies]
+paste = "1.0.15"
+thiserror = { workspace = true }
+
+[build-dependencies]
+bindgen = "0.72.1"
+cc = { workspace = true }
+
+[features]
+default = []

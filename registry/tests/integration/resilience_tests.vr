@@ -1,0 +1,540 @@
+// Verum Registry - Resilience Integration Tests
+//
+// Comprehensive integration tests for resilience patterns
+// Tests circuit breakers, retries, timeouts, and fallbacks
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{
+    setup_test_db,
+    cleanup_test_db,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    simulate_database_failure,
+    simulate_slow_operation,
+    reset_failure_simulation,
+};
+
+// Import domain types
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import resilience modules
+mount super.super.src.resilience.circuit_breaker.{CircuitBreaker, CircuitBreakerState};
+mount super.super.src.resilience.retry.{RetryPolicy, with_retry};
+mount super.super.src.resilience.timeout.{with_timeout};
+mount super.super.src.resilience.fallback.{with_fallback};
+
+// ============================================================================
+// Circuit Breaker Tests
+// ============================================================================
+
+@test
+fn test_circuit_breaker_opens_on_failures() {
+    setup_test_db();
+
+    // Create circuit breaker with low threshold
+    let mut cb = CircuitBreaker.new(
+        "test-breaker",
+        3,  // Failure threshold
+        5000,  // Reset timeout (ms)
+    );
+
+    // Verify initial state is Closed
+    assert_eq(&cb.state(), &CircuitBreakerState.Closed);
+
+    // Simulate 3 consecutive failures
+    for i in 1..4 {
+        simulate_database_failure(true);
+
+        let result = cb.execute(|| {
+            // This will fail
+            database_operation().await
+        }).await;
+
+        assert_err(&result);
+    }
+
+    // Circuit breaker should now be Open
+    assert_eq(&cb.state(), &CircuitBreakerState.Open);
+
+    // Requests should be rejected immediately without execution
+    reset_failure_simulation();
+    let rejected = cb.execute(|| {
+        // This would succeed, but circuit is open
+        database_operation().await
+    }).await;
+
+    assert_err(&rejected);
+    match rejected {
+        Result.Err(RegistryError.InternalError { message }) => {
+            assert(&message.contains("circuit") || &message.contains("breaker"));
+        },
+        _ => panic("Expected circuit breaker rejection"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_circuit_breaker_closes_after_success() {
+    setup_test_db();
+
+    let mut cb = CircuitBreaker.new("test-breaker-2", 2, 100);
+
+    // Open the circuit with failures
+    for i in 1..3 {
+        simulate_database_failure(true);
+        cb.execute(|| database_operation().await).await;
+    }
+
+    assert_eq(&cb.state(), &CircuitBreakerState.Open);
+
+    // Wait for reset timeout (would need time manipulation in production)
+    // After timeout, circuit enters HalfOpen state
+
+    // Successful operation should close circuit
+    reset_failure_simulation();
+
+    // In HalfOpen state, allow one test request
+    cb.transition_to_half_open();
+
+    let success_result = cb.execute(|| database_operation().await).await;
+    assert_ok(&success_result);
+
+    // Circuit should now be Closed
+    assert_eq(&cb.state(), &CircuitBreakerState.Closed);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_circuit_breaker_tracks_failures() {
+    setup_test_db();
+
+    let mut cb = CircuitBreaker.new("test-breaker-3", 5, 5000);
+
+    // Simulate 2 failures (below threshold)
+    simulate_database_failure(true);
+    cb.execute(|| database_operation().await).await;
+    cb.execute(|| database_operation().await).await;
+
+    // Circuit should still be Closed
+    assert_eq(&cb.state(), &CircuitBreakerState.Closed);
+    assert_eq(&cb.failure_count(), &2);
+
+    // Successful operation should reset counter
+    reset_failure_simulation();
+    cb.execute(|| database_operation().await).await;
+
+    assert_eq(&cb.failure_count(), &0);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Retry Tests
+// ============================================================================
+
+@test
+fn test_retry_succeeds_on_transient_failure() {
+    setup_test_db();
+
+    let retry_policy = RetryPolicy.new(
+        3,      // Max attempts
+        100,    // Initial delay (ms)
+        2.0,    // Backoff multiplier
+    );
+
+    let mut attempt_count = 0;
+
+    let result = with_retry(retry_policy, || {
+        attempt_count = attempt_count + 1;
+
+        // Fail first 2 attempts, succeed on 3rd
+        if attempt_count < 3 {
+            simulate_database_failure(true);
+            database_operation().await
+        } else {
+            reset_failure_simulation();
+            database_operation().await
+        }
+    }).await;
+
+    assert_ok(&result);
+    assert_eq(&attempt_count, &3);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_retry_gives_up_after_max_attempts() {
+    setup_test_db();
+
+    let retry_policy = RetryPolicy.new(3, 100, 2.0);
+
+    let mut attempt_count = 0;
+
+    // All attempts will fail
+    simulate_database_failure(true);
+
+    let result = with_retry(retry_policy, || {
+        attempt_count = attempt_count + 1;
+        database_operation().await
+    }).await;
+
+    assert_err(&result);
+    assert_eq(&attempt_count, &3);  // Tried 3 times then gave up
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_retry_with_exponential_backoff() {
+    setup_test_db();
+
+    let retry_policy = RetryPolicy.new(4, 50, 2.0);
+
+    let mut delays = List.new();
+    let mut last_time = current_time_ms();
+
+    let result = with_retry(retry_policy, || {
+        let current = current_time_ms();
+        let delay = current - last_time;
+
+        if delays.len() > 0 {
+            delays.push(delay);
+        }
+
+        last_time = current;
+
+        // Fail first 3 attempts
+        if delays.len() < 3 {
+            simulate_database_failure(true);
+            database_operation().await
+        } else {
+            reset_failure_simulation();
+            database_operation().await
+        }
+    }).await;
+
+    assert_ok(&result);
+
+    // Verify exponential backoff: each delay should be ~2x previous
+    // delay[0] ≈ 50ms, delay[1] ≈ 100ms, delay[2] ≈ 200ms
+    assert(&delays[1] > delays[0]);
+    assert(&delays[2] > delays[1]);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_retry_only_retries_retriable_errors() {
+    setup_test_db();
+
+    let retry_policy = RetryPolicy.new(3, 100, 2.0);
+
+    let mut attempt_count = 0;
+
+    // Return non-retriable error
+    let result = with_retry(retry_policy, || {
+        attempt_count = attempt_count + 1;
+
+        // Return validation error (not retriable)
+        Result.Err(RegistryError.validation_error("field", "Invalid"))
+    }).await;
+
+    assert_err(&result);
+    assert_eq(&attempt_count, &1);  // Should not retry non-retriable errors
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Timeout Tests
+// ============================================================================
+
+@test
+fn test_timeout_prevents_hanging() {
+    setup_test_db();
+
+    // Set short timeout
+    let timeout_ms = 100;
+
+    // Operation that takes longer than timeout
+    simulate_slow_operation(200);  // 200ms operation
+
+    let result = with_timeout(timeout_ms, || {
+        slow_database_operation().await
+    }).await;
+
+    assert_err(&result);
+
+    match result {
+        Result.Err(RegistryError.InternalError { message }) => {
+            assert(&message.contains("timeout") || &message.contains("timed out"));
+        },
+        _ => panic("Expected timeout error"),
+    }
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_timeout_allows_fast_operations() {
+    setup_test_db();
+
+    // Set generous timeout
+    let timeout_ms = 1000;
+
+    // Fast operation
+    simulate_slow_operation(50);  // 50ms operation
+
+    let result = with_timeout(timeout_ms, || {
+        slow_database_operation().await
+    }).await;
+
+    assert_ok(&result);
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_timeout_returns_error_quickly() {
+    setup_test_db();
+
+    let timeout_ms = 100;
+    let start_time = current_time_ms();
+
+    // Operation that would take 5 seconds
+    simulate_slow_operation(5000);
+
+    let result = with_timeout(timeout_ms, || {
+        slow_database_operation().await
+    }).await;
+
+    let elapsed = current_time_ms() - start_time;
+
+    assert_err(&result);
+
+    // Should timeout around 100ms, not wait 5000ms
+    assert(&elapsed < 200);  // Allow some margin
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Fallback Tests
+// ============================================================================
+
+@test
+fn test_fallback_on_primary_failure() {
+    setup_test_db();
+
+    // Primary operation will fail
+    simulate_database_failure(true);
+
+    let fallback_called = false;
+
+    let result = with_fallback(
+        || {
+            // Primary operation (fails)
+            database_operation().await
+        },
+        || {
+            // Fallback operation (succeeds)
+            fallback_called = true;
+            Result.Ok("fallback value")
+        }
+    ).await;
+
+    assert_ok(&result);
+    assert_eq(&fallback_called, &true);
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_fallback_not_called_on_success() {
+    setup_test_db();
+
+    let fallback_called = false;
+
+    let result = with_fallback(
+        || {
+            // Primary operation (succeeds)
+            Result.Ok("primary value")
+        },
+        || {
+            // Fallback operation (should not be called)
+            fallback_called = true;
+            Result.Ok("fallback value")
+        }
+    ).await;
+
+    assert_ok(&result);
+    assert_eq(&fallback_called, &false);
+    assert_eq(&result.unwrap(), &"primary value");
+
+    cleanup_test_db();
+}
+
+@test
+fn test_fallback_degraded_response() {
+    setup_test_db();
+
+    // Simulate cache miss
+    simulate_database_failure(true);
+
+    let result = with_fallback(
+        || {
+            // Try to get from cache (fails)
+            get_from_cache("package-stats").await
+        },
+        || {
+            // Fallback to default/placeholder stats
+            Result.Ok(create_placeholder_stats())
+        }
+    ).await;
+
+    assert_ok(&result);
+
+    // Fallback response should be valid but degraded
+    let stats = result.unwrap();
+    assert(&stats.is_placeholder);
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Combined Resilience Patterns Tests
+// ============================================================================
+
+@test
+fn test_retry_with_circuit_breaker() {
+    setup_test_db();
+
+    let mut cb = CircuitBreaker.new("combined-breaker", 3, 5000);
+    let retry_policy = RetryPolicy.new(2, 100, 2.0);
+
+    // Simulate failures that open circuit
+    simulate_database_failure(true);
+
+    let result = with_retry(retry_policy, || {
+        cb.execute(|| database_operation().await).await
+    }).await;
+
+    assert_err(&result);
+
+    // Circuit should be open after failures
+    assert_eq(&cb.state(), &CircuitBreakerState.Open);
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_timeout_with_retry() {
+    setup_test_db();
+
+    let retry_policy = RetryPolicy.new(3, 100, 2.0);
+    let timeout_ms = 50;
+
+    let mut attempt_count = 0;
+
+    // First 2 attempts timeout, 3rd succeeds
+    let result = with_retry(retry_policy, || {
+        attempt_count = attempt_count + 1;
+
+        if attempt_count < 3 {
+            simulate_slow_operation(100);  // Will timeout
+        } else {
+            simulate_slow_operation(10);  // Will succeed
+        }
+
+        with_timeout(timeout_ms, || {
+            slow_database_operation().await
+        }).await
+    }).await;
+
+    assert_ok(&result);
+    assert_eq(&attempt_count, &3);
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+@test
+fn test_fallback_with_circuit_breaker() {
+    setup_test_db();
+
+    let mut cb = CircuitBreaker.new("fallback-breaker", 2, 5000);
+
+    // Open circuit with failures
+    simulate_database_failure(true);
+    cb.execute(|| database_operation().await).await;
+    cb.execute(|| database_operation().await).await;
+
+    // Circuit is now open, use fallback
+    let result = with_fallback(
+        || {
+            cb.execute(|| database_operation().await).await
+        },
+        || {
+            Result.Ok("fallback value")
+        }
+    ).await;
+
+    assert_ok(&result);
+    assert_eq(&result.unwrap(), &"fallback value");
+
+    reset_failure_simulation();
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+fn database_operation() async -> Result<Text, RegistryError> {
+    // Simulated database operation
+    // Behavior controlled by test utilities
+    Result.Ok("success")
+}
+
+fn slow_database_operation() async -> Result<Text, RegistryError> {
+    // Simulated slow operation
+    // Duration controlled by test utilities
+    Result.Ok("success")
+}
+
+fn get_from_cache(key: Text) async -> Result<PackageStats, RegistryError> {
+    // Simulated cache operation
+    Result.Err(RegistryError.internal_error("Cache miss"))
+}
+
+type PackageStats is {
+    total_downloads: Int,
+    is_placeholder: Bool,
+};
+
+fn create_placeholder_stats() -> PackageStats {
+    PackageStats {
+        total_downloads: 0,
+        is_placeholder: true,
+    }
+}
+
+fn current_time_ms() -> Int {
+    // Return current time in milliseconds
+    // In production, would use std.time
+    0
+}

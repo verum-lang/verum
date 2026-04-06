@@ -1,0 +1,1635 @@
+// =============================================================================
+// parser.vr - Recursive descent parser for the Verum bootstrap compiler
+// =============================================================================
+// Consumes a token stream and produces an AST.
+// Uses Pratt (precedence climbing) parsing for expressions.
+// =============================================================================
+
+mount core.*;
+mount bootstrap.token.*;
+mount bootstrap.ast.*;
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+type Parser is {
+    tokens: List<Token>,
+    pos: Int,
+    len: Int,
+};
+
+implement Parser {
+    fn new(tokens: List<Token>) -> Parser {
+        let l = tokens.len();
+        Parser { tokens: tokens, pos: 0, len: l }
+    }
+
+    // =========================================================================
+    // Core helpers
+    // =========================================================================
+
+    fn peek(&self) -> Token {
+        if self.pos >= self.len {
+            return Token.new(TK_EOF, 0, 0, 0, 0);
+        }
+        self.tokens[self.pos]
+    }
+
+    fn peek_kind(&self) -> Int {
+        self.peek().kind
+    }
+
+    fn peek_ahead(&self, offset: Int) -> Token {
+        let idx = self.pos + offset;
+        if idx >= self.len {
+            return Token.new(TK_EOF, 0, 0, 0, 0);
+        }
+        self.tokens[idx]
+    }
+
+    fn advance(&mut self) -> Token {
+        let tok = self.peek();
+        if self.pos < self.len {
+            self.pos = self.pos + 1;
+        }
+        tok
+    }
+
+    fn at(&self, kind: Int) -> Bool {
+        self.peek_kind() == kind
+    }
+
+    fn eat(&mut self, kind: Int) -> Bool {
+        if self.at(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect(&mut self, kind: Int) -> Result<Token, Text> {
+        if self.at(kind) {
+            Ok(self.advance())
+        } else {
+            let tok = self.peek();
+            Err(f"expected {token_name(kind)}, found {token_name(tok.kind)} at {tok.span.line}:{tok.span.col}")
+        }
+    }
+
+    fn error(&self, msg: Text) -> Text {
+        let tok = self.peek();
+        f"{msg} at {tok.span.line}:{tok.span.col}"
+    }
+
+    fn current_span(&self) -> Span {
+        self.peek().span
+    }
+
+    // =========================================================================
+    // Module parsing
+    // =========================================================================
+
+    fn parse_module(&mut self, path: Text) -> Result<Module, Text> {
+        let mut decls: List<Decl> = List.new();
+
+        while !self.at(TK_EOF) {
+            let decl = self.parse_decl()?;
+            decls.push(decl);
+        }
+
+        Ok(Module { path: path, decls: decls })
+    }
+
+    // =========================================================================
+    // Declaration parsing
+    // =========================================================================
+
+    fn parse_decl(&mut self) -> Result<Decl, Text> {
+        // Handle attributes: @name(...)
+        let attrs = self.parse_attributes()?;
+
+        // Visibility modifier
+        let is_pub = self.eat_visibility();
+
+        let kind = self.peek_kind();
+
+        if kind == TK_FN || kind == TK_ASYNC || kind == TK_PURE || kind == TK_UNSAFE {
+            let func = self.parse_fn_def(is_pub, attrs)?;
+            return Ok(DeclFn(func));
+        }
+
+        if kind == TK_TYPE {
+            let typedef = self.parse_type_def(is_pub, attrs)?;
+            return Ok(DeclType(typedef));
+        }
+
+        if kind == TK_IMPLEMENT {
+            let impl_def = self.parse_impl_def()?;
+            return Ok(DeclImpl(impl_def));
+        }
+
+        if kind == TK_MOUNT {
+            let mount_def = self.parse_mount_def()?;
+            return Ok(DeclMount(mount_def));
+        }
+
+        if kind == TK_CONST {
+            let const_def = self.parse_const_def(is_pub)?;
+            return Ok(DeclConst(const_def));
+        }
+
+        if kind == TK_MODULE {
+            let mod_def = self.parse_module_def(is_pub)?;
+            return Ok(DeclModule(mod_def));
+        }
+
+        Err(self.error(f"unexpected token {token_name(kind)} in declaration"))
+    }
+
+    fn eat_visibility(&mut self) -> Bool {
+        let kind = self.peek_kind();
+        if kind == TK_PUB || kind == TK_PUBLIC {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_attributes(&mut self) -> Result<List<Attribute>, Text> {
+        let mut attrs: List<Attribute> = List.new();
+        while self.at(TK_AT) {
+            let span = self.current_span();
+            self.advance(); // consume @
+
+            let name_tok = self.expect(TK_IDENT)?;
+            let name = name_tok.value;
+            let mut args: List<Text> = List.new();
+
+            if self.eat(TK_LPAREN) {
+                while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                    let arg = self.advance();
+                    args.push(arg.value);
+                    self.eat(TK_COMMA);
+                }
+                self.expect(TK_RPAREN)?;
+            }
+
+            attrs.push(Attribute { name: name, args: args, span: span });
+        }
+        Ok(attrs)
+    }
+
+    // =========================================================================
+    // Function definition
+    // =========================================================================
+
+    fn parse_fn_def(&mut self, is_pub: Bool, attrs: List<Attribute>) -> Result<FnDef, Text> {
+        let span = self.current_span();
+        let is_async = self.eat(TK_ASYNC);
+        let is_pure = self.eat(TK_PURE);
+        let is_unsafe = self.eat(TK_UNSAFE);
+
+        self.expect(TK_FN)?;
+
+        let name_tok = self.expect(TK_IDENT)?;
+        let name = name_tok.value;
+
+        // Type parameters: <T, U>
+        let type_params = self.parse_type_params()?;
+
+        // Parameters: (name: Type, ...)
+        self.expect(TK_LPAREN)?;
+        let params = self.parse_param_list()?;
+        self.expect(TK_RPAREN)?;
+
+        // Return type: -> Type
+        let return_type = if self.eat(TK_R_ARROW) {
+            Some(Heap(self.parse_type_expr()?))
+        } else {
+            None
+        };
+
+        // Body: { ... } or ;
+        let body = if self.at(TK_LBRACE) {
+            Some(self.parse_block_stmts()?)
+        } else {
+            self.expect(TK_SEMI)?;
+            None
+        };
+
+        Ok(FnDef {
+            name: name,
+            type_params: type_params,
+            params: params,
+            return_type: return_type,
+            body: body,
+            is_pub: is_pub,
+            is_pure: is_pure,
+            is_async: is_async,
+            is_unsafe: is_unsafe,
+            attrs: attrs,
+            span: span,
+        })
+    }
+
+    fn parse_type_params(&mut self) -> Result<List<TypeParam>, Text> {
+        let mut params: List<TypeParam> = List.new();
+        if !self.eat(TK_LT) {
+            return Ok(params);
+        }
+
+        while !self.at(TK_GT) && !self.at(TK_EOF) {
+            let name_tok = self.expect(TK_IDENT)?;
+            let mut bounds: List<Heap<TypeExpr>> = List.new();
+
+            // Bounds: T: Protocol + OtherProtocol
+            if self.eat(TK_COLON) {
+                let bound = self.parse_type_expr()?;
+                bounds.push(Heap(bound));
+                while self.eat(TK_PLUS) {
+                    let bound2 = self.parse_type_expr()?;
+                    bounds.push(Heap(bound2));
+                }
+            }
+
+            params.push(TypeParam { name: name_tok.value, bounds: bounds });
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        self.expect(TK_GT)?;
+        Ok(params)
+    }
+
+    fn parse_param_list(&mut self) -> Result<List<Param>, Text> {
+        let mut params: List<Param> = List.new();
+
+        while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+            let param = self.parse_param()?;
+            params.push(param);
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        Ok(params)
+    }
+
+    fn parse_param(&mut self) -> Result<Param, Text> {
+        // Handle &self, &mut self, self
+        if self.at(TK_AMP) {
+            let is_mut_ref = self.peek_ahead(1).kind == TK_MUT;
+            if is_mut_ref {
+                if self.peek_ahead(2).kind == TK_SELF_VALUE {
+                    self.advance(); // &
+                    self.advance(); // mut
+                    self.advance(); // self
+                    return Ok(Param {
+                        name: "self", type_annotation: None, default_value: None,
+                        is_mut: true, is_self: true, is_ref: true, is_mut_ref: true,
+                    });
+                }
+            } else if self.peek_ahead(1).kind == TK_SELF_VALUE {
+                self.advance(); // &
+                self.advance(); // self
+                return Ok(Param {
+                    name: "self", type_annotation: None, default_value: None,
+                    is_mut: false, is_self: true, is_ref: true, is_mut_ref: false,
+                });
+            }
+        }
+
+        if self.at(TK_SELF_VALUE) {
+            self.advance();
+            return Ok(Param {
+                name: "self", type_annotation: None, default_value: None,
+                is_mut: false, is_self: true, is_ref: false, is_mut_ref: false,
+            });
+        }
+
+        // Regular parameter: [mut] name: Type [= default]
+        let is_mut = self.eat(TK_MUT);
+        let name_tok = self.expect(TK_IDENT)?;
+
+        let type_ann = if self.eat(TK_COLON) {
+            Some(Heap(self.parse_type_expr()?))
+        } else {
+            None
+        };
+
+        let default_val = if self.eat(TK_EQ) {
+            Some(Heap(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        Ok(Param {
+            name: name_tok.value, type_annotation: type_ann, default_value: default_val,
+            is_mut: is_mut, is_self: false, is_ref: false, is_mut_ref: false,
+        })
+    }
+
+    // =========================================================================
+    // Type definition
+    // =========================================================================
+
+    fn parse_type_def(&mut self, is_pub: Bool, attrs: List<Attribute>) -> Result<TypeDef, Text> {
+        let span = self.current_span();
+        self.expect(TK_TYPE)?;
+
+        let name_tok = self.expect(TK_IDENT)?;
+        let type_params = self.parse_type_params()?;
+
+        self.expect(TK_IS)?;
+
+        let body = self.parse_type_body()?;
+        self.expect(TK_SEMI)?;
+
+        Ok(TypeDef {
+            name: name_tok.value,
+            type_params: type_params,
+            definition: body,
+            is_pub: is_pub,
+            attrs: attrs,
+            span: span,
+        })
+    }
+
+    fn parse_type_body(&mut self) -> Result<TypeBody, Text> {
+        // Unit type: ()
+        if self.at(TK_LPAREN) && self.peek_ahead(1).kind == TK_RPAREN {
+            self.advance();
+            self.advance();
+            return Ok(UnitBody);
+        }
+
+        // Protocol
+        if self.at(TK_PROTOCOL) {
+            self.advance();
+            self.expect(TK_LBRACE)?;
+            let mut items: List<ProtocolItem> = List.new();
+            while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+                if self.at(TK_TYPE) {
+                    let assoc = self.parse_assoc_type()?;
+                    items.push(ProtoAssocType(assoc));
+                } else {
+                    let func = self.parse_fn_def(false, List.new())?;
+                    items.push(ProtoMethod(func));
+                }
+            }
+            self.expect(TK_RBRACE)?;
+            return Ok(ProtocolBody(items));
+        }
+
+        // Record: { fields }
+        if self.at(TK_LBRACE) {
+            let fields = self.parse_record_fields()?;
+            return Ok(RecordBody(fields));
+        }
+
+        // Newtype: (Type)
+        if self.at(TK_LPAREN) {
+            self.advance();
+            let inner = self.parse_type_expr()?;
+            self.expect(TK_RPAREN)?;
+            return Ok(NewtypeBody(Heap(inner)));
+        }
+
+        // Sum type: Variant1 | Variant2 | ...
+        // Or alias: ExistingType
+        let first_variant = self.parse_variant()?;
+
+        if self.at(TK_PIPE) {
+            // Sum type
+            let mut variants: List<Variant> = List.new();
+            variants.push(first_variant);
+            while self.eat(TK_PIPE) {
+                let v = self.parse_variant()?;
+                variants.push(v);
+            }
+            return Ok(SumBody(variants));
+        }
+
+        // Check if it was a single variant (sum type with one variant) or an alias
+        // If the variant has no payload and looks like a type name, treat as alias
+        match first_variant.payload {
+            PayloadNone => {
+                // Could be alias: type Foo is Bar;
+                // Or single-variant sum: type Foo is Bar;
+                // Treat as alias for simplicity
+                Ok(AliasBody(Heap(TyNamed(first_variant.name))))
+            }
+            _ => {
+                let mut variants: List<Variant> = List.new();
+                variants.push(first_variant);
+                Ok(SumBody(variants))
+            }
+        }
+    }
+
+    fn parse_variant(&mut self) -> Result<Variant, Text> {
+        let name_tok = self.expect(TK_IDENT)?;
+
+        // Tuple payload: Variant(Type1, Type2)
+        if self.at(TK_LPAREN) {
+            self.advance();
+            let mut types: List<Heap<TypeExpr>> = List.new();
+            while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                let ty = self.parse_type_expr()?;
+                types.push(Heap(ty));
+                if !self.eat(TK_COMMA) {
+                    break;
+                }
+            }
+            self.expect(TK_RPAREN)?;
+            return Ok(Variant { name: name_tok.value, payload: PayloadTuple(types) });
+        }
+
+        // Record payload: Variant { field: Type, ... }
+        if self.at(TK_LBRACE) {
+            let fields = self.parse_record_fields()?;
+            return Ok(Variant { name: name_tok.value, payload: PayloadRecord(fields) });
+        }
+
+        // No payload
+        Ok(Variant { name: name_tok.value, payload: PayloadNone })
+    }
+
+    fn parse_record_fields(&mut self) -> Result<List<Field>, Text> {
+        self.expect(TK_LBRACE)?;
+        let mut fields: List<Field> = List.new();
+
+        while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+            let is_pub = self.eat_visibility();
+            let name_tok = self.expect(TK_IDENT)?;
+            self.expect(TK_COLON)?;
+            let ty = self.parse_type_expr()?;
+            fields.push(Field { name: name_tok.value, type_expr: Heap(ty), is_pub: is_pub });
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        self.expect(TK_RBRACE)?;
+        Ok(fields)
+    }
+
+    fn parse_assoc_type(&mut self) -> Result<AssocType, Text> {
+        self.expect(TK_TYPE)?;
+        let name_tok = self.expect(TK_IDENT)?;
+        let mut bounds: List<Heap<TypeExpr>> = List.new();
+        let mut default_type: Maybe<Heap<TypeExpr>> = None;
+
+        if self.eat(TK_COLON) {
+            let b = self.parse_type_expr()?;
+            bounds.push(Heap(b));
+        }
+
+        if self.eat(TK_EQ) {
+            let d = self.parse_type_expr()?;
+            default_type = Some(Heap(d));
+        }
+
+        self.expect(TK_SEMI)?;
+        Ok(AssocType { name: name_tok.value, bounds: bounds, default_type: default_type })
+    }
+
+    // =========================================================================
+    // Implement block
+    // =========================================================================
+
+    fn parse_impl_def(&mut self) -> Result<ImplDef, Text> {
+        let span = self.current_span();
+        self.expect(TK_IMPLEMENT)?;
+
+        let name_tok = self.expect(TK_IDENT)?;
+        let type_params = self.parse_type_params()?;
+
+        // implement Protocol for Type { ... }
+        let mut protocol: Maybe<Text> = None;
+        let mut target = name_tok.value;
+
+        if self.eat(TK_FOR) {
+            protocol = Some(target);
+            let target_tok = self.expect(TK_IDENT)?;
+            target = target_tok.value;
+        }
+
+        self.expect(TK_LBRACE)?;
+        let mut methods: List<FnDef> = List.new();
+
+        while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+            let attrs = self.parse_attributes()?;
+            let is_pub = self.eat_visibility();
+            let func = self.parse_fn_def(is_pub, attrs)?;
+            methods.push(func);
+        }
+
+        self.expect(TK_RBRACE)?;
+
+        Ok(ImplDef {
+            target_type: target,
+            type_params: type_params,
+            protocol: protocol,
+            methods: methods,
+            span: span,
+        })
+    }
+
+    // =========================================================================
+    // Mount statement
+    // =========================================================================
+
+    fn parse_mount_def(&mut self) -> Result<MountDef, Text> {
+        let span = self.current_span();
+        self.expect(TK_MOUNT)?;
+
+        let mut path: List<Text> = List.new();
+        let name_tok = self.expect(TK_IDENT)?;
+        path.push(name_tok.value);
+
+        while self.eat(TK_DOT) {
+            // Glob: mount foo.*
+            if self.eat(TK_STAR) {
+                self.expect(TK_SEMI)?;
+                return Ok(MountDef { path: path, items: MountAll, span: span });
+            }
+
+            // Selective: mount foo.{a, b}
+            if self.at(TK_LBRACE) {
+                self.advance();
+                let mut items: List<MountItem> = List.new();
+                while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+                    let item_tok = self.expect(TK_IDENT)?;
+                    let alias = if self.eat(TK_AS) {
+                        let alias_tok = self.expect(TK_IDENT)?;
+                        Some(alias_tok.value)
+                    } else {
+                        None
+                    };
+                    items.push(MountItem { name: item_tok.value, alias: alias });
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+                self.expect(TK_RBRACE)?;
+                self.expect(TK_SEMI)?;
+                return Ok(MountDef { path: path, items: MountSelected(items), span: span });
+            }
+
+            // Path continuation: mount foo.bar
+            let seg_tok = self.expect(TK_IDENT)?;
+            path.push(seg_tok.value);
+        }
+
+        self.expect(TK_SEMI)?;
+        Ok(MountDef { path: path, items: MountSingle, span: span })
+    }
+
+    // =========================================================================
+    // Const definition
+    // =========================================================================
+
+    fn parse_const_def(&mut self, is_pub: Bool) -> Result<ConstDef, Text> {
+        let span = self.current_span();
+        self.expect(TK_CONST)?;
+
+        let name_tok = self.expect(TK_IDENT)?;
+
+        let type_ann = if self.eat(TK_COLON) {
+            Some(Heap(self.parse_type_expr()?))
+        } else {
+            None
+        };
+
+        self.expect(TK_EQ)?;
+        let value = self.parse_expr()?;
+        self.expect(TK_SEMI)?;
+
+        Ok(ConstDef {
+            name: name_tok.value,
+            type_annotation: type_ann,
+            value: Heap(value),
+            is_pub: is_pub,
+            span: span,
+        })
+    }
+
+    // =========================================================================
+    // Module definition
+    // =========================================================================
+
+    fn parse_module_def(&mut self, is_pub: Bool) -> Result<ModuleDef, Text> {
+        let span = self.current_span();
+        self.expect(TK_MODULE)?;
+
+        let name_tok = self.expect(TK_IDENT)?;
+
+        let body = if self.at(TK_LBRACE) {
+            self.advance();
+            let mut decls: List<Decl> = List.new();
+            while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+                let d = self.parse_decl()?;
+                decls.push(d);
+            }
+            self.expect(TK_RBRACE)?;
+            Some(decls)
+        } else {
+            self.expect(TK_SEMI)?;
+            None
+        };
+
+        Ok(ModuleDef { name: name_tok.value, is_pub: is_pub, body: body, span: span })
+    }
+
+    // =========================================================================
+    // Statement parsing
+    // =========================================================================
+
+    fn parse_block_stmts(&mut self) -> Result<List<Stmt>, Text> {
+        self.expect(TK_LBRACE)?;
+        let mut stmts: List<Stmt> = List.new();
+
+        while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+            let stmt = self.parse_stmt()?;
+            stmts.push(stmt);
+        }
+
+        self.expect(TK_RBRACE)?;
+        Ok(stmts)
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, Text> {
+        let kind = self.peek_kind();
+
+        if kind == TK_LET {
+            return self.parse_let_stmt();
+        }
+
+        if kind == TK_WHILE {
+            return self.parse_while_stmt();
+        }
+
+        if kind == TK_FOR {
+            return self.parse_for_stmt();
+        }
+
+        if kind == TK_LOOP {
+            self.advance();
+            let body = self.parse_block_stmts()?;
+            return Ok(StmtLoop(body));
+        }
+
+        if kind == TK_RETURN {
+            self.advance();
+            let value = if self.at(TK_SEMI) || self.at(TK_RBRACE) {
+                None
+            } else {
+                Some(Heap(self.parse_expr()?))
+            };
+            self.eat(TK_SEMI);
+            return Ok(StmtReturn(value));
+        }
+
+        if kind == TK_BREAK {
+            self.advance();
+            let value = if self.at(TK_SEMI) || self.at(TK_RBRACE) {
+                None
+            } else {
+                Some(Heap(self.parse_expr()?))
+            };
+            self.eat(TK_SEMI);
+            return Ok(StmtBreak(value));
+        }
+
+        if kind == TK_CONTINUE {
+            self.advance();
+            self.eat(TK_SEMI);
+            return Ok(StmtContinue);
+        }
+
+        // Declaration statements (fn, type, etc. inside blocks)
+        if kind == TK_FN || kind == TK_TYPE || kind == TK_IMPLEMENT ||
+           kind == TK_CONST || kind == TK_AT {
+            let decl = self.parse_decl()?;
+            return Ok(StmtDecl(decl));
+        }
+
+        // Expression statement
+        let expr = self.parse_expr()?;
+
+        // Check for assignment
+        if self.at(TK_EQ) {
+            self.advance();
+            let rhs = self.parse_expr()?;
+            self.eat(TK_SEMI);
+            return Ok(StmtExpr(Heap(ExprAssign(AssignOp {
+                target: Heap(expr),
+                value: Heap(rhs),
+            }))));
+        }
+
+        if is_assignment_op(self.peek_kind()) {
+            let op_tok = self.advance();
+            let rhs = self.parse_expr()?;
+            self.eat(TK_SEMI);
+            return Ok(StmtExpr(Heap(ExprCompoundAssign(CompoundAssignOp {
+                op: op_tok.kind,
+                target: Heap(expr),
+                value: Heap(rhs),
+            }))));
+        }
+
+        self.eat(TK_SEMI);
+        Ok(StmtExpr(Heap(expr)))
+    }
+
+    fn parse_let_stmt(&mut self) -> Result<Stmt, Text> {
+        let span = self.current_span();
+        self.expect(TK_LET)?;
+        let is_mut = self.eat(TK_MUT);
+
+        let pattern = self.parse_pattern()?;
+
+        let type_ann = if self.eat(TK_COLON) {
+            Some(Heap(self.parse_type_expr()?))
+        } else {
+            None
+        };
+
+        let value = if self.eat(TK_EQ) {
+            Some(Heap(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        self.expect(TK_SEMI)?;
+
+        Ok(StmtLet(LetDef {
+            pattern: pattern,
+            type_annotation: type_ann,
+            value: value,
+            is_mut: is_mut,
+            span: span,
+        }))
+    }
+
+    fn parse_while_stmt(&mut self) -> Result<Stmt, Text> {
+        self.expect(TK_WHILE)?;
+        let cond = self.parse_expr()?;
+        let body = self.parse_block_stmts()?;
+        Ok(StmtWhile(WhileDef { condition: Heap(cond), body: body }))
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<Stmt, Text> {
+        self.expect(TK_FOR)?;
+        let binding = self.parse_pattern()?;
+        self.expect(TK_IN)?;
+        let iter = self.parse_expr()?;
+        let body = self.parse_block_stmts()?;
+        Ok(StmtFor(ForDef { binding: binding, iterator: Heap(iter), body: body }))
+    }
+
+    // =========================================================================
+    // Expression parsing (Pratt parser)
+    // =========================================================================
+
+    fn parse_expr(&mut self) -> Result<Expr, Text> {
+        self.parse_expr_bp(0)
+    }
+
+    fn parse_expr_bp(&mut self, min_bp: Int) -> Result<Expr, Text> {
+        let mut lhs = self.parse_prefix()?;
+
+        loop {
+            // Postfix operators: .field, .method(), [index], ?, as
+            lhs = self.parse_postfix(lhs)?;
+
+            let tok = self.peek();
+            let bp = operator_precedence(tok.kind);
+
+            if bp == 0 || bp <= min_bp {
+                break;
+            }
+
+            self.advance();
+            let next_bp = if is_right_assoc(tok.kind) { bp - 1 } else { bp };
+            let rhs = self.parse_expr_bp(next_bp)?;
+
+            lhs = ExprBinary(BinOp {
+                op: tok.kind,
+                left: Heap(lhs),
+                right: Heap(rhs),
+            });
+        }
+
+        Ok(lhs)
+    }
+
+    fn parse_prefix(&mut self) -> Result<Expr, Text> {
+        let tok = self.peek();
+        let kind = tok.kind;
+
+        // Unary operators: !, -, ~, &, &mut, *
+        if kind == TK_BANG || kind == TK_MINUS || kind == TK_TILDE {
+            self.advance();
+            let operand = self.parse_prefix()?;
+            return Ok(ExprUnary(UnOp { op: kind, operand: Heap(operand) }));
+        }
+
+        // Reference: &expr, &mut expr
+        if kind == TK_AMP {
+            self.advance();
+            let is_mut = self.eat(TK_MUT);
+            let operand = self.parse_prefix()?;
+            let op = if is_mut { TK_AMP_AMP } else { TK_AMP }; // encode mut in op
+            return Ok(ExprUnary(UnOp { op: op, operand: Heap(operand) }));
+        }
+
+        // Dereference: *expr
+        if kind == TK_STAR {
+            self.advance();
+            let operand = self.parse_prefix()?;
+            return Ok(ExprUnary(UnOp { op: TK_STAR, operand: Heap(operand) }));
+        }
+
+        // Literals
+        if kind == TK_INTEGER {
+            let t = self.advance();
+            return Ok(ExprLitInt(t.value));
+        }
+        if kind == TK_FLOAT {
+            let t = self.advance();
+            return Ok(ExprLitFloat(t.value));
+        }
+        if kind == TK_STRING {
+            let t = self.advance();
+            return Ok(ExprLitStr(t.value));
+        }
+        if kind == TK_FSTRING {
+            let t = self.advance();
+            return Ok(ExprLitFStr(t.value));
+        }
+        if kind == TK_CHAR {
+            let t = self.advance();
+            return Ok(ExprLitChar(t.value));
+        }
+        if kind == TK_TRUE {
+            self.advance();
+            return Ok(ExprLitBool(true));
+        }
+        if kind == TK_FALSE {
+            self.advance();
+            return Ok(ExprLitBool(false));
+        }
+        if kind == TK_NONE {
+            self.advance();
+            return Ok(ExprLitNone);
+        }
+
+        // Self
+        if kind == TK_SELF_VALUE {
+            self.advance();
+            return Ok(ExprSelf);
+        }
+        if kind == TK_SELF_TYPE {
+            self.advance();
+            return Ok(ExprSelfType);
+        }
+
+        // Identifier (possibly followed by { for construction or :: for path)
+        if kind == TK_IDENT {
+            return self.parse_ident_expr();
+        }
+
+        // Variant constructors: Some(x), Ok(x), Err(x)
+        if kind == TK_SOME || kind == TK_OK || kind == TK_ERR {
+            return self.parse_variant_constructor();
+        }
+
+        // Grouping or tuple: (expr, ...) or (expr)
+        if kind == TK_LPAREN {
+            return self.parse_paren_or_tuple();
+        }
+
+        // Array literal: [expr, ...]
+        if kind == TK_LBRACKET {
+            return self.parse_array_literal();
+        }
+
+        // Block expression: { stmts; expr }
+        if kind == TK_LBRACE {
+            return self.parse_block_expr();
+        }
+
+        // If expression
+        if kind == TK_IF {
+            return self.parse_if_expr();
+        }
+
+        // Match expression
+        if kind == TK_MATCH {
+            return self.parse_match_expr();
+        }
+
+        // Closure: |params| body
+        if kind == TK_PIPE {
+            return self.parse_closure();
+        }
+
+        // Closure: || body
+        if kind == TK_PIPE_PIPE {
+            // || is two pipes merged — empty parameter list closure
+            self.advance();
+            let body = self.parse_expr()?;
+            return Ok(ExprClosure(ClosureOp {
+                params: List.new(),
+                return_type: None,
+                body: Heap(body),
+            }));
+        }
+
+        // Return as expression
+        if kind == TK_RETURN {
+            self.advance();
+            if self.at(TK_SEMI) || self.at(TK_RBRACE) || self.at(TK_COMMA) {
+                return Ok(ExprUnit);
+            }
+            let val = self.parse_expr()?;
+            return Ok(ExprUnit); // simplified: return is handled at stmt level
+        }
+
+        // Await: await expr
+        if kind == TK_AWAIT {
+            self.advance();
+            let inner = self.parse_prefix()?;
+            return Ok(ExprAwait(Heap(inner)));
+        }
+
+        // Spawn: spawn expr
+        if kind == TK_SPAWN {
+            self.advance();
+            let inner = self.parse_prefix()?;
+            return Ok(ExprSpawn(Heap(inner)));
+        }
+
+        Err(self.error(f"unexpected token {token_name(kind)} in expression"))
+    }
+
+    // =========================================================================
+    // Postfix expressions
+    // =========================================================================
+
+    fn parse_postfix(&mut self, expr: Expr) -> Result<Expr, Text> {
+        let mut result = expr;
+
+        loop {
+            let kind = self.peek_kind();
+
+            // Field access or method call: .name or .name(args)
+            if kind == TK_DOT {
+                self.advance();
+                let name_tok = self.expect(TK_IDENT)?;
+
+                // Method call: .name(args)
+                if self.at(TK_LPAREN) {
+                    self.advance();
+                    let args = self.parse_expr_list(TK_RPAREN)?;
+                    self.expect(TK_RPAREN)?;
+                    result = ExprMethodCall(MethodOp {
+                        receiver: Heap(result),
+                        method: name_tok.value,
+                        type_args: List.new(),
+                        args: args,
+                    });
+                    continue;
+                }
+
+                result = ExprFieldAccess(FieldOp {
+                    object: Heap(result),
+                    field: name_tok.value,
+                });
+                continue;
+            }
+
+            // Indexing: [expr]
+            if kind == TK_LBRACKET {
+                self.advance();
+                let index = self.parse_expr()?;
+                self.expect(TK_RBRACKET)?;
+                result = ExprIndex(IndexOp {
+                    object: Heap(result),
+                    index: Heap(index),
+                });
+                continue;
+            }
+
+            // Function call: (args) — only if directly after ident/postfix
+            if kind == TK_LPAREN {
+                // Check if this is really a call (not grouping after a statement)
+                self.advance();
+                let args = self.parse_expr_list(TK_RPAREN)?;
+                self.expect(TK_RPAREN)?;
+                result = ExprCall(CallOp {
+                    callee: Heap(result),
+                    type_args: List.new(),
+                    args: args,
+                });
+                continue;
+            }
+
+            // Error propagation: ?
+            if kind == TK_QUESTION {
+                self.advance();
+                result = ExprTry(Heap(result));
+                continue;
+            }
+
+            // Optional chaining: ?.field
+            if kind == TK_QUESTION_DOT {
+                self.advance();
+                let name_tok = self.expect(TK_IDENT)?;
+                result = ExprFieldAccess(FieldOp {
+                    object: Heap(ExprTry(Heap(result))),
+                    field: name_tok.value,
+                });
+                continue;
+            }
+
+            // Pipeline: |> fn
+            if kind == TK_PIPE_GT {
+                self.advance();
+                let rhs = self.parse_prefix()?;
+                result = ExprPipeline(PipeOp {
+                    left: Heap(result),
+                    right: Heap(rhs),
+                });
+                continue;
+            }
+
+            // Cast: as Type
+            if kind == TK_AS {
+                self.advance();
+                let ty = self.parse_type_expr()?;
+                result = ExprCast(CastOp {
+                    expr: Heap(result),
+                    target_type: Heap(ty),
+                });
+                continue;
+            }
+
+            // Range: .., ..=
+            if kind == TK_DOT_DOT || kind == TK_DOT_DOT_EQ {
+                let inclusive = kind == TK_DOT_DOT_EQ;
+                self.advance();
+                let end = if self.at(TK_SEMI) || self.at(TK_RBRACE) || self.at(TK_RPAREN) ||
+                             self.at(TK_RBRACKET) || self.at(TK_COMMA) {
+                    None
+                } else {
+                    let e = self.parse_expr_bp(7)?; // higher than comparison
+                    Some(Heap(e))
+                };
+                result = ExprRange(RangeOp {
+                    start: Some(Heap(result)),
+                    end: end,
+                    inclusive: inclusive,
+                });
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(result)
+    }
+
+    // =========================================================================
+    // Expression sub-parsers
+    // =========================================================================
+
+    fn parse_ident_expr(&mut self) -> Result<Expr, Text> {
+        let tok = self.advance(); // consume identifier
+        let name = tok.value;
+
+        // Qualified path: Name.inner or Name::inner
+        // Record construction: Name { field: value, ... }
+        if self.at(TK_LBRACE) {
+            // Lookahead: is this { field: value } or { statements }?
+            // Heuristic: if second token is : or }, it's a record construction
+            let second = self.peek_ahead(1);
+            if second.kind == TK_COLON || second.kind == TK_RBRACE ||
+               (second.kind == TK_IDENT && self.peek_ahead(2).kind == TK_COLON) {
+                return self.parse_record_construction(name);
+            }
+        }
+
+        Ok(ExprIdent(name))
+    }
+
+    fn parse_record_construction(&mut self, type_name: Text) -> Result<Expr, Text> {
+        self.expect(TK_LBRACE)?;
+        let mut fields: List<FieldInit> = List.new();
+
+        while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+            let field_name = self.expect(TK_IDENT)?;
+            self.expect(TK_COLON)?;
+            let value = self.parse_expr()?;
+            fields.push(FieldInit { name: field_name.value, value: Heap(value) });
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        self.expect(TK_RBRACE)?;
+        Ok(ExprConstruct(ConstructOp {
+            type_name: TypePath { segments: [type_name], type_args: List.new() },
+            fields: fields,
+        }))
+    }
+
+    fn parse_variant_constructor(&mut self) -> Result<Expr, Text> {
+        let tok = self.advance();
+        let name = token_name(tok.kind); // "Some", "Ok", "Err"
+
+        if self.at(TK_LPAREN) {
+            self.advance();
+            let args = self.parse_expr_list(TK_RPAREN)?;
+            self.expect(TK_RPAREN)?;
+            return Ok(ExprCall(CallOp {
+                callee: Heap(ExprIdent(name)),
+                type_args: List.new(),
+                args: args,
+            }));
+        }
+
+        Ok(ExprIdent(name))
+    }
+
+    fn parse_paren_or_tuple(&mut self) -> Result<Expr, Text> {
+        self.advance(); // consume (
+
+        // Empty tuple: ()
+        if self.eat(TK_RPAREN) {
+            return Ok(ExprUnit);
+        }
+
+        let first = self.parse_expr()?;
+
+        // Tuple: (a, b, ...)
+        if self.eat(TK_COMMA) {
+            let mut elements: List<Heap<Expr>> = List.new();
+            elements.push(Heap(first));
+            while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                let elem = self.parse_expr()?;
+                elements.push(Heap(elem));
+                if !self.eat(TK_COMMA) {
+                    break;
+                }
+            }
+            self.expect(TK_RPAREN)?;
+            return Ok(ExprTuple(elements));
+        }
+
+        // Grouping: (expr)
+        self.expect(TK_RPAREN)?;
+        Ok(first)
+    }
+
+    fn parse_array_literal(&mut self) -> Result<Expr, Text> {
+        self.advance(); // consume [
+        let mut elements: List<Heap<Expr>> = List.new();
+
+        while !self.at(TK_RBRACKET) && !self.at(TK_EOF) {
+            let elem = self.parse_expr()?;
+            elements.push(Heap(elem));
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        self.expect(TK_RBRACKET)?;
+        Ok(ExprArray(elements))
+    }
+
+    fn parse_block_expr(&mut self) -> Result<Expr, Text> {
+        let stmts = self.parse_block_stmts()?;
+        Ok(ExprBlock(BlockOp { stmts: stmts, trailing_expr: None }))
+    }
+
+    fn parse_if_expr(&mut self) -> Result<Expr, Text> {
+        self.expect(TK_IF)?;
+        let cond = self.parse_expr()?;
+        let then_body = self.parse_block_stmts()?;
+
+        let else_body = if self.eat(TK_ELSE) {
+            if self.at(TK_IF) {
+                let else_if = self.parse_if_expr()?;
+                match else_if {
+                    ExprIf(inner) => Some(ElseIf(Heap(inner))),
+                    _ => None,
+                }
+            } else {
+                let else_stmts = self.parse_block_stmts()?;
+                Some(ElseBlock(else_stmts))
+            }
+        } else {
+            None
+        };
+
+        Ok(ExprIf(IfOp { condition: Heap(cond), then_body: then_body, else_body: else_body }))
+    }
+
+    fn parse_match_expr(&mut self) -> Result<Expr, Text> {
+        self.expect(TK_MATCH)?;
+        let scrutinee = self.parse_expr()?;
+        self.expect(TK_LBRACE)?;
+
+        let mut arms: List<MatchArm> = List.new();
+        while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+            let pattern = self.parse_pattern()?;
+            let guard = if self.eat(TK_IF) {
+                Some(Heap(self.parse_expr()?))
+            } else {
+                None
+            };
+            self.expect(TK_FAT_ARROW)?;
+            let body = self.parse_expr()?;
+            arms.push(MatchArm { pattern: pattern, guard: guard, body: Heap(body) });
+            self.eat(TK_COMMA);
+        }
+
+        self.expect(TK_RBRACE)?;
+        Ok(ExprMatch(MatchOp { scrutinee: Heap(scrutinee), arms: arms }))
+    }
+
+    fn parse_closure(&mut self) -> Result<Expr, Text> {
+        self.expect(TK_PIPE)?;
+        let mut params: List<ClosureParam> = List.new();
+
+        while !self.at(TK_PIPE) && !self.at(TK_EOF) {
+            let name_tok = self.expect(TK_IDENT)?;
+            let type_ann = if self.eat(TK_COLON) {
+                Some(Heap(self.parse_type_expr()?))
+            } else {
+                None
+            };
+            params.push(ClosureParam { name: name_tok.value, type_annotation: type_ann });
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+
+        self.expect(TK_PIPE)?;
+
+        let return_type = if self.eat(TK_R_ARROW) {
+            Some(Heap(self.parse_type_expr()?))
+        } else {
+            None
+        };
+
+        let body = self.parse_expr()?;
+        Ok(ExprClosure(ClosureOp { params: params, return_type: return_type, body: Heap(body) }))
+    }
+
+    fn parse_expr_list(&mut self, end_token: Int) -> Result<List<Heap<Expr>>, Text> {
+        let mut args: List<Heap<Expr>> = List.new();
+        while !self.at(end_token) && !self.at(TK_EOF) {
+            let arg = self.parse_expr()?;
+            args.push(Heap(arg));
+            if !self.eat(TK_COMMA) {
+                break;
+            }
+        }
+        Ok(args)
+    }
+
+    // =========================================================================
+    // Type expression parsing
+    // =========================================================================
+
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, Text> {
+        let kind = self.peek_kind();
+
+        // Reference: &T, &mut T, &unsafe T, &checked T
+        if kind == TK_AMP {
+            self.advance();
+            if self.eat(TK_MUT) {
+                let inner = self.parse_type_expr()?;
+                return Ok(TyMutRef(RefTy { inner: Heap(inner) }));
+            }
+            if self.eat(TK_UNSAFE) {
+                let inner = self.parse_type_expr()?;
+                return Ok(TyUnsafeRef(RefTy { inner: Heap(inner) }));
+            }
+            if self.eat(TK_CHECKED) {
+                let inner = self.parse_type_expr()?;
+                return Ok(TyRef(RefTy { inner: Heap(inner) }));
+            }
+            let inner = self.parse_type_expr()?;
+            return Ok(TyRef(RefTy { inner: Heap(inner) }));
+        }
+
+        // Function type: fn(T, U) -> V
+        if kind == TK_FN {
+            self.advance();
+            self.expect(TK_LPAREN)?;
+            let mut params: List<Heap<TypeExpr>> = List.new();
+            while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                let p = self.parse_type_expr()?;
+                params.push(Heap(p));
+                if !self.eat(TK_COMMA) {
+                    break;
+                }
+            }
+            self.expect(TK_RPAREN)?;
+
+            let ret = if self.eat(TK_R_ARROW) {
+                Heap(self.parse_type_expr()?)
+            } else {
+                Heap(TyUnit)
+            };
+
+            return Ok(TyFn(FnTy { params: params, return_type: ret }));
+        }
+
+        // Tuple or unit: (), (T, U)
+        if kind == TK_LPAREN {
+            self.advance();
+            if self.eat(TK_RPAREN) {
+                return Ok(TyUnit);
+            }
+            let first = self.parse_type_expr()?;
+            if self.eat(TK_COMMA) {
+                let mut types: List<Heap<TypeExpr>> = List.new();
+                types.push(Heap(first));
+                while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                    let t = self.parse_type_expr()?;
+                    types.push(Heap(t));
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+                self.expect(TK_RPAREN)?;
+                return Ok(TyTuple(types));
+            }
+            self.expect(TK_RPAREN)?;
+            return Ok(first);
+        }
+
+        // Array/Slice: [T; N] or [T]
+        if kind == TK_LBRACKET {
+            self.advance();
+            let elem = self.parse_type_expr()?;
+            if self.eat(TK_SEMI) {
+                let size = self.parse_expr()?;
+                self.expect(TK_RBRACKET)?;
+                return Ok(TyArray(ArrayTy { element: Heap(elem), size: Heap(size) }));
+            }
+            self.expect(TK_RBRACKET)?;
+            return Ok(TySlice(Heap(elem)));
+        }
+
+        // Self type
+        if kind == TK_SELF_TYPE {
+            self.advance();
+            return Ok(TySelf);
+        }
+
+        // Named type: Ident or Ident<Args>
+        if kind == TK_IDENT {
+            let name_tok = self.advance();
+            let name = name_tok.value;
+
+            // Generic: Name<T, U>
+            if self.at(TK_LT) {
+                self.advance();
+                let mut args: List<Heap<TypeExpr>> = List.new();
+                while !self.at(TK_GT) && !self.at(TK_EOF) {
+                    let a = self.parse_type_expr()?;
+                    args.push(Heap(a));
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+                self.expect(TK_GT)?;
+                return Ok(TyGeneric(GenericTy { base: name, args: args }));
+            }
+
+            // Qualified path: Name.Inner
+            if self.at(TK_DOT) && self.peek_ahead(1).kind == TK_IDENT {
+                let mut segments: List<Text> = List.new();
+                segments.push(name);
+                while self.eat(TK_DOT) {
+                    let seg = self.expect(TK_IDENT)?;
+                    segments.push(seg.value);
+                }
+                return Ok(TyQualified(segments));
+            }
+
+            // NOTE: Refinement types (Int{>= 0}) disabled to avoid ambiguity
+            // with function body braces. Re-enable with lookahead later.
+
+            return Ok(TyNamed(name));
+        }
+
+        // Inferred type _
+        if kind == TK_IDENT && self.peek().value == "_" {
+            self.advance();
+            return Ok(TyInferred);
+        }
+
+        Err(self.error(f"expected type, found {token_name(kind)}"))
+    }
+
+    // =========================================================================
+    // Pattern parsing
+    // =========================================================================
+
+    fn parse_pattern(&mut self) -> Result<Pattern, Text> {
+        let pat = self.parse_single_pattern()?;
+
+        // Or pattern: a | b
+        if self.at(TK_PIPE) {
+            let mut pats: List<Heap<Pattern>> = List.new();
+            pats.push(Heap(pat));
+            while self.eat(TK_PIPE) {
+                let p = self.parse_single_pattern()?;
+                pats.push(Heap(p));
+            }
+            return Ok(PatOr(pats));
+        }
+
+        Ok(pat)
+    }
+
+    fn parse_single_pattern(&mut self) -> Result<Pattern, Text> {
+        let kind = self.peek_kind();
+
+        // Wildcard: _
+        if kind == TK_IDENT && self.peek().value == "_" {
+            self.advance();
+            return Ok(PatWildcard);
+        }
+
+        // Rest: ..
+        if kind == TK_DOT_DOT {
+            self.advance();
+            return Ok(PatRest);
+        }
+
+        // Literal patterns
+        if kind == TK_INTEGER {
+            let tok = self.advance();
+            return Ok(PatLitInt(tok.value));
+        }
+        if kind == TK_FLOAT {
+            let tok = self.advance();
+            return Ok(PatLitFloat(tok.value));
+        }
+        if kind == TK_STRING {
+            let tok = self.advance();
+            return Ok(PatLitStr(tok.value));
+        }
+        if kind == TK_TRUE {
+            self.advance();
+            return Ok(PatLitBool(true));
+        }
+        if kind == TK_FALSE {
+            self.advance();
+            return Ok(PatLitBool(false));
+        }
+        if kind == TK_NONE {
+            self.advance();
+            return Ok(PatLitNone);
+        }
+
+        // Tuple: (pat, ...)
+        if kind == TK_LPAREN {
+            self.advance();
+            let mut pats: List<Heap<Pattern>> = List.new();
+            while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                let p = self.parse_pattern()?;
+                pats.push(Heap(p));
+                if !self.eat(TK_COMMA) {
+                    break;
+                }
+            }
+            self.expect(TK_RPAREN)?;
+            return Ok(PatTuple(pats));
+        }
+
+        // Negative literal: -42
+        if kind == TK_MINUS {
+            self.advance();
+            if self.at(TK_INTEGER) {
+                let tok = self.advance();
+                return Ok(PatLitInt(f"-{tok.value}"));
+            }
+            if self.at(TK_FLOAT) {
+                let tok = self.advance();
+                return Ok(PatLitFloat(f"-{tok.value}"));
+            }
+            return Err(self.error("expected number after - in pattern"));
+        }
+
+        // Variant constructors: Some(pat), Ok(pat), Err(pat)
+        if kind == TK_SOME || kind == TK_OK || kind == TK_ERR {
+            let tok = self.advance();
+            let name = token_name(tok.kind);
+            if self.at(TK_LPAREN) {
+                self.advance();
+                let mut fields: List<Heap<Pattern>> = List.new();
+                while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                    let p = self.parse_pattern()?;
+                    fields.push(Heap(p));
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+                self.expect(TK_RPAREN)?;
+                return Ok(PatVariant(VariantPat { type_path: [name], fields: fields }));
+            }
+            return Ok(PatVariant(VariantPat { type_path: [name], fields: List.new() }));
+        }
+
+        // Identifier: binding, variant, or record pattern
+        if kind == TK_IDENT {
+            let tok = self.advance();
+            let name = tok.value;
+
+            // Check for variant: Name(pat, ...)
+            if self.at(TK_LPAREN) {
+                self.advance();
+                let mut fields: List<Heap<Pattern>> = List.new();
+                while !self.at(TK_RPAREN) && !self.at(TK_EOF) {
+                    let p = self.parse_pattern()?;
+                    fields.push(Heap(p));
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+                self.expect(TK_RPAREN)?;
+                return Ok(PatVariant(VariantPat { type_path: [name], fields: fields }));
+            }
+
+            // Record pattern: Name { field: pat, ... }
+            if self.at(TK_LBRACE) {
+                self.advance();
+                let mut fields: List<RecordPatField> = List.new();
+                let mut has_rest = false;
+
+                while !self.at(TK_RBRACE) && !self.at(TK_EOF) {
+                    if self.eat(TK_DOT_DOT) {
+                        has_rest = true;
+                        break;
+                    }
+                    let field_name = self.expect(TK_IDENT)?;
+                    let sub_pat = if self.eat(TK_COLON) {
+                        Some(Heap(self.parse_pattern()?))
+                    } else {
+                        None
+                    };
+                    fields.push(RecordPatField { name: field_name.value, pattern: sub_pat });
+                    if !self.eat(TK_COMMA) {
+                        break;
+                    }
+                }
+
+                self.expect(TK_RBRACE)?;
+                return Ok(PatRecord(RecordPat {
+                    type_name: Some(name),
+                    fields: fields,
+                    has_rest: has_rest,
+                }));
+            }
+
+            // Range pattern: name..end or name..=end
+            if self.at(TK_DOT_DOT) || self.at(TK_DOT_DOT_EQ) {
+                let inclusive = self.peek_kind() == TK_DOT_DOT_EQ;
+                self.advance();
+                let end_pat = self.parse_single_pattern()?;
+                return Ok(PatRange(RangePat {
+                    start: Some(Heap(PatBind(BindPat { name: name, is_mut: false }))),
+                    end: Some(Heap(end_pat)),
+                    inclusive: inclusive,
+                }));
+            }
+
+            // Mut binding
+            let is_mut = name == "mut";
+            if is_mut {
+                let inner_tok = self.expect(TK_IDENT)?;
+                return Ok(PatBind(BindPat { name: inner_tok.value, is_mut: true }));
+            }
+
+            // Simple binding
+            return Ok(PatBind(BindPat { name: name, is_mut: false }));
+        }
+
+        Err(self.error(f"unexpected token {token_name(kind)} in pattern"))
+    }
+}

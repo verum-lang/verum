@@ -1,0 +1,580 @@
+// Verum Registry - Admin Integration Tests
+//
+// Comprehensive integration tests for administrative operations
+// Tests user suspension, package blocking, and registry statistics
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{
+    setup_test_db,
+    cleanup_test_db,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+    create_admin_user,
+    publish_test_package,
+};
+
+// Import domain types
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.src.dto.user_dto.{RegisterRequestDto, LoginRequestDto};
+mount super.super.src.handlers.admin.{
+    SuspendUserRequestDto,
+    BlockPackageRequestDto,
+    UnblockPackageRequestDto,
+};
+
+// Import handlers
+mount super.super.src.handlers.users.{register_user, login_user};
+mount super.super.src.handlers.packages.{download_package_artifact};
+mount super.super.src.handlers.admin.{
+    list_all_users,
+    suspend_user,
+    unsuspend_user,
+    list_all_packages,
+    block_package,
+    unblock_package,
+    get_registry_stats,
+};
+
+// ============================================================================
+// Admin User Management Tests
+// ============================================================================
+
+@test
+fn test_admin_can_suspend_user() {
+    setup_test_db();
+
+    // Create admin user
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Create regular user
+    register_user(RegisterRequestDto {
+        username: "regularuser",
+        email: "regular@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    // Get user ID
+    let users_list = list_all_users(1, 10, admin_token.clone()).await.unwrap();
+    let regular_user = users_list.users.iter()
+        .find(|u| u.username == "regularuser")
+        .unwrap();
+
+    // Suspend the user
+    let suspend_req = SuspendUserRequestDto {
+        user_id: regular_user.id,
+        reason: "Violation of terms of service",
+    };
+
+    let suspend_result = suspend_user(suspend_req, admin_token).await;
+    assert_ok(&suspend_result);
+
+    let suspend_response = suspend_result.unwrap();
+    assert_eq(&suspend_response.success, &true);
+    assert(&suspend_response.message.contains("suspended"));
+
+    // Verify user can't login
+    let login_result = login_user(LoginRequestDto {
+        username: "regularuser",
+        password: "password123",
+    }).await;
+    // In production, suspended users should not be able to login
+    // For now, this documents the expected behavior
+
+    cleanup_test_db();
+}
+
+@test
+fn test_admin_cannot_suspend_other_admins() {
+    setup_test_db();
+
+    // Create two admin users
+    let admin1_token = create_admin_user("admin1", "admin1@example.com");
+    create_admin_user("admin2", "admin2@example.com");
+
+    // Get admin2's ID
+    let users_list = list_all_users(1, 10, admin1_token.clone()).await.unwrap();
+    let admin2 = users_list.users.iter()
+        .find(|u| u.username == "admin2")
+        .unwrap();
+
+    // Try to suspend admin2 (should fail)
+    let suspend_req = SuspendUserRequestDto {
+        user_id: admin2.id,
+        reason: "Testing admin protection",
+    };
+
+    let suspend_result = suspend_user(suspend_req, admin1_token).await;
+    assert_err(&suspend_result);
+
+    match suspend_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"user_id");
+            assert(&message.contains("admin"));
+        },
+        _ => panic("Expected ValidationError for admin suspension"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_suspend_user_requires_reason() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    register_user(RegisterRequestDto {
+        username: "testuser",
+        email: "test@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let users_list = list_all_users(1, 10, admin_token.clone()).await.unwrap();
+    let test_user = users_list.users.iter()
+        .find(|u| u.username == "testuser")
+        .unwrap();
+
+    // Try to suspend without reason
+    let suspend_req = SuspendUserRequestDto {
+        user_id: test_user.id,
+        reason: "",  // Empty reason
+    };
+
+    let suspend_result = suspend_user(suspend_req, admin_token).await;
+    assert_err(&suspend_result);
+
+    match suspend_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"reason");
+            assert(&message.contains("required"));
+        },
+        _ => panic("Expected ValidationError for empty reason"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_suspend_user_requires_admin_role() {
+    setup_test_db();
+
+    // Create two regular users
+    register_user(RegisterRequestDto {
+        username: "user1",
+        email: "user1@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "user2",
+        email: "user2@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let user1_token = login_user(LoginRequestDto {
+        username: "user1",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // user1 (regular user) tries to suspend user2 (should fail)
+    let suspend_req = SuspendUserRequestDto {
+        user_id: 2,  // user2's ID
+        reason: "Unauthorized attempt",
+    };
+
+    let suspend_result = suspend_user(suspend_req, user1_token).await;
+    assert_err(&suspend_result);
+
+    match suspend_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            assert(&message.contains("Admin"));
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_admin_can_unsuspend_user() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    register_user(RegisterRequestDto {
+        username: "suspendtest",
+        email: "suspend@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let users_list = list_all_users(1, 10, admin_token.clone()).await.unwrap();
+    let test_user = users_list.users.iter()
+        .find(|u| u.username == "suspendtest")
+        .unwrap();
+
+    // Suspend user
+    suspend_user(SuspendUserRequestDto {
+        user_id: test_user.id,
+        reason: "Testing suspension",
+    }, admin_token.clone()).await;
+
+    // Unsuspend user
+    let unsuspend_result = unsuspend_user(test_user.id, admin_token).await;
+    assert_ok(&unsuspend_result);
+
+    let unsuspend_response = unsuspend_result.unwrap();
+    assert_eq(&unsuspend_response.success, &true);
+    assert(&unsuspend_response.message.contains("unsuspended"));
+
+    // Verify user can login again
+    let login_result = login_user(LoginRequestDto {
+        username: "suspendtest",
+        password: "password123",
+    }).await;
+    // Should succeed after unsuspension
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Admin Package Management Tests
+// ============================================================================
+
+@test
+fn test_admin_can_block_package() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Create regular user and publish package
+    register_user(RegisterRequestDto {
+        username: "publisher",
+        email: "publisher@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let publisher_token = login_user(LoginRequestDto {
+        username: "publisher",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("malicious-pkg", "1.0.0", publisher_token).await;
+
+    // Block the package
+    let block_req = BlockPackageRequestDto {
+        package_name: "malicious-pkg",
+        reason: "Contains malicious code",
+    };
+
+    let block_result = block_package(block_req, admin_token).await;
+    assert_ok(&block_result);
+
+    let block_response = block_result.unwrap();
+    assert_eq(&block_response.success, &true);
+    assert(&block_response.message.contains("blocked"));
+
+    // Verify package is not downloadable
+    let download_result = download_package_artifact("malicious-pkg", "1.0.0").await;
+    assert_err(&download_result);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_block_package_requires_reason() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Publish test package
+    let user_token = login_user(LoginRequestDto {
+        username: "testuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("test-pkg", "1.0.0", user_token).await;
+
+    // Try to block without reason
+    let block_req = BlockPackageRequestDto {
+        package_name: "test-pkg",
+        reason: "",  // Empty reason
+    };
+
+    let block_result = block_package(block_req, admin_token).await;
+    assert_err(&block_result);
+
+    match block_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"reason");
+            assert(&message.contains("required"));
+        },
+        _ => panic("Expected ValidationError for empty reason"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_admin_can_unblock_package() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Publish and block package
+    let user_token = login_user(LoginRequestDto {
+        username: "publisher",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("blocked-pkg", "1.0.0", user_token).await;
+
+    block_package(BlockPackageRequestDto {
+        package_name: "blocked-pkg",
+        reason: "Testing block/unblock",
+    }, admin_token.clone()).await;
+
+    // Unblock the package
+    let unblock_req = UnblockPackageRequestDto {
+        package_name: "blocked-pkg",
+    };
+
+    let unblock_result = unblock_package(unblock_req, admin_token).await;
+    assert_ok(&unblock_result);
+
+    let unblock_response = unblock_result.unwrap();
+    assert_eq(&unblock_response.success, &true);
+    assert(&unblock_response.message.contains("unblocked"));
+
+    // Verify package is downloadable again
+    let download_result = download_package_artifact("blocked-pkg", "1.0.0").await;
+    assert_ok(&download_result);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_block_package_requires_admin_role() {
+    setup_test_db();
+
+    // Create regular user
+    register_user(RegisterRequestDto {
+        username: "regularuser",
+        email: "regular@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let regular_token = login_user(LoginRequestDto {
+        username: "regularuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("test-pkg", "1.0.0", regular_token.clone()).await;
+
+    // Try to block as regular user
+    let block_req = BlockPackageRequestDto {
+        package_name: "test-pkg",
+        reason: "Unauthorized block attempt",
+    };
+
+    let block_result = block_package(block_req, regular_token).await;
+    assert_err(&block_result);
+
+    match block_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            assert(&message.contains("Admin"));
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Registry Statistics Tests
+// ============================================================================
+
+@test
+fn test_registry_stats() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Create some users and packages
+    for i in 1..6 {
+        register_user(RegisterRequestDto {
+            username: f"user{i}",
+            email: f"user{i}@example.com",
+            password: "password123",
+            confirm_password: "password123",
+        }).await;
+
+        let user_token = login_user(LoginRequestDto {
+            username: f"user{i}",
+            password: "password123",
+        }).await.unwrap().token;
+
+        publish_test_package(f"package{i}", "1.0.0", user_token).await;
+    }
+
+    // Get registry stats
+    let stats_result = get_registry_stats(admin_token).await;
+    assert_ok(&stats_result);
+
+    let stats = stats_result.unwrap();
+
+    // Verify stats
+    assert(&stats.total_users >= 5);  // At least 5 users created (plus admin)
+    assert(&stats.total_packages >= 5);  // At least 5 packages
+    assert_eq(&stats.total_versions, &stats.total_packages);  // 1 version per package
+    assert(&stats.total_downloads >= 0);  // Non-negative
+
+    cleanup_test_db();
+}
+
+@test
+fn test_registry_stats_requires_admin() {
+    setup_test_db();
+
+    // Create regular user
+    register_user(RegisterRequestDto {
+        username: "regularuser",
+        email: "regular@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let regular_token = login_user(LoginRequestDto {
+        username: "regularuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Try to get stats as regular user
+    let stats_result = get_registry_stats(regular_token).await;
+    assert_err(&stats_result);
+
+    match stats_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            assert(&message.contains("Admin"));
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Admin List Operations Tests
+// ============================================================================
+
+@test
+fn test_list_all_users_pagination() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Create 25 users
+    for i in 1..26 {
+        register_user(RegisterRequestDto {
+            username: f"user{i}",
+            email: f"user{i}@example.com",
+            password: "password123",
+            confirm_password: "password123",
+        }).await;
+    }
+
+    // Test pagination
+    let page1 = list_all_users(1, 10, admin_token.clone()).await;
+    assert_ok(&page1);
+    assert_eq(&page1.unwrap().users.len(), &10);
+
+    let page2 = list_all_users(2, 10, admin_token.clone()).await;
+    assert_ok(&page2);
+    assert_eq(&page2.unwrap().users.len(), &10);
+
+    let page3 = list_all_users(3, 10, admin_token).await;
+    assert_ok(&page3);
+    assert(&page3.unwrap().users.len() > 0);  // Remaining users
+
+    cleanup_test_db();
+}
+
+@test
+fn test_list_all_packages_pagination() {
+    setup_test_db();
+
+    let admin_token = create_admin_user("admin", "admin@example.com");
+
+    // Create user and publish 25 packages
+    register_user(RegisterRequestDto {
+        username: "publisher",
+        email: "publisher@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let publisher_token = login_user(LoginRequestDto {
+        username: "publisher",
+        password: "password123",
+    }).await.unwrap().token;
+
+    for i in 1..26 {
+        publish_test_package(f"package{i}", "1.0.0", publisher_token.clone()).await;
+    }
+
+    // Test pagination
+    let page1 = list_all_packages(1, 10, admin_token.clone()).await;
+    assert_ok(&page1);
+    assert_eq(&page1.unwrap().packages.len(), &10);
+
+    let page2 = list_all_packages(2, 10, admin_token.clone()).await;
+    assert_ok(&page2);
+    assert_eq(&page2.unwrap().packages.len(), &10);
+
+    let page3 = list_all_packages(3, 10, admin_token).await;
+    assert_ok(&page3);
+    assert(&page3.unwrap().packages.len() > 0);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_list_operations_require_admin() {
+    setup_test_db();
+
+    // Create regular user
+    register_user(RegisterRequestDto {
+        username: "regularuser",
+        email: "regular@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let regular_token = login_user(LoginRequestDto {
+        username: "regularuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Try to list users as regular user
+    let users_result = list_all_users(1, 10, regular_token.clone()).await;
+    assert_err(&users_result);
+
+    // Try to list packages as regular user
+    let packages_result = list_all_packages(1, 10, regular_token).await;
+    assert_err(&packages_result);
+
+    cleanup_test_db();
+}

@@ -1,0 +1,7 @@
+// Test: Simple try statement
+
+fn main() {
+    try {
+        println("In try block");
+    };
+}

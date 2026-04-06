@@ -1,0 +1,349 @@
+// Comprehensive Protocol (Trait) Features Test
+// Tests all major protocol capabilities in Verum
+//
+// Test Coverage:
+// 1. Protocol definition with methods - PLANNED (syntax exists, codegen pending)
+// 2. Protocol implementation for types - PLANNED (syntax exists, codegen pending)
+// 3. Associated types in protocols - PLANNED (syntax exists, codegen pending)
+// 4. Generic protocols - PLANNED (syntax exists, codegen pending)
+// 5. Protocol bounds on generic functions - PLANNED (syntax exists, codegen pending)
+// 6. Default method implementations - PLANNED (syntax exists, codegen pending)
+// 7. Multiple protocol implementation - PLANNED (syntax exists, codegen pending)
+//
+// NOTE: As of the current implementation, protocol syntax is parsed but not fully
+// implemented in code generation. This file demonstrates the features that will work
+// once the feature is complete. For now, we test using function-based polymorphism
+// that protocols will eventually replace.
+
+// ========================================
+// CURRENT WORKING ALTERNATIVE: MANUAL POLYMORPHISM
+// ========================================
+
+// Instead of protocols, we use explicit functions
+// This demonstrates the functionality that protocols will provide
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Rectangle is {
+    width: Float,
+    height: Float
+};
+
+type Person is {
+    name: Text,
+    age: Int
+};
+
+type Color is Red | Green | Blue | Custom(Float, Float, Float);
+
+type Maybe<T> is Some(T) | None;
+
+type Pair<A, B> is {
+    first: A,
+    second: B
+};
+
+// ========================================
+// DISPLAY FUNCTIONS (Protocol-like behavior)
+// ========================================
+
+fn display_point(p: Point) -> Text {
+    f"Point({p.x}, {p.y})"
+}
+
+fn display_rectangle(r: Rectangle) -> Text {
+    f"Rectangle({r.width}x{r.height})"
+}
+
+fn display_person(p: Person) -> Text {
+    f"{p.name} (age {p.age})"
+}
+
+fn display_color(c: Color) -> Text {
+    match c {
+        Red => "Red",
+        Green => "Green",
+        Blue => "Blue",
+        Custom(r, g, b) => f"Custom({r}, {g}, {b})"
+    }
+}
+
+// ========================================
+// DEBUG FUNCTIONS (Protocol-like behavior)
+// ========================================
+
+fn debug_point(p: Point) -> Text {
+    f"Point {{ x: {p.x}, y: {p.y} }}"
+}
+
+fn debug_rectangle(r: Rectangle) -> Text {
+    f"Rectangle {{ width: {r.width}, height: {r.height} }}"
+}
+
+fn debug_person(p: Person) -> Text {
+    f"Person {{ name: \"{p.name}\", age: {p.age} }}"
+}
+
+fn debug_color(c: Color) -> Text {
+    match c {
+        Red => "Color.Red",
+        Green => "Color.Green",
+        Blue => "Color.Blue",
+        Custom(r, g, b) => f"Color.Custom({r}, {g}, {b})"
+    }
+}
+
+// ========================================
+// COMPARABLE FUNCTIONS (Protocol-like behavior)
+// ========================================
+
+fn compare_points(p1: Point, p2: Point) -> Int {
+    let dist1 = p1.x * p1.x + p1.y * p1.y;
+    let dist2 = p2.x * p2.x + p2.y * p2.y;
+    if dist1 < dist2 {
+        -1
+    } else if dist1 > dist2 {
+        1
+    } else {
+        0
+    }
+}
+
+fn compare_ints(a: Int, b: Int) -> Int {
+    if a < b {
+        -1
+    } else if a > b {
+        1
+    } else {
+        0
+    }
+}
+
+fn compare_floats(a: Float, b: Float) -> Int {
+    if a < b {
+        -1
+    } else if a > b {
+        1
+    } else {
+        0
+    }
+}
+
+// ========================================
+// GENERIC-LIKE FUNCTIONS WITH MANUAL DISPATCH
+// ========================================
+
+fn min_int(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn max_int(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min_float(a: Float, b: Float) -> Float {
+    if a < b { a } else { b }
+}
+
+fn max_float(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+// ========================================
+// TEST FUNCTIONS
+// ========================================
+
+fn test_display_functionality() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 1: Display Functionality (Protocol-like)    ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let point = Point { x: 3.0, y: 4.0 };
+    let _ = print(f"Point display: {display_point(point)}");
+
+    let rect = Rectangle { width: 10.0, height: 5.0 };
+    let _ = print(f"Rectangle display: {display_rectangle(rect)}");
+
+    let person = Person { name: "Alice", age: 30 };
+    let _ = print(f"Person display: {display_person(person)}");
+    let _ = print("");
+}
+
+fn test_debug_functionality() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 2: Debug Functionality (Protocol-like)      ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let point = Point { x: 5.0, y: 6.0 };
+    let _ = print(f"Point debug: {debug_point(point)}");
+
+    let rect = Rectangle { width: 8.0, height: 4.0 };
+    let _ = print(f"Rectangle debug: {debug_rectangle(rect)}");
+
+    let person = Person { name: "Bob", age: 25 };
+    let _ = print(f"Person debug: {debug_person(person)}");
+    let _ = print("");
+}
+
+fn test_variant_display() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 3: Variant Type Display                     ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let red = Red;
+    let _ = print(f"Red display: {display_color(red)}");
+    let _ = print(f"Red debug: {debug_color(red)}");
+
+    let custom = Custom(0.5, 0.7, 0.9);
+    let _ = print(f"Custom display: {display_color(custom)}");
+    let _ = print(f"Custom debug: {debug_color(custom)}");
+    let _ = print("");
+}
+
+fn test_comparison() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 4: Comparable Functionality                 ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let p1 = Point { x: 3.0, y: 4.0 };
+    let p2 = Point { x: 6.0, y: 8.0 };
+    let cmp = compare_points(p1, p2);
+    let _ = print(f"compare_points(p1, p2): {cmp} (p1 is closer to origin)");
+
+    let a = 10;
+    let b = 20;
+    let _ = print(f"min(10, 20): {min_int(a, b)}");
+    let _ = print(f"max(10, 20): {max_int(a, b)}");
+
+    let x = 3.5;
+    let y = 2.1;
+    let _ = print(f"min(3.5, 2.1): {min_float(x, y)}");
+    let _ = print(f"max(3.5, 2.1): {max_float(x, y)}");
+    let _ = print("");
+}
+
+fn test_generic_types() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 5: Generic Types (Foundation for Protocols) ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let pair_points = Pair {
+        first: Point { x: 1.0, y: 2.0 },
+        second: Point { x: 3.0, y: 4.0 }
+    };
+    let _ = print(f"Pair of Points: ({display_point(pair_points.first)}, {display_point(pair_points.second)})");
+
+    let pair_mixed = Pair {
+        first: Point { x: 5.0, y: 6.0 },
+        second: Person { name: "Charlie", age: 35 }
+    };
+    let _ = print(f"Mixed Pair: ({display_point(pair_mixed.first)}, {display_person(pair_mixed.second)})");
+    let _ = print("");
+}
+
+fn test_maybe_type() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 6: Maybe Type (Demonstrates Generic Variants)║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    let some_point: Maybe<Point> = Some(Point { x: 7.0, y: 8.0 });
+    match some_point {
+        Some(p) => { let _ = print(f"Maybe<Point> Some: {display_point(p)}"); },
+        None => { let _ = print("Maybe<Point> None"); }
+    }
+
+    let none_point: Maybe<Point> = None;
+    match none_point {
+        Some(p) => { let _ = print(f"Maybe<Point> Some: {display_point(p)}"); },
+        None => { let _ = print("Maybe<Point> None: no value"); }
+    }
+    let _ = print("");
+}
+
+fn test_future_protocol_features() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║  Test 7: Future Protocol Features                 ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+    let _ = print("The following protocol features are planned:");
+    let _ = print("");
+    let _ = print("1. Protocol Definition:");
+    let _ = print("   type Display is protocol {");
+    let _ = print("       fn display(self) -> Text;");
+    let _ = print("   };");
+    let _ = print("");
+    let _ = print("2. Protocol Implementation:");
+    let _ = print("   impl Display for Point {");
+    let _ = print("       fn display(self) -> Text {");
+    let _ = print("           f\"Point({self.x}, {self.y})\"");
+    let _ = print("       }");
+    let _ = print("   }");
+    let _ = print("");
+    let _ = print("3. Generic Functions with Protocol Bounds:");
+    let _ = print("   fn show<T>(value: T) -> Text where type T: Display {");
+    let _ = print("       value.display()");
+    let _ = print("   }");
+    let _ = print("");
+    let _ = print("4. Associated Types in Protocols:");
+    let _ = print("   type Container is protocol {");
+    let _ = print("       type Item;");
+    let _ = print("       fn get(self, index: Int) -> Item;");
+    let _ = print("   };");
+    let _ = print("");
+    let _ = print("5. Multiple Protocol Bounds:");
+    let _ = print("   fn debug_and_display<T>(value: T)");
+    let _ = print("       where type T: Display, type T: Debug { ... }");
+    let _ = print("");
+    let _ = print("These features are currently being implemented!");
+    let _ = print("");
+}
+
+// ========================================
+// MAIN ENTRY POINT
+// ========================================
+
+fn main() {
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║                                                    ║");
+    let _ = print("║  PROTOCOL FEATURES TEST SUITE                      ║");
+    let _ = print("║  (Current: Manual Polymorphism)                    ║");
+    let _ = print("║  (Future: True Protocol Support)                   ║");
+    let _ = print("║                                                    ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    test_display_functionality();
+    test_debug_functionality();
+    test_variant_display();
+    test_comparison();
+    test_generic_types();
+    test_maybe_type();
+    test_future_protocol_features();
+
+    let _ = print("╔════════════════════════════════════════════════════╗");
+    let _ = print("║                                                    ║");
+    let _ = print("║  ALL TESTS COMPLETED SUCCESSFULLY! ✓               ║");
+    let _ = print("║                                                    ║");
+    let _ = print("╚════════════════════════════════════════════════════╝");
+    let _ = print("");
+    let _ = print("Protocol-like features tested:");
+    let _ = print("  ✓ Display functionality (via dedicated functions)");
+    let _ = print("  ✓ Debug functionality (via dedicated functions)");
+    let _ = print("  ✓ Comparable functionality (via comparison functions)");
+    let _ = print("  ✓ Generic types (Pair, Maybe)");
+    let _ = print("  ✓ Variant types with behavior");
+    let _ = print("  ✓ Multiple method implementations per type");
+    let _ = print("");
+    let _ = print("These demonstrate the capabilities that will be");
+    let _ = print("unified under the protocol system once implemented!");
+    let _ = print("");
+}

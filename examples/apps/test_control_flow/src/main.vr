@@ -1,0 +1,488 @@
+// Comprehensive Control Flow Test
+// Tests all control flow features in Verum
+
+// ===== Test 1: If/Else Expressions =====
+
+fn test_if_else() {
+    print("--- Test 1: If/Else Expressions ---");
+
+    // Simple if/else
+    let x = 10;
+    let result = if x > 5 {
+        "greater than 5"
+    } else {
+        "not greater than 5"
+    };
+    print("if x > 5: " + result);
+
+    // If without else (unit return)
+    if x == 10 {
+        print("x is exactly 10");
+    }
+
+    // Nested if/else
+    let y = 15;
+    let category = if y < 10 {
+        "small"
+    } else if y < 20 {
+        "medium"
+    } else {
+        "large"
+    };
+    print("Category for 15: " + category);
+
+    // If as expression in assignment
+    let is_positive = if x > 0 { true } else { false };
+    print("Is positive: " + is_positive.to_string());
+
+    // Complex condition
+    let a = 5;
+    let b = 10;
+    if a > 0 && b > 0 {
+        print("Both positive");
+    } else if a > 0 || b > 0 {
+        print("At least one positive");
+    } else {
+        print("Neither positive");
+    }
+
+    print("");
+}
+
+// ===== Test 2: Match Expressions =====
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | RGB(Int, Int, Int);
+
+fn test_match() {
+    print("--- Test 2: Match Expressions ---");
+
+    // Simple enum match
+    let color = Red;
+    let name = match color {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        RGB(_, _, _) => "custom"
+    };
+    print("Color name: " + name);
+
+    // Match with guards
+    let number = 42;
+    let description = match number {
+        n if n < 0 => "negative",
+        0 => "zero",
+        n if n < 10 => "small positive",
+        n if n < 100 => "medium positive",
+        _ => "large positive"
+    };
+    print("Number description (42): " + description);
+
+    // Match on tuples
+    let point = (3, 4);
+    let location = match point {
+        (0, 0) => "origin",
+        (0, _) => "on y-axis",
+        (_, 0) => "on x-axis",
+        (x, y) => "general point"
+    };
+    print("Point location: " + location);
+
+    // Match on Maybe
+    let some_value = Some(10);
+    let result = match some_value {
+        Some(v) => "got " + v.to_string(),
+        None => "got nothing"
+    };
+    print("Maybe result: " + result);
+
+    print("");
+}
+
+// ===== Test 3: While Loops =====
+
+fn test_while() {
+    print("--- Test 3: While Loops ---");
+
+    // Basic while loop
+    let i = 0;
+    let sum = 0;
+    while i < 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    print("Sum of 0..4: " + sum.to_string());
+
+    // While with complex condition
+    let x = 1;
+    let y = 10;
+    while x < y && x < 5 {
+        x = x + 1;
+    }
+    print("x after while: " + x.to_string());
+
+    // While with break
+    let count = 0;
+    while true {
+        count = count + 1;
+        if count >= 3 {
+            break;
+        }
+    }
+    print("Count with break: " + count.to_string());
+
+    // While with continue
+    let n = 0;
+    let even_sum = 0;
+    while n < 10 {
+        n = n + 1;
+        if n % 2 != 0 {
+            continue;
+        }
+        even_sum = even_sum + n;
+    }
+    print("Sum of even numbers 1..10: " + even_sum.to_string());
+
+    print("");
+}
+
+// ===== Test 4: For Loops =====
+
+fn test_for() {
+    print("--- Test 4: For Loops ---");
+
+    // For loop over range
+    print("For loop 0..5:");
+    for i in 0..5 {
+        print("  " + i.to_string());
+    }
+
+    // For loop with accumulation
+    let sum = 0;
+    for i in 1..6 {
+        sum = sum + i;
+    }
+    print("Sum 1..5: " + sum.to_string());
+
+    // For loop over array
+    let nums = [10, 20, 30, 40];
+    print("For loop over array:");
+    for n in nums {
+        print("  " + n.to_string());
+    }
+
+    // For loop with break
+    print("For loop with break at 3:");
+    for i in 0..10 {
+        if i >= 3 {
+            break;
+        }
+        print("  " + i.to_string());
+    }
+
+    // For loop with continue
+    print("For loop with continue (skip evens):");
+    for i in 0..6 {
+        if i % 2 == 0 {
+            continue;
+        }
+        print("  " + i.to_string());
+    }
+
+    print("");
+}
+
+// ===== Test 5: Loop (Infinite Loop) =====
+
+fn test_loop() {
+    print("--- Test 5: Loop (Infinite Loop) ---");
+
+    // Loop with break
+    let counter = 0;
+    loop {
+        counter = counter + 1;
+        if counter >= 5 {
+            break;
+        }
+    }
+    print("Loop with break, counter: " + counter.to_string());
+
+    // Loop with break and value
+    let result = loop {
+        if counter >= 10 {
+            break counter;
+        }
+        counter = counter + 1;
+    };
+    print("Loop with break value: " + result.to_string());
+
+    // Nested loop with labeled break would be:
+    // 'outer: loop {
+    //     loop {
+    //         break 'outer;
+    //     }
+    // }
+
+    print("");
+}
+
+// ===== Test 6: Early Return =====
+
+fn find_positive(numbers: [Int]) -> Maybe<Int> {
+    for n in numbers {
+        if n > 0 {
+            return Some(n);
+        }
+    }
+    None
+}
+
+fn divide_if_even(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        return None;
+    }
+    if b % 2 != 0 {
+        return None;
+    }
+    Some(a / b)
+}
+
+fn test_return() {
+    print("--- Test 6: Early Return ---");
+
+    let nums = [-5, -3, 0, 7, 10];
+    let first_pos = find_positive(nums);
+    match first_pos {
+        Some(n) => print("First positive in [-5,-3,0,7,10]: " + n.to_string()),
+        None => print("No positive found")
+    }
+
+    match divide_if_even(20, 4) {
+        Some(v) => print("divide_if_even(20, 4) = " + v.to_string()),
+        None => print("divide_if_even(20, 4) = None")
+    }
+
+    match divide_if_even(20, 3) {
+        Some(v) => print("divide_if_even(20, 3) = " + v.to_string()),
+        None => print("divide_if_even(20, 3) = None")
+    }
+
+    print("");
+}
+
+// ===== Test 7: Break and Continue in Nested Loops =====
+
+fn test_nested_loops() {
+    print("--- Test 7: Nested Loops ---");
+
+    print("Nested for loops (multiplication table 1-3):");
+    for i in 1..4 {
+        for j in 1..4 {
+            let product = i * j;
+            print("  " + i.to_string() + " * " + j.to_string() + " = " + product.to_string());
+        }
+    }
+
+    // Break from inner loop
+    print("Nested with break in inner:");
+    for i in 0..3 {
+        for j in 0..5 {
+            if j >= 2 {
+                break;
+            }
+            print("  (" + i.to_string() + ", " + j.to_string() + ")");
+        }
+    }
+
+    // Continue in nested loop
+    print("Nested with continue (skip when i == j):");
+    for i in 0..3 {
+        for j in 0..3 {
+            if i == j {
+                continue;
+            }
+            print("  (" + i.to_string() + ", " + j.to_string() + ")");
+        }
+    }
+
+    print("");
+}
+
+// ===== Test 8: Complex Control Flow =====
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    let a = 0;
+    let b = 1;
+    let i = 2;
+
+    while i <= n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+
+    b
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n <= 1 {
+        return false;
+    }
+    if n <= 3 {
+        return true;
+    }
+    if n % 2 == 0 || n % 3 == 0 {
+        return false;
+    }
+
+    let i = 5;
+    while i * i <= n {
+        if n % i == 0 || n % (i + 2) == 0 {
+            return false;
+        }
+        i = i + 6;
+    }
+
+    true
+}
+
+fn test_complex() {
+    print("--- Test 8: Complex Control Flow ---");
+
+    print("Fibonacci sequence (first 8):");
+    for i in 0..8 {
+        print("  fib(" + i.to_string() + ") = " + fibonacci(i).to_string());
+    }
+
+    print("Prime numbers up to 20:");
+    for i in 0..21 {
+        if is_prime(i) {
+            print("  " + i.to_string());
+        }
+    }
+
+    print("");
+}
+
+// ===== Test 9: Let-Else Pattern =====
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+fn test_let_else() {
+    print("--- Test 9: Let-Else Pattern ---");
+
+    // Note: let-else syntax may be: let pattern = expr else { ... }
+    // For now, using match for similar behavior
+
+    let maybe_val = Some(42);
+    match maybe_val {
+        Some(v) => {
+            print("Got value: " + v.to_string());
+        },
+        None => {
+            print("No value");
+        }
+    }
+
+    // Simulating let-else with early return
+    fn extract_or_return(m: Maybe<Int>) -> Int {
+        match m {
+            Some(v) => v,
+            None => {
+                print("Early return due to None");
+                return 0;
+            }
+        }
+    }
+
+    let result = extract_or_return(Some(99));
+    print("Extracted: " + result.to_string());
+
+    let result2 = extract_or_return(None);
+    print("Extracted: " + result2.to_string());
+
+    print("");
+}
+
+// ===== Test 10: Block Expressions =====
+
+fn test_blocks() {
+    print("--- Test 10: Block Expressions ---");
+
+    // Block as expression
+    let result = {
+        let x = 5;
+        let y = 10;
+        x + y
+    };
+    print("Block result: " + result.to_string());
+
+    // Nested blocks
+    let nested = {
+        let a = {
+            let inner = 3;
+            inner * 2
+        };
+        a + 4
+    };
+    print("Nested block result: " + nested.to_string());
+
+    // Block with side effects
+    let value = {
+        print("  Computing in block...");
+        42
+    };
+    print("Block with side effects: " + value.to_string());
+
+    print("");
+}
+
+// ===== Main Test Function =====
+
+fn main() {
+    print("=== Comprehensive Control Flow Test ===");
+    print("");
+
+    test_if_else();
+    test_match();
+    test_while();
+    test_for();
+    test_loop();
+    test_return();
+    test_nested_loops();
+    test_complex();
+    test_let_else();
+    test_blocks();
+
+    print("=== Control Flow Features Tested ===");
+    print("✓ If/else expressions");
+    print("✓ Nested if/else");
+    print("✓ Match expressions");
+    print("✓ Match with guards");
+    print("✓ While loops");
+    print("✓ While with break");
+    print("✓ While with continue");
+    print("✓ For loops over ranges");
+    print("✓ For loops over arrays");
+    print("✓ For with break");
+    print("✓ For with continue");
+    print("✓ Infinite loops (loop)");
+    print("✓ Loop with break value");
+    print("✓ Early return");
+    print("✓ Nested loops");
+    print("✓ Complex control flow (fibonacci, prime)");
+    print("✓ Let-else pattern (via match)");
+    print("✓ Block expressions");
+    print("");
+    print("=== Test Complete ===");
+}

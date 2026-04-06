@@ -1,0 +1,13 @@
+async fn compute(n: Int) -> Int {
+    n * 2
+}
+
+async fn main() {
+    let task1 = spawn compute(10)
+    let task2 = spawn compute(20)
+
+    let r1 = task1.await
+    let r2 = task2.await
+
+    println(f"Results: {r1}, {r2}")
+}

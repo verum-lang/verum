@@ -1,0 +1,192 @@
+// =============================================================================
+// sparkline.vr - Sparkline widget (compact bar chart using Unicode blocks)
+// =============================================================================
+module sparkline;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.Block;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+
+// Bar characters: 8 levels from shortest to full block
+// ▁ (U+2581), ▂ (U+2582), ▃ (U+2583), ▄ (U+2584),
+// ▅ (U+2585), ▆ (U+2586), ▇ (U+2587), █ (U+2588)
+const BAR_CHARS: List<Text> = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+// =============================================================================
+// SparkDirection — controls which end of the data is shown first
+// =============================================================================
+
+/// Direction of data display in the sparkline.
+public type SparkDirection is LeftToRight | RightToLeft;
+
+// =============================================================================
+// BarSet — character set used for rendering bars
+// =============================================================================
+
+/// Character set for sparkline rendering.
+public type BarSet is Full | Half | Braille;
+
+// =============================================================================
+// Sparkline — compact multi-row bar chart
+// =============================================================================
+
+/// Sparkline — a compact bar chart rendered using 8-level Unicode block
+/// characters. Supports multi-row rendering where each column can be up to
+/// H*8 levels tall (H full rows with a partial top row).
+public type Sparkline is {
+    data: List<Float>,
+    block: Maybe<Block>,
+    style: Style,
+    bar_style: Style,
+    max: Maybe<Float>,
+    direction: SparkDirection,
+    bar_set: BarSet,
+};
+
+implement Sparkline {
+    /// Create a new sparkline with data.
+    public fn new(data: List<Float>) -> Sparkline {
+        Sparkline {
+            data: data,
+            block: None,
+            style: Style.DEFAULT,
+            bar_style: Style.new().fg(Color.Green),
+            max: None,
+            direction: SparkDirection.LeftToRight,
+            bar_set: BarSet.Full,
+        }
+    }
+
+    /// Create an empty sparkline.
+    public fn empty() -> Sparkline {
+        Sparkline {
+            data: List.new(),
+            block: None,
+            style: Style.DEFAULT,
+            bar_style: Style.new().fg(Color.Green),
+            max: None,
+            direction: SparkDirection.LeftToRight,
+            bar_set: BarSet.Full,
+        }
+    }
+
+    /// Set the data points.
+    public fn data(self, data: List<Float>) -> Sparkline {
+        Sparkline { data: data, ..self }
+    }
+
+    /// Set the block wrapper.
+    public fn block(self, block: Block) -> Sparkline {
+        Sparkline { block: Some(block), ..self }
+    }
+
+    /// Set the style for the sparkline area.
+    public fn style(self, style: Style) -> Sparkline {
+        Sparkline { style: style, ..self }
+    }
+
+    /// Set the style for the bar characters.
+    public fn bar_style(self, style: Style) -> Sparkline {
+        Sparkline { bar_style: style, ..self }
+    }
+
+    /// Set explicit maximum value. If None, the maximum of the data is used.
+    public fn max(self, max: Float) -> Sparkline {
+        Sparkline { max: Some(max), ..self }
+    }
+
+    /// Set the data direction.
+    public fn direction(self, dir: SparkDirection) -> Sparkline {
+        Sparkline { direction: dir, ..self }
+    }
+
+    /// Set the bar character set.
+    public fn bar_set(self, bs: BarSet) -> Sparkline {
+        Sparkline { bar_set: bs, ..self }
+    }
+}
+
+implement Widget for Sparkline {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let spark_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if spark_area.width < 1 || spark_area.height < 1 { return; }
+        if self.data.len() == 0 { return; }
+
+        buf.set_style(spark_area, self.style);
+
+        // Determine the effective maximum
+        let data_max = match self.max {
+            Some(m) => m,
+            None => {
+                let mut m = 0.0;
+                for v in &self.data {
+                    if v > m { m = v; }
+                }
+                m
+            }
+        };
+
+        // If all values are zero, nothing to draw
+        if data_max <= 0.0 { return; }
+
+        let height = spark_area.height;
+        let width = spark_area.width;
+        let visible_count = width.min(self.data.len());
+
+        // Render each column
+        for i in 0..visible_count {
+            // Determine the data index based on direction
+            let idx = match self.direction {
+                LeftToRight => {
+                    // Show most recent data points that fit, left to right
+                    let start = self.data.len() - visible_count;
+                    start + i
+                }
+                RightToLeft => {
+                    // Show data points right to left
+                    let start = self.data.len() - visible_count;
+                    start + (visible_count - 1 - i)
+                }
+            };
+
+            if idx < 0 || idx >= self.data.len() { continue; }
+
+            let value = self.data[idx];
+            let clamped = value.clamp(0.0, data_max);
+            let normalized = clamped / data_max;
+
+            // Total levels: height * 8 (8 sub-levels per cell row)
+            let total_levels = height * 8;
+            let bar_height = (normalized * total_levels as Float) as Int;
+            let full_rows = bar_height / 8;
+            let partial = bar_height % 8;
+
+            let x = spark_area.x + i;
+
+            // Render from bottom to top
+            for row in 0..height {
+                let y = spark_area.bottom() - 1 - row;
+
+                if row < full_rows {
+                    // Full block row
+                    buf.get_mut(x, y).set_char("█", self.bar_style);
+                } else if row == full_rows && partial > 0 {
+                    // Partial block (1-7 levels)
+                    let bar_char = BAR_CHARS[partial - 1];
+                    buf.get_mut(x, y).set_char(&bar_char, self.bar_style);
+                }
+            }
+        }
+    }
+}

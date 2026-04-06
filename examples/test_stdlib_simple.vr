@@ -1,0 +1,135 @@
+// test_stdlib_simple.vr
+// Simple test of Verum features without requiring stdlib imports
+
+// Test primitive types
+fn test_primitives() {
+    print("=== Testing Primitives ===")
+
+    let b: Bool = true
+    let i: Int = 42
+    let f: Float = 3.14159
+    let t: Text = "Hello, Verum"
+
+    print(f"Bool: {b}")
+    print(f"Int: {i}")
+    print(f"Float: {f}")
+    print(f"Text: {t}")
+
+    // Arithmetic
+    let x = 10
+    let y = 3
+    print(f"{x} + {y} = {x + y}")
+    print(f"{x} - {y} = {x - y}")
+    print(f"{x} * {y} = {x * y}")
+    print(f"{x} / {y} = {x / y}")
+    print(f"{x} % {y} = {x % y}")
+}
+
+// Test List operations
+fn test_list() {
+    print("=== Testing List<T> ===")
+
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Original: {numbers}")
+
+    // Map
+    let squared = numbers.map(|x| x * x)
+    print(f"Squared: {squared}")
+
+    // Filter
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"Evens: {evens}")
+
+    // Length
+    print(f"Length: {numbers.len()}")
+}
+
+// Test control flow
+fn test_control_flow() {
+    print("=== Testing Control Flow ===")
+
+    // If-else
+    let age = 25
+    if age >= 18 {
+        print("Adult")
+    } else {
+        print("Minor")
+    }
+
+    // Match
+    let color = "red"
+    let description = match color {
+        "red" => "The color of fire",
+        "blue" => "The color of sky",
+        "green" => "The color of grass",
+        _ => "Some other color"
+    }
+    print(f"Color description: {description}")
+
+    // While loop
+    let mut count = 0
+    while count < 3 {
+        print(f"Count: {count}")
+        count = count + 1
+    }
+
+    // For loop
+    for i in 0..3 {
+        print(f"Index: {i}")
+    }
+}
+
+// Test functions
+fn add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn multiply(x: Int, y: Int) -> Int = x * y;
+
+fn test_functions() {
+    print("=== Testing Functions ===")
+
+    let sum = add(5, 3)
+    print(f"add(5, 3) = {sum}")
+
+    let product = multiply(4, 7)
+    print(f"multiply(4, 7) = {product}")
+
+    // Closure
+    let double = |x| x * 2
+    print(f"double(21) = {double(21)}")
+}
+
+// Test strings
+fn test_strings() {
+    print("=== Testing Strings ===")
+
+    let greeting = "Hello"
+    let name = "Verum"
+
+    // String interpolation
+    let message = f"{greeting}, {name}!"
+    print(message)
+
+    // Multiline string (if supported)
+    let poem = "Roses are red,
+Violets are blue,
+Verum is awesome,
+And so are you!"
+    print(poem)
+}
+
+// Main test runner
+fn main() {
+    print("Verum Language Feature Test Suite")
+    print("==================================")
+
+    test_primitives()
+    test_list()
+    test_control_flow()
+    test_functions()
+    test_strings()
+
+    print("==================================")
+    print("All tests completed!")
+}

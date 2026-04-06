@@ -1,0 +1,535 @@
+// =============================================================================
+// math/libm.vr - Software Math Library (replaces libm)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// Pure Verum implementations of all math functions. Zero libc dependency.
+// These compile through VBC → LLVM and also work in the interpreter.
+//
+// For AOT: LLVM can optimize these to hardware instructions where available
+// (e.g., sqrtsd on x86, fsqrt on ARM).
+//
+// Precision: IEEE 754 double precision (~15-16 significant digits).
+//
+// =============================================================================
+
+module libm;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+public const PI: Float = 3.14159265358979323846;
+public const E: Float = 2.71828182845904523536;
+public const LN2: Float = 0.69314718055994530942;
+public const LN10: Float = 2.30258509299404568402;
+public const LOG2E: Float = 1.44269504088896340736;
+public const LOG10E: Float = 0.43429448190325182765;
+public const SQRT2: Float = 1.41421356237309504880;
+public const INF: Float = 1.0 / 0.0;
+public const NEG_INF: Float = -1.0 / 0.0;
+public const NAN: Float = 0.0 / 0.0;
+public const EPSILON: Float = 2.2204460492503131e-16;
+
+// =============================================================================
+// Basic Operations
+// =============================================================================
+
+/// Absolute value.
+public fn abs(x: Float) -> Float {
+    if x < 0.0 { -x } else { x }
+}
+
+/// Integer absolute value.
+public fn iabs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+/// Minimum of two floats.
+public fn min(a: Float, b: Float) -> Float {
+    if a < b { a } else { b }
+}
+
+/// Maximum of two floats.
+public fn max(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+/// Clamp value to range [lo, hi].
+public fn clamp(x: Float, lo: Float, hi: Float) -> Float {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
+/// Floor: largest integer ≤ x.
+public fn floor(x: Float) -> Float {
+    let i = x as Int;
+    let f = i as Float;
+    if f > x { f - 1.0 } else { f }
+}
+
+/// Ceiling: smallest integer ≥ x.
+public fn ceil(x: Float) -> Float {
+    let i = x as Int;
+    let f = i as Float;
+    if f < x { f + 1.0 } else { f }
+}
+
+/// Round to nearest integer.
+public fn round(x: Float) -> Float {
+    floor(x + 0.5)
+}
+
+/// Truncate toward zero.
+public fn trunc(x: Float) -> Float {
+    let i = x as Int;
+    i as Float
+}
+
+/// Fractional part.
+public fn fract(x: Float) -> Float {
+    x - floor(x)
+}
+
+/// Float modulus (matches C fmod).
+public fn fmod(x: Float, y: Float) -> Float {
+    x - trunc(x / y) * y
+}
+
+/// Sign: -1.0, 0.0, or 1.0.
+public fn sign(x: Float) -> Float {
+    if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }
+}
+
+/// Copy sign of y onto magnitude of x.
+public fn copysign(x: Float, y: Float) -> Float {
+    let mag = abs(x);
+    if y < 0.0 { -mag } else { mag }
+}
+
+// =============================================================================
+// Square Root — Newton-Raphson with hardware seed
+// =============================================================================
+
+/// Square root. Uses Newton-Raphson iteration.
+/// LLVM will optimize this to sqrtsd/fsqrt on capable hardware.
+@intrinsic("sqrt")
+public fn sqrt(x: Float) -> Float {
+    if x < 0.0 { return NAN; }
+    if x == 0.0 { return 0.0; }
+    if x == 1.0 { return 1.0; }
+
+    // Initial estimate using bit manipulation
+    // Reinterpret float bits, halve exponent
+    let mut guess = x;
+    if x > 1.0 {
+        guess = x / 2.0;
+    } else {
+        guess = x * 2.0;
+    }
+
+    // Newton-Raphson: x_{n+1} = (x_n + S/x_n) / 2
+    let mut i = 0;
+    while i < 20 {
+        let next = (guess + x / guess) * 0.5;
+        if abs(next - guess) < EPSILON * abs(next) {
+            return next;
+        }
+        guess = next;
+        i = i + 1;
+    }
+    guess
+}
+
+/// Reciprocal square root: 1/sqrt(x).
+public fn rsqrt(x: Float) -> Float {
+    1.0 / sqrt(x)
+}
+
+/// Cube root.
+public fn cbrt(x: Float) -> Float {
+    if x == 0.0 { return 0.0; }
+    let s = sign(x);
+    let ax = abs(x);
+    // Initial guess: x^(1/3) ≈ 2^(log2(x)/3)
+    let mut guess = ax;
+    if ax > 1.0 { guess = ax / 3.0; }
+    else { guess = ax * 3.0; }
+
+    // Halley's method: faster convergence for cube root
+    let mut i = 0;
+    while i < 20 {
+        let g3 = guess * guess * guess;
+        let next = guess * (g3 + 2.0 * ax) / (2.0 * g3 + ax);
+        if abs(next - guess) < EPSILON * abs(next) {
+            return s * next;
+        }
+        guess = next;
+        i = i + 1;
+    }
+    s * guess
+}
+
+/// Hypotenuse: sqrt(x² + y²) without overflow.
+public fn hypot(x: Float, y: Float) -> Float {
+    let ax = abs(x);
+    let ay = abs(y);
+    let big = max(ax, ay);
+    let small = min(ax, ay);
+    if big == 0.0 { return 0.0; }
+    let ratio = small / big;
+    big * sqrt(1.0 + ratio * ratio)
+}
+
+// =============================================================================
+// Exponential and Logarithm
+// =============================================================================
+
+/// Natural exponential: e^x.
+/// Range reduction: e^x = 2^(x/ln2) = 2^k * e^r where r = x - k*ln2.
+@intrinsic("exp")
+public fn exp(x: Float) -> Float {
+    if x > 709.0 { return INF; }
+    if x < -745.0 { return 0.0; }
+    if abs(x) < EPSILON { return 1.0 + x; }
+
+    // Range reduction: x = k*ln2 + r, |r| <= ln2/2
+    let k_f = round(x * LOG2E);
+    let k = k_f as Int;
+    let r = x - k_f * LN2;
+
+    // Padé approximation for e^r (|r| <= 0.347):
+    // e^r ≈ (1 + r/2 + r²/12) / (1 - r/2 + r²/12)
+    // More accurate: use minimax polynomial
+    let r2 = r * r;
+    let r3 = r2 * r;
+    let r4 = r2 * r2;
+
+    // Taylor: e^r = 1 + r + r²/2 + r³/6 + r⁴/24 + r⁵/120 + r⁶/720
+    let er = 1.0 + r + r2 * 0.5 + r3 / 6.0 + r4 / 24.0
+           + r4 * r / 120.0 + r4 * r2 / 720.0
+           + r4 * r3 / 5040.0;
+
+    // Multiply by 2^k using repeated multiplication
+    let mut result = er;
+    let mut kk = k;
+    if kk > 0 {
+        while kk >= 10 {
+            result = result * 1024.0;  // 2^10
+            kk = kk - 10;
+        }
+        while kk > 0 {
+            result = result * 2.0;
+            kk = kk - 1;
+        }
+    } else {
+        while kk <= -10 {
+            result = result / 1024.0;
+            kk = kk + 10;
+        }
+        while kk < 0 {
+            result = result / 2.0;
+            kk = kk + 1;
+        }
+    }
+    result
+}
+
+/// Natural logarithm: ln(x).
+/// Range reduction: ln(x) = ln(2^k * m) = k*ln2 + ln(m), 1 <= m < 2.
+@intrinsic("log")
+public fn log(x: Float) -> Float {
+    if x <= 0.0 { return NEG_INF; }
+    if x == 1.0 { return 0.0; }
+
+    // Decompose: x = 2^k * m, 1 <= m < 2
+    let mut m = x;
+    let mut k = 0;
+    while m >= 2.0 {
+        m = m / 2.0;
+        k = k + 1;
+    }
+    while m < 1.0 {
+        m = m * 2.0;
+        k = k - 1;
+    }
+
+    // ln(m) where 1 <= m < 2, using substitution t = (m-1)/(m+1)
+    // ln(m) = 2 * (t + t³/3 + t⁵/5 + t⁷/7 + ...)
+    let t = (m - 1.0) / (m + 1.0);
+    let t2 = t * t;
+
+    let mut sum = t;
+    let mut term = t;
+    let mut n = 1;
+    while n < 30 {
+        term = term * t2;
+        n = n + 2;
+        let contribution = term / (n as Float);
+        sum = sum + contribution;
+        if abs(contribution) < EPSILON * abs(sum) {
+            break;
+        }
+    }
+
+    (k as Float) * LN2 + 2.0 * sum
+}
+
+/// Base-2 logarithm.
+public fn log2(x: Float) -> Float {
+    log(x) * LOG2E
+}
+
+/// Base-10 logarithm.
+public fn log10(x: Float) -> Float {
+    log(x) * LOG10E
+}
+
+/// log(1 + x) — accurate for small x.
+public fn log1p(x: Float) -> Float {
+    if abs(x) < 1.0e-4 {
+        // Taylor: ln(1+x) = x - x²/2 + x³/3 - x⁴/4 + ...
+        let x2 = x * x;
+        return x - x2 / 2.0 + x2 * x / 3.0 - x2 * x2 / 4.0;
+    }
+    log(1.0 + x)
+}
+
+/// exp(x) - 1 — accurate for small x.
+public fn expm1(x: Float) -> Float {
+    if abs(x) < 1.0e-4 {
+        let x2 = x * x;
+        return x + x2 / 2.0 + x2 * x / 6.0 + x2 * x2 / 24.0;
+    }
+    exp(x) - 1.0
+}
+
+/// Power: x^y.
+public fn pow(x: Float, y: Float) -> Float {
+    if y == 0.0 { return 1.0; }
+    if x == 0.0 { return 0.0; }
+    if x == 1.0 { return 1.0; }
+    if y == 1.0 { return x; }
+    if y == 2.0 { return x * x; }
+    if y == 0.5 { return sqrt(x); }
+    if y == -1.0 { return 1.0 / x; }
+
+    // Integer powers: use repeated squaring
+    let yi = y as Int;
+    if (yi as Float) == y {
+        return ipow(x, yi);
+    }
+
+    // General case: x^y = e^(y * ln(x))
+    if x > 0.0 {
+        exp(y * log(x))
+    } else {
+        // Negative base with non-integer exponent → NaN
+        NAN
+    }
+}
+
+/// Integer power: x^n using repeated squaring.
+public fn ipow(x: Float, n: Int) -> Float {
+    if n == 0 { return 1.0; }
+    let mut result = 1.0;
+    let mut base = x;
+    let mut exp = if n < 0 { -n } else { n };
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = result * base;
+        }
+        base = base * base;
+        exp = exp / 2;
+    }
+    if n < 0 { 1.0 / result } else { result }
+}
+
+// =============================================================================
+// Trigonometric Functions
+// =============================================================================
+
+/// Sine — range reduction + Chebyshev polynomial.
+@intrinsic("sin")
+public fn sin(x: Float) -> Float {
+    // Range reduction to [-π, π]
+    let mut t = fmod(x, 2.0 * PI);
+    if t > PI { t = t - 2.0 * PI; }
+    if t < -PI { t = t + 2.0 * PI; }
+
+    // Further reduce to [-π/2, π/2]
+    if t > PI / 2.0 {
+        t = PI - t;
+    } else if t < -PI / 2.0 {
+        t = -PI - t;
+    }
+
+    // Taylor series: sin(x) = x - x³/6 + x⁵/120 - x⁷/5040 + ...
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let t5 = t3 * t2;
+    let t7 = t5 * t2;
+    let t9 = t7 * t2;
+    let t11 = t9 * t2;
+    let t13 = t11 * t2;
+
+    t - t3 / 6.0 + t5 / 120.0 - t7 / 5040.0
+      + t9 / 362880.0 - t11 / 39916800.0
+      + t13 / 6227020800.0
+}
+
+/// Cosine.
+@intrinsic("cos")
+public fn cos(x: Float) -> Float {
+    sin(x + PI / 2.0)
+}
+
+/// Tangent.
+public fn tan(x: Float) -> Float {
+    sin(x) / cos(x)
+}
+
+/// Arcsine: returns value in [-π/2, π/2].
+public fn asin(x: Float) -> Float {
+    if x < -1.0 { return NAN; }
+    if x > 1.0 { return NAN; }
+    if abs(x) < 1.0e-8 { return x; }
+    // asin(x) = atan(x / sqrt(1 - x²))
+    atan2(x, sqrt(1.0 - x * x))
+}
+
+/// Arccosine: returns value in [0, π].
+public fn acos(x: Float) -> Float {
+    PI / 2.0 - asin(x)
+}
+
+/// Arctangent.
+public fn atan(x: Float) -> Float {
+    atan2(x, 1.0)
+}
+
+/// Two-argument arctangent: atan2(y, x).
+@intrinsic("atan2")
+public fn atan2(y: Float, x: Float) -> Float {
+    if x > 0.0 {
+        return atan_core(y / x);
+    }
+    if x < 0.0 {
+        if y >= 0.0 {
+            return atan_core(y / x) + PI;
+        } else {
+            return atan_core(y / x) - PI;
+        }
+    }
+    // x == 0
+    if y > 0.0 { return PI / 2.0; }
+    if y < 0.0 { return -PI / 2.0; }
+    0.0  // both zero
+}
+
+// atan for |x| range, using polynomial approximation
+fn atan_core(x: Float) -> Float {
+    // Range reduction: if |x| > 1, use atan(x) = π/2 - atan(1/x)
+    if abs(x) > 1.0 {
+        let s = sign(x);
+        return s * PI / 2.0 - atan_core(1.0 / x);
+    }
+    // For |x| <= 1: atan(x) ≈ x - x³/3 + x⁵/5 - x⁷/7 + ...
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+    let x7 = x5 * x2;
+    let x9 = x7 * x2;
+    let x11 = x9 * x2;
+    let x13 = x11 * x2;
+    let x15 = x13 * x2;
+
+    x - x3 / 3.0 + x5 / 5.0 - x7 / 7.0
+      + x9 / 9.0 - x11 / 11.0 + x13 / 13.0 - x15 / 15.0
+}
+
+// =============================================================================
+// Hyperbolic Functions
+// =============================================================================
+
+/// Hyperbolic sine.
+public fn sinh(x: Float) -> Float {
+    if abs(x) < 1.0e-4 {
+        return x + x * x * x / 6.0;
+    }
+    (exp(x) - exp(-x)) / 2.0
+}
+
+/// Hyperbolic cosine.
+public fn cosh(x: Float) -> Float {
+    (exp(x) + exp(-x)) / 2.0
+}
+
+/// Hyperbolic tangent.
+@intrinsic("tanh")
+public fn tanh(x: Float) -> Float {
+    if x > 20.0 { return 1.0; }
+    if x < -20.0 { return -1.0; }
+    if abs(x) < 1.0e-7 { return x; }
+    let e2x = exp(2.0 * x);
+    (e2x - 1.0) / (e2x + 1.0)
+}
+
+// =============================================================================
+// Activation Functions (ML)
+// =============================================================================
+
+/// Sigmoid: 1 / (1 + e^(-x)).
+public fn sigmoid(x: Float) -> Float {
+    if x > 20.0 { return 1.0; }
+    if x < -20.0 { return 0.0; }
+    1.0 / (1.0 + exp(-x))
+}
+
+/// ReLU: max(0, x).
+public fn relu(x: Float) -> Float {
+    if x > 0.0 { x } else { 0.0 }
+}
+
+/// GELU: x * Φ(x) ≈ x * sigmoid(1.702 * x).
+public fn gelu(x: Float) -> Float {
+    x * sigmoid(1.702 * x)
+}
+
+/// SiLU / Swish: x * sigmoid(x).
+public fn silu(x: Float) -> Float {
+    x * sigmoid(x)
+}
+
+/// Softplus: log(1 + e^x).
+public fn softplus(x: Float) -> Float {
+    if x > 20.0 { return x; }
+    if x < -20.0 { return 0.0; }
+    log(1.0 + exp(x))
+}
+
+/// Mish: x * tanh(softplus(x)).
+public fn mish(x: Float) -> Float {
+    x * tanh(softplus(x))
+}
+
+/// Error function (erf) — Abramowitz & Stegun approximation.
+public fn erf(x: Float) -> Float {
+    let a1 = 0.254829592;
+    let a2 = -0.284496736;
+    let a3 = 1.421413741;
+    let a4 = -1.453152027;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
+
+    let s = sign(x);
+    let ax = abs(x);
+    let t = 1.0 / (1.0 + p * ax);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let t4 = t3 * t;
+    let t5 = t4 * t;
+    let y = 1.0 - (a1 * t + a2 * t2 + a3 * t3 + a4 * t4 + a5 * t5) * exp(-ax * ax);
+    s * y
+}

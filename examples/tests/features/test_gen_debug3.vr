@@ -1,0 +1,10 @@
+type Maybe<T> is Some(T) | None;
+
+fn nested_maybe() -> Maybe<Maybe<Int>> {
+    Some(Some(42))
+}
+
+fn main() {
+    let result = nested_maybe();
+    let _ = print("Test complete");
+}

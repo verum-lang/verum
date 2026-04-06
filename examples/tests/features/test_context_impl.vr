@@ -1,0 +1,62 @@
+// Test context implementation and instantiation
+// This tests how contexts are actually implemented
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+}
+
+// Implementation struct for Logger
+type ConsoleLogger = {
+    prefix: Text,
+    enabled: Bool
+}
+
+// Methods that could implement Logger context
+impl ConsoleLogger {
+    fn new(prefix: Text) -> ConsoleLogger {
+        ConsoleLogger { prefix: prefix, enabled: true }
+    }
+
+    fn log(self, message: Text) {
+        // Would print to console
+    }
+
+    fn error(self, message: Text) {
+        // Would print error to console
+    }
+}
+
+// Another implementation
+type FileLogger = {
+    file_path: Text
+}
+
+impl FileLogger {
+    fn new(path: Text) -> FileLogger {
+        FileLogger { file_path: path }
+    }
+
+    fn log(self, message: Text) {
+        // Would write to file
+    }
+
+    fn error(self, message: Text) {
+        // Would write error to file
+    }
+}
+
+// Function using Logger context
+fn app_logic(data: Text) using Logger {
+    Logger.log("Processing data");
+    Logger.error("An error occurred");
+}
+
+fn main() {
+    // Test providing different implementations
+    provide Logger = ConsoleLogger.new("APP");
+    app_logic("test1");
+
+    provide Logger = FileLogger.new("app.log");
+    app_logic("test2");
+}

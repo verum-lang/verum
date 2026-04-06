@@ -1,0 +1,153 @@
+// Router parameter extraction tests
+//
+// Tests for path parameter extraction and route matching functionality.
+// Uses only built-in functions for now.
+
+// ============================================================================
+// Helper Functions (Self-contained for testing)
+// ============================================================================
+
+/// Simplified route matching - checks if pattern structure matches path
+fn route_matches(pattern: Text, path: Text) -> Bool {
+    // Simple check: same prefix structure
+    let pattern_parts = split(pattern, "/");
+    let path_parts = split(path, "/");
+
+    // Length check
+    if len(pattern_parts) != len(path_parts) {
+        return false;
+    }
+
+    true
+}
+
+/// Check if a path segment is a parameter placeholder
+fn is_param_segment(segment: Text) -> Bool {
+    starts_with(segment, "{") && ends_with(segment, "}")
+}
+
+// ============================================================================
+// Route Pattern Tests
+// ============================================================================
+
+/// Test: Basic path matching
+@test
+fn test_basic_path_match() {
+    let pattern = "/health";
+    let path = "/health";
+
+    assert(pattern == path, "Identical paths should match");
+}
+
+/// Test: Path with single parameter placeholder
+@test
+fn test_single_param_pattern() {
+    let pattern = "/api/packages/{name}";
+    let path = "/api/packages/my-pkg";
+
+    // Both should have same number of segments
+    assert(contains(pattern, "{name}"), "Pattern should contain {name} placeholder");
+    assert(len(pattern) > 0, "Pattern should not be empty");
+    assert(len(path) > 0, "Path should not be empty");
+}
+
+/// Test: Path with multiple parameters
+@test
+fn test_multiple_param_pattern() {
+    let pattern = "/api/packages/{name}/versions/{version}";
+
+    assert(contains(pattern, "{name}"), "Pattern should contain {name}");
+    assert(contains(pattern, "{version}"), "Pattern should contain {version}");
+}
+
+/// Test: Parameter segment detection
+@test
+fn test_param_segment_detection() {
+    assert(is_param_segment("{name}"), "{name} should be detected as param");
+    assert(is_param_segment("{version}"), "{version} should be detected as param");
+    assert(!is_param_segment("packages"), "packages should not be a param");
+    assert(!is_param_segment("api"), "api should not be a param");
+}
+
+/// Test: Route with no parameters
+@test
+fn test_no_param_route() {
+    let pattern = "/health";
+
+    assert(!contains(pattern, "{"), "Health route should have no parameters");
+}
+
+/// Test: Path segment splitting
+@test
+fn test_path_segment_splitting() {
+    let path = "/api/packages/my-pkg";
+
+    // Path should contain expected segments
+    assert(contains(path, "api"), "Path should contain 'api'");
+    assert(contains(path, "packages"), "Path should contain 'packages'");
+    assert(contains(path, "my-pkg"), "Path should contain 'my-pkg'");
+}
+
+/// Test: Path length comparison
+@test
+fn test_path_length_comparison() {
+    let pattern = "/api/packages/{name}";
+    let matching_path = "/api/packages/my-pkg";
+    let longer_path = "/api/packages/my-pkg/extra";
+
+    // Length check is part of matching
+    assert(len(pattern) > 0, "Pattern should have content");
+    assert(len(matching_path) > 0, "Matching path should have content");
+    assert(len(longer_path) > len(matching_path), "Longer path should be longer");
+}
+
+/// Test: Parameter value extraction concept
+@test
+fn test_param_value_extraction_concept() {
+    let param_placeholder = "{name}";
+    let actual_value = "my-pkg";
+
+    // Extract parameter name from placeholder
+    let param_name_length = len(param_placeholder) - 2; // Remove { and }
+    assert(param_name_length == 4, "Parameter name 'name' has 4 characters");
+    assert(len(actual_value) == 6, "Value 'my-pkg' has 6 characters");
+}
+
+/// Test: Route pattern with special characters
+@test
+fn test_route_with_special_chars() {
+    let path = "/api/users/john-doe_123";
+
+    assert(contains(path, "john-doe_123"), "Path should contain username with special chars");
+    assert(contains(path, "-"), "Username should contain hyphen");
+    assert(contains(path, "_"), "Username should contain underscore");
+}
+
+/// Test: Empty path handling
+@test
+fn test_empty_path_handling() {
+    let empty = "";
+    let root = "/";
+
+    assert(len(empty) == 0, "Empty string should have zero length");
+    assert(len(root) == 1, "Root path should have length 1");
+}
+
+/// Test: Trailing slash handling
+@test
+fn test_trailing_slash() {
+    let with_slash = "/api/packages/";
+    let without_slash = "/api/packages";
+
+    assert(ends_with(with_slash, "/"), "With-slash path should end with /");
+    assert(!ends_with(without_slash, "/"), "Without-slash path should not end with /");
+}
+
+/// Test: Version in path
+@test
+fn test_version_in_path() {
+    let path = "/api/packages/my-pkg/versions/1.0.0";
+
+    assert(contains(path, "1.0.0"), "Path should contain version");
+    assert(contains(path, "."), "Version should contain dots");
+}

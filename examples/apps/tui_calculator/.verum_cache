@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/tui_calculator/src/main.vr": {
+      "hash": "4e073b71b9782591f6426682ae40feed5432bba9ce98ed5976946cda24db5c20",
+      "timestamp": {
+        "secs_since_epoch": 1765039597,
+        "nanos_since_epoch": 15133878
+      },
+      "size": 1641
+    }
+  },
+  "artifacts": {}
+}

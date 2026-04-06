@@ -1,0 +1,186 @@
+// =============================================================================
+// core/intrinsics/runtime/async_ops.vr - Async Runtime Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Async runtime (executor, scheduler)
+//
+// These intrinsics require the Verum async runtime (executor, scheduler).
+// VBC Opcodes: Spawn (0xA0), Await (0xA1), IoSubmit (0x4C), IoPoll (0x4D)
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.async_ops;
+
+// =============================================================================
+// SECTION 1: Opaque Handle Types
+// =============================================================================
+
+/// Opaque handle for async join results (actual type: async.task.JoinHandle<T>)
+public type JoinHandleOpaque is (*const Byte);
+
+/// Opaque handle for executors (actual type: implements async.Executor protocol)
+public type ExecutorHandle is (*const Byte);
+
+/// Opaque handle for futures (actual type: implements async.Future protocol)
+public type FutureHandle is (*const Byte);
+
+/// Opaque handle for supervisors
+public type SupervisorHandleOpaque is (*const Byte);
+
+/// Opaque handle for child specs
+public type ChildSpecOpaque is (*const Byte);
+
+/// Opaque handle for execution environment
+public type ExecutionEnvOpaque is (*const Byte);
+
+/// Opaque handle for recovery context
+public type RecoveryContextOpaque is (*const Byte);
+
+/// Opaque handle for circuit breaker
+public type CircuitBreakerOpaque is (*const Byte);
+
+/// Opaque handle for allocator
+public type AllocHandle is (*const Byte);
+
+/// Opaque handle for I/O driver
+public type IODriverHandle is (*const Byte);
+
+/// Opaque handle for shared registry
+public type SharedRegistryOpaque is (*const Byte);
+
+/// Opaque handle for middleware chain
+public type MiddlewareChainOpaque is (*const Byte);
+
+/// Opaque handle for single-thread executor
+public type SingleThreadExecutorOpaque is (*const Byte);
+
+// =============================================================================
+// SECTION 2: Task Spawning
+// =============================================================================
+
+/// Spawn a task on the executor with a custom environment.
+///
+/// VBC Opcode: Spawn (0xA0)
+/// Requires: Async runtime
+@intrinsic("spawn_with_env")
+public fn spawn_with_env(future: FutureHandle, task_id: UInt64) -> JoinHandleOpaque;
+
+/// Spawn a task on an executor.
+///
+/// VBC Opcode: Spawn (0xA0)
+/// Requires: Async runtime
+@intrinsic("executor_spawn")
+public fn executor_spawn(executor: ExecutorHandle, task: FutureHandle) -> JoinHandleOpaque;
+
+/// Block on a future until completion.
+///
+/// Uses Await opcode (0xA1) in a loop
+/// Requires: Async runtime
+@intrinsic("executor_block_on")
+public fn executor_block_on(executor: ExecutorHandle, future: FutureHandle) -> *const Byte;
+
+/// Poll a future synchronously (for no-async mode).
+///
+/// Requires: Async runtime (or no-op in sync mode)
+@intrinsic("future_poll_sync")
+public fn future_poll_sync(future: FutureHandle) -> *const Byte;
+
+/// Get default executor handle.
+///
+/// Requires: Async runtime global state (via TLS)
+@intrinsic("default_executor")
+public fn default_executor() -> ExecutorHandle;
+
+// =============================================================================
+// SECTION 3: Async Sleep
+// =============================================================================
+
+/// Async sleep for specified milliseconds.
+///
+/// Uses IoSubmit (0x4C) / IoPoll (0x4D) with timer
+/// Requires: Async runtime + OS timer
+@intrinsic("async_sleep_ms")
+public async fn async_sleep_ms(ms: UInt64);
+
+/// Async sleep for specified nanoseconds.
+///
+/// Uses IoSubmit (0x4C) / IoPoll (0x4D) with timer
+/// Requires: Async runtime + OS timer
+@intrinsic("async_sleep_ns")
+public async fn async_sleep_ns(ns: UInt64);
+
+// =============================================================================
+// SECTION 4: Supervision
+// =============================================================================
+
+/// Recovery error type
+public type RecoveryError is
+    | MaxRetriesExceeded
+    | CircuitOpen
+    | Timeout
+    | InnerError(Error);
+
+/// Spawn a supervised task.
+///
+/// Requires: Supervisor runtime
+@intrinsic("spawn_supervised")
+public fn spawn_supervised(
+    supervisor: SupervisorHandleOpaque,
+    future: FutureHandle,
+    spec: ChildSpecOpaque,
+    env: ExecutionEnvOpaque,
+) -> JoinHandleOpaque;
+
+/// Log an escalation event.
+///
+/// Requires: Supervisor runtime
+@intrinsic("supervisor_log_escalation")
+public fn supervisor_log_escalation(reason: *const Byte);
+
+/// Set parent supervisor link.
+///
+/// Requires: Supervisor runtime
+@intrinsic("supervisor_set_parent")
+public fn supervisor_set_parent(child: SupervisorHandleOpaque, parent: SupervisorHandleOpaque);
+
+/// Execute a future with recovery strategy.
+///
+/// Requires: Recovery runtime
+@intrinsic("exec_with_recovery")
+public async fn exec_with_recovery(
+    recovery_ctx: RecoveryContextOpaque,
+    future_factory: fn() -> FutureHandle,
+) -> Result<*const Byte, RecoveryError>;
+
+/// Get reference to inline circuit breaker.
+@intrinsic("inline_cb_as_ref")
+public fn inline_cb_as_ref(inline_storage: *const Byte) -> CircuitBreakerOpaque;
+
+// =============================================================================
+// SECTION 5: Global Resources
+// =============================================================================
+
+/// Get global allocator reference.
+///
+/// Requires: Global allocator registration
+@intrinsic("global_allocator")
+public fn global_allocator() -> AllocHandle;
+
+/// Get default I/O driver.
+///
+/// Requires: I/O runtime
+@intrinsic("default_io_driver")
+public fn default_io_driver() -> IODriverHandle;
+
+/// Get global shared registry.
+@intrinsic("shared_registry_global")
+public fn shared_registry_global() -> SharedRegistryOpaque;
+
+/// Create empty middleware chain.
+@intrinsic("middleware_chain_empty")
+public fn middleware_chain_empty() -> MiddlewareChainOpaque;
+
+/// Block on a future with single-threaded executor.
+@intrinsic("single_thread_block_on")
+public fn single_thread_block_on(executor: SingleThreadExecutorOpaque, future: FutureHandle) -> *const Byte;

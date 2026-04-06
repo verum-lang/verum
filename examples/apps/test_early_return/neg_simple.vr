@@ -1,0 +1,9 @@
+// Test simple negative literal
+
+fn test_neg() -> Int {
+    -1
+}
+
+fn main() {
+    print(f"test_neg() = {test_neg()}");
+}

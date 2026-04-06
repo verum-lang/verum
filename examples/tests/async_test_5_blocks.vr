@@ -1,0 +1,46 @@
+// Comprehensive Test 5: Async blocks
+
+async fn main() -> Int {
+    print("Test 5: Async blocks");
+
+    // Test 5a: Simple async block
+    print("5a: Simple async block");
+    let future1 = async {
+        42
+    };
+    let result1 = future1.await;
+    print(f"  Result: {result1}");
+
+    // Test 5b: Async block with multiple statements
+    print("5b: Async block with statements");
+    let future2 = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    let result2 = future2.await;
+    print(f"  Result: {result2}");
+
+    // Test 5c: Nested async blocks
+    print("5c: Nested async blocks");
+    let future3 = async {
+        let inner = async {
+            100
+        };
+        inner.await + 50
+    };
+    let result3 = future3.await;
+    print(f"  Result: {result3}");
+
+    // Test 5d: Async block capturing environment
+    print("5d: Async block with capture");
+    let base = 5;
+    let future4 = async {
+        base * 10
+    };
+    let result4 = future4.await;
+    print(f"  Result: {result4}");
+
+    print("✓ All async block tests passed");
+    0
+}

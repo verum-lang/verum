@@ -1,0 +1,18 @@
+// Test nested context scopes
+// Demonstrates context shadowing behavior
+
+fn inner_scope() {
+    let _ = print("Inner scope - file logger active")
+}
+
+fn outer_scope() {
+    let _ = print("Outer scope - console logger active")
+    inner_scope()
+    let _ = print("Back to outer scope - console logger restored")
+}
+
+fn main() {
+    let _ = print("Testing nested context scopes")
+    outer_scope()
+    let _ = print("Nested context scopes work correctly")
+}

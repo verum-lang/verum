@@ -1,0 +1,11 @@
+type Box<T> is { value: T };
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() {
+    // This should trigger the occurs check
+    let x = identity(Box { value: x });
+    let _ = println(f"Value: {x}");
+}

@@ -1,0 +1,10 @@
+// Test basic async functionality
+async fn async_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    // Test simple async call
+    let result = async_add(5, 3);
+    print(f"Async result: {result}");
+}

@@ -1,0 +1,298 @@
+// Test: Comprehensive defer statement tests
+// Grammar: defer_stmt = 'defer' , ( expression , ';' | block_expr ) ;
+// Tests all defer features according to verum.ebnf
+
+// ============================================================================
+// Test 1: Basic defer with expression
+// ============================================================================
+fn test_basic_defer() -> Int {
+    println("=== Test 1: Basic defer ===");
+    defer println("Cleanup executed");
+    println("Working...");
+    42
+}
+
+// ============================================================================
+// Test 2: Defer with block expression
+// ============================================================================
+fn test_defer_block() -> Int {
+    println("=== Test 2: Defer with block ===");
+    defer {
+        println("Defer block line 1");
+        println("Defer block line 2");
+        println("Defer block line 3");
+    }
+    println("Main execution");
+    100
+}
+
+// ============================================================================
+// Test 3: Multiple defers (LIFO order)
+// ============================================================================
+fn test_multiple_defers() -> Int {
+    println("=== Test 3: Multiple defers (LIFO order) ===");
+    defer println("First defer (executes last)");
+    defer println("Second defer");
+    defer println("Third defer (executes first)");
+    println("Main work");
+    200
+}
+
+// ============================================================================
+// Test 4: Defer with early return
+// ============================================================================
+fn test_defer_with_return(should_return_early: Bool) -> Int {
+    println("=== Test 4: Defer with return ===");
+    defer println("Cleanup always runs");
+
+    if should_return_early {
+        println("Returning early");
+        return 42;
+    }
+
+    println("Normal path");
+    100
+}
+
+// ============================================================================
+// Test 5: Defer with break
+// ============================================================================
+fn test_defer_with_break() -> Int {
+    println("=== Test 5: Defer with break ===");
+    loop {
+        defer println("Loop iteration cleanup");
+        println("Loop iteration");
+        break;
+    }
+    println("After loop");
+    300
+}
+
+// ============================================================================
+// Test 6: Nested scopes with defer
+// ============================================================================
+fn test_nested_scopes() -> Int {
+    println("=== Test 6: Nested scopes ===");
+    defer println("Outer defer");
+
+    println("Outer scope start");
+    {
+        defer println("Middle defer");
+        println("Middle scope start");
+        {
+            defer println("Inner defer");
+            println("Inner scope");
+        }
+        println("Middle scope end");
+    }
+    println("Outer scope end");
+    400
+}
+
+// ============================================================================
+// Test 7: Defer with mutable state
+// ============================================================================
+fn test_defer_with_mutable() -> Int {
+    println("=== Test 7: Defer with mutable state ===");
+    let mut counter = 0;
+
+    defer {
+        counter = counter + 1;
+        println("Cleanup executed");
+    }
+
+    println("Before cleanup");
+    500
+}
+
+// ============================================================================
+// Test 8: Defer with function calls
+// ============================================================================
+type Resource is {
+    name: Text,
+    id: Int,
+};
+
+fn acquire_resource(name: Text) -> Resource {
+    println("Acquiring resource");
+    Resource { name: name, id: 123 }
+}
+
+fn release_resource(res: Resource) {
+    println("Releasing resource");
+}
+
+fn test_defer_with_functions() -> Int {
+    println("=== Test 8: Defer with functions ===");
+    let res1 = acquire_resource("Database");
+    defer release_resource(res1);
+
+    let res2 = acquire_resource("Network");
+    defer release_resource(res2);
+
+    println("Using resources...");
+    600
+}
+
+// ============================================================================
+// Test 9: Defer in if-else
+// ============================================================================
+fn test_defer_in_if_else(condition: Bool) -> Int {
+    println("=== Test 9: Defer in if-else ===");
+
+    if condition {
+        defer println("Defer in if branch");
+        println("If branch");
+    } else {
+        defer println("Defer in else branch");
+        println("Else branch");
+    }
+
+    println("After if-else");
+    700
+}
+
+// ============================================================================
+// Test 10: Defer with while loop
+// ============================================================================
+fn test_defer_in_while() -> Int {
+    println("=== Test 10: Defer in while loop ===");
+    let mut count = 0;
+
+    while count < 3 {
+        defer println("Defer in while iteration");
+        println("While iteration");
+        count = count + 1;
+    }
+    800
+}
+
+// ============================================================================
+// Test 11: Complex defer scenario - Resource management
+// ============================================================================
+fn test_complex_resource_management() -> Int {
+    println("=== Test 11: Complex resource management ===");
+
+    let file = acquire_resource("file.txt");
+    defer release_resource(file);
+
+    let lock = acquire_resource("mutex");
+    defer release_resource(lock);
+
+    defer println("Final cleanup");
+
+    println("Performing operations...");
+
+    {
+        let temp = acquire_resource("temp_buffer");
+        defer release_resource(temp);
+        println("Using temp resource");
+    }
+
+    println("Operations complete");
+    900
+}
+
+// ============================================================================
+// Test 12: Defer with error conditions
+// ============================================================================
+fn test_defer_with_errors(should_fail: Bool) -> Int {
+    println("=== Test 12: Defer with errors ===");
+    defer println("Cleanup runs even on error path");
+
+    if should_fail {
+        println("Error condition detected");
+        return -1;
+    }
+
+    println("Success path");
+    0
+}
+
+// ============================================================================
+// Test 13: Defer with multiple returns
+// ============================================================================
+fn test_defer_multiple_returns(value: Int) -> Text {
+    println("=== Test 13: Defer with multiple returns ===");
+    defer println("Cleanup runs for any return path");
+
+    if value < 0 {
+        println("Negative path");
+        return "negative";
+    }
+
+    if value == 0 {
+        println("Zero path");
+        return "zero";
+    }
+
+    if value > 100 {
+        println("Large path");
+        return "large";
+    }
+
+    println("Normal path");
+    "normal"
+}
+
+// ============================================================================
+// Test 14: Infinite loop with defer
+// ============================================================================
+fn test_defer_infinite_loop() -> Int {
+    println("=== Test 14: Infinite loop with defer ===");
+    let mut count = 0;
+
+    loop {
+        defer println("Loop defer");
+        println("Loop body");
+        count = count + 1;
+        if count >= 2 {
+            break;
+        }
+    }
+    1000
+}
+
+// ============================================================================
+// Main function - Run all tests
+// ============================================================================
+fn main() -> Int {
+    println("===================================");
+    println("Comprehensive Defer Statement Tests");
+    println("===================================");
+
+    let r1 = test_basic_defer();
+    let r2 = test_defer_block();
+    let r3 = test_multiple_defers();
+
+    let r4a = test_defer_with_return(true);
+    let r4b = test_defer_with_return(false);
+
+    let r5 = test_defer_with_break();
+    let r6 = test_nested_scopes();
+    let r7 = test_defer_with_mutable();
+    let r8 = test_defer_with_functions();
+
+    let r9a = test_defer_in_if_else(true);
+    let r9b = test_defer_in_if_else(false);
+
+    let r10 = test_defer_in_while();
+    let r11 = test_complex_resource_management();
+
+    let r12a = test_defer_with_errors(false);
+    let r12b = test_defer_with_errors(true);
+
+    let s1 = test_defer_multiple_returns(-5);
+    let s2 = test_defer_multiple_returns(0);
+    let s3 = test_defer_multiple_returns(50);
+    let s4 = test_defer_multiple_returns(150);
+
+    let r14 = test_defer_infinite_loop();
+
+    println("");
+    println("===================================");
+    println("All defer tests completed!");
+    println("===================================");
+
+    0
+}

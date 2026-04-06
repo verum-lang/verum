@@ -1,0 +1,128 @@
+# =============================================================================
+# Verum WASM End-to-End Tests
+# =============================================================================
+#
+# Validates that Verum programs compile to WebAssembly and execute correctly
+# under wasmtime (WASI). Runs on push to main/develop and PRs touching
+# codegen, compiler, or WASM test specs.
+
+name: WASM Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'crates/verum_codegen/**'
+      - 'crates/verum_compiler/**'
+      - 'crates/verum_cli/**'
+      - 'vcs/specs/L3-extended/wasm/**'
+      - '.github/workflows/wasm-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/verum_codegen/**'
+      - 'crates/verum_compiler/**'
+      - 'crates/verum_cli/**'
+      - 'vcs/specs/L3-extended/wasm/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  wasm-compile:
+    name: WASM Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasi
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+            ${{ runner.os }}-cargo-
+
+      - name: Install LLVM 21
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-21-dev libpolly-21-dev lld-21
+          echo "LLVM_SYS_210_PREFIX=/usr/lib/llvm-21" >> $GITHUB_ENV
+
+      - name: Build Verum compiler with WASM target
+        run: cargo build --release -p verum_cli --features target-wasm
+
+      - name: Upload compiler artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verum-compiler
+          path: target/release/verum
+          retention-days: 1
+
+  wasm-execute:
+    name: WASM Execute (${{ matrix.runtime }})
+    needs: wasm-compile
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [wasmtime]
+        # wasmer can be added when WASI support is stable
+        # runtime: [wasmtime, wasmer]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download compiler artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: verum-compiler
+          path: ./bin
+
+      - name: Make compiler executable
+        run: chmod +x ./bin/verum
+
+      - name: Install wasmtime
+        if: matrix.runtime == 'wasmtime'
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+
+      - name: Install wasmer
+        if: matrix.runtime == 'wasmer'
+        run: |
+          curl https://get.wasmer.io -sSfL | sh
+          echo "$HOME/.wasmer/bin" >> $GITHUB_PATH
+
+      - name: Verify WASM runtime
+        run: |
+          ${{ matrix.runtime }} --version
+
+      - name: Run WASM tests
+        env:
+          VERUM_BIN: ./bin/verum
+          WASM_RUNTIME: ${{ matrix.runtime }}
+          VERBOSE: 1
+        run: |
+          cd vcs/specs/L3-extended/wasm
+          ./run_wasm_tests.sh
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-test-artifacts-${{ matrix.runtime }}
+          path: vcs/specs/L3-extended/wasm/target/
+          retention-days: 7

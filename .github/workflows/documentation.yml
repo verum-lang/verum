@@ -1,0 +1,267 @@
+name: Documentation Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check-docs:
+    name: Check Documentation Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustdoc
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check documentation for verum_cbgr
+        run: |
+          cargo rustdoc -p verum_cbgr -- \
+            -D missing-docs \
+            -D rustdoc::broken_intra_doc_links \
+            -D rustdoc::invalid_codeblock_attributes \
+            -D rustdoc::invalid_html_tags \
+            -D rustdoc::bare_urls
+
+      - name: Check documentation for verum_types
+        run: |
+          cargo rustdoc -p verum_types -- \
+            -D missing-docs \
+            -D rustdoc::broken_intra_doc_links \
+            -D rustdoc::invalid_codeblock_attributes \
+            -D rustdoc::invalid_html_tags \
+            -D rustdoc::bare_urls
+
+      - name: Check documentation for verum_std
+        run: |
+          cargo rustdoc -p verum_std -- \
+            -D missing-docs \
+            -D rustdoc::broken_intra_doc_links \
+            -D rustdoc::invalid_codeblock_attributes \
+            -D rustdoc::invalid_html_tags \
+            -D rustdoc::bare_urls
+
+      - name: Check documentation for verum_runtime
+        run: |
+          cargo rustdoc -p verum_runtime -- \
+            -D missing-docs \
+            -D rustdoc::broken_intra_doc_links \
+            -D rustdoc::invalid_codeblock_attributes \
+            -D rustdoc::invalid_html_tags \
+            -D rustdoc::bare_urls
+        continue-on-error: true  # verum_runtime may not exist yet
+
+      - name: Check documentation for verum_compiler
+        run: |
+          cargo rustdoc -p verum_compiler -- \
+            -D missing-docs \
+            -D rustdoc::broken_intra_doc_links \
+            -D rustdoc::invalid_codeblock_attributes \
+            -D rustdoc::invalid_html_tags \
+            -D rustdoc::bare_urls
+
+  build-docs:
+    name: Build and Deploy Documentation
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build documentation for all crates
+        run: |
+          cargo doc --all --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
+
+      - name: Create index.html redirect
+        run: |
+          cat > target/doc/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=verum_std/index.html">
+              <title>Verum Documentation</title>
+          </head>
+          <body>
+              <h1>Redirecting to Verum documentation...</h1>
+              <p>If you are not redirected, <a href="verum_std/index.html">click here</a>.</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
+          cname: docs.verum-lang.org  # Optional: configure your custom domain
+
+  check-examples:
+    name: Test Documentation Examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Test documentation examples
+        run: |
+          cargo test --doc --all
+
+  coverage-report:
+    name: Generate Coverage Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Make scripts executable
+        run: chmod +x scripts/check_docs.sh
+
+      - name: Run documentation coverage check
+        run: ./scripts/check_docs.sh || true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-coverage-report
+          path: target/doc_coverage_report.txt
+          retention-days: 30
+
+  lint-docs:
+    name: Lint Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check for common documentation issues
+        run: |
+          # Check for TODO in documentation
+          echo "Checking for TODO markers in public documentation..."
+          ! grep -r "/// TODO" crates/*/src/lib.rs crates/*/src/*.rs
+
+          # Check for broken links in markdown
+          echo "Checking for broken markdown links..."
+          # This is a simple check - you may want to use a dedicated tool
+          find docs -name "*.md" -exec grep -H "\[.*\](.*)" {} \; | \
+            grep -v "http" | \
+            while read line; do
+              file=$(echo "$line" | cut -d: -f1)
+              link=$(echo "$line" | sed 's/.*(\(.*\)).*/\1/')
+              if [ -f "$link" ] || [ -f "$(dirname $file)/$link" ]; then
+                continue
+              else
+                echo "Broken link in $file: $link"
+              fi
+            done || true
+
+      - name: Check documentation formatting
+        run: |
+          # Ensure all crate-level docs start with proper headers
+          echo "Checking crate-level documentation formatting..."
+          for crate in crates/verum_*/src/lib.rs; do
+            if ! head -1 "$crate" | grep -q "^//!"; then
+              echo "Missing crate-level doc in: $crate"
+              exit 1
+            fi
+          done
+
+  spellcheck:
+    name: Spellcheck Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install aspell
+        run: sudo apt-get install -y aspell aspell-en
+
+      - name: Spellcheck Rust documentation
+        run: |
+          # Extract documentation comments and check spelling
+          find crates -name "*.rs" -exec sh -c '
+            grep "^//[/!]" "$1" | \
+            sed "s|^//[/!] *||" | \
+            aspell list --lang=en --ignore-case | \
+            sort -u
+          ' _ {} \; > /tmp/typos.txt || true
+
+          if [ -s /tmp/typos.txt ]; then
+            echo "Potential typos found:"
+            cat /tmp/typos.txt
+            # Uncomment to fail on typos:
+            # exit 1
+          else
+            echo "No typos detected!"
+          fi

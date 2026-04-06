@@ -1,0 +1,4 @@
+// Simple macro test
+fn main() {
+    println!("Hello");
+}

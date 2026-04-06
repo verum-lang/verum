@@ -1,0 +1,19 @@
+// Test that closures returned from functions work correctly
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int = |x| x * n;
+
+fn main() {
+    // Test block-body function returning closure
+    let add10 = make_adder(10);
+    let result1 = add10(5);
+    println(result1);
+    
+    // Test expr-body function returning closure  
+    let mul3 = make_multiplier(3);
+    let result2 = mul3(7);
+    println(result2);
+}

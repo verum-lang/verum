@@ -1,0 +1,14 @@
+[package]
+name = "tui_calculator"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "TUI Calculator with visual interface demonstrating Verum's terminal capabilities"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []

@@ -1,0 +1,17 @@
+// Simple error handling test to isolate parsing issues
+
+fn test_result() {
+    print("Testing Result type");
+
+    let ok_val: Result<Int, Text> = Result.Ok(42);
+    let err_val: Result<Int, Text> = Result.Err("error");
+
+    match ok_val {
+        Result.Ok(v) => print(f"Ok: {v}"),
+        Result.Err(e) => print(f"Err: {e}"),
+    }
+}
+
+fn main() {
+    test_result();
+}

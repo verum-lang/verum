@@ -1,0 +1,15 @@
+[package]
+name = "calculator"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Interactive CLI calculator demonstrating Verum language features"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []
+stdio = []  # Enable stdio mode for testing

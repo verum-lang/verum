@@ -1,0 +1,12 @@
+// Test compound only
+
+fn main() {
+    let _ = print("=== Compound Test ===");
+
+    let a = 10.0;
+    let b = 3.0;
+    let result = (a + b) * (a - b);
+    let _ = print(f"compound = {result}");
+
+    let _ = print("=== Done ===");
+}

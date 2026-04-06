@@ -1,0 +1,138 @@
+// HTTP Client Context Protocol
+//
+// Provides HTTP request capabilities for making external API calls,
+// particularly for webhook delivery and external service integration.
+
+mount core.base.{Text, Int, Map};
+mount core.base.Result;
+
+// ============================================================================
+// HTTP Response and Error Types
+// ============================================================================
+
+/// HTTP response from a successful request
+pub type HttpResponse is {
+    /// HTTP status code (200, 404, 500, etc.)
+    status_code: Int,
+    /// Response headers
+    headers: Map<Text, Text>,
+    /// Response body as text
+    body: Text,
+    /// Response time in milliseconds
+    response_time_ms: Int,
+};
+
+/// HTTP error types
+pub type HttpError is
+    | ConnectionFailed { url: Text, reason: Text }
+    | Timeout { url: Text, timeout_ms: Int }
+    | InvalidUrl { url: Text }
+    | TlsError { url: Text, reason: Text }
+    | ResponseError { status_code: Int, body: Text };
+
+implement HttpError {
+    pub fn to_string(self) -> Text {
+        match self {
+            HttpError.ConnectionFailed { url, reason } =>
+                f"Connection failed to {url}: {reason}",
+            HttpError.Timeout { url, timeout_ms } =>
+                f"Request to {url} timed out after {timeout_ms}ms",
+            HttpError.InvalidUrl { url } =>
+                f"Invalid URL: {url}",
+            HttpError.TlsError { url, reason } =>
+                f"TLS error connecting to {url}: {reason}",
+            HttpError.ResponseError { status_code, body } =>
+                f"HTTP error {status_code}: {body}",
+        }
+    }
+}
+
+// ============================================================================
+// HTTP Client Context Protocol
+// ============================================================================
+
+/// HTTP client context for making external HTTP requests
+///
+/// This context protocol abstracts HTTP operations, allowing the application
+/// to make HTTP requests without depending on a specific HTTP client library.
+/// Implementations can use any underlying HTTP client (e.g., reqwest, hyper).
+///
+/// # Usage
+///
+/// ```verum
+/// async fn call_api() -> Result<Text, HttpError>
+///     using [HttpClient]
+/// {
+///     let mut headers = Map.new();
+///     headers.insert("Content-Type", "application/json");
+///
+///     let response = HttpClient.post(
+///         "https://api.example.com/data",
+///         headers,
+///         "{\"key\":\"value\"}"
+///     ).await?;
+///
+///     Result.Ok(response.body)
+/// }
+/// ```
+pub context protocol HttpClient {
+    /// Make an HTTP POST request with JSON body
+    ///
+    /// # Parameters
+    /// - url: The target URL
+    /// - headers: HTTP headers to include in the request
+    /// - body: Request body content (typically JSON)
+    ///
+    /// # Returns
+    /// Result containing HttpResponse on success or HttpError on failure
+    async fn post(
+        self,
+        url: Text,
+        headers: Map<Text, Text>,
+        body: Text
+    ) -> Result<HttpResponse, HttpError>;
+
+    /// Make an HTTP GET request
+    ///
+    /// # Parameters
+    /// - url: The target URL
+    /// - headers: HTTP headers to include in the request
+    ///
+    /// # Returns
+    /// Result containing HttpResponse on success or HttpError on failure
+    async fn get(
+        self,
+        url: Text,
+        headers: Map<Text, Text>
+    ) -> Result<HttpResponse, HttpError>;
+
+    /// Make an HTTP PUT request
+    ///
+    /// # Parameters
+    /// - url: The target URL
+    /// - headers: HTTP headers to include in the request
+    /// - body: Request body content
+    ///
+    /// # Returns
+    /// Result containing HttpResponse on success or HttpError on failure
+    async fn put(
+        self,
+        url: Text,
+        headers: Map<Text, Text>,
+        body: Text
+    ) -> Result<HttpResponse, HttpError>;
+
+    /// Make an HTTP DELETE request
+    ///
+    /// # Parameters
+    /// - url: The target URL
+    /// - headers: HTTP headers to include in the request
+    ///
+    /// # Returns
+    /// Result containing HttpResponse on success or HttpError on failure
+    async fn delete(
+        self,
+        url: Text,
+        headers: Map<Text, Text>
+    ) -> Result<HttpResponse, HttpError>;
+}

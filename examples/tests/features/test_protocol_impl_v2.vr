@@ -1,0 +1,316 @@
+// ============================================================================
+// Comprehensive Protocol Implementation Test for Verum (Simplified)
+// Tests: Protocol definitions, implementations, bounds, generics, and defaults
+// Based on: grammar/verum.ebnf (Lines 299-447)
+// ============================================================================
+
+// ============================================================================
+// Test 1: Basic Protocol Definition
+// ============================================================================
+
+type Display is protocol {
+    fn display(self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+// ============================================================================
+// Test 2: Protocol with Default Implementation
+// ============================================================================
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+// ============================================================================
+// Test 3: Protocol with Associated Type
+// ============================================================================
+
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Int;
+};
+
+// ============================================================================
+// Test 4: Protocol Extension (Inheritance)
+// ============================================================================
+
+type Ord is protocol extends Eq {
+    fn cmp(&self, other: &Self) -> Int;
+
+    fn lt(&self, other: &Self) -> Bool {
+        self.cmp(other) < 0
+    }
+};
+
+// ============================================================================
+// Test 5: Record Type for Implementation Tests
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+// ============================================================================
+// Test 6: Basic Implementation
+// ============================================================================
+
+implement Display for Point {
+    fn display(self) -> Text {
+        "Point"
+    }
+}
+
+implement Debug for Point {
+    fn debug(&self) -> Text {
+        "Point"
+    }
+}
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        true
+    }
+}
+
+implement Ord for Point {
+    fn cmp(&self, other: &Self) -> Int {
+        0
+    }
+}
+
+// ============================================================================
+// Test 7: Generic Protocol Definition
+// ============================================================================
+
+type Converter<T> is protocol {
+    fn convert(&self) -> T;
+};
+
+// ============================================================================
+// Test 8: Generic Protocol Implementation
+// ============================================================================
+
+implement Converter<Text> for Point {
+    fn convert(&self) -> Text {
+        "point"
+    }
+}
+
+implement Converter<Int> for Point {
+    fn convert(&self) -> Int {
+        42
+    }
+}
+
+// ============================================================================
+// Test 9: Generic Type with Protocol Bound
+// ============================================================================
+
+type Wrapper<T> is { value: T };
+
+implement<T> Display for Wrapper<T> where type T: Display {
+    fn display(self) -> Text {
+        "Wrapper"
+    }
+}
+
+// ============================================================================
+// Test 10: Multiple Protocol Bounds
+// ============================================================================
+
+type Pair<T> is { first: T, second: T };
+
+implement<T> Display for Pair<T> where type T: Display + Eq {
+    fn display(self) -> Text {
+        "Pair"
+    }
+}
+
+// ============================================================================
+// Test 11: Generic Function with Protocol Bound
+// ============================================================================
+
+fn show<T>(item: T) where type T: Display {
+    print("show called");
+}
+
+fn show_both<T>(a: T, b: T) where type T: Display + Eq {
+    print("show_both called");
+}
+
+// ============================================================================
+// Test 12: Protocol with Const
+// ============================================================================
+
+type Sized is protocol {
+    const SIZE: Int;
+
+    fn size(&self) -> Int {
+        2
+    }
+};
+
+type Rectangle is { width: Int, height: Int };
+
+implement Sized for Rectangle {
+    const SIZE = 2;
+}
+
+// ============================================================================
+// Test 13: Inherent Implementation (no protocol)
+// ============================================================================
+
+type Counter is { count: Int };
+
+implement Counter {
+    fn new() -> Counter {
+        Counter { count: 0 }
+    }
+
+    fn increment(&mut self) {
+        let temp = 1;
+    }
+
+    fn get(&self) -> Int {
+        0
+    }
+}
+
+// ============================================================================
+// Test 14: Protocol for Enum Type
+// ============================================================================
+
+type Option<T> is
+    | Some(T)
+    | None;
+
+implement<T> Display for Option<T> where type T: Display {
+    fn display(self) -> Text {
+        "Option"
+    }
+}
+
+// ============================================================================
+// Test 15: Multiple Implementations for Same Type
+// ============================================================================
+
+type Number is { value: Int };
+
+implement Display for Number {
+    fn display(self) -> Text {
+        "Number"
+    }
+}
+
+implement Debug for Number {
+    fn debug(&self) -> Text {
+        "Number"
+    }
+}
+
+implement Eq for Number {
+    fn eq(&self, other: &Self) -> Bool {
+        true
+    }
+}
+
+// ============================================================================
+// Test 16: Protocol with Multiple Methods
+// ============================================================================
+
+type Collection is protocol {
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool;
+    fn clear(&mut self);
+
+    fn capacity(&self) -> Int {
+        0
+    }
+};
+
+type SimpleList is { items: Int, size: Int };
+
+implement Collection for SimpleList {
+    fn len(&self) -> Int {
+        0
+    }
+
+    fn is_empty(&self) -> Bool {
+        true
+    }
+
+    fn clear(&mut self) {
+        let temp = 0;
+    }
+}
+
+// ============================================================================
+// Main Function: Test All Protocol Implementations
+// ============================================================================
+
+fn main() {
+    print("=== Protocol Implementation Tests ===");
+
+    // Test 1-6: Basic protocols and implementations
+    let p1 = Point { x: 10, y: 20 };
+    print("Point created");
+
+    let p2 = Point { x: 10, y: 20 };
+    let p3 = Point { x: 5, y: 15 };
+    print("Multiple points created");
+
+    // Test 7-8: Generic protocol implementations
+    print("Generic protocol tests complete");
+
+    // Test 9: Generic type with protocol bound
+    let wrapped = Wrapper { value: p1 };
+    print("Wrapped point created");
+
+    // Test 10: Multiple protocol bounds
+    let pair = Pair { first: p1, second: p2 };
+    print("Pair created");
+
+    // Test 11: Generic functions with protocol bounds
+    print("=== Generic Functions ===");
+    show(p1);
+    show_both(p1, p2);
+
+    // Test 12: Protocol with const
+    let rect = Rectangle { width: 100, height: 50 };
+    print("Rectangle created");
+
+    // Test 13: Inherent implementation
+    print("=== Counter ===");
+    let mut counter = Counter.new();
+    print("Counter created");
+    counter.increment();
+    counter.increment();
+    print("Counter incremented");
+
+    // Test 14: Protocol for enum type
+    let some_val = Option.Some(42);
+    let none_val = Option.None;
+    print("Option values created");
+
+    // Test 15: Multiple implementations
+    let num = Number { value: 42 };
+    print("Number created");
+
+    let num2 = Number { value: 42 };
+    print("Second number created");
+
+    // Test 16: Protocol with multiple methods
+    print("=== Collection Protocol ===");
+    let mut list = SimpleList { items: 0, size: 5 };
+    print("SimpleList created");
+    list.clear();
+    print("List cleared");
+
+    print("=== All Tests Complete ===");
+}

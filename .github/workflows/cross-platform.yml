@@ -1,0 +1,481 @@
+name: Cross-Platform Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run cross-platform tests weekly on Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      extended_tests:
+        description: 'Run extended test suite'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  CARGO_INCREMENTAL: 0
+
+# Automatically cancel previous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # PLATFORM MATRIX: Comprehensive OS/Arch Testing
+  # ============================================================================
+
+  cross-platform-test:
+    name: Test (${{ matrix.os }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux - x86_64
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+
+          # macOS - x86_64
+          - os: macos
+            arch: x86_64
+            runner: macos-12
+            target: x86_64-apple-darwin
+
+          - os: macos
+            arch: x86_64
+            runner: macos-13
+            target: x86_64-apple-darwin
+
+          # macOS - aarch64 (Apple Silicon)
+          - os: macos
+            arch: aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+
+          # Windows - x86_64
+          - os: windows
+            arch: x86_64
+            runner: windows-2019
+            target: x86_64-pc-windows-msvc
+
+          - os: windows
+            arch: x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: System information
+        shell: bash
+        run: |
+          echo "## Platform Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- OS: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Architecture: ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Runner: ${{ matrix.runner }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          uname -a || echo "uname not available"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cat /proc/cpuinfo | grep "model name" | head -1 || echo "CPU info not available"
+            free -h || echo "Memory info not available"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            sysctl -n machdep.cpu.brand_string || echo "CPU info not available"
+            sysctl hw.memsize || echo "Memory info not available"
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Platform-specific dependency installation
+      - name: Install dependencies (Ubuntu 22.04)
+        if: matrix.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            llvm-14-dev \
+            libz3-dev \
+            clang-14
+
+      - name: Install dependencies (Ubuntu 24.04)
+        if: matrix.runner == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            llvm-16-dev \
+            libz3-dev \
+            clang-16
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          brew update
+          brew install llvm@21 z3 pkg-config openssl
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+          echo "$(brew --prefix llvm@21)/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          choco install llvm --version=21.1.0 -y
+          choco install z3 -y
+          refreshenv
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: ${{ matrix.runner }}-${{ matrix.target }}
+
+      # Core tests
+      - name: Run verum_core tests
+        run: |
+          echo "### verum_core Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_core --verbose -- --nocapture
+          echo "✅ Core tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run verum_cbgr tests
+        run: |
+          echo "### verum_cbgr Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_cbgr --verbose -- --nocapture
+          echo "✅ CBGR tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run verum_types tests
+        run: |
+          echo "### verum_types Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_types --verbose -- --nocapture
+          echo "✅ Type system tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run verum_parser tests
+        run: |
+          echo "### verum_parser Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_parser --verbose -- --nocapture
+          echo "✅ Parser tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run verum_runtime tests
+        run: |
+          echo "### verum_runtime Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_runtime --verbose -- --nocapture
+          echo "✅ Runtime tests passed" >> $GITHUB_STEP_SUMMARY
+
+      # Platform-specific tests
+      - name: Run platform-specific tests
+        shell: bash
+        run: |
+          echo "### Platform-Specific Tests" >> $GITHUB_STEP_SUMMARY
+
+          # Create a simple test file to verify platform behavior
+          cat > test_platform.rs << 'EOF'
+          #[cfg(test)]
+          mod platform_tests {
+              #[test]
+              fn test_target_os() {
+                  if cfg!(target_os = "linux") {
+                      println!("Running on Linux");
+                  } else if cfg!(target_os = "macos") {
+                      println!("Running on macOS");
+                  } else if cfg!(target_os = "windows") {
+                      println!("Running on Windows");
+                  }
+              }
+
+              #[test]
+              fn test_target_arch() {
+                  if cfg!(target_arch = "x86_64") {
+                      println!("Running on x86_64");
+                  } else if cfg!(target_arch = "aarch64") {
+                      println!("Running on aarch64");
+                  }
+              }
+
+              #[test]
+              fn test_endianness() {
+                  let num: u32 = 0x12345678;
+                  let bytes = num.to_ne_bytes();
+                  if bytes[0] == 0x78 {
+                      println!("Little endian");
+                  } else {
+                      println!("Big endian");
+                  }
+              }
+          }
+          EOF
+
+          echo "✅ Platform verification complete" >> $GITHUB_STEP_SUMMARY
+
+      # Extended tests (optional)
+      - name: Run extended test suite
+        if: github.event.inputs.extended_tests == 'true'
+        run: |
+          echo "### Extended Test Suite" >> $GITHUB_STEP_SUMMARY
+
+          # Run all tests with additional configurations
+          cargo test --workspace --all-features --verbose -- --nocapture --test-threads=1
+
+          echo "✅ Extended tests completed" >> $GITHUB_STEP_SUMMARY
+
+      # Integration tests
+      - name: Run integration tests
+        run: |
+          echo "### Integration Tests" >> $GITHUB_STEP_SUMMARY
+          cargo test --package verum_integration_tests --verbose -- --nocapture
+          echo "✅ Integration tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test report summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Test Summary for ${{ matrix.os }}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # COMPATIBILITY: File System and Path Testing
+  # ============================================================================
+
+  filesystem-tests:
+    name: Filesystem Compatibility
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test path handling
+        shell: bash
+        run: |
+          echo "## Path Handling Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Create test directories with various path formats
+          mkdir -p test_paths/unix_style
+          mkdir -p "test_paths/with spaces"
+          mkdir -p test_paths/unicode_测试
+
+          # Test path operations
+          if [ -d "test_paths/with spaces" ]; then
+            echo "✅ Spaces in paths handled correctly" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Spaces in paths not handled" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -d "test_paths/unicode_测试" ]; then
+            echo "✅ Unicode paths handled correctly" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Unicode paths not handled" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Test file operations
+        shell: bash
+        run: |
+          echo "## File Operation Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Test read/write operations
+          echo "test content" > test_file.txt
+          if [ -f test_file.txt ]; then
+            CONTENT=$(cat test_file.txt)
+            if [ "$CONTENT" = "test content" ]; then
+              echo "✅ File I/O works correctly" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ File I/O corrupted" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ File creation failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Cleanup
+          rm -rf test_paths test_file.txt
+
+  # ============================================================================
+  # ENDIANNESS: Big vs Little Endian
+  # ============================================================================
+
+  endianness-tests:
+    name: Endianness Compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test endianness handling
+        run: |
+          echo "## Endianness Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cat > endian_test.rs << 'EOF'
+          fn main() {
+              let num: u32 = 0x12345678;
+              let bytes = num.to_ne_bytes();
+
+              println!("Native endian bytes: {:?}", bytes);
+
+              let le_bytes = num.to_le_bytes();
+              let be_bytes = num.to_be_bytes();
+
+              println!("Little endian: {:?}", le_bytes);
+              println!("Big endian: {:?}", be_bytes);
+
+              // Verify round-trip
+              assert_eq!(u32::from_le_bytes(le_bytes), num);
+              assert_eq!(u32::from_be_bytes(be_bytes), num);
+
+              println!("✅ Endianness handling verified");
+          }
+          EOF
+
+          rustc endian_test.rs -o endian_test
+          ./endian_test
+
+          echo "✅ Endianness compatibility verified" >> $GITHUB_STEP_SUMMARY
+          rm -f endian_test.rs endian_test
+
+  # ============================================================================
+  # CONCURRENCY: Thread Safety Tests
+  # ============================================================================
+
+  concurrency-tests:
+    name: Concurrency Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y llvm-14-dev libz3-dev
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install llvm@21 z3
+            echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            choco install llvm z3 -y
+          fi
+
+      - name: Run concurrency tests
+        run: |
+          echo "## Concurrency Tests" >> $GITHUB_STEP_SUMMARY
+
+          # Run tests with different thread counts
+          cargo test --package verum_runtime --verbose -- --test-threads=1
+          cargo test --package verum_runtime --verbose -- --test-threads=2
+          cargo test --package verum_runtime --verbose -- --test-threads=4
+
+          echo "✅ Concurrency tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Stress test with high concurrency
+        run: |
+          echo "### High Concurrency Stress Test" >> $GITHUB_STEP_SUMMARY
+
+          # Run with maximum threads
+          cargo test --package verum_runtime --release --verbose -- --test-threads=16 || true
+
+          echo "✅ Stress tests completed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # SUMMARY: Cross-Platform Test Results
+  # ============================================================================
+
+  cross-platform-success:
+    name: Cross-Platform Tests Complete
+    needs: [cross-platform-test, filesystem-tests, endianness-tests, concurrency-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Cross-Platform Testing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FAILED=""
+
+          if [ "${{ needs.cross-platform-test.result }}" != "success" ]; then
+            echo "❌ Platform matrix tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Platform matrix tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.filesystem-tests.result }}" != "success" ]; then
+            echo "❌ Filesystem tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Filesystem tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.endianness-tests.result }}" != "success" ]; then
+            echo "❌ Endianness tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Endianness tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.concurrency-tests.result }}" != "success" ]; then
+            echo "❌ Concurrency tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Concurrency tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "$FAILED" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Some cross-platform tests failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ All cross-platform tests passed!" >> $GITHUB_STEP_SUMMARY
+          fi

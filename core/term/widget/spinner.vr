@@ -1,0 +1,208 @@
+// =============================================================================
+// spinner.vr - Animated spinner as a StatefulWidget with frame sets
+// =============================================================================
+module spinner;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.paragraph.Span;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+// =============================================================================
+// SpinnerFrames — defines the animation frames and timing
+// =============================================================================
+
+/// SpinnerFrames defines the character set and interval for a spinner animation.
+public type SpinnerFrames is {
+    frames: List<Text>,
+    interval_ms: Int,
+};
+
+implement SpinnerFrames {
+    /// Braille dots spinner (80ms interval).
+    public fn dots() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("⠋"); f.push("⠙"); f.push("⠹"); f.push("⠸");
+        f.push("⠼"); f.push("⠴"); f.push("⠦"); f.push("⠧");
+        f.push("⠇"); f.push("⠏");
+        SpinnerFrames { frames: f, interval_ms: 80 }
+    }
+
+    /// ASCII line spinner (130ms interval).
+    public fn line() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("-"); f.push("\\"); f.push("|"); f.push("/");
+        SpinnerFrames { frames: f, interval_ms: 130 }
+    }
+
+    /// Dot pulse spinner (100ms interval).
+    public fn dots_pulse() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("⠁"); f.push("⠂"); f.push("⠄"); f.push("⡀");
+        f.push("⢀"); f.push("⠠"); f.push("⠐"); f.push("⠈");
+        SpinnerFrames { frames: f, interval_ms: 100 }
+    }
+
+    /// Moon phases spinner (120ms interval).
+    public fn moon() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("🌑"); f.push("🌒"); f.push("🌓"); f.push("🌔");
+        f.push("🌕"); f.push("🌖"); f.push("🌗"); f.push("🌘");
+        SpinnerFrames { frames: f, interval_ms: 120 }
+    }
+
+    /// Earth globe spinner (180ms interval).
+    public fn earth() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("🌍"); f.push("🌎"); f.push("🌏");
+        SpinnerFrames { frames: f, interval_ms: 180 }
+    }
+
+    /// Arrow spinner (100ms interval).
+    public fn arrows() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("←"); f.push("↖"); f.push("↑"); f.push("↗");
+        f.push("→"); f.push("↘"); f.push("↓"); f.push("↙");
+        SpinnerFrames { frames: f, interval_ms: 100 }
+    }
+
+    /// Blocks spinner (100ms interval).
+    public fn blocks() -> SpinnerFrames {
+        let mut f = List.new();
+        f.push("▖"); f.push("▘"); f.push("▝"); f.push("▗");
+        SpinnerFrames { frames: f, interval_ms: 100 }
+    }
+}
+
+// =============================================================================
+// SpinnerState — tracks current frame and timing
+// =============================================================================
+
+/// State for the spinner, tracking the current frame and last tick time.
+public type SpinnerState is {
+    current_frame: Int,
+    last_tick_ms: UInt64,
+};
+
+implement SpinnerState {
+    /// Create a new spinner state starting at frame 0.
+    public fn new() -> SpinnerState {
+        SpinnerState { current_frame: 0, last_tick_ms: 0 }
+    }
+
+    /// Reset the spinner to the first frame.
+    public fn reset(&mut self) {
+        self.current_frame = 0;
+        self.last_tick_ms = 0;
+    }
+}
+
+// =============================================================================
+// Spinner — the widget itself
+// =============================================================================
+
+/// Spinner — an animated loading indicator rendered as a StatefulWidget.
+/// Automatically advances frames based on interval_ms and monotonic time.
+public type Spinner is {
+    frames: SpinnerFrames,
+    label: Maybe<Span>,
+    style: Style,
+};
+
+implement Spinner {
+    /// Create a new spinner with the given frame set.
+    public fn new(frames: SpinnerFrames) -> Spinner {
+        Spinner {
+            frames: frames,
+            label: None,
+            style: Style.DEFAULT,
+        }
+    }
+
+    /// Create a dots spinner (most common).
+    public fn dots() -> Spinner {
+        Spinner.new(SpinnerFrames.dots())
+    }
+
+    /// Create a line spinner.
+    public fn line() -> Spinner {
+        Spinner.new(SpinnerFrames.line())
+    }
+
+    /// Create a moon phases spinner.
+    public fn moon() -> Spinner {
+        Spinner.new(SpinnerFrames.moon())
+    }
+
+    /// Create an earth globe spinner.
+    public fn earth() -> Spinner {
+        Spinner.new(SpinnerFrames.earth())
+    }
+
+    /// Create an arrows spinner.
+    public fn arrows() -> Spinner {
+        Spinner.new(SpinnerFrames.arrows())
+    }
+
+    /// Create a blocks spinner.
+    public fn blocks() -> Spinner {
+        Spinner.new(SpinnerFrames.blocks())
+    }
+
+    /// Set the label as a styled Span displayed after the spinner character.
+    public fn label(self, label: Span) -> Spinner {
+        Spinner { label: Some(label), ..self }
+    }
+
+    /// Set a plain text label.
+    public fn label_text(self, text: Text) -> Spinner {
+        Spinner { label: Some(Span.raw(text)), ..self }
+    }
+
+    /// Set the spinner style.
+    public fn style(self, style: Style) -> Spinner {
+        Spinner { style: style, ..self }
+    }
+
+    /// Set the frame set.
+    public fn frames(self, frames: SpinnerFrames) -> Spinner {
+        Spinner { frames: frames, ..self }
+    }
+}
+
+implement StatefulWidget for Spinner {
+    type State = SpinnerState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut SpinnerState) {
+        if area.width < 1 || area.height < 1 { return; }
+        if self.frames.frames.len() == 0 { return; }
+
+        // Auto-advance frame based on monotonic time
+        let now_ms = core.sys.monotonic_time_ns() / 1_000_000;
+        if state.last_tick_ms == 0 {
+            // First render — initialize timing
+            state.last_tick_ms = now_ms;
+        } else if now_ms - state.last_tick_ms >= self.frames.interval_ms as UInt64 {
+            state.current_frame = (state.current_frame + 1) % self.frames.frames.len();
+            state.last_tick_ms = now_ms;
+        }
+
+        // Get current frame character
+        let frame_idx = state.current_frame % self.frames.frames.len();
+        let frame_text = &self.frames.frames[frame_idx];
+
+        // Render spinner character
+        let mut x = buf.set_string(area.x, area.y, frame_text, self.style);
+
+        // Render label if present
+        match self.label {
+            Some(ref label) => {
+                if x < area.right() {
+                    x = buf.set_string(x + 1, area.y, &label.content, label.style);
+                }
+            }
+            None => {}
+        }
+    }
+}

@@ -1,0 +1,298 @@
+// Retry Pattern with Exponential Backoff
+//
+// Automatically retries failed operations with increasing delays between attempts.
+// Supports jitter to prevent thundering herd problems.
+//
+// Key Features:
+// - Exponential backoff: delay grows exponentially (initial * multiplier^attempt)
+// - Maximum delay cap: prevents excessively long waits
+// - Jitter: adds randomness to prevent synchronized retries
+// - Selective retry: only retry errors marked as retryable
+
+mount core.base.{Text, Int, Bool, Float, Result};
+mount core.time.{Duration, SystemTime, sleep_millis};
+mount super.super.domain.errors.{RegistryError};
+
+/// Configuration for retry behavior
+pub type RetryConfig is {
+    max_attempts: Int,          // Maximum number of attempts (including initial)
+    initial_delay_ms: Int,      // Initial delay in milliseconds
+    max_delay_ms: Int,          // Maximum delay cap in milliseconds
+    multiplier: Float,          // Backoff multiplier (e.g., 2.0 for exponential)
+    jitter: Bool,               // Whether to add random jitter
+};
+
+implement RetryConfig {
+    /// Create a default retry configuration
+    ///
+    /// Defaults: 3 attempts, 100ms initial delay, 10s max, 2x multiplier, with jitter
+    pub fn default() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 10000,
+            multiplier: 2.0,
+            jitter: true,
+        }
+    }
+
+    /// Create a conservative retry configuration for critical operations
+    ///
+    /// More attempts, longer delays, suitable for important but non-urgent operations
+    pub fn conservative() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 5,
+            initial_delay_ms: 500,
+            max_delay_ms: 30000,
+            multiplier: 2.0,
+            jitter: true,
+        }
+    }
+
+    /// Create an aggressive retry configuration for time-sensitive operations
+    ///
+    /// Fewer attempts, shorter delays, suitable for operations that must complete quickly
+    pub fn aggressive() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 50,
+            max_delay_ms: 1000,
+            multiplier: 1.5,
+            jitter: true,
+        }
+    }
+
+    /// Calculate delay for a given attempt number
+    ///
+    /// Uses exponential backoff formula: initial * (multiplier ^ (attempt - 1))
+    /// Applies jitter if configured: random value between 50% and 100% of calculated delay
+    fn calculate_delay(self, attempt: Int) -> Int {
+        if attempt == 0 {
+            return 0;
+        }
+
+        // Calculate exponential backoff: initial * (multiplier ^ (attempt - 1))
+        let mut delay = self.initial_delay_ms;
+        let mut i = 1;
+
+        while i < attempt {
+            let next_delay = (delay.to_float() * self.multiplier).to_int();
+            delay = if next_delay > self.max_delay_ms {
+                self.max_delay_ms
+            } else {
+                next_delay
+            };
+            i = i + 1;
+        }
+
+        // Apply jitter if configured (50-100% of calculated delay)
+        if self.jitter {
+            let jitter_factor = 0.5 + (attempt % 50).to_float() / 100.0; // Simple jitter
+            (delay.to_float() * jitter_factor).to_int()
+        } else {
+            delay
+        }
+    }
+}
+
+/// Retry a fallible operation with exponential backoff
+///
+/// # Type Parameters
+/// - T: The success type returned by the operation
+///
+/// # Parameters
+/// - operation: The function to retry
+/// - config: Retry configuration
+/// - is_retryable: Function to determine if an error should trigger a retry
+///
+/// # Returns
+/// - Ok(T): Operation succeeded
+/// - Err(RegistryError): Operation failed after all retries
+///
+/// # Example
+/// ```
+/// let result = with_retry(
+///     || Database.query("SELECT * FROM users"),
+///     RetryConfig.default(),
+///     |err| err.is_recoverable()
+/// );
+/// ```
+pub fn with_retry<T>(
+    operation: fn() -> Result<T, RegistryError>,
+    config: RetryConfig,
+    is_retryable: fn(RegistryError) -> Bool
+) -> Result<T, RegistryError> {
+    let mut attempt = 1;
+    let mut last_error = RegistryError.internal_error("No attempts made");
+
+    // Try up to max_attempts times
+    while attempt <= config.max_attempts {
+        let result = operation();
+
+        match result {
+            Result.Ok(value) => {
+                // Success - return immediately
+                return Result.Ok(value);
+            },
+            Result.Err(err) => {
+                last_error = err;
+
+                // Check if we should retry this error
+                if !is_retryable(err.clone()) {
+                    // Non-retryable error, fail immediately
+                    return Result.Err(err);
+                }
+
+                // Check if we have attempts remaining
+                if attempt >= config.max_attempts {
+                    // Out of attempts, return last error
+                    return Result.Err(last_error);
+                }
+
+                // Calculate delay and sleep
+                let delay_ms = config.calculate_delay(attempt);
+                if delay_ms > 0 {
+                    sleep_millis(delay_ms);
+                }
+
+                attempt = attempt + 1;
+            }
+        }
+    }
+
+    // Return last error if loop exits without success
+    Result.Err(last_error)
+}
+
+/// Retry an async operation with exponential backoff
+///
+/// Similar to with_retry but for async operations
+pub async fn with_retry_async<T>(
+    operation: fn() -> Result<T, RegistryError>,
+    config: RetryConfig,
+    is_retryable: fn(RegistryError) -> Bool
+) -> Result<T, RegistryError> {
+    let mut attempt = 1;
+    let mut last_error = RegistryError.internal_error("No attempts made");
+
+    while attempt <= config.max_attempts {
+        let result = operation().await;
+
+        match result {
+            Result.Ok(value) => {
+                return Result.Ok(value);
+            },
+            Result.Err(err) => {
+                last_error = err;
+
+                if !is_retryable(err.clone()) {
+                    return Result.Err(err);
+                }
+
+                if attempt >= config.max_attempts {
+                    return Result.Err(last_error);
+                }
+
+                let delay_ms = config.calculate_delay(attempt);
+                if delay_ms > 0 {
+                    sleep_millis(delay_ms);
+                }
+
+                attempt = attempt + 1;
+            }
+        }
+    }
+
+    Result.Err(last_error)
+}
+
+/// Helper to check if a RegistryError is retryable
+///
+/// Uses the is_recoverable method from RegistryError
+pub fn is_retryable_error(error: RegistryError) -> Bool {
+    error.is_recoverable()
+}
+
+/// Retry with custom retry logic based on error type
+///
+/// Allows different retry configurations for different error types
+pub fn with_custom_retry<T>(
+    operation: fn() -> Result<T, RegistryError>,
+    select_config: fn(RegistryError) -> Maybe<RetryConfig>
+) -> Result<T, RegistryError> {
+    let result = operation();
+
+    match result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(err) => {
+            // Check if this error type should be retried
+            match select_config(err.clone()) {
+                Maybe.Some(config) => {
+                    // Retry with the selected configuration
+                    with_retry(operation, config, |_| true)
+                },
+                Maybe.None => {
+                    // No retry configuration, fail immediately
+                    Result.Err(err)
+                }
+            }
+        }
+    }
+}
+
+/// Track retry statistics for monitoring
+pub type RetryStats is {
+    total_attempts: Int,
+    successful_attempts: Int,
+    failed_attempts: Int,
+    total_delay_ms: Int,
+};
+
+implement RetryStats {
+    pub fn new() -> RetryStats {
+        RetryStats {
+            total_attempts: 0,
+            successful_attempts: 0,
+            failed_attempts: 0,
+            total_delay_ms: 0,
+        }
+    }
+
+    pub fn record_success(mut self) -> RetryStats {
+        self.total_attempts = self.total_attempts + 1;
+        self.successful_attempts = self.successful_attempts + 1;
+        self
+    }
+
+    pub fn record_failure(mut self) -> RetryStats {
+        self.total_attempts = self.total_attempts + 1;
+        self.failed_attempts = self.failed_attempts + 1;
+        self
+    }
+
+    pub fn record_delay(mut self, delay_ms: Int) -> RetryStats {
+        self.total_delay_ms = self.total_delay_ms + delay_ms;
+        self
+    }
+
+    pub fn success_rate(self) -> Float {
+        if self.total_attempts == 0 {
+            0.0
+        } else {
+            self.successful_attempts.to_float() / self.total_attempts.to_float()
+        }
+    }
+
+    pub fn average_delay_ms(self) -> Int {
+        if self.total_attempts == 0 {
+            0
+        } else {
+            self.total_delay_ms / self.total_attempts
+        }
+    }
+
+    pub fn to_string(self) -> Text {
+        f"RetryStats[attempts={self.total_attempts}, successes={self.successful_attempts}, failures={self.failed_attempts}, avg_delay={self.average_delay_ms()}ms]"
+    }
+}
+

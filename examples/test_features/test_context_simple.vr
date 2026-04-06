@@ -1,0 +1,7 @@
+context Logger {
+    fn log(message: Text)
+}
+
+fn main() {
+    println("Testing context parsing")
+}

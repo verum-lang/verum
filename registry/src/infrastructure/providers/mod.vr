@@ -1,0 +1,18 @@
+// Context Provider Implementations
+//
+// Concrete implementations of the context protocols defined in contexts/.
+// Each provider can be swapped independently without changing application code.
+
+module database_provider;
+module storage_provider;
+module cache_provider;
+module search_provider;
+module logger_provider;
+module metrics_provider;
+
+pub import .database_provider.PostgresDatabaseProvider;
+pub import .storage_provider.FilesystemStorageProvider;
+pub import .cache_provider.LruCacheProvider;
+pub import .search_provider.MemorySearchProvider;
+pub import .logger_provider.StdoutLoggerProvider;
+pub import .metrics_provider.InMemoryMetricsProvider;

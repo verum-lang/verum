@@ -1,0 +1,480 @@
+// Comprehensive Async/Await Test for Verum Language
+// Tests all async syntax features from verum.ebnf grammar
+//
+// Grammar References:
+// - Line 689: async_expr = 'async' , block_expr
+// - Line 592: '.' , 'await' (postfix_op)
+// - Line 704: spawn_expr = 'spawn' , expression
+// - Line 686: closure_expr = [ 'async' ] , closure_params
+// - Line 326-336: function_def with 'async' modifier
+
+// ===== Type Definitions =====
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Text
+};
+
+type Post is {
+    id: Int,
+    user_id: Int,
+    title: Text
+};
+
+type UserProfile is {
+    user: User,
+    posts: List<Post>
+};
+
+// ===== TEST 1: Basic Async Functions =====
+// Grammar: function_modifiers = [ 'meta' ] , [ 'async' ] , [ 'unsafe' ]
+
+async fn sleep(ms: Int) -> () {
+    // Simulated async sleep - would use runtime in real implementation
+    ()
+}
+
+async fn fetch_data(url: Text) -> Result<Text, Text> {
+    sleep(100).await;
+    Ok("Data from " + url)
+}
+
+async fn compute_value(x: Int) -> Int {
+    sleep(50).await;
+    x * 2
+}
+
+async fn simple_async() -> Text {
+    "Hello from async"
+}
+
+// ===== TEST 2: Await Expressions =====
+// Grammar: postfix_op = '.' , 'await'
+
+async fn test_await() -> Int {
+    let value = compute_value(21).await;
+    value
+}
+
+async fn chain_awaits() -> Int {
+    let a = compute_value(10).await;
+    let b = compute_value(20).await;
+    let c = compute_value(30).await;
+    a + b + c
+}
+
+// ===== TEST 3: Async Blocks =====
+// Grammar: async_expr = 'async' , block_expr
+
+fn create_async_block() -> Future<Int> {
+    async {
+        let x = compute_value(5).await;
+        let y = compute_value(10).await;
+        x + y
+    }
+}
+
+fn nested_async_blocks() -> Future<Int> {
+    async {
+        let inner = async {
+            compute_value(7).await
+        };
+        let result = inner.await;
+        result * 2
+    }
+}
+
+// ===== TEST 4: Multiple Concurrent Awaits =====
+
+async fn fetch_user(id: Int) -> Result<User, Text> {
+    if id <= 0 {
+        Err("Invalid user ID")
+    } else {
+        sleep(100).await;
+        Ok(User {
+            id: id,
+            name: "User" + id.to_string(),
+            email: "user" + id.to_string() + "@example.com"
+        })
+    }
+}
+
+async fn fetch_posts(user_id: Int) -> Result<List<Post>, Text> {
+    sleep(150).await;
+    Ok([
+        Post { id: 1, user_id: user_id, title: "First post" },
+        Post { id: 2, user_id: user_id, title: "Second post" }
+    ])
+}
+
+async fn concurrent_fetch() -> Result<UserProfile, Text> {
+    // Sequential awaits
+    let user = fetch_user(42).await?;
+    let posts = fetch_posts(42).await?;
+
+    Ok(UserProfile { user: user, posts: posts })
+}
+
+async fn multiple_users() -> List<Result<User, Text>> {
+    let mut results = [];
+
+    let u1 = fetch_user(1).await;
+    results.push(u1);
+
+    let u2 = fetch_user(2).await;
+    results.push(u2);
+
+    let u3 = fetch_user(3).await;
+    results.push(u3);
+
+    results
+}
+
+// ===== TEST 5: Spawn Expressions =====
+// Grammar: spawn_expr = 'spawn' , expression
+
+async fn test_spawn() -> () {
+    // Spawn a task
+    let task1 = spawn compute_value(10);
+    let task2 = spawn compute_value(20);
+    let task3 = spawn compute_value(30);
+
+    // Wait for results
+    let r1 = task1.await;
+    let r2 = task2.await;
+    let r3 = task3.await;
+
+    print("Spawned tasks results: " + r1.to_string() + ", " + r2.to_string() + ", " + r3.to_string());
+}
+
+async fn spawn_multiple() -> () {
+    let mut handles = [];
+
+    for i in 0..5 {
+        let handle = spawn compute_value(i);
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let result = handle.await;
+        print("Result: " + result.to_string());
+    }
+}
+
+// ===== TEST 6: Async Closures =====
+// Grammar: closure_expr = [ 'async' ] , closure_params , [ '->' , type_expr ] , expression
+
+fn test_async_closure() -> () {
+    // Simple async closure
+    let async_fn = async || {
+        compute_value(42).await
+    };
+
+    let result = async_fn().await;
+    print("Async closure result: " + result.to_string());
+}
+
+fn async_closure_with_params() -> () {
+    let compute = async |x: Int| {
+        compute_value(x).await
+    };
+
+    let result = compute(100).await;
+    print("Async closure with params: " + result.to_string());
+}
+
+fn map_with_async() -> () {
+    let values = [1, 2, 3, 4, 5];
+    let async_mapper = async |x: Int| {
+        compute_value(x).await
+    };
+
+    // Would map async over values
+    for v in values {
+        let result = async_mapper(v).await;
+        print("Mapped: " + result.to_string());
+    }
+}
+
+// ===== TEST 7: Error Handling in Async Code =====
+
+async fn fetch_with_retry(url: Text, max_retries: Int) -> Result<Text, Text> {
+    let mut retries = 0;
+
+    loop {
+        let result = fetch_data(url).await;
+        match result {
+            Ok(data) => return Ok(data)
+            Err(e) => {
+                retries = retries + 1;
+                if retries >= max_retries {
+                    return Err("Failed after " + max_retries.to_string() + " retries: " + e);
+                }
+                sleep(1000).await;
+            }
+        }
+    }
+}
+
+async fn try_async_operations() -> Result<Int, Text> {
+    try {
+        let user = fetch_user(42).await?;
+        let posts = fetch_posts(user.id).await?;
+        Ok(posts.len())
+    } recover {
+        e => Err("Error in async operations: " + e)
+    }
+}
+
+async fn async_with_early_return() -> Result<Int, Text> {
+    let user = fetch_user(5).await?;
+
+    if user.id < 0 {
+        return Err("Invalid user");
+    }
+
+    let value = compute_value(user.id).await;
+    Ok(value)
+}
+
+// ===== TEST 8: Complex Async Patterns =====
+
+async fn recursive_async(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        let sub = recursive_async(n - 1).await;
+        n + sub
+    }
+}
+
+async fn fibonacci_async(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        let a = fibonacci_async(n - 1).await;
+        let b = fibonacci_async(n - 2).await;
+        a + b
+    }
+}
+
+async fn nested_async_calls() -> Text {
+    let level3 = async {
+        "Level 3"
+    };
+
+    let level2 = async {
+        let msg = level3.await;
+        "Level 2 -> " + msg
+    };
+
+    let level1 = async {
+        let msg = level2.await;
+        "Level 1 -> " + msg
+    };
+
+    level1.await
+}
+
+// ===== TEST 9: Async with Match Expressions =====
+
+async fn match_async_result() -> () {
+    let result = fetch_user(42).await;
+
+    match result {
+        Ok(user) => {
+            print("User found: " + user.name);
+            let posts = fetch_posts(user.id).await;
+            match posts {
+                Ok(p) => print("Posts: " + p.len().to_string()),
+                Err(e) => print("Error fetching posts: " + e)
+            }
+        },
+        Err(e) => print("Error: " + e)
+    }
+}
+
+async fn match_multiple_futures() -> Text {
+    let future1 = compute_value(10);
+    let future2 = compute_value(20);
+
+    let r1 = future1.await;
+    let r2 = future2.await;
+
+    match (r1, r2) {
+        (a, b) if a > b => "First is larger"
+        (a, b) if a < b => "Second is larger"
+        _ => "Equal"
+    }
+}
+
+// ===== TEST 10: Async in Loops =====
+
+async fn async_in_for_loop() -> Int {
+    let mut sum = 0;
+
+    for i in 0..5 {
+        let value = compute_value(i).await;
+        sum = sum + value;
+    }
+
+    sum
+}
+
+async fn async_in_while_loop() -> Int {
+    let mut count = 0;
+    let mut sum = 0;
+
+    while count < 5 {
+        let value = compute_value(count).await;
+        sum = sum + value;
+        count = count + 1;
+    }
+
+    sum
+}
+
+async fn async_infinite_loop() -> () {
+    let mut i = 0;
+
+    loop {
+        let value = compute_value(i).await;
+        print("Value: " + value.to_string());
+
+        i = i + 1;
+        if i >= 3 {
+            break;
+        }
+    }
+}
+
+// ===== Main Test Function =====
+
+async fn main() -> () {
+    print("=== Comprehensive Async/Await Test for Verum ===");
+    print("");
+
+    // TEST 1: Basic Async Functions
+    print("--- Test 1: Basic Async Functions ---");
+    let data = fetch_data("https://api.example.com").await;
+    match data {
+        Ok(d) => print("Success: " + d),
+        Err(e) => print("Error: " + e)
+    }
+
+    let value = compute_value(21).await;
+    print("compute_value(21) = " + value.to_string());
+
+    let simple = simple_async().await;
+    print("simple_async() = " + simple);
+    print("");
+
+    // TEST 2: Await Expressions
+    print("--- Test 2: Await Expressions ---");
+    let awaited = test_await().await;
+    print("test_await() = " + awaited.to_string());
+
+    let chained = chain_awaits().await;
+    print("chain_awaits() = " + chained.to_string());
+    print("");
+
+    // TEST 3: Async Blocks
+    print("--- Test 3: Async Blocks ---");
+    let block_result = create_async_block().await;
+    print("create_async_block() = " + block_result.to_string());
+
+    let nested_result = nested_async_blocks().await;
+    print("nested_async_blocks() = " + nested_result.to_string());
+    print("");
+
+    // TEST 4: Multiple Concurrent Awaits
+    print("--- Test 4: Multiple Concurrent Awaits ---");
+    let profile = concurrent_fetch().await;
+    match profile {
+        Ok(p) => {
+            print("Profile for " + p.user.name + ":");
+            print("  Email: " + p.user.email);
+            print("  Posts: " + p.posts.len().to_string());
+        },
+        Err(e) => print("Error: " + e)
+    }
+
+    let users = multiple_users().await;
+    print("Fetched " + users.len().to_string() + " users");
+    print("");
+
+    // TEST 5: Spawn Expressions
+    print("--- Test 5: Spawn Expressions ---");
+    test_spawn().await;
+    spawn_multiple().await;
+    print("");
+
+    // TEST 6: Async Closures
+    print("--- Test 6: Async Closures ---");
+    test_async_closure();
+    async_closure_with_params();
+    map_with_async();
+    print("");
+
+    // TEST 7: Error Handling
+    print("--- Test 7: Error Handling in Async Code ---");
+    let retry_result = fetch_with_retry("https://unreliable.api.com", 3).await;
+    match retry_result {
+        Ok(d) => print("Success after retries: " + d),
+        Err(e) => print("Failed: " + e)
+    }
+
+    let try_result = try_async_operations().await;
+    match try_result {
+        Ok(count) => print("Try succeeded with count: " + count.to_string()),
+        Err(e) => print("Try failed: " + e)
+    }
+    print("");
+
+    // TEST 8: Complex Patterns
+    print("--- Test 8: Complex Async Patterns ---");
+    let rec_result = recursive_async(5).await;
+    print("recursive_async(5) = " + rec_result.to_string());
+
+    let fib_result = fibonacci_async(7).await;
+    print("fibonacci_async(7) = " + fib_result.to_string());
+
+    let nested_msg = nested_async_calls().await;
+    print("nested_async_calls() = " + nested_msg);
+    print("");
+
+    // TEST 9: Async with Match
+    print("--- Test 9: Async with Match Expressions ---");
+    match_async_result().await;
+
+    let match_result = match_multiple_futures().await;
+    print("match_multiple_futures() = " + match_result);
+    print("");
+
+    // TEST 10: Async in Loops
+    print("--- Test 10: Async in Loops ---");
+    let for_sum = async_in_for_loop().await;
+    print("async_in_for_loop() = " + for_sum.to_string());
+
+    let while_sum = async_in_while_loop().await;
+    print("async_in_while_loop() = " + while_sum.to_string());
+
+    async_infinite_loop().await;
+    print("");
+
+    // Summary
+    print("=== Async/Await Features Tested ===");
+    print("✓ 1. Async functions (async fn)");
+    print("✓ 2. Await expressions (.await)");
+    print("✓ 3. Async blocks (async { ... })");
+    print("✓ 4. Multiple concurrent awaits");
+    print("✓ 5. Spawn expressions (spawn expr)");
+    print("✓ 6. Async closures (async || ...)");
+    print("✓ 7. Error handling (try/recover)");
+    print("✓ 8. Complex async patterns");
+    print("✓ 9. Async with match expressions");
+    print("✓ 10. Async in loops");
+    print("");
+    print("=== Test Complete ===");
+}

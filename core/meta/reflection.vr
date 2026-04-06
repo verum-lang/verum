@@ -1,0 +1,1040 @@
+// =============================================================================
+// reflection.vr - Type Reflection at Compile-Time
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Type Reflection
+//
+// Provides compile-time type introspection capabilities for meta programming.
+// All reflection happens at compile-time with zero runtime overhead.
+//
+// ## Capabilities
+//
+// - Field enumeration and inspection
+// - Variant enumeration for sum types
+// - Generic parameter access
+// - Protocol/trait information
+// - Attribute inspection
+//
+// =============================================================================
+
+module meta.reflection;
+
+mount core.{Text, List, Maybe};
+mount meta.span.{Span};
+mount meta.attribute.{Attribute};
+
+// =============================================================================
+// TypeKind
+// =============================================================================
+
+/// Classification of types
+@repr(UInt8)
+public type TypeKind is
+    /// Struct/record type: `type Foo is { ... }`
+    | Struct
+    /// Enum/sum type: `type Foo is A | B | C`
+    | Enum
+    /// Newtype wrapper: `type Foo is (T)`
+    | Newtype
+    /// Unit type: `type Foo is ()`
+    | Unit
+    /// Protocol/trait: `type Foo is protocol { ... }`
+    | Protocol
+    /// Tuple type: `(A, B, C)`
+    | Tuple
+    /// Array type: `[T; N]`
+    | Array
+    /// Slice type: `[T]`
+    | Slice
+    /// Reference type: `&T`, `&mut T`
+    | Reference
+    /// Pointer type: `*const T`, `*mut T`
+    | Pointer
+    /// Function type: `fn(A) -> B`
+    | Function
+    /// Generic type parameter: `T` in `fn foo<T>()`
+    | TypeParam
+    /// Associated type: `Self.Item`
+    | Associated
+    /// Primitive type: Int, Bool, Float, etc.
+    | Primitive
+    /// Never type: `!`
+    | Never
+    /// Inferred type: `_`
+    | Infer
+    /// Unknown (error recovery)
+    | Unknown;
+
+implement TypeKind {
+    /// Check if this is a compound type (has fields or variants)
+    public fn is_compound(&self) -> Bool {
+        match self {
+            Struct | Enum | Tuple => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a reference type
+    public fn is_reference(&self) -> Bool {
+        match self {
+            Reference | Pointer => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a primitive type
+    public fn is_primitive(&self) -> Bool {
+        match self {
+            Primitive => true,
+            _ => false,
+        }
+    }
+
+    /// Get human-readable name
+    public fn name(&self) -> Text {
+        match self {
+            Struct => "struct",
+            Enum => "enum",
+            Newtype => "newtype",
+            Unit => "unit",
+            Protocol => "protocol",
+            Tuple => "tuple",
+            Array => "array",
+            Slice => "slice",
+            Reference => "reference",
+            Pointer => "pointer",
+            Function => "function",
+            TypeParam => "type parameter",
+            Associated => "associated type",
+            Primitive => "primitive",
+            Never => "never",
+            Infer => "inferred",
+            Unknown => "unknown",
+        }
+    }
+}
+
+// =============================================================================
+// FieldInfo
+// =============================================================================
+
+/// Information about a struct field
+public type FieldInfo is {
+    /// Field name (empty for tuple struct fields)
+    name: Text,
+
+    /// Field index (position in struct)
+    index: Int,
+
+    /// Field type name
+    type_name: Text,
+
+    /// Field type kind
+    type_kind: TypeKind,
+
+    /// Field visibility
+    visibility: Visibility,
+
+    /// Whether field is mutable
+    is_mutable: Bool,
+
+    /// Field attributes
+    attributes: List<Attribute>,
+
+    /// Field documentation
+    doc: Maybe<Text>,
+
+    /// Source span of field declaration
+    span: Span,
+};
+
+implement FieldInfo {
+    /// Check if field has specific attribute
+    public fn has_attribute(&self, name: Text) -> Bool {
+        self.attributes.iter().any(|a| a.name == name)
+    }
+
+    /// Get attribute by name
+    public fn get_attribute(&self, name: Text) -> Maybe<&Attribute> {
+        self.attributes.iter().find(|a| a.name == name)
+    }
+
+    /// Check if field is public
+    public fn is_public(&self) -> Bool {
+        self.visibility == Visibility.Public
+    }
+
+    /// Check if field is private
+    public fn is_private(&self) -> Bool {
+        self.visibility == Visibility.Private
+    }
+
+    /// Check if this is a tuple field (has numeric index, no name)
+    public fn is_tuple_field(&self) -> Bool {
+        self.name.is_empty() || self.name.chars().all(|c| c.is_digit(10))
+    }
+
+    /// Get accessor expression for this field
+    public fn accessor(&self) -> Text {
+        if self.is_tuple_field() {
+            f".{self.index}"
+        } else {
+            f".{self.name}"
+        }
+    }
+}
+
+// =============================================================================
+// VariantInfo
+// =============================================================================
+
+/// Information about an enum variant
+public type VariantInfo is {
+    /// Variant name
+    name: Text,
+
+    /// Variant index (discriminant)
+    index: Int,
+
+    /// Variant kind
+    kind: VariantKind,
+
+    /// Fields (for struct/tuple variants)
+    fields: List<FieldInfo>,
+
+    /// Variant attributes
+    attributes: List<Attribute>,
+
+    /// Variant documentation
+    doc: Maybe<Text>,
+
+    /// Source span of variant declaration
+    span: Span,
+};
+
+implement VariantInfo {
+    /// Check if variant has specific attribute
+    public fn has_attribute(&self, name: Text) -> Bool {
+        self.attributes.iter().any(|a| a.name == name)
+    }
+
+    /// Get attribute by name
+    public fn get_attribute(&self, name: Text) -> Maybe<&Attribute> {
+        self.attributes.iter().find(|a| a.name == name)
+    }
+
+    /// Check if this is a unit variant (no data)
+    public fn is_unit(&self) -> Bool {
+        self.kind == VariantKind.Unit
+    }
+
+    /// Check if this is a tuple variant
+    public fn is_tuple(&self) -> Bool {
+        self.kind == VariantKind.Tuple
+    }
+
+    /// Check if this is a struct variant
+    public fn is_struct(&self) -> Bool {
+        self.kind == VariantKind.Struct
+    }
+
+    /// Get pattern for matching this variant
+    ///
+    /// Returns pattern like "Some(x)" or "Point { x, y }"
+    public fn pattern(&self) -> Text {
+        match self.kind {
+            VariantKind.Unit => self.name.clone(),
+            VariantKind.Tuple => {
+                let bindings = self.fields.iter()
+                    .enumerate()
+                    .map(|(i, _)| f"_{i}")
+                    .collect()
+                    .join(", ");
+                f"{self.name}({bindings})"
+            }
+            VariantKind.Struct => {
+                let bindings = self.fields.iter()
+                    .map(|f| f.name.clone())
+                    .collect()
+                    .join(", ");
+                f"{self.name} {{ {bindings} }}"
+            }
+        }
+    }
+
+    /// Get wildcard pattern (ignores fields)
+    public fn wildcard_pattern(&self) -> Text {
+        match self.kind {
+            VariantKind.Unit => self.name.clone(),
+            VariantKind.Tuple => f"{self.name}(..)",
+            VariantKind.Struct => f"{self.name} {{ .. }}",
+        }
+    }
+}
+
+/// Variant kind
+@repr(UInt8)
+public type VariantKind is
+    /// Unit variant: `None`
+    | Unit
+    /// Tuple variant: `Some(T)`
+    | Tuple
+    /// Struct variant: `Point { x: Int, y: Int }`
+    | Struct;
+
+// =============================================================================
+// GenericParam
+// =============================================================================
+
+/// Information about a generic type parameter
+public type GenericParam is {
+    /// Parameter name
+    name: Text,
+
+    /// Parameter index
+    index: Int,
+
+    /// Parameter kind
+    kind: GenericParamKind,
+
+    /// Bounds on this parameter
+    bounds: List<Text>,
+
+    /// Default value (if any)
+    default: Maybe<Text>,
+
+    /// Source span
+    span: Span,
+};
+
+implement GenericParam {
+    /// Check if parameter has bound
+    public fn has_bound(&self, bound: Text) -> Bool {
+        self.bounds.contains(&bound)
+    }
+
+    /// Check if parameter is constrained
+    public fn is_constrained(&self) -> Bool {
+        !self.bounds.is_empty()
+    }
+
+    /// Check if parameter has default
+    public fn has_default(&self) -> Bool {
+        self.default.is_some()
+    }
+
+    /// Get declaration syntax
+    public fn declaration(&self) -> Text {
+        let mut decl = self.name.clone();
+
+        if !self.bounds.is_empty() {
+            decl = f"{decl}: {self.bounds.join(" + ")}";
+        }
+
+        if let Some(def) = &self.default {
+            decl = f"{decl} = {def}";
+        }
+
+        decl
+    }
+}
+
+/// Generic parameter kind
+@repr(UInt8)
+public type GenericParamKind is
+    /// Type parameter: `T` in `fn foo<T>()`
+    | Type
+    /// Lifetime parameter: `'a` in `fn foo<'a>()`
+    | Lifetime
+    /// Const parameter: `N` in `fn foo<const N: Int>()`
+    | Const;
+
+// =============================================================================
+// ProtocolInfo
+// =============================================================================
+
+/// Information about a protocol (trait)
+public type ProtocolInfo is {
+    /// Protocol name
+    name: Text,
+
+    /// Full path
+    path: Text,
+
+    /// Generic parameters
+    generics: List<GenericParam>,
+
+    /// Super protocols (bounds)
+    super_protocols: List<Text>,
+
+    /// Associated types
+    associated_types: List<AssociatedTypeInfo>,
+
+    /// Required methods
+    required_methods: List<FunctionInfo>,
+
+    /// Provided methods (with default impl)
+    provided_methods: List<FunctionInfo>,
+
+    /// Protocol attributes
+    attributes: List<Attribute>,
+
+    /// Protocol documentation
+    doc: Maybe<Text>,
+
+    /// Source span
+    span: Span,
+};
+
+implement ProtocolInfo {
+    /// Check if protocol is marker (no methods)
+    public fn is_marker(&self) -> Bool {
+        self.required_methods.is_empty() && self.provided_methods.is_empty()
+    }
+
+    /// Get all methods (required + provided)
+    public fn all_methods(&self) -> List<&FunctionInfo> {
+        self.required_methods.iter()
+            .chain(self.provided_methods.iter())
+            .collect()
+    }
+
+    /// Check if protocol has associated type
+    public fn has_associated_type(&self, name: Text) -> Bool {
+        self.associated_types.iter().any(|at| at.name == name)
+    }
+
+    /// Get associated type by name
+    public fn get_associated_type(&self, name: Text) -> Maybe<&AssociatedTypeInfo> {
+        self.associated_types.iter().find(|at| at.name == name)
+    }
+}
+
+/// Associated type information
+public type AssociatedTypeInfo is {
+    /// Associated type name
+    name: Text,
+
+    /// Bounds on the associated type
+    bounds: List<Text>,
+
+    /// Default type (if any)
+    default: Maybe<Text>,
+
+    /// Documentation
+    doc: Maybe<Text>,
+
+    /// Source span
+    span: Span,
+};
+
+// =============================================================================
+// FunctionInfo
+// =============================================================================
+
+/// Information about a function signature
+public type FunctionInfo is {
+    /// Function name
+    name: Text,
+
+    /// Full path
+    path: Text,
+
+    /// Generic parameters
+    generics: List<GenericParam>,
+
+    /// Function parameters
+    params: List<ParamInfo>,
+
+    /// Return type name
+    return_type: Text,
+
+    /// Return type kind
+    return_kind: TypeKind,
+
+    /// Whether function is async
+    is_async: Bool,
+
+    /// Whether function is const
+    is_const: Bool,
+
+    /// Whether function is unsafe
+    is_unsafe: Bool,
+
+    /// Whether function is pure
+    is_pure: Bool,
+
+    /// Whether function is meta
+    is_meta: Bool,
+
+    /// Required contexts
+    contexts: List<Text>,
+
+    /// Function attributes
+    attributes: List<Attribute>,
+
+    /// Function documentation
+    doc: Maybe<Text>,
+
+    /// Visibility
+    visibility: Visibility,
+
+    /// Source span
+    span: Span,
+};
+
+implement FunctionInfo {
+    /// Get self parameter if present
+    public fn self_param(&self) -> Maybe<&ParamInfo> {
+        self.params.first().filter(|p| p.is_self())
+    }
+
+    /// Check if this is a method (has self parameter)
+    public fn is_method(&self) -> Bool {
+        self.self_param().is_some()
+    }
+
+    /// Check if this is a static function (no self)
+    public fn is_static(&self) -> Bool {
+        !self.is_method()
+    }
+
+    /// Get non-self parameters
+    public fn non_self_params(&self) -> List<&ParamInfo> {
+        self.params.iter().filter(|p| !p.is_self()).collect()
+    }
+
+    /// Check if function requires specific context
+    public fn requires_context(&self, ctx: Text) -> Bool {
+        self.contexts.contains(&ctx)
+    }
+
+    /// Get function signature as string
+    public fn signature(&self) -> Text {
+        let params = self.params.iter()
+            .map(|p| p.declaration())
+            .collect()
+            .join(", ");
+
+        let mut sig = f"fn {self.name}";
+
+        if !self.generics.is_empty() {
+            let gens = self.generics.iter()
+                .map(|g| g.declaration())
+                .collect()
+                .join(", ");
+            sig = f"{sig}<{gens}>";
+        }
+
+        sig = f"{sig}({params})";
+
+        if self.return_type != "()" {
+            sig = f"{sig} -> {self.return_type}";
+        }
+
+        if !self.contexts.is_empty() {
+            sig = f"{sig} using [{self.contexts.join(", ")}]";
+        }
+
+        sig
+    }
+}
+
+/// Function parameter information
+public type ParamInfo is {
+    /// Parameter name
+    name: Text,
+
+    /// Parameter index
+    index: Int,
+
+    /// Parameter type name
+    type_name: Text,
+
+    /// Parameter type kind
+    type_kind: TypeKind,
+
+    /// Whether parameter is mutable
+    is_mut: Bool,
+
+    /// Whether this is self parameter
+    is_self_param: Bool,
+
+    /// Self reference kind (if self parameter)
+    self_kind: Maybe<SelfKind>,
+
+    /// Default value (if any)
+    default: Maybe<Text>,
+
+    /// Parameter attributes
+    attributes: List<Attribute>,
+
+    /// Source span
+    span: Span,
+};
+
+implement ParamInfo {
+    /// Check if this is a self parameter
+    public fn is_self(&self) -> Bool {
+        self.is_self_param
+    }
+
+    /// Get declaration syntax
+    public fn declaration(&self) -> Text {
+        if self.is_self_param {
+            match self.self_kind {
+                Some(SelfKind.Value) => "self",
+                Some(SelfKind.Ref) => "&self",
+                Some(SelfKind.RefMut) => "&mut self",
+                None => "self",
+            }.to_string()
+        } else {
+            let mut decl = self.name.clone();
+            if self.is_mut {
+                decl = f"mut {decl}";
+            }
+            decl = f"{decl}: {self.type_name}";
+            if let Some(def) = &self.default {
+                decl = f"{decl} = {def}";
+            }
+            decl
+        }
+    }
+}
+
+/// Self parameter kind
+@repr(UInt8)
+public type SelfKind is
+    /// `self` - takes ownership
+    | Value
+    /// `&self` - shared reference
+    | Ref
+    /// `&mut self` - mutable reference
+    | RefMut;
+
+// =============================================================================
+// Visibility
+// =============================================================================
+
+/// Item visibility
+@repr(UInt8)
+public type Visibility is
+    /// Public: accessible everywhere
+    | Public
+    /// Private: accessible only in current module
+    | Private
+    /// Crate-visible: accessible within current crate
+    | Crate
+    /// Super-visible: accessible in parent module
+    | Super
+    /// Path-restricted: accessible in specific path
+    | In(Text);
+
+implement Visibility {
+    /// Check if publicly visible
+    public fn is_public(&self) -> Bool {
+        self == Visibility.Public
+    }
+
+    /// Get keyword for this visibility
+    public fn keyword(&self) -> Maybe<Text> {
+        match self {
+            Public => Some("public".to_string()),
+            Private => None,
+            Crate => Some("public(crate)".to_string()),
+            Super => Some("public(super)".to_string()),
+            In(path) => Some(f"public(in {path})"),
+        }
+    }
+}
+
+// =============================================================================
+// PrimitiveType
+// =============================================================================
+
+/// Primitive type information
+@repr(UInt8)
+public type PrimitiveType is
+    | Bool
+    | Char
+    | Int8 | Int16 | Int32 | Int64 | Int
+    | UInt8 | UInt16 | UInt32 | UInt64
+    | ISize | USize
+    | Float32 | Float64
+    | Text
+    | Unit;
+
+implement PrimitiveType {
+    /// Get type name
+    public fn name(&self) -> Text {
+        match self {
+            Bool => "Bool",
+            Char => "Char",
+            Int8 => "Int8", Int16 => "Int16", Int32 => "Int32", Int64 => "Int64", Int => "Int",
+            UInt8 => "UInt8", UInt16 => "UInt16", UInt32 => "UInt32", UInt64 => "UInt64",
+            ISize => "ISize", USize => "USize",
+            Float32 => "Float32", Float64 => "Float64",
+            Text => "Text",
+            Unit => "()",
+        }.to_string()
+    }
+
+    /// Get size in bytes
+    public fn size(&self) -> Int {
+        match self {
+            Bool => 1,
+            Char => 4,
+            Int8 | UInt8 => 1,
+            Int16 | UInt16 => 2,
+            Int32 | UInt32 | Float32 => 4,
+            Int64 | UInt64 | Float64 | Int | ISize | USize => 8,
+            Text => 24,  // Fat pointer + length
+            Unit => 0,
+        }
+    }
+
+    /// Check if this is a numeric type
+    public fn is_numeric(&self) -> Bool {
+        match self {
+            Bool | Char | Text | Unit => false,
+            _ => true,
+        }
+    }
+
+    /// Check if this is a signed integer
+    public fn is_signed(&self) -> Bool {
+        match self {
+            Int8 | Int16 | Int32 | Int64 | Int | ISize => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is an unsigned integer
+    public fn is_unsigned(&self) -> Bool {
+        match self {
+            UInt8 | UInt16 | UInt32 | UInt64 | USize => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a floating point type
+    public fn is_float(&self) -> Bool {
+        match self {
+            Float32 | Float64 => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// TraitBound (Protocol Bound)
+// =============================================================================
+
+/// Information about a trait/protocol bound
+///
+/// Represents bounds like `T: Clone + Send` or `T: Iterator<Item = Int>`.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn analyze_bounds<T>() -> List<TraitBound> using TypeInfo {
+///     let bounds = TypeInfo.bounds_of<T>();
+///     for bound in bounds {
+///         println(f"Bound: {bound.protocol_name}");
+///         for (name, ty) in bound.associated_types {
+///             println(f"  {name} = {ty}");
+///         }
+///     }
+///     bounds
+/// }
+/// ```
+public type TraitBound is {
+    /// Protocol/trait name
+    protocol_name: Text,
+
+    /// Full path to protocol
+    protocol_path: Text,
+
+    /// Generic arguments to the protocol (e.g., `Item` in `Iterator<Item = Int>`)
+    type_args: List<Text>,
+
+    /// Associated type bindings (e.g., `Item = Int`)
+    associated_types: List<(Text, Text)>,
+
+    /// Whether this is a negative bound (`!Send`)
+    is_negative: Bool,
+
+    /// Whether this is a maybe bound (`?Sized`)
+    is_maybe: Bool,
+
+    /// Source span
+    span: Span,
+};
+
+implement TraitBound {
+    /// Get simplified bound syntax
+    public fn syntax(&self) -> Text {
+        let mut result = self.protocol_name.clone();
+
+        if !self.type_args.is_empty() || !self.associated_types.is_empty() {
+            let mut args: List<Text> = self.type_args.clone();
+            for (name, ty) in &self.associated_types {
+                args.push(f"{name} = {ty}");
+            }
+            result = f"{result}<{args.join(", ")}>";
+        }
+
+        if self.is_negative {
+            result = f"!{result}";
+        } else if self.is_maybe {
+            result = f"?{result}";
+        }
+
+        result
+    }
+
+    /// Check if this is a marker trait bound
+    public fn is_marker(&self) -> Bool {
+        match self.protocol_name.as_str() {
+            "Copy" | "Clone" | "Send" | "Sync" | "Sized" | "Unpin" => true,
+            _ => false,
+        }
+    }
+
+    /// Check if bound implies Copy
+    public fn implies_copy(&self) -> Bool {
+        self.protocol_name == "Copy"
+    }
+}
+
+// =============================================================================
+// LifetimeParam
+// =============================================================================
+
+/// Information about a lifetime parameter
+///
+/// Represents lifetime parameters like `'a`, `'static`, or `'_`.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn analyze_lifetimes<T>() using TypeInfo {
+///     let lifetimes = TypeInfo.lifetime_params_of<T>();
+///     for lt in lifetimes {
+///         println(f"Lifetime: {lt.name}");
+///         if !lt.bounds.is_empty() {
+///             println(f"  Bounds: {lt.bounds.join(", ")}");
+///         }
+///     }
+/// }
+/// ```
+public type LifetimeParam is {
+    /// Lifetime name (e.g., "a" for 'a, "static" for 'static)
+    name: Text,
+
+    /// Parameter index
+    index: Int,
+
+    /// Bounds on this lifetime (other lifetimes it must outlive)
+    bounds: List<Text>,
+
+    /// Whether this is the 'static lifetime
+    is_static: Bool,
+
+    /// Whether this is an anonymous lifetime ('_)
+    is_anonymous: Bool,
+
+    /// Source span
+    span: Span,
+};
+
+implement LifetimeParam {
+    /// Get lifetime syntax ('a, 'static, etc.)
+    public fn syntax(&self) -> Text {
+        if self.is_static {
+            "'static".to_string()
+        } else if self.is_anonymous {
+            "'_".to_string()
+        } else {
+            f"'{self.name}"
+        }
+    }
+
+    /// Get declaration with bounds
+    public fn declaration(&self) -> Text {
+        let base = self.syntax();
+        if self.bounds.is_empty() {
+            base
+        } else {
+            f"{base}: {self.bounds.iter().map(|b| f"'{b}").join(" + ")}"
+        }
+    }
+
+    /// Check if this lifetime has explicit bounds
+    public fn has_bounds(&self) -> Bool {
+        !self.bounds.is_empty()
+    }
+}
+
+// =============================================================================
+// OwnershipInfo
+// =============================================================================
+
+/// Information about ownership and borrowing for a type
+///
+/// Provides compile-time insight into ownership semantics.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_clone<T>() -> TokenStream using TypeInfo {
+///     let ownership = TypeInfo.ownership_of<T>();
+///
+///     if ownership.is_copy {
+///         // Can use simple copy
+///         quote { implement Clone for T { fn clone(&self) -> Self { *self } } }
+///     } else {
+///         // Need deep clone
+///         generate_deep_clone<T>()
+///     }
+/// }
+/// ```
+public type OwnershipInfo is {
+    /// Whether type implements Copy
+    is_copy: Bool,
+
+    /// Whether type implements Clone
+    is_clone: Bool,
+
+    /// Whether type is Send (safe to transfer between threads)
+    is_send: Bool,
+
+    /// Whether type is Sync (safe to share between threads)
+    is_sync: Bool,
+
+    /// Whether type has Drop implementation
+    has_drop: Bool,
+
+    /// Whether type needs drop (has non-trivial destructor)
+    needs_drop: Bool,
+
+    /// Whether type is Unpin (safe to move while borrowed)
+    is_unpin: Bool,
+
+    /// Whether type has interior mutability
+    has_interior_mutability: Bool,
+
+    /// Fields that prevent Copy/Send/Sync
+    blocking_fields: List<Text>,
+};
+
+implement OwnershipInfo {
+    /// Check if type can be trivially copied
+    public fn is_trivially_copyable(&self) -> Bool {
+        self.is_copy && !self.needs_drop
+    }
+
+    /// Check if type is thread-safe
+    public fn is_thread_safe(&self) -> Bool {
+        self.is_send && self.is_sync
+    }
+
+    /// Check if type requires explicit cleanup
+    public fn requires_cleanup(&self) -> Bool {
+        self.has_drop || self.needs_drop
+    }
+
+    /// Get reason why type is not Copy
+    public fn non_copy_reason(&self) -> Maybe<Text> {
+        if self.is_copy {
+            None
+        } else if !self.blocking_fields.is_empty() {
+            Some(f"contains non-Copy field(s): {self.blocking_fields.join(", ")}")
+        } else if self.has_drop {
+            Some("has custom Drop implementation".to_string())
+        } else {
+            Some("unknown reason".to_string())
+        }
+    }
+}
+
+// =============================================================================
+// FieldOffset
+// =============================================================================
+
+/// Information about a field's memory layout
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn derive_serialize<T>() -> TokenStream using TypeInfo {
+///     let fields = TypeInfo.fields_of<T>();
+///     for field in fields {
+///         let offset = TypeInfo.field_offset<T>(field.name)?;
+///         // Use offset for binary serialization
+///     }
+/// }
+/// ```
+public type FieldOffset is {
+    /// Field name
+    name: Text,
+
+    /// Byte offset from start of struct
+    offset: Int,
+
+    /// Field size in bytes
+    size: Int,
+
+    /// Field alignment in bytes
+    align: Int,
+
+    /// Padding bytes before this field
+    padding_before: Int,
+};
+
+implement FieldOffset {
+    /// Get end position (offset + size)
+    public fn end(&self) -> Int {
+        self.offset + self.size
+    }
+
+    /// Check if field has padding before it
+    public fn has_padding(&self) -> Bool {
+        self.padding_before > 0
+    }
+}
+
+// =============================================================================
+// MethodResolution
+// =============================================================================
+
+/// Result of method resolution for a type
+///
+/// Contains information about where a method comes from.
+public type MethodResolution is {
+    /// The resolved function info
+    function: FunctionInfo,
+
+    /// Where the method comes from
+    source: MethodSource,
+
+    /// Protocol that provides the method (if from protocol)
+    providing_protocol: Maybe<Text>,
+
+    /// Whether this is a default implementation
+    is_default_impl: Bool,
+};
+
+/// Source of a resolved method
+@repr(UInt8)
+public type MethodSource is
+    /// Inherent method (defined directly on type)
+    | Inherent
+    /// Protocol method (from trait implementation)
+    | Protocol
+    /// Auto-derived method
+    | Derived
+    /// Compiler-generated method
+    | Generated;

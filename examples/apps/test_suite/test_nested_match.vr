@@ -1,0 +1,47 @@
+// Test nested pattern matching with simple variants
+
+type Color is | Red | Green | Blue;
+type MaybeColor is Maybe<Color>;
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+fn describe_maybe_color(mc: MaybeColor) -> Text {
+    match mc {
+        Some(c) => {
+            // Nested match
+            match c {
+                Red => "It's red!",
+                Green => "It's green!",
+                Blue => "It's blue!"
+            }
+        }
+        None => "No color"
+    }
+}
+
+fn main() {
+    let _ = print("Testing nested pattern matching...");
+
+    let red = Red;
+    let green = Green;
+    let blue = Blue;
+
+    let _ = print(f"Red: {color_name(red)}");
+    let _ = print(f"Green: {color_name(green)}");
+    let _ = print(f"Blue: {color_name(blue)}");
+
+    // Test Maybe<Color>
+    let maybe_red: MaybeColor = Some(Red);
+    let maybe_none: MaybeColor = None;
+
+    let _ = print(describe_maybe_color(maybe_red));
+    let _ = print(describe_maybe_color(maybe_none));
+
+    let _ = print("Done!");
+}

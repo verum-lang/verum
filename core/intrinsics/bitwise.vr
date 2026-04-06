@@ -1,0 +1,119 @@
+// =============================================================================
+// core/intrinsics/bitwise.vr - Bitwise Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides bitwise operation intrinsics that map directly to
+// LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Logical operations: and, or, xor, not
+// - Shifts: shl, shr, lshr, ashr
+// - Rotations: rotl, rotr, fshl, fshr
+// - Bit counting: clz, ctz, popcnt
+// - Bit manipulation: bswap, bitreverse
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.bitwise;
+
+// =============================================================================
+// SECTION 1: Logical Operations
+// =============================================================================
+
+/// Bitwise AND
+public fn bitand<T>(a: T, b: T) -> T { @intrinsic("and", a, b) }
+
+/// Bitwise OR
+public fn bitor<T>(a: T, b: T) -> T { @intrinsic("or", a, b) }
+
+/// Bitwise XOR
+public fn bitxor<T>(a: T, b: T) -> T { @intrinsic("xor", a, b) }
+
+/// Bitwise NOT
+public fn bitnot<T>(x: T) -> T { @intrinsic("not", x) }
+
+// =============================================================================
+// SECTION 2: Shift Operations
+// =============================================================================
+
+/// Left shift
+public fn shl<T>(x: T, n: UInt32) -> T { @intrinsic("shl", x, n) }
+
+/// Right shift (arithmetic for signed, logical for unsigned)
+public fn shr<T>(x: T, n: UInt32) -> T { @intrinsic("shr", x, n) }
+
+/// Logical right shift (always zero-fills)
+public fn lshr<T>(x: T, n: UInt32) -> T { @intrinsic("lshr", x, n) }
+
+/// Arithmetic right shift (sign-extends)
+public fn ashr<T>(x: T, n: UInt32) -> T { @intrinsic("ashr", x, n) }
+
+// =============================================================================
+// SECTION 3: Rotation Operations
+// =============================================================================
+
+/// Rotate left
+public fn rotl<T>(x: T, n: UInt32) -> T { @intrinsic("fshl", x, x, n) }
+
+/// Rotate right
+public fn rotr<T>(x: T, n: UInt32) -> T { @intrinsic("fshr", x, x, n) }
+
+/// Funnel shift left (fshl(a, b, c) = (a << c) | (b >> (bits - c)))
+public fn fshl<T>(a: T, b: T, c: UInt32) -> T { @intrinsic("fshl", a, b, c) }
+
+/// Funnel shift right (fshr(a, b, c) = (a << (bits - c)) | (b >> c))
+public fn fshr<T>(a: T, b: T, c: UInt32) -> T { @intrinsic("fshr", a, b, c) }
+
+// =============================================================================
+// SECTION 4: Bit Counting
+// =============================================================================
+
+/// Count leading zeros
+public fn clz<T>(x: T) -> Int { @intrinsic("ctlz", x) }
+
+/// Count trailing zeros
+public fn ctz<T>(x: T) -> Int { @intrinsic("cttz", x) }
+
+/// Population count (count ones / set bits)
+public fn popcnt<T>(x: T) -> Int { @intrinsic("ctpop", x) }
+
+/// Count leading ones
+public fn leading_ones<T>(x: T) -> Int {
+    clz(bitnot(x))
+}
+
+/// Count trailing ones
+public fn trailing_ones<T>(x: T) -> Int {
+    ctz(bitnot(x))
+}
+
+// --- Type-specific bit counting ---
+/// Count leading zeros for UInt32
+public fn clz_u32(x: UInt32) -> Int { @intrinsic("ctlz", x) }
+/// Count trailing zeros for UInt32
+public fn ctz_u32(x: UInt32) -> Int { @intrinsic("cttz", x) }
+/// Population count for UInt32
+public fn popcnt_u32(x: UInt32) -> Int { @intrinsic("ctpop", x) }
+/// Count leading zeros for UInt64
+public fn clz_u64(x: UInt64) -> Int { @intrinsic("ctlz", x) }
+/// Count trailing zeros for UInt64
+public fn ctz_u64(x: UInt64) -> Int { @intrinsic("cttz", x) }
+/// Population count for UInt64
+public fn popcnt_u64(x: UInt64) -> Int { @intrinsic("ctpop", x) }
+
+// =============================================================================
+// SECTION 5: Bit Manipulation
+// =============================================================================
+
+/// Byte swap (endianness conversion)
+public fn bswap<T>(x: T) -> T { @intrinsic("bswap", x) }
+
+/// Bit reverse
+public fn bitreverse<T>(x: T) -> T { @intrinsic("bitreverse", x) }
+
+/// Reverse bits in each byte (not the whole word)
+public fn byte_swap_bits<T>(x: T) -> T { @intrinsic("byte_swap_bits", x) }

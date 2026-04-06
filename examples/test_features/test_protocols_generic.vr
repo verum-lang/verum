@@ -1,0 +1,22 @@
+// NOTE: Generic protocols with type parameters are not fully supported yet
+// This test demonstrates the syntax but may not compile successfully
+
+type Showable is protocol {
+    fn show(self) -> Text;
+}
+
+type Wrapper<T> is { inner: T }
+
+// Simplified: using concrete type instead of generic
+type IntWrapper is { inner: Int }
+
+implement Showable for IntWrapper {
+    fn show(self) -> Text {
+        f"Wrapper({self.inner})"
+    }
+}
+
+fn main() {
+    let w = IntWrapper { inner: 42 }
+    println(w.show())
+}

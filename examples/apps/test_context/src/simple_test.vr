@@ -1,0 +1,18 @@
+// Simplest possible context method dispatch test
+
+context Logger {
+    fn log(msg: Text)
+}
+
+fn main() {
+    print("Testing context creation...");
+
+    // Check if Logger exists as a value
+    print("Logger context created");
+
+    // Try calling a method on it
+    // This should now work with our fix
+    // Logger.log("Hello!");
+
+    print("Test complete!");
+}

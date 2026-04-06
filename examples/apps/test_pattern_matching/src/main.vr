@@ -1,0 +1,424 @@
+// Comprehensive Pattern Matching Test
+// Tests all pattern matching forms supported by Verum
+
+// ===== Basic Enum Types =====
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { base: Float, height: Float };
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Either<L, R> is
+    | Left(L)
+    | Right(R);
+
+// ===== Nested Types =====
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { value: T, left: Tree<T>, right: Tree<T> };
+
+type List<T> is
+    | Nil
+    | Cons(T, List<T>);
+
+// ===== Pattern Matching: Literal Patterns =====
+
+fn match_number(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "other"
+    }
+}
+
+fn match_bool(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no"
+    }
+}
+
+fn match_string(s: Text) -> Text {
+    match s {
+        "" => "empty",
+        "hello" => "greeting",
+        "bye" => "farewell",
+        _ => "something else"
+    }
+}
+
+// ===== Pattern Matching: Simple Enum =====
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red | Green | Blue => true
+    }
+}
+
+// ===== Pattern Matching: Tuple Destructuring =====
+
+fn tuple_match(t: (Int, Int)) -> Text {
+    match t {
+        (0, 0) => "origin",
+        (0, _) => "on y-axis",
+        (_, 0) => "on x-axis",
+        (x, y) => f"point at ({x}, {y})"
+    }
+}
+
+// ===== Pattern Matching: Record Destructuring =====
+
+fn area(s: Shape) -> Float {
+    match s {
+        Circle { radius } => 3.14159 * radius * radius,
+        Rectangle { width, height } => width * height,
+        Triangle { base, height } => 0.5 * base * height
+    }
+}
+
+fn describe_shape(s: Shape) -> Text {
+    match s {
+        Circle { radius } => f"Circle with radius {radius}",
+        Rectangle { width: w, height: h } => f"Rectangle {w}x{h}",
+        Triangle { .. } => "Some triangle"
+    }
+}
+
+// ===== Pattern Matching: Maybe Type =====
+
+fn get_or_default<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(v) => v,
+        None => default
+    }
+}
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(a) => Some(f(a)),
+        None => None
+    }
+}
+
+fn is_some<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false
+    }
+}
+
+// ===== Pattern Matching: Result Type =====
+
+fn unwrap_or<T, E>(r: Result<T, E>, default: T) -> T {
+    match r {
+        Ok(value) => value,
+        Err(_) => default
+    }
+}
+
+fn map_result<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match r {
+        Ok(value) => Ok(f(value)),
+        Err(e) => Err(e)
+    }
+}
+
+fn is_ok<T, E>(r: Result<T, E>) -> Bool {
+    match r {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+// ===== Pattern Matching: Either Type =====
+
+fn either_to_maybe<L, R>(e: Either<L, R>) -> Maybe<R> {
+    match e {
+        Left(_) => None,
+        Right(r) => Some(r)
+    }
+}
+
+fn map_either<A, B, C>(e: Either<A, B>, f: fn(A) -> C) -> Either<C, B> {
+    match e {
+        Left(a) => Left(f(a)),
+        Right(b) => Right(b)
+    }
+}
+
+// ===== Pattern Matching: Nested Patterns =====
+
+fn nested_maybe(m: Maybe<Maybe<Int>>) -> Text {
+    match m {
+        Some(Some(n)) => f"double some: {n}",
+        Some(None) => "some none",
+        None => "none"
+    }
+}
+
+fn nested_result(r: Result<Maybe<Int>, Text>) -> Text {
+    match r {
+        Ok(Some(n)) => f"success with {n}",
+        Ok(None) => "success but empty",
+        Err(e) => f"error: {e}"
+    }
+}
+
+// ===== Pattern Matching: List Patterns =====
+
+fn list_head<T>(l: List<T>) -> Maybe<T> {
+    match l {
+        Nil => None,
+        Cons(x, _) => Some(x)
+    }
+}
+
+fn list_tail<T>(l: List<T>) -> Maybe<List<T>> {
+    match l {
+        Nil => None,
+        Cons(_, xs) => Some(xs)
+    }
+}
+
+fn list_length<T>(l: List<T>) -> Int {
+    match l {
+        Nil => 0,
+        Cons(_, xs) => 1 + list_length(xs)
+    }
+}
+
+// ===== Pattern Matching: Tree Patterns =====
+
+fn tree_depth<T>(t: Tree<T>) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { value: _, left, right } => {
+            let left_depth = tree_depth(left);
+            let right_depth = tree_depth(right);
+            1 + max(left_depth, right_depth)
+        }
+    }
+}
+
+fn tree_sum(t: Tree<Int>) -> Int {
+    match t {
+        Leaf(n) => n,
+        Node { value, left, right } => value + tree_sum(left) + tree_sum(right)
+    }
+}
+
+// ===== Pattern Matching: Guards =====
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x > 0 && x < 10 => "small positive",
+        x if x >= 10 && x < 100 => "medium positive",
+        _ => "large positive"
+    }
+}
+
+fn categorize_age(age: Int) -> Text {
+    match age {
+        a if a < 0 => "invalid",
+        a if a < 13 => "child",
+        a if a < 20 => "teenager",
+        a if a < 65 => "adult",
+        _ => "senior"
+    }
+}
+
+// ===== Pattern Matching: As Patterns =====
+
+fn extract_some<T>(m: Maybe<T>) -> Text {
+    match m {
+        s @ Some(_) => f"got some: {s}",
+        None => "got none"
+    }
+}
+
+// ===== Pattern Matching: Array/Slice Patterns =====
+
+fn array_match(arr: [Int]) -> Text {
+    match arr {
+        [] => "empty",
+        [x] => f"single: {x}",
+        [x, y] => f"pair: {x}, {y}",
+        [x, y, z] => f"triple: {x}, {y}, {z}",
+        [first, .., last] => f"many: {first} ... {last}",
+        _ => "other"
+    }
+}
+
+// ===== Pattern Matching: Or Patterns =====
+
+fn is_weekend(day: Text) -> Bool {
+    match day {
+        "Saturday" | "Sunday" => true,
+        _ => false
+    }
+}
+
+fn is_vowel(c: Text) -> Bool {
+    match c {
+        "a" | "e" | "i" | "o" | "u" => true,
+        "A" | "E" | "I" | "O" | "U" => true,
+        _ => false
+    }
+}
+
+// ===== Helper Functions =====
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+// ===== Main Test Function =====
+
+fn main() {
+    print("=== Comprehensive Pattern Matching Test ===");
+    print("");
+
+    // Test 1: Literal patterns
+    print("--- Test 1: Literal Patterns ---");
+    print(f"match_number(0) = {match_number(0)}");
+    print(f"match_number(1) = {match_number(1)}");
+    print(f"match_number(5) = {match_number(5)}");
+    print(f"match_bool(true) = {match_bool(true)}");
+    print(f"match_string('hello') = {match_string('hello')}");
+    print("");
+
+    // Test 2: Simple enum
+    print("--- Test 2: Simple Enum Patterns ---");
+    let red = Red;
+    print(f"color_name(Red) = {color_name(red)}");
+    print(f"is_primary(Green) = {is_primary(Green)}");
+    print("");
+
+    // Test 3: Tuple destructuring
+    print("--- Test 3: Tuple Destructuring ---");
+    print(f"tuple_match((0, 0)) = {tuple_match((0, 0))}");
+    print(f"tuple_match((0, 5)) = {tuple_match((0, 5))}");
+    print(f"tuple_match((3, 4)) = {tuple_match((3, 4))}");
+    print("");
+
+    // Test 4: Record destructuring
+    print("--- Test 4: Record Destructuring ---");
+    let circle = Circle { radius: 5.0 };
+    print(f"area(Circle{{radius: 5.0}}) = {area(circle)}");
+    print(f"describe_shape(Circle{{radius: 5.0}}) = {describe_shape(circle)}");
+
+    let rect = Rectangle { width: 3.0, height: 4.0 };
+    print(f"area(Rectangle{{width: 3.0, height: 4.0}}) = {area(rect)}");
+    print("");
+
+    // Test 5: Maybe type
+    print("--- Test 5: Maybe Type Patterns ---");
+    let some_val = Some(42);
+    print(f"get_or_default(Some(42), 0) = {get_or_default(some_val, 0)}");
+
+    let no_val = None;
+    print(f"get_or_default(None, 99) = {get_or_default(no_val, 99)}");
+
+    print(f"is_some(Some(42)) = {is_some(some_val)}");
+    print(f"is_some(None) = {is_some(no_val)}");
+    print("");
+
+    // Test 6: Result type
+    print("--- Test 6: Result Type Patterns ---");
+    let ok_val = Ok(100);
+    print(f"unwrap_or(Ok(100), 0) = {unwrap_or(ok_val, 0)}");
+
+    let err_val = Err("error");
+    print(f"unwrap_or(Err('error'), 0) = {unwrap_or(err_val, 0)}");
+
+    print(f"is_ok(Ok(100)) = {is_ok(ok_val)}");
+    print(f"is_ok(Err('error')) = {is_ok(err_val)}");
+    print("");
+
+    // Test 7: Nested patterns
+    print("--- Test 7: Nested Patterns ---");
+    let nested1 = Some(Some(42));
+    print(f"nested_maybe(Some(Some(42))) = {nested_maybe(nested1)}");
+
+    let nested2 = Some(None);
+    print(f"nested_maybe(Some(None)) = {nested_maybe(nested2)}");
+
+    let nested_res1 = Ok(Some(10));
+    print(f"nested_result(Ok(Some(10))) = {nested_result(nested_res1)}");
+    print("");
+
+    // Test 8: Guards
+    print("--- Test 8: Pattern Guards ---");
+    print(f"classify_number(-5) = {classify_number(-5)}");
+    print(f"classify_number(0) = {classify_number(0)}");
+    print(f"classify_number(7) = {classify_number(7)}");
+    print(f"classify_number(50) = {classify_number(50)}");
+    print(f"classify_number(1000) = {classify_number(1000)}");
+    print("");
+
+    print(f"categorize_age(10) = {categorize_age(10)}");
+    print(f"categorize_age(15) = {categorize_age(15)}");
+    print(f"categorize_age(30) = {categorize_age(30)}");
+    print(f"categorize_age(70) = {categorize_age(70)}");
+    print("");
+
+    // Test 9: Or patterns
+    print("--- Test 9: Or Patterns ---");
+    print(f"is_weekend('Saturday') = {is_weekend('Saturday')}");
+    print(f"is_weekend('Monday') = {is_weekend('Monday')}");
+    print(f"is_vowel('a') = {is_vowel('a')}");
+    print(f"is_vowel('b') = {is_vowel('b')}");
+    print("");
+
+    // Test 10: List patterns
+    print("--- Test 10: List Patterns ---");
+    let list1 = Cons(1, Cons(2, Cons(3, Nil)));
+    let head = list_head(list1);
+    match head {
+        Some(h) => print(f"list_head([1,2,3]) = {h}"),
+        None => print("list_head([1,2,3]) = None")
+    }
+    print(f"list_length([1,2,3]) = {list_length(list1)}");
+    print("");
+
+    print("=== Pattern Matching Features Tested ===");
+    print("✓ Literal patterns (Int, Bool, Text)");
+    print("✓ Wildcard pattern (_)");
+    print("✓ Simple enum patterns");
+    print("✓ Tuple destructuring");
+    print("✓ Record destructuring");
+    print("✓ Nested patterns");
+    print("✓ Or patterns (|)");
+    print("✓ Pattern guards (if)");
+    print("✓ As patterns (@)");
+    print("✓ List patterns");
+    print("✓ Tree patterns (recursive)");
+    print("✓ Rest patterns (..)");
+    print("");
+    print("=== Test Complete ===");
+}

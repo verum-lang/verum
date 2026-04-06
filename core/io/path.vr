@@ -1,0 +1,973 @@
+// =============================================================================
+// path.vr - Path manipulation
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, text, collections
+// =============================================================================
+//
+// This module provides cross-platform path manipulation:
+//
+// - Path: Immutable borrowed path (like &str for paths)
+// - PathBuf: Owned mutable path (like Text for paths)
+// - Component: Path component (RootDir, Normal, ParentDir, etc.)
+//
+// # Platform Differences
+//
+// Unix paths: `/home/user/file.txt`
+// Windows paths: `C:\Users\user\file.txt` (also supports `/`)
+//
+// # Example
+// ```verum
+// let path = Path.new("/home/user/docs/file.txt");
+// assert_eq(path.file_name(), Some("file.txt"));
+// assert_eq(path.extension(), Some("txt"));
+// assert_eq(path.parent(), Some(Path.new("/home/user/docs")));
+//
+// let mut buf = PathBuf.from("/home/user");
+// buf.push("docs");
+// buf.push("file.txt");
+// assert_eq(buf.as_path().to_str(), "/home/user/docs/file.txt");
+// ```
+//
+// =============================================================================
+
+module core.io.path;
+mount core.*;
+mount collections.*;
+mount io.fs.{metadata as fs_metadata};
+
+// =============================================================================
+// Platform Constants
+// =============================================================================
+
+/// Main path separator for the current platform
+@cfg(unix)
+public const MAIN_SEPARATOR: Char = '/';
+
+@cfg(windows)
+public const MAIN_SEPARATOR: Char = '\\';
+
+/// All valid path separators for the current platform
+@cfg(unix)
+const SEPARATORS: List<Char> = ['/'];
+
+@cfg(windows)
+const SEPARATORS: List<Char> = ['/', '\\'];
+
+/// Check if character is a path separator
+fn is_separator(c: Char) -> Bool {
+    // Unix: only '/' is a separator
+    // Windows: both '/' and '\' are separators
+    // For cross-platform, we accept both
+    c == '/' || c == '\\'
+}
+
+// =============================================================================
+// Component
+// =============================================================================
+
+/// A single component of a path.
+///
+/// Components are the pieces between path separators.
+///
+/// # Example
+/// For path `/home/user/../docs/./file.txt`:
+/// - `RootDir` - the leading `/`
+/// - `Normal("home")`
+/// - `Normal("user")`
+/// - `ParentDir` - the `..`
+/// - `Normal("docs")`
+/// - `CurDir` - the `.`
+/// - `Normal("file.txt")`
+public type Component is
+    /// A Windows path prefix (e.g., `C:` || `\\server\share`)
+    | Prefix(Text)
+    /// The root directory `/` || `\`
+    | RootDir
+    /// Current directory `.`
+    | CurDir
+    /// Parent directory `..`
+    | ParentDir
+    /// A normal path component
+    | Normal(Text);
+
+implement Component {
+    /// Get the underlying text if this is a normal component.
+    public fn as_text(&self) -> Maybe<&Text> {
+        match self {
+            Normal(s) => Some(s),
+            Prefix(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Convert component to owned Text.
+    public fn to_text(&self) -> Text {
+        match self {
+            Prefix(s) => s.clone(),
+            RootDir => Text.from(MAIN_SEPARATOR),
+            CurDir => Text.from("."),
+            ParentDir => Text.from(".."),
+            Normal(s) => s.clone(),
+        }
+    }
+}
+
+implement Eq for Component {
+    fn eq(&self, other: &Component) -> Bool {
+        match (self, other) {
+            (Prefix(a), Prefix(b)) => a == b,
+            (RootDir, RootDir) => true,
+            (CurDir, CurDir) => true,
+            (ParentDir, ParentDir) => true,
+            (Normal(a), Normal(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Debug for Component {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Prefix(s) => f.write_str(f"Prefix({s})"),
+            RootDir => f.write_str("RootDir"),
+            CurDir => f.write_str("CurDir"),
+            ParentDir => f.write_str("ParentDir"),
+            Normal(s) => f.write_str(f"Normal({s})"),
+        }
+    }
+}
+
+implement Display for Component {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Prefix(s) => f.write_str(s),
+            RootDir => f.write_str("/"),
+            CurDir => f.write_str("."),
+            ParentDir => f.write_str(".."),
+            Normal(s) => f.write_str(s),
+        }
+    }
+}
+
+// =============================================================================
+// Path
+// =============================================================================
+
+/// An immutable borrowed reference to a path.
+///
+/// This type is similar to `&Text` but provides path-specific methods.
+/// Path is always valid UTF-8.
+///
+/// # Example
+/// ```verum
+/// let path = Path.new("/home/user/file.txt");
+/// let parent = path.parent().unwrap();
+/// let name = path.file_name().unwrap();
+/// ```
+public type Path is {
+    inner: Text,
+};
+
+implement Path {
+    /// Create a new Path from a string.
+    ///
+    /// # Example
+    /// ```verum
+    /// let path = Path.new("/home/user");
+    /// ```
+    public fn new(s: &Text) -> Path {
+        Path { inner: s.clone() }
+    }
+
+    /// Create path from raw string.
+    public fn from_str(s: &str) -> Path {
+        Path { inner: Text.from(s) }
+    }
+
+    /// Get the path as a Text reference.
+    public fn as_str(&self) -> &Text {
+        &self.inner
+    }
+
+    /// Convert to owned Text.
+    public fn to_text(&self) -> Text {
+        self.inner.clone()
+    }
+
+    /// Convert to owned PathBuf.
+    public fn to_path_buf(&self) -> PathBuf {
+        PathBuf { inner: self.inner.clone() }
+    }
+
+    /// Check if the path is empty.
+    public fn is_empty(&self) -> Bool {
+        self.inner.is_empty()
+    }
+
+    /// Check if the path is absolute.
+    ///
+    /// Unix: starts with `/`
+    /// Windows: starts with `C:\` || `\\`
+    public fn is_absolute(&self) -> Bool {
+        if self.inner.is_empty() {
+            return false;
+        }
+
+        // Unix-style: starts with /
+        if self.inner.starts_with("/") {
+            return true;
+        }
+
+        // Windows-style: drive letter (C:\) or UNC path (\\)
+        if self.inner.len() >= 3 {
+            let bytes = self.inner.as_bytes();
+            // Drive letter
+            if bytes[1] == ':' as Byte && is_separator(bytes[2] as Char) {
+                return true;
+            }
+        }
+        if self.inner.len() >= 2 {
+            let bytes = self.inner.as_bytes();
+            // UNC path
+            if is_separator(bytes[0] as Char) && is_separator(bytes[1] as Char) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if the path is relative.
+    public fn is_relative(&self) -> Bool {
+        !self.is_absolute()
+    }
+
+    /// Check if path has a root.
+    public fn has_root(&self) -> Bool {
+        self.is_absolute()
+    }
+
+    /// Get the parent directory.
+    ///
+    /// Returns None if the path has no parent (is root || empty).
+    ///
+    /// # Example
+    /// ```verum
+    /// let path = Path.new("/home/user/file.txt");
+    /// assert_eq(path.parent(), Some(Path.new("/home/user")));
+    /// ```
+    public fn parent(&self) -> Maybe<Path> {
+        if self.inner.is_empty() {
+            return None;
+        }
+
+        // Find the last separator
+        let mut last_sep = -1;
+        for (i, c) in self.inner.chars().enumerate() {
+            if is_separator(c) {
+                last_sep = i as Int;
+            }
+        }
+
+        if last_sep < 0 {
+            // No separator - no parent (relative path with just file name)
+            return None;
+        }
+
+        if last_sep == 0 {
+            // Root is parent
+            if self.inner.len() == 1 {
+                return None; // Path is just "/"
+            }
+            return Some(Path.new(&Text.from(MAIN_SEPARATOR)));
+        }
+
+        Some(Path.new(&self.inner.slice(0, last_sep as Int)))
+    }
+
+    /// Get the ancestors of this path.
+    ///
+    /// Returns an iterator over the path && all its parents.
+    public fn ancestors(&self) -> Ancestors {
+        Ancestors { path: Some(self.clone()) }
+    }
+
+    /// Get the final component of the path (file || directory name).
+    ///
+    /// Returns None if the path ends in `..` || is empty.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq(Path.new("/home/user/file.txt").file_name(), Some("file.txt"));
+    /// assert_eq(Path.new("/home/user/").file_name(), Some("user"));
+    /// ```
+    public fn file_name(&self) -> Maybe<Text> {
+        let path = self.inner.trim_end_matches(is_separator);
+        if path.is_empty() {
+            return None;
+        }
+
+        // Find the last separator
+        let mut last_sep = -1;
+        for (i, c) in path.chars().enumerate() {
+            if is_separator(c) {
+                last_sep = i as Int;
+            }
+        }
+
+        let name = if last_sep < 0 {
+            path.clone()
+        } else {
+            path.slice(last_sep + 1, path.len())
+        };
+
+        if name == ".." || name == "." || name.is_empty() {
+            None
+        } else {
+            Some(name)
+        }
+    }
+
+    /// Get the stem of the file name (without extension).
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq(Path.new("/home/user/file.txt").file_stem(), Some("file"));
+    /// assert_eq(Path.new("/home/user/.hidden").file_stem(), Some(".hidden"));
+    /// ```
+    public fn file_stem(&self) -> Maybe<Text> {
+        let name = self.file_name()?;
+
+        // Find the last dot (but not if it's the first character)
+        let mut last_dot = -1;
+        for (i, c) in name.chars().enumerate() {
+            if c == '.' && i > 0 {
+                last_dot = i as Int;
+            }
+        }
+
+        if last_dot < 0 {
+            Some(name)
+        } else {
+            Some(name.slice(0, last_dot))
+        }
+    }
+
+    /// Get the extension of the file.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq(Path.new("/home/user/file.txt").extension(), Some("txt"));
+    /// assert_eq(Path.new("/home/user/file.tar.gz").extension(), Some("gz"));
+    /// assert_eq(Path.new("/home/user/.hidden").extension(), None);
+    /// ```
+    public fn extension(&self) -> Maybe<Text> {
+        let name = self.file_name()?;
+
+        // Find the last dot (but not if it's the first character)
+        let mut last_dot = -1;
+        for (i, c) in name.chars().enumerate() {
+            if c == '.' && i > 0 {
+                last_dot = i as Int;
+            }
+        }
+
+        if last_dot < 0 {
+            None
+        } else {
+            Some(name.slice(last_dot + 1, name.len()))
+        }
+    }
+
+    /// Join this path with another.
+    ///
+    /// If the other path is absolute, it replaces this path.
+    ///
+    /// # Example
+    /// ```verum
+    /// let path = Path.new("/home/user").join("docs/file.txt");
+    /// assert_eq(path.as_str(), "/home/user/docs/file.txt");
+    /// ```
+    public fn join(&self, other: &Path) -> PathBuf {
+        let mut buf = self.to_path_buf();
+        buf.push(other);
+        buf
+    }
+
+    /// Join with a string path.
+    public fn join_str(&self, other: &Text) -> PathBuf {
+        self.join(&Path.new(other))
+    }
+
+    /// Get an iterator over the components of this path.
+    public fn components(&self) -> Components {
+        Components {
+            path: self.inner.clone(),
+            pos: 0,
+        }
+    }
+
+    /// Get an iterator over the path && its ancestors.
+    public fn iter(&self) -> PathIter {
+        PathIter { components: self.components() }
+    }
+
+    /// Check if this path starts with the given prefix.
+    public fn starts_with(&self, prefix: &Path) -> Bool {
+        self.inner.starts_with(&prefix.inner)
+    }
+
+    /// Check if this path ends with the given suffix.
+    public fn ends_with(&self, suffix: &Path) -> Bool {
+        // For paths, we need to check component-wise
+        let self_name = self.file_name();
+        let suffix_name = suffix.file_name();
+
+        match (self_name, suffix_name) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// Strip a prefix from this path.
+    public fn strip_prefix(&self, prefix: &Path) -> Maybe<Path> {
+        if self.starts_with(prefix) {
+            let remaining = self.inner.slice(prefix.inner.len(), self.inner.len());
+            let trimmed = remaining.trim_start_matches(is_separator);
+            Some(Path.new(&trimmed))
+        } else {
+            None
+        }
+    }
+
+    /// Create a path with a different extension.
+    public fn with_extension(&self, ext: &Text) -> PathBuf {
+        let mut buf = self.to_path_buf();
+        buf.set_extension(ext);
+        buf
+    }
+
+    /// Create a path with a different file name.
+    public fn with_file_name(&self, name: &Text) -> PathBuf {
+        let mut buf = self.to_path_buf();
+        buf.set_file_name(name);
+        buf
+    }
+
+    /// Check if this path exists (convenience for fs.exists).
+    public fn exists(&self) -> Bool {
+        fs_metadata(self).is_ok()
+    }
+
+    /// Check if this path is a file.
+    public fn is_file(&self) -> Bool {
+        match fs_metadata(self) {
+            Ok(meta) => meta.is_file(),
+            Err(_) => false,
+        }
+    }
+
+    /// Check if this path is a directory.
+    public fn is_dir(&self) -> Bool {
+        match fs_metadata(self) {
+            Ok(meta) => meta.is_dir(),
+            Err(_) => false,
+        }
+    }
+}
+
+implement Clone for Path {
+    fn clone(&self) -> Path {
+        Path { inner: self.inner.clone() }
+    }
+}
+
+implement Eq for Path {
+    fn eq(&self, other: &Path) -> Bool {
+        self.inner == other.inner
+    }
+}
+
+implement Hash for Path {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.inner.hash(hasher);
+    }
+}
+
+implement Debug for Path {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Path({self.inner})")
+    }
+}
+
+implement Display for Path {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.inner)
+    }
+}
+
+// =============================================================================
+// PathBuf
+// =============================================================================
+
+/// An owned, mutable path.
+///
+/// This is the owned version of Path, similar to how Text relates to &str.
+///
+/// # Example
+/// ```verum
+/// let mut path = PathBuf.new();
+/// path.push("/home");
+/// path.push("user");
+/// path.push("file.txt");
+/// assert_eq(path.as_path().to_str(), "/home/user/file.txt");
+/// ```
+public type PathBuf is {
+    inner: Text,
+};
+
+implement PathBuf {
+    /// Create a new empty PathBuf.
+    public fn new() -> PathBuf {
+        PathBuf { inner: Text.new() }
+    }
+
+    /// Create PathBuf with capacity.
+    public fn with_capacity(capacity: Int) -> PathBuf {
+        PathBuf { inner: Text.with_capacity(capacity) }
+    }
+
+    /// Create PathBuf from a Text.
+    public fn from(s: &Text) -> PathBuf {
+        PathBuf { inner: s.clone() }
+    }
+
+    /// Create PathBuf from a string literal.
+    public fn from_str(s: &str) -> PathBuf {
+        PathBuf { inner: Text.from(s) }
+    }
+
+    /// Get this as an immutable Path.
+    public fn as_path(&self) -> Path {
+        Path { inner: self.inner.clone() }
+    }
+
+    /// Push a path component.
+    ///
+    /// If the component is absolute, it replaces the current path.
+    /// Otherwise, it's joined with a separator.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut path = PathBuf.from("/home/user");
+    /// path.push("docs");
+    /// path.push("file.txt");
+    /// assert_eq(path.to_str(), "/home/user/docs/file.txt");
+    /// ```
+    public fn push(&mut self, component: &Path) {
+        if component.is_absolute() {
+            // Replace entirely
+            self.inner = component.inner.clone();
+            return;
+        }
+
+        if component.inner.is_empty() {
+            return;
+        }
+
+        // Add separator if needed
+        if !self.inner.is_empty() && !self.inner.ends_with_char(MAIN_SEPARATOR) {
+            self.inner.push(MAIN_SEPARATOR);
+        }
+
+        self.inner.push_str(&component.inner);
+    }
+
+    /// Push a string component.
+    public fn push_str(&mut self, component: &Text) {
+        self.push(&Path.new(component));
+    }
+
+    /// Pop the last component.
+    ///
+    /// Returns false if the path is empty || root.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut path = PathBuf.from("/home/user/file.txt");
+    /// assert(path.pop());
+    /// assert_eq(path.to_str(), "/home/user");
+    /// ```
+    public fn pop(&mut self) -> Bool {
+        match self.as_path().parent() {
+            Some(parent) => {
+                self.inner = parent.inner;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Set the file name.
+    ///
+    /// Replaces the file name portion of the path.
+    public fn set_file_name(&mut self, name: &Text) {
+        if self.as_path().file_name().is_some() {
+            self.pop();
+        }
+        self.push(&Path.new(name));
+    }
+
+    /// Set the extension.
+    ///
+    /// Replaces || adds the extension.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut path = PathBuf.from("/home/user/file.txt");
+    /// path.set_extension("md");
+    /// assert_eq(path.to_str(), "/home/user/file.md");
+    /// ```
+    public fn set_extension(&mut self, ext: &Text) -> Bool {
+        let name = match self.as_path().file_name() {
+            Some(n) => n,
+            None => return false,
+        };
+
+        let stem = match self.as_path().file_stem() {
+            Some(s) => s,
+            None => return false,
+        };
+
+        self.pop();
+
+        if ext.is_empty() {
+            self.push(&Path.new(&stem));
+        } else {
+            let new_name = f"{stem}.{ext}";
+            self.push(&Path.new(&new_name));
+        }
+
+        true
+    }
+
+    /// Clear the path.
+    public fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Reserve capacity.
+    public fn reserve(&mut self, additional: Int) {
+        self.inner.reserve(additional);
+    }
+
+    /// Get the capacity.
+    public fn capacity(&self) -> Int {
+        self.inner.capacity()
+    }
+
+    /// Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.inner.is_empty()
+    }
+
+    /// Get length in bytes.
+    public fn len(&self) -> Int {
+        self.inner.len()
+    }
+
+    /// Convert to Text.
+    public fn to_text(&self) -> Text {
+        self.inner.clone()
+    }
+
+    /// Convert to str reference.
+    public fn to_str(&self) -> &Text {
+        &self.inner
+    }
+
+    /// Into inner Text.
+    public fn into_text(self) -> Text {
+        self.inner
+    }
+
+    /// Check if this path exists.
+    public fn exists(&self) -> Bool {
+        self.as_path().exists()
+    }
+
+    /// Check if this path is a file.
+    public fn is_file(&self) -> Bool {
+        self.as_path().is_file()
+    }
+
+    /// Check if this path is a directory.
+    public fn is_dir(&self) -> Bool {
+        self.as_path().is_dir()
+    }
+}
+
+implement Clone for PathBuf {
+    fn clone(&self) -> PathBuf {
+        PathBuf { inner: self.inner.clone() }
+    }
+}
+
+implement Default for PathBuf {
+    fn default() -> PathBuf {
+        PathBuf.new()
+    }
+}
+
+implement Eq for PathBuf {
+    fn eq(&self, other: &PathBuf) -> Bool {
+        self.inner == other.inner
+    }
+}
+
+implement Hash for PathBuf {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.inner.hash(hasher);
+    }
+}
+
+implement Debug for PathBuf {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PathBuf({self.inner})")
+    }
+}
+
+implement Display for PathBuf {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.inner)
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+/// Iterator over path components.
+public type Components is {
+    path: Text,
+    pos: Int,
+};
+
+implement Iterator for Components {
+    type Item = Component;
+
+    fn next(&mut self) -> Maybe<Component> {
+        if self.pos >= self.path.len() {
+            return None;
+        }
+
+        // Skip leading separators (except for root)
+        if self.pos == 0 {
+            let first_char = self.path.char_at(0)?;
+            if is_separator(first_char) {
+                self.pos = 1;
+                return Some(RootDir);
+            }
+
+            // Check for Windows drive letter (e.g., C:)
+            // This is cross-platform: won't match Unix paths (which don't have colons in this position)
+            if self.path.len() >= 2 {
+                let second = self.path.char_at(1);
+                if second == Some(':') {
+                    let prefix = self.path.slice(0, 2);
+                    self.pos = 2;
+                    if self.path.len() > 2 && is_separator(self.path.char_at(2).unwrap()) {
+                        self.pos = 3;
+                    }
+                    return Some(Prefix(prefix));
+                }
+            }
+        }
+
+        // Skip any separators
+        while self.pos < self.path.len() {
+            if let Some(c) = self.path.char_at(self.pos) {
+                if is_separator(c) {
+                    self.pos = self.pos + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if self.pos >= self.path.len() {
+            return None;
+        }
+
+        // Find the end of this component
+        let start = self.pos;
+        while self.pos < self.path.len() {
+            if let Some(c) = self.path.char_at(self.pos) {
+                if is_separator(c) {
+                    break;
+                }
+                self.pos = self.pos + 1;
+            }
+        }
+
+        let component = self.path.slice(start, self.pos);
+
+        if component == "." {
+            Some(CurDir)
+        } else if component == ".." {
+            Some(ParentDir)
+        } else {
+            Some(Normal(component))
+        }
+    }
+}
+
+// IntoIterator implementation for Components (enables for loops)
+implement IntoIterator for Components {
+    type Item = Component;
+    type Iter = Components;
+
+    fn into_iter(self) -> Components {
+        self
+    }
+}
+
+/// Iterator over path ancestors.
+public type Ancestors is {
+    path: Maybe<Path>,
+};
+
+implement Iterator for Ancestors {
+    type Item = Path;
+
+    fn next(&mut self) -> Maybe<Path> {
+        let current = self.path.clone()?;
+        self.path = current.parent();
+        Some(current)
+    }
+}
+
+/// Iterator yielding component strings.
+public type PathIter is {
+    components: Components,
+};
+
+implement Iterator for PathIter {
+    type Item = Text;
+
+    fn next(&mut self) -> Maybe<Text> {
+        self.components.next().map(|c| c.to_text())
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Normalize a path by resolving `.` && `..`.
+///
+/// Note: This is purely lexical - it doesn't access the filesystem.
+///
+/// # Example
+/// ```verum
+/// let normalized = normalize("/home/user/../docs/./file.txt");
+/// assert_eq(normalized.to_str(), "/home/docs/file.txt");
+/// ```
+public fn normalize(path: &Path) -> PathBuf {
+    let mut res = PathBuf.new();
+    let mut components: List<Component> = List.new();
+
+    for comp in path.components() {
+        let c: Component = comp;
+        if c is RootDir {
+            components.clear();
+            components.push(RootDir);
+        } else if let Prefix(p) = c {
+            components.clear();
+            components.push(Prefix(p));
+        } else if c is CurDir {
+            // Skip current directory
+        } else if c is ParentDir {
+            // Pop last component if it's not root or another ParentDir
+            let should_pop = if let Some(last) = components.last() {
+                if last is RootDir || last is ParentDir { false }
+                else if let Prefix(_) = last { false }
+                else { true }
+            } else {
+                false
+            };
+
+            let should_push = if components.is_empty() {
+                true
+            } else if let Some(last) = components.last() {
+                if last is RootDir { false }
+                else if let Prefix(_) = last { false }
+                else if last is ParentDir { true }
+                else { false }
+            } else {
+                false
+            };
+
+            if should_pop {
+                components.pop();
+            } else if should_push {
+                components.push(ParentDir);
+            }
+        } else if let Normal(s) = c {
+            components.push(Normal(s));
+        }
+    }
+
+    // Rebuild path
+    for (i, comp) in components.iter().enumerate() {
+        if i > 0 {
+            match comp {
+                RootDir | Prefix(_) => {}
+                _ => {
+                    let prev = &components[i - 1];
+                    match prev {
+                        RootDir | Prefix(_) => {}
+                        _ => res.inner.push(MAIN_SEPARATOR),
+                    }
+                }
+            }
+        }
+        res.inner.push_str(&comp.to_text());
+    }
+
+    if res.is_empty() {
+        res.inner.push('.');
+    }
+
+    res
+}
+
+/// Join two paths.
+public fn join(base: &Path, path: &Path) -> PathBuf {
+    base.join(path)
+}
+
+/// Check if a path is absolute.
+public fn is_absolute(path: &Path) -> Bool {
+    path.is_absolute()
+}
+
+/// Get the parent of a path.
+public fn parent(path: &Path) -> Maybe<Path> {
+    path.parent()
+}
+
+/// Get the file name of a path.
+public fn file_name(path: &Path) -> Maybe<Text> {
+    path.file_name()
+}
+
+/// Get the extension of a path.
+public fn extension(path: &Path) -> Maybe<Text> {
+    path.extension()
+}
+
+/// Get the stem of a path.
+public fn file_stem(path: &Path) -> Maybe<Text> {
+    path.file_stem()
+}

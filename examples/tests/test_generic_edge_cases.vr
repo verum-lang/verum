@@ -1,0 +1,40 @@
+type Box<T> is { value: T };
+type Pair<A, B> is { first: A, second: B };
+
+fn main() {
+    // Test 1: Nested generics with multiple type parameters
+    let pair_of_boxes: Pair<Box<Int>, Box<Bool>> = Pair {
+        first: Box { value: 42 },
+        second: Box { value: true }
+    };
+    let _ = println(f"Pair first: {pair_of_boxes.first.value}");
+    let _ = println(f"Pair second: {pair_of_boxes.second.value}");
+
+    // Test 2: Box of Pair
+    let box_of_pair: Box<Pair<Int, Bool>> = Box {
+        value: Pair { first: 100, second: false }
+    };
+    let _ = println(f"Box of pair first: {box_of_pair.value.first}");
+
+    // Test 3: Pair of Pairs (nested same-level generics)
+    let nested_pairs: Pair<Pair<Int, Int>, Pair<Bool, Bool>> = Pair {
+        first: Pair { first: 1, second: 2 },
+        second: Pair { first: true, second: false }
+    };
+    let _ = println(f"Nested pairs: {nested_pairs.first.first}");
+
+    // Test 4: Deeply nested Box<Box<Pair<Int, Int>>>
+    let complex: Box<Box<Pair<Int, Int>>> = Box {
+        value: Box {
+            value: Pair { first: 10, second: 20 }
+        }
+    };
+    let _ = println(f"Complex nested: {complex.value.value.first}");
+
+    // Test 5: Type inference with nested generics
+    let inferred = Pair {
+        first: Box { value: Box { value: 99 } },
+        second: Box { value: "hello" }
+    };
+    let _ = println(f"Inferred: {inferred.first.value.value}");
+}

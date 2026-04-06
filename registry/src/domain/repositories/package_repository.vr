@@ -1,0 +1,172 @@
+// Package Repository Protocol
+//
+// Defines the PackageRepository protocol for persisting and retrieving Package entities.
+// This protocol abstracts all package-related database operations from the domain layer.
+//
+// Design Principles:
+// - Interface Segregation: Only package-specific operations
+// - Dependency Inversion: Domain depends on protocol, not concrete implementation
+// - Single Responsibility: Exclusively handles Package entity persistence
+//
+// All methods are async for non-blocking I/O and return Result<T, RegistryError>
+// for explicit error handling.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount super.super.package.Package;
+mount super.super.errors.RegistryError;
+mount super.super.refinements.{EntityId, PackageName, Username, QueryOffset, QueryLimit};
+
+/// PackageRepository protocol defines the contract for Package persistence
+///
+/// Implementations must provide thread-safe, async database operations for:
+/// - CRUD operations (Create, Read, Update, Delete)
+/// - Query operations (find by owner, search, pagination)
+/// - Existence checks
+///
+/// Example Usage:
+/// ```verum
+/// using [PackageRepository] async fn publish_package(pkg: Package) -> Result<(), RegistryError> {
+///     // Check if package already exists
+///     if PackageRepository.exists(pkg.name).await? {
+///         return Result.Err(RegistryError.package_already_exists(pkg.name));
+///     }
+///
+///     // Save new package
+///     PackageRepository.save(pkg).await
+/// }
+/// ```
+pub protocol PackageRepository {
+    /// Retrieve a package by its unique ID
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(package)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError) on database error
+    async fn get_by_id(id: EntityId) -> Result<Maybe<Package>, RegistryError>;
+
+    /// Retrieve a package by its unique name
+    ///
+    /// Package names are unique identifiers in the registry.
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(package)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError) on database error
+    async fn get_by_name(name: PackageName) -> Result<Maybe<Package>, RegistryError>;
+
+    /// Persist a package (insert new or update existing)
+    ///
+    /// This operation is idempotent - calling it multiple times with the same
+    /// package should have the same effect as calling it once.
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on persistence failure
+    /// - Err(RegistryError.ValidationError) if package data is invalid
+    async fn save(package: Package) -> Result<(), RegistryError>;
+
+    /// Delete a package by name
+    ///
+    /// This is a destructive operation that removes the package and all
+    /// associated metadata. Package versions should be handled separately.
+    ///
+    /// Returns:
+    /// - Ok(()) if package was deleted or didn't exist (idempotent)
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete(name: PackageName) -> Result<(), RegistryError>;
+
+    /// Check if a package exists by name
+    ///
+    /// More efficient than get_by_name when only existence needs to be checked.
+    ///
+    /// Returns:
+    /// - Ok(true) if package exists
+    /// - Ok(false) if package does not exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists(name: PackageName) -> Result<Bool, RegistryError>;
+
+    /// Find all packages owned by a specific user
+    ///
+    /// Returns packages in descending order by creation date (newest first).
+    ///
+    /// Parameters:
+    /// - owner: The username of the package owner
+    ///
+    /// Returns:
+    /// - Ok(List<Package>) with matching packages (empty list if none)
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn find_by_owner(owner: Username) -> Result<List<Package>, RegistryError>;
+
+    /// List all packages with pagination
+    ///
+    /// Supports efficient pagination for large package registries.
+    ///
+    /// Parameters:
+    /// - offset: Number of packages to skip (for pagination)
+    /// - limit: Maximum number of packages to return
+    ///
+    /// Returns:
+    /// - Ok(List<Package>) with requested page (may be shorter than limit on last page)
+    /// - Err(RegistryError.DatabaseError) on query failure
+    ///
+    /// Example:
+    /// ```verum
+    /// // Get first page (10 packages)
+    /// let page1 = PackageRepository.list_all(0, 10).await?;
+    ///
+    /// // Get second page (next 10 packages)
+    /// let page2 = PackageRepository.list_all(10, 10).await?;
+    /// ```
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<Package>, RegistryError>;
+
+    /// Count total number of packages in the registry
+    ///
+    /// Useful for pagination metadata (total pages calculation).
+    ///
+    /// Returns:
+    /// - Ok(count) with total package count
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count() -> Result<Int, RegistryError>;
+
+    /// Search packages by name or keywords
+    ///
+    /// Performs case-insensitive search across package names, descriptions,
+    /// and keywords. Results are ranked by relevance.
+    ///
+    /// Parameters:
+    /// - query: Search query string
+    /// - offset: Number of results to skip (for pagination)
+    /// - limit: Maximum number of results to return
+    ///
+    /// Returns:
+    /// - Ok(List<Package>) with matching packages ordered by relevance
+    /// - Err(RegistryError.DatabaseError) on search failure
+    async fn search(query: Text, offset: QueryOffset, limit: QueryLimit) -> Result<List<Package>, RegistryError>;
+
+    /// Increment download counter for a package
+    ///
+    /// Atomically increments the download count. This is separated from save()
+    /// for performance (high-frequency operation).
+    ///
+    /// Parameters:
+    /// - name: Package name
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.PackageNotFound) if package doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn increment_downloads(name: PackageName) -> Result<(), RegistryError>;
+
+    /// Update package metadata (description, license, urls, keywords)
+    ///
+    /// Updates only metadata fields, not versions or ownership.
+    ///
+    /// Parameters:
+    /// - package: Package with updated metadata
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.PackageNotFound) if package doesn't exist
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn update_metadata(package: Package) -> Result<(), RegistryError>;
+}

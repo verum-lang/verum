@@ -1,0 +1,148 @@
+// Test: Tensor Operations - Simplified working version
+// Priority: Advanced
+// Expected output: Tensor creation and manipulation
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// ========== Basic Tensor Types ==========
+
+// 1D Tensor (Vector)
+type Tensor1D<T, N: meta Int> is {
+    data: [T; N],
+};
+
+// 2D Tensor (Matrix)
+type Tensor2D<T, R: meta Int, C: meta Int> is {
+    data: [[T; C]; R],
+};
+
+// ========== Tensor Creation ==========
+
+fn test_tensor_literals() {
+    print(f"=== Tensor Literals ===");
+
+    // 1D tensor literal
+    let vec: [Int; 5] = [1, 2, 3, 4, 5];
+    print(f"1D tensor: {vec}");
+
+    // 2D tensor literal (matrix)
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+    print(f"2D tensor: {matrix}");
+}
+
+fn test_tensor_initialization() {
+    print(f"=== Tensor Initialization ===");
+
+    // Fill with value
+    let zeros: [Int; 5] = [0; 5];
+    print(f"Zeros: {zeros}");
+
+    // Comprehension initialization
+    let squares = [for i in 0..5 yield i * i];
+    print(f"Squares: {squares}");
+}
+
+// ========== Tensor Indexing ==========
+
+fn test_tensor_indexing() {
+    print(f"=== Tensor Indexing ===");
+
+    // 1D indexing
+    let vec = [10, 20, 30, 40, 50];
+    print(f"vec[2] = {vec[2]}");
+
+    // 2D indexing
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    print(f"matrix[1][2] = {matrix[1][2]}");
+}
+
+// ========== Tensor Operations ==========
+
+fn test_tensor_arithmetic() {
+    print(f"=== Tensor Arithmetic ===");
+
+    let a = [1, 2, 3, 4, 5];
+    let b = [10, 20, 30, 40, 50];
+
+    // Element-wise operations using comprehensions
+    let sum = [for i in 0..5 yield a[i] + b[i]];
+    print(f"Addition: {sum}");
+
+    let product = [for i in 0..5 yield a[i] * b[i]];
+    print(f"Product: {product}");
+
+    let scaled = [for x in a yield x * 10];
+    print(f"Scaled: {scaled}");
+}
+
+fn test_matrix_operations() {
+    print(f"=== Matrix Operations ===");
+
+    let m1 = [[1, 2], [3, 4]];
+    let m2 = [[5, 6], [7, 8]];
+
+    // Matrix addition
+    let m_sum = [
+        for i in 0..2 yield [
+            for j in 0..2 yield m1[i][j] + m2[i][j]
+        ]
+    ];
+    print(f"Matrix sum: {m_sum}");
+
+    // Transpose
+    let transpose = [for j in 0..2 yield [for i in 0..2 yield m1[i][j]]];
+    print(f"Transpose: {transpose}");
+}
+
+// ========== Tensor Reshaping ==========
+
+fn test_tensor_reshaping() {
+    print(f"=== Tensor Reshaping ===");
+
+    // Flatten
+    let matrix = [[1, 2, 3], [4, 5, 6]];
+    let flat = [for row in matrix for x in row yield x];
+    print(f"Flattened: {flat}");
+
+    // Reshape 1D to 2D
+    let vec = [1, 2, 3, 4, 5, 6];
+    let reshaped = [
+        [vec[0], vec[1], vec[2]],
+        [vec[3], vec[4], vec[5]],
+    ];
+    print(f"Reshaped to 2x3: {reshaped}");
+}
+
+// ========== Typed Tensor Shapes ==========
+
+fn test_typed_shapes() {
+    print(f"=== Typed Tensor Shapes ===");
+
+    // Compile-time shape checking
+    let t1: Tensor1D<Int, 5> = Tensor1D { data: [1, 2, 3, 4, 5] };
+    print(f"Typed 1D: {t1.data}");
+
+    let t2: Tensor2D<Int, 2, 3> = Tensor2D {
+        data: [[1, 2, 3], [4, 5, 6]],
+    };
+    print(f"Typed 2D: {t2.data}");
+}
+
+fn main() {
+    print(f"Starting tensor tests...");
+
+    test_tensor_literals();
+    test_tensor_initialization();
+    test_tensor_indexing();
+    test_tensor_arithmetic();
+    test_matrix_operations();
+    test_tensor_reshaping();
+    test_typed_shapes();
+
+    print(f"All tensor tests complete");
+}

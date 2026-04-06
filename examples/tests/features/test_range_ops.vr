@@ -1,0 +1,65 @@
+// Test: Range expressions (simulated with while loops)
+// Note: Range syntax is not fully implemented yet in Verum
+
+fn test_exclusive_range() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum  // Should be 0+1+2+3+4 = 10
+}
+
+fn test_inclusive_range() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i <= 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum  // Should be 0+1+2+3+4+5 = 15
+}
+
+fn test_range_with_bounds() -> Int {
+    let start = 1;
+    let end = 4;
+    let mut product = 1;
+    let mut i = start;
+
+    while i < end {
+        product = product * i;
+        i = i + 1;
+    }
+    product  // Should be 1*2*3 = 6
+}
+
+fn test_nested_loops() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 2 {
+            sum = sum + i + j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let result1 = test_exclusive_range();
+    println(f"Exclusive range (0..5): {result1}");
+
+    let result2 = test_inclusive_range();
+    println(f"Inclusive range (0..=5): {result2}");
+
+    let result3 = test_range_with_bounds();
+    println(f"Range with variables (1..4): {result3}");
+
+    let result4 = test_nested_loops();
+    println(f"Nested loops: {result4}");
+
+    result1 + result2 + result3 + result4
+}

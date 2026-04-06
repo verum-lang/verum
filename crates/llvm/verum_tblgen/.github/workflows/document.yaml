@@ -1,0 +1,24 @@
+name: document
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  document:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/configure-pages@v5
+      - run: cargo doc
+      - run: rm target/doc/.lock
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+      - uses: actions/deploy-pages@v4
+        if: github.ref == 'refs/heads/master'

@@ -1,0 +1,428 @@
+// Server Router
+//
+// Route definitions for the Verum Registry HTTP API.
+// Demonstrates handler organization and route patterns.
+
+mount core.base.{Result, Text, Int, Maybe};
+mount core.collections.{List, Map};
+
+// ============================================================================
+// HTTP Types
+// ============================================================================
+
+/// HTTP methods
+pub type HttpMethod is
+    | GET
+    | POST
+    | PUT
+    | DELETE
+    | PATCH;
+
+/// HTTP status codes
+pub type HttpStatus is
+    | Ok                    // 200
+    | Created               // 201
+    | NoContent             // 204
+    | BadRequest            // 400
+    | Unauthorized          // 401
+    | Forbidden             // 403
+    | NotFound              // 404
+    | Conflict              // 409
+    | InternalServerError;  // 500
+
+implement HttpStatus {
+    pub fn code(self) -> Int {
+        match self {
+            HttpStatus.Ok => 200,
+            HttpStatus.Created => 201,
+            HttpStatus.NoContent => 204,
+            HttpStatus.BadRequest => 400,
+            HttpStatus.Unauthorized => 401,
+            HttpStatus.Forbidden => 403,
+            HttpStatus.NotFound => 404,
+            HttpStatus.Conflict => 409,
+            HttpStatus.InternalServerError => 500,
+        }
+    }
+}
+
+/// HTTP request representation
+pub type HttpRequest is {
+    method: HttpMethod,
+    path: Text,
+    headers: Map<Text, Text>,
+    body: Maybe<Text>,
+};
+
+/// HTTP response representation
+pub type HttpResponse is {
+    status: HttpStatus,
+    headers: Map<Text, Text>,
+    body: Maybe<Text>,
+};
+
+implement HttpResponse {
+    /// Create a JSON response
+    pub fn json(status: HttpStatus, body: Text) -> HttpResponse {
+        let mut headers = Map.new();
+        headers.insert("Content-Type", "application/json");
+
+        HttpResponse {
+            status,
+            headers,
+            body: Maybe.Some(body),
+        }
+    }
+
+    /// Create an empty response
+    pub fn empty(status: HttpStatus) -> HttpResponse {
+        HttpResponse {
+            status,
+            headers: Map.new(),
+            body: Maybe.None,
+        }
+    }
+
+    /// Create an error response
+    pub fn error(status: HttpStatus, message: Text) -> HttpResponse {
+        let error_json = f"{{\"error\": \"{message}\"}}";
+        HttpResponse.json(status, error_json)
+    }
+}
+
+// ============================================================================
+// Route Definitions
+// ============================================================================
+
+/// Route handler function type
+pub type Handler is fn(HttpRequest) -> HttpResponse;
+
+/// Route definition
+pub type Route is {
+    method: HttpMethod,
+    path: Text,
+    description: Text,
+};
+
+/// Router with route registry
+pub type Router is {
+    routes: List<Route>,
+};
+
+implement Router {
+    /// Create a new router
+    pub fn new() -> Router {
+        Router {
+            routes: List.new(),
+        }
+    }
+
+    /// Register a route
+    pub fn register(mut self, method: HttpMethod, path: Text, description: Text) {
+        let route = Route {
+            method,
+            path,
+            description,
+        };
+        self.routes.push(route);
+    }
+
+    /// Get all registered routes
+    pub fn routes(self) -> List<Route> {
+        self.routes.clone()
+    }
+
+    /// Find a route by method and path
+    pub fn find_route(self, method: &HttpMethod, path: &Text) -> Maybe<Route> {
+        for route in self.routes {
+            if route.method == *method && &route.path == path {
+                return Maybe.Some(route.clone());
+            }
+        }
+        Maybe.None
+    }
+}
+
+// ============================================================================
+// API Routes Registry
+// ============================================================================
+
+/// Initialize all API routes
+pub fn setup_routes() -> Router {
+    let mut router = Router.new();
+
+    // Health check
+    router.register(
+        HttpMethod.GET,
+        "/health",
+        "Health check endpoint"
+    );
+
+    // Package routes
+    router.register(
+        HttpMethod.GET,
+        "/api/packages",
+        "List all packages"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/api/packages/{name}",
+        "Get package by name"
+    );
+
+    router.register(
+        HttpMethod.POST,
+        "/api/packages",
+        "Create new package"
+    );
+
+    router.register(
+        HttpMethod.PUT,
+        "/api/packages/{name}",
+        "Update package"
+    );
+
+    router.register(
+        HttpMethod.DELETE,
+        "/api/packages/{name}",
+        "Delete package"
+    );
+
+    // Version routes
+    router.register(
+        HttpMethod.GET,
+        "/api/packages/{name}/versions",
+        "List package versions"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/api/packages/{name}/versions/{version}",
+        "Get specific version"
+    );
+
+    router.register(
+        HttpMethod.POST,
+        "/api/packages/{name}/versions",
+        "Publish new version"
+    );
+
+    // Search routes
+    router.register(
+        HttpMethod.GET,
+        "/api/search",
+        "Search packages"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/api/search/autocomplete",
+        "Autocomplete package names"
+    );
+
+    // User routes
+    router.register(
+        HttpMethod.POST,
+        "/api/users/login",
+        "User login"
+    );
+
+    router.register(
+        HttpMethod.POST,
+        "/api/users/register",
+        "User registration"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/api/users/{username}",
+        "Get user profile"
+    );
+
+    // Download route
+    router.register(
+        HttpMethod.GET,
+        "/api/packages/{name}/versions/{version}/download",
+        "Download package artifact"
+    );
+
+    // Statistics routes
+    router.register(
+        HttpMethod.GET,
+        "/api/stats",
+        "Get registry statistics"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/api/stats/popular",
+        "Get popular packages"
+    );
+
+    // Sumdb (checksum database) routes
+    router.register(
+        HttpMethod.GET,
+        "/sumdb/lookup/{package}@{version}",
+        "Lookup package checksum"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/sumdb/latest",
+        "Get latest signed tree head"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/sumdb/tile/{level}/{index}",
+        "Get Merkle tile"
+    );
+
+    router.register(
+        HttpMethod.GET,
+        "/sumdb/proof/{entry_id}",
+        "Get inclusion proof for entry"
+    );
+
+    router.register(
+        HttpMethod.POST,
+        "/sumdb/verify",
+        "Verify a checksum against the transparency log"
+    );
+
+    router
+}
+
+// ============================================================================
+// Route Utilities
+// ============================================================================
+
+/// Extract path parameters from a route pattern
+///
+/// Takes a route pattern with placeholders (e.g., "/api/packages/{name}/versions/{version}")
+/// and an actual request path (e.g., "/api/packages/my-pkg/versions/1.0.0")
+/// and returns a map of extracted parameter values.
+///
+/// # Arguments
+/// * `pattern` - Route pattern with {param} placeholders
+/// * `path` - Actual request path to extract from
+///
+/// # Returns
+/// Map of parameter names to their extracted values
+///
+/// # Examples
+/// ```
+/// let pattern = "/api/packages/{name}/versions/{version}";
+/// let path = "/api/packages/my-pkg/versions/1.0.0";
+/// let params = extract_params(&pattern, &path);
+/// // params: {"name": "my-pkg", "version": "1.0.0"}
+/// ```
+pub fn extract_params(pattern: &Text, path: &Text) -> Map<Text, Text> {
+    let mut params = Map.new();
+
+    // Split both pattern and path by '/'
+    let pattern_parts = pattern.split("/");
+    let path_parts = path.split("/");
+
+    // Early return if lengths don't match
+    if pattern_parts.len() != path_parts.len() {
+        return params;
+    }
+
+    // Iterate through parts and extract parameters
+    for i in 0..pattern_parts.len() {
+        let pattern_part = match pattern_parts.get(i) {
+            Maybe.Some(part) => part.clone(),
+            Maybe.None => continue,
+        };
+
+        // Check if this part is a parameter (enclosed in braces)
+        if pattern_part.starts_with("{") && pattern_part.ends_with("}") {
+            let part_len = pattern_part.len();
+
+            // Extract parameter name by removing { and }
+            if part_len > 2 {
+                let param_name = pattern_part.substring(1, part_len - 1);
+
+                // Get corresponding value from path
+                let param_value = match path_parts.get(i) {
+                    Maybe.Some(value) => value.clone(),
+                    Maybe.None => continue,
+                };
+
+                // Insert into params map
+                params.insert(param_name, param_value);
+            }
+        }
+    }
+
+    params
+}
+
+/// Check if a path matches a route pattern
+///
+/// Compares a route pattern with placeholders against an actual path.
+/// Pattern parts enclosed in braces (e.g., {name}) are treated as wildcards.
+///
+/// # Arguments
+/// * `pattern` - Route pattern with optional {param} placeholders
+/// * `path` - Actual request path to match
+///
+/// # Returns
+/// true if the path matches the pattern structure
+///
+/// # Examples
+/// ```
+/// matches_route("/api/packages/{name}", "/api/packages/my-pkg") // true
+/// matches_route("/api/packages/{name}", "/api/users/admin") // false
+/// matches_route("/health", "/health") // true
+/// ```
+pub fn matches_route(pattern: &Text, path: &Text) -> Bool {
+    // Split both pattern and path by '/'
+    let pattern_parts = pattern.split("/");
+    let path_parts = path.split("/");
+
+    // Must have same number of parts
+    if pattern_parts.len() != path_parts.len() {
+        return false;
+    }
+
+    // Check each part
+    for i in 0..pattern_parts.len() {
+        let pattern_part = match pattern_parts.get(i) {
+            Maybe.Some(part) => part.clone(),
+            Maybe.None => return false,
+        };
+
+        let path_part = match path_parts.get(i) {
+            Maybe.Some(part) => part.clone(),
+            Maybe.None => return false,
+        };
+
+        // If pattern part is a parameter (in braces), it matches any value
+        let is_param = pattern_part.starts_with("{") && pattern_part.ends_with("}");
+
+        // If not a parameter, parts must match exactly
+        if !is_param && pattern_part != path_part {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Print all registered routes
+pub fn print_routes(router: &Router) {
+    print("Registered routes:");
+    for route in router.routes() {
+        let method_str = match route.method {
+            HttpMethod.GET => "GET   ",
+            HttpMethod.POST => "POST  ",
+            HttpMethod.PUT => "PUT   ",
+            HttpMethod.DELETE => "DELETE",
+            HttpMethod.PATCH => "PATCH ",
+        };
+        print(f"  {method_str} {route.path} - {route.description}");
+    }
+}

@@ -1,0 +1,12 @@
+// Test: Defer in nested scope
+// Tests if defer executes at block exit
+
+fn main() {
+    print("Outer start");
+    {
+        print("Inner start");
+        defer print("Inner defer");
+        print("Inner end");
+    }
+    print("Outer end");
+}

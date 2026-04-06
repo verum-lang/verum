@@ -1,0 +1,11 @@
+fn main() {
+    // Test += with Text (string concatenation)
+    let mut message = "Hello";
+    message += " World";
+    print(f"message: {message}");  // Should print "Hello World"
+
+    message += "!";
+    print(f"message: {message}");  // Should print "Hello World!"
+
+    print("Text compound assignment works correctly!");
+}

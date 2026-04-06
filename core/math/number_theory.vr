@@ -1,0 +1,556 @@
+// =============================================================================
+// number_theory.vr - Number Theory Foundations
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// Defines the number-theoretic types and theorem statements:
+// natural numbers (Peano), divisibility, primes, GCD/LCM,
+// modular arithmetic, arithmetic functions, and key theorems
+// (Euler, Fermat, FTA, Bezout, CRT, Wilson, quadratic reciprocity).
+// =============================================================================
+
+module core.math.number_theory;
+
+mount core.math.algebra.{Ring, CommutativeRing, Field, Group, AbelianGroup};
+
+// =============================================================================
+// 1. Natural Numbers (Peano)
+// =============================================================================
+
+/// The natural numbers defined inductively via the Peano axioms.
+public type Nat is Zero | Succ(Heap<Nat>);
+
+implement Nat {
+    /// Convert to an Int.
+    @allow(unbounded_recursion)
+    public fn to_int(&self) -> Int {
+        match self {
+            Zero => 0,
+            Succ(n) => 1 + n.to_int(),
+        }
+    }
+
+    /// Construct from a non-negative Int.
+    @allow(unbounded_recursion)
+    public fn from_int(n: Int) -> Nat {
+        if n <= 0 {
+            Zero
+        } else {
+            Succ(Heap(Nat.from_int(n - 1)))
+        }
+    }
+
+    /// Addition on natural numbers.
+    @allow(unbounded_recursion)
+    public fn plus(&self, other: &Nat) -> Nat {
+        match self {
+            Zero => other.clone(),
+            Succ(n) => Succ(Heap(n.plus(other))),
+        }
+    }
+
+    /// Multiplication on natural numbers.
+    @allow(unbounded_recursion)
+    public fn times(&self, other: &Nat) -> Nat {
+        match self {
+            Zero => Zero,
+            Succ(n) => other.plus(&n.times(other)),
+        }
+    }
+
+    /// Predecessor (returns Zero for Zero).
+    public fn pred(&self) -> Nat {
+        match self {
+            Zero => Zero,
+            Succ(n) => n.clone(),
+        }
+    }
+
+    /// Clone a natural number.
+    @allow(unbounded_recursion)
+    public fn clone(&self) -> Nat {
+        match self {
+            Zero => Zero,
+            Succ(n) => Succ(Heap(n.clone())),
+        }
+    }
+}
+
+// =============================================================================
+// 2. Divisibility
+// =============================================================================
+
+/// Divisibility: a divides b (written a | b) if there exists k with b = a * k.
+public type Divisible is protocol {
+    /// Test whether self divides other.
+    fn divides(&self, other: &Self) -> Bool;
+
+    /// Reflexivity: a | a.
+    @verify(formal)
+    fn divides_reflexive(&self) -> Bool;
+
+    /// Transitivity: a | b and b | c implies a | c.
+    @verify(formal)
+    fn divides_transitive(&self, b: &Self, c: &Self) -> Bool;
+
+    /// Antisymmetry (for positive integers): a | b and b | a implies a = b.
+    @verify(formal)
+    fn divides_antisymmetric(&self, other: &Self) -> Bool;
+};
+
+/// Test divisibility of integers.
+public fn divides(a: Int, b: Int) -> Bool {
+    if a == 0 {
+        b == 0
+    } else {
+        b % a == 0
+    }
+}
+
+// =============================================================================
+// 3. GCD and LCM
+// =============================================================================
+
+/// Greatest common divisor via the Euclidean algorithm.
+public fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    if x < 0 { x = 0 - x; }
+    if y < 0 { y = 0 - y; }
+    while y != 0 {
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}
+
+/// Least common multiple.
+public fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 {
+        0
+    } else {
+        let product = a * b;
+        let abs_product = if product < 0 { 0 - product } else { product };
+        abs_product / gcd(a, b)
+    }
+}
+
+/// Extended Euclidean algorithm: returns (g, x, y) with a*x + b*y = g = gcd(a, b).
+public fn extended_gcd(a: Int, b: Int) -> (Int, Int, Int) {
+    let mut old_r = a;
+    let mut r = b;
+    let mut old_s = 1;
+    let mut s = 0;
+    let mut old_t = 0;
+    let mut t = 1;
+    while r != 0 {
+        let q = old_r / r;
+        let temp_r = r;
+        r = old_r - q * r;
+        old_r = temp_r;
+        let temp_s = s;
+        s = old_s - q * s;
+        old_s = temp_s;
+        let temp_t = t;
+        t = old_t - q * t;
+        old_t = temp_t;
+    }
+    (old_r, old_s, old_t)
+}
+
+// =============================================================================
+// 4. Primality
+// =============================================================================
+
+/// A prime number: greater than 1 and divisible only by 1 and itself.
+public type Prime is {
+    /// The prime value.
+    value: Int,
+};
+
+/// Primality predicate protocol.
+public type Primality is protocol {
+    /// Test whether a number is prime.
+    fn is_prime(&self) -> Bool;
+
+    /// A prime p > 1 has no divisors other than 1 and p.
+    @verify(formal)
+    fn prime_divisors(&self) -> Bool;
+};
+
+/// Two integers are coprime if their GCD is 1.
+public type Coprime is protocol {
+    /// Test whether self and other are coprime.
+    fn is_coprime(&self, other: &Self) -> Bool;
+
+    /// Coprimality is symmetric.
+    @verify(formal)
+    fn coprime_symmetric(&self, other: &Self) -> Bool;
+};
+
+/// Trial division primality test.
+public fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 2;
+    }
+    true
+}
+
+/// Test whether n is composite.
+public fn is_composite(n: Int) -> Bool {
+    n > 1 && !is_prime(n)
+}
+
+/// Sieve of Eratosthenes: list all primes up to n.
+public fn primes_up_to(n: Int) -> List<Int> {
+    let mut sieve = List.new();
+    let mut i = 0;
+    while i <= n {
+        sieve.push(true);
+        i = i + 1;
+    }
+    let mut p = 2;
+    while p * p <= n {
+        if sieve[p] {
+            let mut j = p * p;
+            while j <= n {
+                sieve[j] = false;
+                j = j + p;
+            }
+        }
+        p = p + 1;
+    }
+    let mut result = List.new();
+    let mut k = 2;
+    while k <= n {
+        if sieve[k] {
+            result.push(k);
+        }
+        k = k + 1;
+    }
+    result
+}
+
+/// Trial division factorization.
+public fn prime_factors(n: Int) -> List<Int> {
+    let mut factors = List.new();
+    let mut x = if n < 0 { 0 - n } else { n };
+    let mut d = 2;
+    while d * d <= x {
+        while x % d == 0 {
+            factors.push(d);
+            x = x / d;
+        }
+        d = d + 1;
+    }
+    if x > 1 {
+        factors.push(x);
+    }
+    factors
+}
+
+// =============================================================================
+// 5. Modular Arithmetic
+// =============================================================================
+
+/// Modular arithmetic operations over a fixed modulus.
+public type ModularArithmetic is protocol {
+    /// The modulus.
+    fn modulus(&self) -> Int;
+
+    /// Modular addition: (a + b) mod n.
+    fn mod_add(&self, other: &Self) -> Self;
+
+    /// Modular multiplication: (a * b) mod n.
+    fn mod_mul(&self, other: &Self) -> Self;
+
+    /// Modular exponentiation: a^e mod n.
+    fn mod_pow(&self, exponent: Int) -> Self;
+
+    /// Modular inverse: a^{-1} mod n, exists when gcd(a, n) = 1.
+    fn mod_inverse(&self) -> Self;
+
+    /// Closure: results are in [0, n).
+    @verify(formal)
+    fn mod_closure(&self) -> Bool;
+
+    /// Inverse correctness: a * a^{-1} = 1 (mod n) when gcd(a, n) = 1.
+    @verify(formal)
+    fn inverse_correct(&self) -> Bool;
+};
+
+/// A residue class modulo n.
+public type Residue is {
+    /// The representative value.
+    value: Int,
+    /// The modulus.
+    modulus: Int,
+};
+
+/// Modular exponentiation: base^exp mod modulus (binary exponentiation).
+public fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    if modulus == 1 { return 0; }
+    let mut result = 1;
+    let mut b = base % modulus;
+    if b < 0 { b = b + modulus; }
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+/// Modular multiplicative inverse via extended GCD.
+/// Returns None if gcd(a, m) != 1.
+public fn mod_inverse(a: Int, m: Int) -> Maybe<Int> {
+    let (g, x, _) = extended_gcd(a, m);
+    if g != 1 {
+        None
+    } else {
+        Some(((x % m) + m) % m)
+    }
+}
+
+// =============================================================================
+// 6. Arithmetic Functions
+// =============================================================================
+
+/// Euler's totient function phi(n): count of integers in [1, n] coprime to n.
+/// Uses the product formula for efficiency.
+public fn euler_totient(n: Int) -> Int {
+    let mut result = n;
+    let mut x = n;
+    let mut p = 2;
+    while p * p <= x {
+        if x % p == 0 {
+            while x % p == 0 {
+                x = x / p;
+            }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if x > 1 {
+        result = result - result / x;
+    }
+    result
+}
+
+/// Mobius function mu(n).
+/// mu(1) = 1, mu(n) = 0 if n has a squared prime factor,
+/// mu(n) = (-1)^k if n is a product of k distinct primes.
+public fn mobius(n: Int) -> Int {
+    if n == 1 { return 1; }
+    let mut x = n;
+    let mut num_factors = 0;
+    let mut d = 2;
+    while d * d <= x {
+        if x % d == 0 {
+            x = x / d;
+            num_factors = num_factors + 1;
+            if x % d == 0 {
+                return 0;
+            }
+        }
+        d = d + 1;
+    }
+    if x > 1 {
+        num_factors = num_factors + 1;
+    }
+    if num_factors % 2 == 0 { 1 } else { -1 }
+}
+
+/// Number of divisors of n.
+public fn num_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut d = 1;
+    while d * d <= n {
+        if n % d == 0 {
+            count = count + 1;
+            if d != n / d {
+                count = count + 1;
+            }
+        }
+        d = d + 1;
+    }
+    count
+}
+
+/// Sum of divisors of n.
+public fn sum_divisors(n: Int) -> Int {
+    let mut total = 0;
+    let mut d = 1;
+    while d * d <= n {
+        if n % d == 0 {
+            total = total + d;
+            if d != n / d {
+                total = total + n / d;
+            }
+        }
+        d = d + 1;
+    }
+    total
+}
+
+// =============================================================================
+// 7. Rational Numbers
+// =============================================================================
+
+/// A rational number p/q in lowest terms with q > 0.
+public type Rational is {
+    numerator: Int,
+    denominator: Int,
+};
+
+implement Rational {
+    /// Create a rational in lowest terms.
+    public fn new(p: Int, q: Int) -> Rational {
+        let g = gcd(p, q);
+        let sign = if q < 0 { -1 } else { 1 };
+        Rational {
+            numerator: sign * p / g,
+            denominator: sign * q / g,
+        }
+    }
+
+    /// Addition of rationals.
+    public fn add(&self, other: &Rational) -> Rational {
+        Rational.new(
+            self.numerator * other.denominator + other.numerator * self.denominator,
+            self.denominator * other.denominator,
+        )
+    }
+
+    /// Subtraction of rationals.
+    public fn sub(&self, other: &Rational) -> Rational {
+        Rational.new(
+            self.numerator * other.denominator - other.numerator * self.denominator,
+            self.denominator * other.denominator,
+        )
+    }
+
+    /// Multiplication of rationals.
+    public fn mul(&self, other: &Rational) -> Rational {
+        Rational.new(
+            self.numerator * other.numerator,
+            self.denominator * other.denominator,
+        )
+    }
+
+    /// Division of rationals (by nonzero).
+    public fn div(&self, other: &Rational) -> Maybe<Rational> {
+        if other.numerator == 0 {
+            None
+        } else {
+            Some(Rational.new(
+                self.numerator * other.denominator,
+                self.denominator * other.numerator,
+            ))
+        }
+    }
+
+    /// Negation.
+    public fn negate(&self) -> Rational {
+        Rational { numerator: 0 - self.numerator, denominator: self.denominator }
+    }
+
+    /// Reciprocal for nonzero rationals.
+    public fn reciprocal(&self) -> Maybe<Rational> {
+        if self.numerator == 0 {
+            None
+        } else {
+            Some(Rational.new(self.denominator, self.numerator))
+        }
+    }
+
+    /// Absolute value.
+    public fn abs(&self) -> Rational {
+        let n = if self.numerator < 0 { 0 - self.numerator } else { self.numerator };
+        Rational { numerator: n, denominator: self.denominator }
+    }
+
+    /// Convert to Float.
+    public fn to_float(&self) -> Float {
+        self.numerator as Float / self.denominator as Float
+    }
+}
+
+// =============================================================================
+// 8. CRT Solver
+// =============================================================================
+
+/// Chinese Remainder Theorem solver: find x with x = a_i (mod m_i).
+public fn solve_crt(moduli: &List<Int>, remainders: &List<Int>) -> Maybe<Int> {
+    if moduli.len() != remainders.len() || moduli.len() == 0 {
+        return None;
+    }
+    let mut result = remainders[0];
+    let mut mod_product = moduli[0];
+    let mut i = 1;
+    while i < moduli.len() {
+        let mi = moduli[i];
+        let ai = remainders[i];
+        let inv = mod_inverse(mod_product, mi);
+        match inv {
+            None => { return None; },
+            Some(inv_val) => {
+                result = result + mod_product * ((ai - result) * inv_val % mi + mi) % mi;
+                mod_product = mod_product * mi;
+                result = result % mod_product;
+            },
+        }
+        i = i + 1;
+    }
+    Some(result)
+}
+
+// =============================================================================
+// 9. Fundamental Theorems (Axiom Statements)
+// =============================================================================
+
+/// Euler's theorem: if gcd(a, n) = 1, then a^{phi(n)} = 1 (mod n).
+axiom eulers_theorem(a: Int, n: Int) -> Bool;
+
+/// Fermat's little theorem: if p is prime and gcd(a, p) = 1,
+/// then a^{p-1} = 1 (mod p).
+axiom fermats_little_theorem(a: Int, p: Int) -> Bool;
+
+/// Fundamental theorem of arithmetic: every integer > 1 has a unique
+/// prime factorization (up to ordering).
+axiom fundamental_theorem_arithmetic(n: Int) -> Bool;
+
+/// Infinitude of primes: there are infinitely many prime numbers.
+axiom infinitude_of_primes() -> Bool;
+
+/// Bezout's identity: for any integers a, b, there exist integers x, y
+/// such that a*x + b*y = gcd(a, b).
+axiom bezouts_identity(a: Int, b: Int) -> Bool;
+
+/// Chinese remainder theorem: if n_1, ..., n_k are pairwise coprime,
+/// the system x = a_i (mod n_i) has a unique solution modulo N = prod(n_i).
+axiom chinese_remainder_theorem(moduli: Int, residues: Int) -> Bool;
+
+/// Wilson's theorem: p is prime if and only if (p-1)! = -1 (mod p).
+axiom wilsons_theorem(p: Int) -> Bool;
+
+/// Quadratic reciprocity: for distinct odd primes p, q,
+/// (p/q)(q/p) = (-1)^{(p-1)(q-1)/4} where (a/b) is the Legendre symbol.
+axiom quadratic_reciprocity(p: Int, q: Int) -> Bool;
+
+/// Dirichlet's theorem on primes in arithmetic progressions:
+/// If gcd(a, d) = 1, there are infinitely many primes p = a (mod d).
+axiom dirichlet_theorem(a: Int, d: Int) -> Bool;
+
+/// Prime number theorem: pi(x) ~ x / ln(x) as x -> infinity.
+axiom prime_number_theorem() -> Bool;

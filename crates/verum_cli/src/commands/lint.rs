@@ -1,0 +1,2196 @@
+// Lint command - static analysis for code quality issues.
+// Checks for unused imports, dead code, style violations, and common mistakes.
+// Implements 10 Verum-specific lint rules using fast text-based scanning.
+
+use crate::error::{CliError, Result};
+use crate::ui;
+use colored::Colorize;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use verum_common::{List, Text};
+use walkdir::WalkDir;
+
+/// Lint severity level
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LintLevel {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+/// Verum-specific lint rule
+#[derive(Debug, Clone)]
+struct LintRule {
+    name: &'static str,
+    level: LintLevel,
+    description: &'static str,
+    category: LintCategory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LintCategory {
+    Performance,
+    Safety,
+    Style,
+    Verification,
+}
+
+/// Lint issue found in code
+#[derive(Debug, Clone)]
+struct LintIssue {
+    rule: &'static str,
+    level: LintLevel,
+    file: PathBuf,
+    line: usize,
+    column: usize,
+    message: String,
+    suggestion: Option<Text>,
+    fixable: bool,
+}
+
+/// Verum-specific lint rules
+const LINT_RULES: &[LintRule] = &[
+    LintRule {
+        name: "unchecked-refinement",
+        level: LintLevel::Warning,
+        description: "Function with refinement types lacks @verify annotation",
+        category: LintCategory::Verification,
+    },
+    LintRule {
+        name: "missing-context-decl",
+        level: LintLevel::Error,
+        description: "Function uses context without declaration in scope",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "unused-import",
+        level: LintLevel::Warning,
+        description: "Unused mount/import statement",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "unnecessary-heap",
+        level: LintLevel::Warning,
+        description: "Heap allocation for small type that could be stack-allocated",
+        category: LintCategory::Performance,
+    },
+    LintRule {
+        name: "missing-error-context",
+        level: LintLevel::Warning,
+        description: "Error propagation without context",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "large-copy",
+        level: LintLevel::Warning,
+        description: "Large struct passed by value instead of by reference",
+        category: LintCategory::Performance,
+    },
+    LintRule {
+        name: "unused-result",
+        level: LintLevel::Warning,
+        description: "Function result value is unused",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "missing-cleanup",
+        level: LintLevel::Warning,
+        description: "Type with resource management lacks Cleanup protocol",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "deprecated-syntax",
+        level: LintLevel::Error,
+        description: "Rust-ism or deprecated syntax used",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "cbgr-hotspot",
+        level: LintLevel::Info,
+        description: "Tight loop with reference dereferences could use &checked",
+        category: LintCategory::Performance,
+    },
+    // ── Extended rules (Verum-specific, beyond Clippy) ──
+    LintRule {
+        name: "mutable-capture-in-spawn",
+        level: LintLevel::Error,
+        description: "Mutable variable captured by spawn closure (data race risk)",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "unbounded-channel",
+        level: LintLevel::Warning,
+        description: "Channel.new() without capacity limit can cause OOM",
+        category: LintCategory::Performance,
+    },
+    LintRule {
+        name: "missing-timeout",
+        level: LintLevel::Warning,
+        description: "Blocking operation without timeout (recv, await, join)",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "redundant-clone",
+        level: LintLevel::Warning,
+        description: "Clone on value that is not used after this point",
+        category: LintCategory::Performance,
+    },
+    LintRule {
+        name: "empty-match-arm",
+        level: LintLevel::Warning,
+        description: "Match arm with empty body or just unit ()",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "single-variant-match",
+        level: LintLevel::Hint,
+        description: "Match with single pattern could be `if let`",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "todo-in-code",
+        level: LintLevel::Warning,
+        description: "TODO/FIXME/HACK comment in production code",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "unsafe-ref-in-public",
+        level: LintLevel::Warning,
+        description: "Public function exposes &unsafe reference in API",
+        category: LintCategory::Safety,
+    },
+    LintRule {
+        name: "missing-type-annotation",
+        level: LintLevel::Hint,
+        description: "Complex expression could benefit from explicit type annotation",
+        category: LintCategory::Style,
+    },
+    LintRule {
+        name: "shadow-binding",
+        level: LintLevel::Info,
+        description: "Variable shadows an existing binding in outer scope",
+        category: LintCategory::Style,
+    },
+];
+
+pub fn execute(fix: bool, deny_warnings: bool) -> Result<()> {
+    ui::step("Running Verum linter");
+    println!();
+
+    // Load config for disabled rules
+    let disabled_rules = load_lint_config();
+
+    let mut all_issues = List::new();
+    let mut total_files = 0;
+
+    // Find all .vr files in src/ and core/
+    let search_dirs: Vec<PathBuf> = ["src", "core"]
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
+
+    if search_dirs.is_empty() {
+        return Err(CliError::Custom("No src/ or core/ directory found".into()));
+    }
+
+    for search_dir in &search_dirs {
+        for entry in WalkDir::new(search_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && is_verum_file(path) {
+                total_files += 1;
+
+                match lint_file(path) {
+                    Ok(issues) => {
+                        // Filter out disabled rules
+                        let filtered: Vec<_> = issues.into_iter()
+                            .filter(|i| !disabled_rules.contains(&i.rule.to_string()))
+                            .collect();
+                        all_issues.extend(filtered);
+                    }
+                    Err(e) => {
+                        ui::error(&format!("Failed to lint {}: {}", path.display(), e));
+                    }
+                }
+            }
+        }
+    }
+
+    // Group issues by severity
+    let mut errors = List::new();
+    let mut warnings = List::new();
+    let mut info_issues = List::new();
+    let mut hints = List::new();
+
+    for issue in &all_issues {
+        match issue.level {
+            LintLevel::Error => errors.push(issue),
+            LintLevel::Warning => warnings.push(issue),
+            LintLevel::Info => info_issues.push(issue),
+            LintLevel::Hint => hints.push(issue),
+        }
+    }
+
+    // Print issues
+    for issue in &errors {
+        print_issue(issue, deny_warnings);
+    }
+
+    for issue in &warnings {
+        print_issue(issue, deny_warnings);
+    }
+
+    for issue in &info_issues {
+        print_issue(issue, deny_warnings);
+    }
+
+    for issue in &hints {
+        print_issue(issue, deny_warnings);
+    }
+
+    println!();
+
+    // Summary
+    let total_issues = all_issues.len();
+    if total_issues == 0 {
+        ui::success(&format!("No lint issues found in {} files", total_files));
+        return Ok(());
+    }
+
+    println!("{}", "Lint Summary:".bold());
+    println!("  Files checked: {}", total_files);
+
+    if !errors.is_empty() {
+        println!("  {}: {}", "Errors".red().bold(), errors.len());
+    }
+    if !warnings.is_empty() {
+        println!("  {}: {}", "Warnings".yellow().bold(), warnings.len());
+    }
+    if !info_issues.is_empty() {
+        println!("  {}: {}", "Info".blue().bold(), info_issues.len());
+    }
+    if !hints.is_empty() {
+        println!("  {}: {}", "Hints".dimmed(), hints.len());
+    }
+    println!();
+
+    // Count fixable issues
+    let fixable_count = all_issues.iter().filter(|i| i.fixable).count();
+    if fixable_count > 0 && !fix {
+        println!(
+            "{} issues can be auto-fixed with {}",
+            fixable_count,
+            "verum lint --fix".cyan().bold()
+        );
+    }
+
+    // Apply fixes if requested
+    if fix && fixable_count > 0 {
+        ui::step(&format!("Applying {} automatic fixes", fixable_count));
+
+        // Group fixable issues by file
+        let mut fixes_by_file: HashMap<PathBuf, List<&LintIssue>> = HashMap::new();
+        for issue in all_issues.iter().filter(|i| i.fixable) {
+            fixes_by_file
+                .entry(issue.file.clone())
+                .or_default()
+                .push(issue);
+        }
+
+        // Apply fixes to each file
+        let mut fixed_count = 0;
+        for (file_path, issues) in fixes_by_file {
+            if let Ok(content) = fs::read_to_string(&file_path) {
+                let fixed_content = apply_fixes(&content, &issues);
+                if fixed_content != content && fs::write(&file_path, &fixed_content).is_ok() {
+                    fixed_count += issues.len();
+                }
+            }
+        }
+
+        ui::success(&format!("Fixed {} issues", fixed_count));
+    }
+
+    // Determine exit status
+    if !errors.is_empty() {
+        Err(CliError::Custom(format!(
+            "Found {} lint errors",
+            errors.len()
+        )))
+    } else if deny_warnings && !warnings.is_empty() {
+        Err(CliError::Custom(format!(
+            "Found {} lint warnings (denied)",
+            warnings.len()
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+/// Check if file is a Verum source file (.vr).
+fn is_verum_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext == "vr")
+        .unwrap_or(false)
+}
+
+/// Load lint configuration from `.verum.toml` or `verum.toml`.
+/// Returns set of disabled rule names.
+/// User-configurable lint settings loaded from verum.toml [lint] section.
+///
+/// Supports:
+/// - `disable = "rule1, rule2"` — Disable specific rules
+/// - `deny = "rule1, rule2"` — Promote rules to errors (fail build)
+/// - `allow = "rule1, rule2"` — Demote rules to allowed (no output)
+/// - `warn = "rule1, rule2"` — Explicitly set rules to warning level
+///
+/// Custom pattern-based rules in [lint.custom] section:
+/// ```toml
+/// [lint]
+/// disable = "todo-in-code"
+/// deny = "unsafe-ref-in-public"
+///
+/// [[lint.custom]]
+/// name = "no-print-in-lib"
+/// pattern = "print("
+/// message = "Use Logger context instead of print() in library code"
+/// level = "warning"
+/// paths = ["src/lib/"]
+///
+/// [[lint.custom]]
+/// name = "no-unwrap-in-production"
+/// pattern = ".unwrap()"
+/// message = "Use ? or handle error explicitly"
+/// level = "error"
+/// exclude = ["tests/", "benches/"]
+/// ```
+struct LintConfig {
+    /// Rules that are completely disabled (no output)
+    disabled: HashSet<String>,
+    /// Rules promoted to error level
+    denied: HashSet<String>,
+    /// Rules demoted to allow (suppressed)
+    allowed: HashSet<String>,
+    /// Rules explicitly set to warning level
+    warned: HashSet<String>,
+    /// Custom pattern-based lint rules
+    custom_rules: Vec<CustomLintRule>,
+}
+
+/// A user-defined pattern-based lint rule from [lint.custom].
+#[derive(Debug, Clone)]
+struct CustomLintRule {
+    /// Rule name (used in diagnostics and disable/deny)
+    name: String,
+    /// Text pattern to search for (substring match)
+    pattern: String,
+    /// Diagnostic message
+    message: String,
+    /// Severity level
+    level: LintLevel,
+    /// Only check files under these paths (empty = all files)
+    paths: Vec<String>,
+    /// Exclude files under these paths
+    exclude: Vec<String>,
+    /// Optional fix suggestion
+    suggestion: Option<String>,
+}
+
+impl Default for LintConfig {
+    fn default() -> Self {
+        Self {
+            disabled: HashSet::new(),
+            denied: HashSet::new(),
+            allowed: HashSet::new(),
+            warned: HashSet::new(),
+            custom_rules: Vec::new(),
+        }
+    }
+}
+
+impl LintConfig {
+    /// Get effective level for a rule, considering user overrides.
+    fn effective_level(&self, rule_name: &str, default_level: LintLevel) -> Option<LintLevel> {
+        if self.disabled.contains(rule_name) || self.allowed.contains(rule_name) {
+            return None; // Suppressed
+        }
+        if self.denied.contains(rule_name) {
+            return Some(LintLevel::Error);
+        }
+        if self.warned.contains(rule_name) {
+            return Some(LintLevel::Warning);
+        }
+        Some(default_level)
+    }
+}
+
+fn load_lint_config() -> HashSet<String> {
+    let config = load_full_lint_config();
+    config.disabled
+}
+
+fn load_full_lint_config() -> LintConfig {
+    let mut config = LintConfig::default();
+
+    for name in &[".verum.toml", "verum.toml", "Verum.toml"] {
+        let path = PathBuf::from(name);
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                parse_lint_config_from_toml(&content, &mut config);
+            }
+            break; // Use first found config file
+        }
+    }
+
+    config
+}
+
+fn parse_lint_config_from_toml(content: &str, config: &mut LintConfig) {
+    let mut in_lint_section = false;
+    let mut in_custom_section = false;
+    let mut current_custom: Option<CustomLintRule> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments and empty lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Section headers
+        if trimmed.starts_with('[') {
+            // Flush any pending custom rule
+            if let Some(rule) = current_custom.take() {
+                if !rule.name.is_empty() && !rule.pattern.is_empty() {
+                    config.custom_rules.push(rule);
+                }
+            }
+
+            in_lint_section = trimmed == "[lint]" || trimmed == "[linter]";
+            in_custom_section = trimmed == "[[lint.custom]]" || trimmed == "[[linter.custom]]";
+
+            if in_custom_section {
+                current_custom = Some(CustomLintRule {
+                    name: String::new(),
+                    pattern: String::new(),
+                    message: String::new(),
+                    level: LintLevel::Warning,
+                    paths: Vec::new(),
+                    exclude: Vec::new(),
+                    suggestion: None,
+                });
+            }
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"');
+
+            if in_lint_section && !in_custom_section {
+                let rules: Vec<String> = value.split(',')
+                    .map(|r| r.trim().to_string())
+                    .filter(|r| !r.is_empty())
+                    .collect();
+
+                match key {
+                    "disable" | "disabled" => config.disabled.extend(rules),
+                    "deny" | "denied" => config.denied.extend(rules),
+                    "allow" | "allowed" => config.allowed.extend(rules),
+                    "warn" | "warned" => config.warned.extend(rules),
+                    _ => {}
+                }
+            }
+
+            if in_custom_section {
+                if let Some(ref mut rule) = current_custom {
+                    match key {
+                        "name" => rule.name = value.to_string(),
+                        "pattern" => rule.pattern = value.to_string(),
+                        "message" => rule.message = value.to_string(),
+                        "level" => {
+                            rule.level = match value {
+                                "error" => LintLevel::Error,
+                                "warning" | "warn" => LintLevel::Warning,
+                                "info" => LintLevel::Info,
+                                "hint" => LintLevel::Hint,
+                                _ => LintLevel::Warning,
+                            };
+                        }
+                        "suggestion" | "fix" => rule.suggestion = Some(value.to_string()),
+                        "paths" => {
+                            rule.paths = value.split(',')
+                                .map(|p| p.trim().to_string())
+                                .filter(|p| !p.is_empty())
+                                .collect();
+                        }
+                        "exclude" => {
+                            rule.exclude = value.split(',')
+                                .map(|p| p.trim().to_string())
+                                .filter(|p| !p.is_empty())
+                                .collect();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Flush last custom rule
+    if let Some(rule) = current_custom {
+        if !rule.name.is_empty() && !rule.pattern.is_empty() {
+            config.custom_rules.push(rule);
+        }
+    }
+}
+
+/// Run custom lint rules against a file.
+fn lint_custom_rules(path: &Path, content: &str, config: &LintConfig) -> Vec<LintIssue> {
+    let mut issues = Vec::new();
+    let path_str = path.to_string_lossy();
+
+    for rule in &config.custom_rules {
+        // Check path filters
+        if !rule.paths.is_empty() {
+            let matches_path = rule.paths.iter().any(|p| path_str.contains(p.as_str()));
+            if !matches_path { continue; }
+        }
+        if rule.exclude.iter().any(|p| path_str.contains(p.as_str())) {
+            continue;
+        }
+
+        // Check if rule is disabled/allowed
+        if config.disabled.contains(&rule.name) || config.allowed.contains(&rule.name) {
+            continue;
+        }
+
+        // Effective level (deny overrides)
+        let level = if config.denied.contains(&rule.name) {
+            LintLevel::Error
+        } else {
+            rule.level
+        };
+
+        // Scan lines for pattern
+        for (line_idx, line) in content.lines().enumerate() {
+            if line.contains(&rule.pattern) {
+                issues.push(LintIssue {
+                    rule: Box::leak(rule.name.clone().into_boxed_str()),
+                    level,
+                    file: path.to_path_buf(),
+                    line: line_idx + 1,
+                    column: line.find(&rule.pattern).unwrap_or(0) + 1,
+                    message: rule.message.clone(),
+                    suggestion: rule.suggestion.as_ref().map(|s| Text::from(s.clone())),
+                    fixable: rule.suggestion.is_some(),
+                });
+            }
+        }
+    }
+
+    issues
+}
+
+// ---------------------------------------------------------------------------
+// Fix application
+// ---------------------------------------------------------------------------
+
+/// Apply automatic fixes to file content
+fn apply_fixes(content: &str, issues: &List<&LintIssue>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result_lines: Vec<Option<String>> = lines.iter().map(|l| Some(l.to_string())).collect();
+
+    for issue in issues.iter() {
+        let idx = issue.line.wrapping_sub(1);
+        if idx >= result_lines.len() {
+            continue;
+        }
+        match issue.rule {
+            "unused-import" => {
+                // Remove the entire mount line
+                result_lines[idx] = None;
+            }
+            "deprecated-syntax" => {
+                if let Some(ref suggestion) = issue.suggestion {
+                    if let Some(ref current) = result_lines[idx] {
+                        let fixed = apply_deprecated_syntax_fix(current, suggestion);
+                        result_lines[idx] = Some(fixed);
+                    }
+                }
+            }
+            "unnecessary-heap" => {
+                // Replace Heap(literal) with the literal for small types
+                if let Some(ref current) = result_lines[idx] {
+                    let fixed = fix_unnecessary_heap(current);
+                    result_lines[idx] = Some(fixed);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut result = String::new();
+    for line in result_lines {
+        if let Some(l) = line {
+            result.push_str(&l);
+            result.push('\n');
+        }
+    }
+    result
+}
+
+/// Apply a deprecated syntax fix based on the suggestion
+fn apply_deprecated_syntax_fix(line: &str, suggestion: &str) -> String {
+    // Suggestions are of the form "Use 'X' instead of 'Y'"
+    // Extract the replacement pairs
+    if suggestion.contains("'implement'") && suggestion.contains("'impl'") {
+        return line.replace("impl ", "implement ");
+    }
+    if suggestion.contains("'type X is'") && suggestion.contains("'struct'") {
+        // struct Name { -> type Name is {
+        if let Some(pos) = line.find("struct ") {
+            let after = &line[pos + 7..];
+            if let Some(brace) = after.find('{') {
+                let name = after[..brace].trim();
+                let indent = &line[..pos];
+                return format!("{}type {} is {{", indent, name);
+            }
+        }
+    }
+    if suggestion.contains("'List<T>'") && suggestion.contains("'Vec<T>'") {
+        return line.replace("Vec<", "List<");
+    }
+    if suggestion.contains("without '!'") {
+        // Remove ! from macro-style calls: println!(...) -> print(...)
+        // The suggestion tells us the correct name
+        return line
+            .replace("println!(", "print(")
+            .replace("format!(", "f\"")
+            .replace("panic!(", "panic(")
+            .replace("assert!(", "assert(")
+            .replace("assert_eq!(", "assert_eq(");
+    }
+    line.to_string()
+}
+
+/// Fix unnecessary Heap allocation by removing the Heap() wrapper
+fn fix_unnecessary_heap(line: &str) -> String {
+    // Heap(42) -> 42, Heap(true) -> true, Heap(3.14) -> 3.14
+    let mut result = line.to_string();
+    // Simple pattern: Heap(literal)
+    for small in &["Heap(true)", "Heap(false)"] {
+        let replacement = &small[5..small.len() - 1]; // extract inner
+        result = result.replace(small, replacement);
+    }
+    // For numeric literals, use a regex-like scan
+    let mut output = String::new();
+    let chars = result.chars().peekable();
+    let mut i = 0;
+    let bytes = result.as_bytes();
+    while i < bytes.len() {
+        if i + 5 <= bytes.len() && &result[i..i + 5] == "Heap(" {
+            // Check if content is a simple numeric literal
+            let after = &result[i + 5..];
+            if let Some(close) = after.find(')') {
+                let inner = after[..close].trim();
+                if is_small_literal(inner) {
+                    output.push_str(inner);
+                    i += 5 + close + 1;
+                    continue;
+                }
+            }
+        }
+        output.push(bytes[i] as char);
+        i += 1;
+    }
+    let _ = chars; // suppress unused
+    output
+}
+
+/// Check if a string is a small literal (Int, Float, Bool)
+fn is_small_literal(s: &str) -> bool {
+    if s == "true" || s == "false" {
+        return true;
+    }
+    // Integer literal (possibly negative)
+    let s = s.strip_prefix('-').unwrap_or(s);
+    if s.chars().all(|c| c.is_ascii_digit()) && !s.is_empty() {
+        return true;
+    }
+    // Float literal
+    if s.contains('.') {
+        let parts: Vec<&str> = s.splitn(2, '.').collect();
+        if parts.len() == 2
+            && parts[0].chars().all(|c| c.is_ascii_digit())
+            && parts[1].chars().all(|c| c.is_ascii_digit())
+            && !parts[0].is_empty()
+        {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Core linting engine
+// ---------------------------------------------------------------------------
+
+/// Parsed information about the file for cross-rule analysis
+struct FileInfo {
+    lines: Vec<String>,
+    /// All context declarations found: "context Name { ... }"
+    context_decls: HashSet<String>,
+    /// All type declarations: name -> (line, field_count)
+    type_decls: HashMap<String, (usize, usize)>,
+    /// Types that have close()/free() methods
+    types_with_resource_methods: HashSet<String>,
+    /// Types that implement Cleanup
+    types_with_cleanup: HashSet<String>,
+    /// Imported names from mount statements: name -> line_number
+    mount_imports: Vec<(String, Vec<String>, usize)>,
+    /// Functions that return Result/Maybe types: (line, name)
+    result_returning_fns: HashSet<String>,
+}
+
+impl FileInfo {
+    fn parse(content: &str) -> Self {
+        let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut context_decls = HashSet::new();
+        let mut type_decls = HashMap::new();
+        let mut types_with_resource_methods = HashSet::new();
+        let mut types_with_cleanup = HashSet::new();
+        let mut mount_imports = Vec::new();
+        let mut result_returning_fns = HashSet::new();
+
+        let mut current_type_name: Option<String> = None;
+        let mut current_type_line: usize = 0;
+        let mut current_field_count: usize = 0;
+        let mut brace_depth: i32 = 0;
+        let mut in_type_body = false;
+
+        for (line_num, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+
+            // Context declarations: "context Name { ... }"
+            if trimmed.starts_with("context ") {
+                if let Some(name) = trimmed
+                    .strip_prefix("context ")
+                    .and_then(|s| s.split_whitespace().next())
+                {
+                    context_decls.insert(name.trim_end_matches('{').trim().to_string());
+                }
+            }
+
+            // Type declarations: "type Name is { field: Type, ... };"
+            if trimmed.starts_with("type ") && trimmed.contains(" is ") {
+                let after_type = trimmed.strip_prefix("type ").unwrap_or("");
+                let name = after_type
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                if trimmed.contains('{') {
+                    // Count fields in single-line type decl
+                    if trimmed.contains('}') {
+                        let body = extract_between(trimmed, '{', '}');
+                        let field_count = body
+                            .split(',')
+                            .filter(|f| f.contains(':'))
+                            .count();
+                        type_decls.insert(name, (line_num, field_count));
+                    } else {
+                        // Multi-line type decl
+                        current_type_name = Some(name);
+                        current_type_line = line_num;
+                        current_field_count = 0;
+                        in_type_body = true;
+                        brace_depth = 1;
+                    }
+                } else if !name.is_empty() {
+                    // Simple type alias or newtype
+                    type_decls.insert(name, (line_num, 0));
+                }
+            } else if in_type_body {
+                for ch in trimmed.chars() {
+                    match ch {
+                        '{' => brace_depth += 1,
+                        '}' => brace_depth -= 1,
+                        _ => {}
+                    }
+                }
+                if trimmed.contains(':') && brace_depth == 1 {
+                    current_field_count += trimmed
+                        .split(',')
+                        .filter(|f| f.contains(':'))
+                        .count();
+                }
+                if brace_depth <= 0 {
+                    if let Some(ref name) = current_type_name {
+                        type_decls.insert(name.clone(), (current_type_line, current_field_count));
+                    }
+                    in_type_body = false;
+                    current_type_name = None;
+                }
+            }
+
+            // Implement blocks with close()/free() methods
+            if trimmed.starts_with("implement ") && !trimmed.contains(" for ") {
+                let impl_name = trimmed
+                    .strip_prefix("implement ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .unwrap_or("")
+                    .trim_end_matches('{')
+                    .trim()
+                    .to_string();
+                // Scan ahead for close()/free() methods
+                for ahead in lines.iter().skip(line_num + 1) {
+                    let at = ahead.trim();
+                    if at.starts_with("fn close(") || at.starts_with("fn free(") {
+                        types_with_resource_methods.insert(impl_name.clone());
+                        break;
+                    }
+                    if at == "}" && !at.contains("fn ") {
+                        // Simple heuristic: top-level closing brace ends impl
+                        if ahead.starts_with('}') {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // implement Cleanup for Type
+            if trimmed.starts_with("implement Cleanup for ") {
+                let type_name = trimmed
+                    .strip_prefix("implement Cleanup for ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .unwrap_or("")
+                    .trim_end_matches('{')
+                    .trim()
+                    .to_string();
+                types_with_cleanup.insert(type_name);
+            }
+
+            // Mount statements: "mount module.{name1, name2}" or "mount module.name"
+            if trimmed.starts_with("mount ") {
+                if let Some(rest) = trimmed.strip_prefix("mount ") {
+                    let rest = rest.trim_end_matches(';').trim();
+                    let (module_path, names) = parse_mount_statement(rest);
+                    mount_imports.push((module_path, names, line_num));
+                }
+            }
+
+            // Functions returning Result/Maybe
+            if trimmed.starts_with("fn ") {
+                if let Some(arrow_pos) = trimmed.find("->") {
+                    let ret_type = trimmed[arrow_pos + 2..].trim();
+                    if ret_type.starts_with("Result")
+                        || ret_type.starts_with("Maybe")
+                        || ret_type.contains("Result<")
+                        || ret_type.contains("Maybe<")
+                    {
+                        if let Some(fn_name) = extract_fn_name(trimmed) {
+                            result_returning_fns.insert(fn_name);
+                        }
+                    }
+                }
+            }
+        }
+
+        FileInfo {
+            lines,
+            context_decls,
+            type_decls,
+            types_with_resource_methods,
+            types_with_cleanup,
+            mount_imports,
+            result_returning_fns,
+        }
+    }
+}
+
+/// Parse a mount statement to extract module path and imported names
+fn parse_mount_statement(rest: &str) -> (String, Vec<String>) {
+    // "foo.bar.{Baz, Qux}" or "foo.bar.Baz" or "foo.bar.*"
+    if let Some(brace_start) = rest.find('{') {
+        let module_path = rest[..brace_start].trim_end_matches('.').to_string();
+        let brace_end = rest.find('}').unwrap_or(rest.len());
+        let names: Vec<String> = rest[brace_start + 1..brace_end]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        (module_path, names)
+    } else if rest.contains('.') {
+        let parts: Vec<&str> = rest.rsplitn(2, '.').collect();
+        let name = parts[0].trim().to_string();
+        let module_path = if parts.len() > 1 {
+            parts[1].trim().to_string()
+        } else {
+            String::new()
+        };
+        if name == "*" {
+            (module_path, vec!["*".to_string()])
+        } else {
+            (module_path, vec![name])
+        }
+    } else {
+        (rest.to_string(), vec![rest.to_string()])
+    }
+}
+
+/// Extract function name from a line like "fn foo(..."
+fn extract_fn_name(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let after_fn = trimmed
+        .strip_prefix("pub fn ")
+        .or_else(|| trimmed.strip_prefix("fn "))?;
+    let name_end = after_fn.find(|c: char| c == '(' || c == '<' || c == ' ')?;
+    Some(after_fn[..name_end].to_string())
+}
+
+/// Extract text between matching delimiters (first occurrence)
+fn extract_between(s: &str, open: char, close: char) -> &str {
+    if let Some(start) = s.find(open) {
+        if let Some(end) = s[start + 1..].find(close) {
+            return &s[start + 1..start + 1 + end];
+        }
+    }
+    ""
+}
+
+// ---------------------------------------------------------------------------
+// Individual lint rule checkers
+// ---------------------------------------------------------------------------
+
+/// Rule 1: UncheckedRefinement
+/// Functions with refinement type parameters that lack @verify annotation.
+fn check_unchecked_refinement(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    let mut prev_lines_have_verify = false;
+
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Track @verify annotations
+        if trimmed.starts_with("@verify") {
+            prev_lines_have_verify = true;
+            continue;
+        }
+
+        // Look for function signatures with refinement types
+        // Refinement types in Verum look like: param: { x: Int | x > 0 }
+        if (trimmed.starts_with("fn ") || trimmed.starts_with("pub fn "))
+            && trimmed.contains('{')
+            && trimmed.contains('|')
+        {
+            // Heuristic: if line has "fn" and contains "{ ... | ... }" before the body,
+            // it likely has a refinement type in the signature
+            if let Some(paren_end) = trimmed.find(')') {
+                let sig_part = &trimmed[..paren_end + 1];
+                // Check for refinement pattern: { ident : Type | predicate }
+                if sig_part.contains('{') && sig_part.contains('|') {
+                    if !prev_lines_have_verify {
+                        let fn_name = extract_fn_name(trimmed).unwrap_or_default();
+                        issues.push(LintIssue {
+                            rule: "unchecked-refinement",
+                            level: LintLevel::Warning,
+                            file: path.to_path_buf(),
+                            line: line_num + 1,
+                            column: 1,
+                            message: format!(
+                                "Function '{}' has refinement type parameters without @verify annotation",
+                                fn_name
+                            ),
+                            suggestion: Some("Add @verify above the function to enable SMT checking".into()),
+                            fixable: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Also check for standalone refinement type annotations in params
+        // Pattern: param_name: { val: Type | condition }
+        if (trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ")) && !prev_lines_have_verify {
+            // Scan for refinement-style braces in the parameter list
+            if let Some(paren_start) = trimmed.find('(') {
+                if let Some(paren_end) = trimmed.rfind(')') {
+                    let params = &trimmed[paren_start + 1..paren_end];
+                    // Refinement: contains "{ ... | ... }" in param types
+                    let mut depth = 0;
+                    let mut has_refinement = false;
+                    let mut in_brace = false;
+                    for ch in params.chars() {
+                        match ch {
+                            '{' => {
+                                depth += 1;
+                                in_brace = true;
+                            }
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    in_brace = false;
+                                }
+                            }
+                            '|' if in_brace && depth == 1 => {
+                                has_refinement = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if has_refinement {
+                        let fn_name = extract_fn_name(trimmed).unwrap_or_default();
+                        issues.push(LintIssue {
+                            rule: "unchecked-refinement",
+                            level: LintLevel::Warning,
+                            file: path.to_path_buf(),
+                            line: line_num + 1,
+                            column: 1,
+                            message: format!(
+                                "Function '{}' has refinement type parameters without @verify annotation",
+                                fn_name
+                            ),
+                            suggestion: Some("Add @verify above the function to enable SMT checking".into()),
+                            fixable: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Reset verify tracking for non-annotation, non-blank lines
+        if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('@') {
+            prev_lines_have_verify = false;
+        }
+    }
+}
+
+/// Rule 2: MissingContextDecl
+/// Functions using `using [X]` where X is not declared as a context in scope.
+fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Look for "using [ContextA, ContextB]" in function signatures
+        if let Some(using_pos) = trimmed.find("using [") {
+            let after_using = &trimmed[using_pos + 7..];
+            if let Some(bracket_end) = after_using.find(']') {
+                let context_list = &after_using[..bracket_end];
+                for ctx_name in context_list.split(',') {
+                    let ctx_name = ctx_name.trim();
+                    if ctx_name.is_empty() {
+                        continue;
+                    }
+                    // Check if this context is declared in the file
+                    if !info.context_decls.contains(ctx_name) {
+                        // Also check mount imports
+                        let imported = info
+                            .mount_imports
+                            .iter()
+                            .any(|(_, names, _)| names.iter().any(|n| n == ctx_name || n == "*"));
+
+                        if !imported {
+                            let col = line.find("using [").unwrap_or(0) + 1;
+                            issues.push(LintIssue {
+                                rule: "missing-context-decl",
+                                level: LintLevel::Error,
+                                file: path.to_path_buf(),
+                                line: line_num + 1,
+                                column: col,
+                                message: format!(
+                                    "Context '{}' used but not declared or imported in this file",
+                                    ctx_name
+                                ),
+                                suggestion: Some(
+                                    format!(
+                                        "Add 'context {} {{ ... }}' or import it via mount",
+                                        ctx_name
+                                    )
+                                    .into(),
+                                ),
+                                fixable: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Rule 3: UnusedImport
+/// Mount statements where the imported name is never referenced in the file.
+fn check_unused_imports(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (module_path, names, mount_line) in &info.mount_imports {
+        // Wildcard imports can't be checked
+        if names.iter().any(|n| n == "*") {
+            continue;
+        }
+
+        for name in names {
+            if name.is_empty() {
+                continue;
+            }
+
+            // Check if the name appears anywhere in the file other than the mount line
+            let used = info.lines.iter().enumerate().any(|(idx, line)| {
+                if idx == *mount_line {
+                    return false;
+                }
+                let trimmed = line.trim();
+                // Skip comments
+                if trimmed.starts_with("//") {
+                    return false;
+                }
+                // Check for the name as a word boundary (not just substring)
+                contains_word(trimmed, name)
+            });
+
+            if !used {
+                let display_import = if names.len() == 1 {
+                    format!("{}.{}", module_path, name)
+                } else {
+                    name.clone()
+                };
+                issues.push(LintIssue {
+                    rule: "unused-import",
+                    level: LintLevel::Warning,
+                    file: path.to_path_buf(),
+                    line: mount_line + 1,
+                    column: 1,
+                    message: format!("Unused import: {}", display_import),
+                    suggestion: Some("Remove unused import".into()),
+                    fixable: true,
+                });
+            }
+        }
+    }
+}
+
+/// Check if a line contains a word (not just a substring)
+fn contains_word(line: &str, word: &str) -> bool {
+    let mut start = 0;
+    while let Some(pos) = line[start..].find(word) {
+        let abs_pos = start + pos;
+        let before_ok = abs_pos == 0
+            || !line.as_bytes()[abs_pos - 1].is_ascii_alphanumeric()
+                && line.as_bytes()[abs_pos - 1] != b'_';
+        let after_pos = abs_pos + word.len();
+        let after_ok = after_pos >= line.len()
+            || !line.as_bytes()[after_pos].is_ascii_alphanumeric()
+                && line.as_bytes()[after_pos] != b'_';
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs_pos + 1;
+        if start >= line.len() {
+            break;
+        }
+    }
+    false
+}
+
+/// Rule 4: UnnecessaryHeap
+/// Heap(x) where x is a small type (Int, Float, Bool) literal.
+fn check_unnecessary_heap(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+        // Skip comments
+        if trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Scan for Heap(literal) patterns
+        let mut search_start = 0;
+        while let Some(pos) = line[search_start..].find("Heap(") {
+            let abs_pos = search_start + pos;
+            // Check it's not part of a larger word (e.g., "MinHeap(")
+            if abs_pos > 0 && line.as_bytes()[abs_pos - 1].is_ascii_alphanumeric() {
+                search_start = abs_pos + 5;
+                continue;
+            }
+
+            let after = &line[abs_pos + 5..];
+            if let Some(close) = find_matching_paren(after) {
+                let inner = after[..close].trim();
+                if is_small_literal(inner) {
+                    issues.push(LintIssue {
+                        rule: "unnecessary-heap",
+                        level: LintLevel::Warning,
+                        file: path.to_path_buf(),
+                        line: line_num + 1,
+                        column: abs_pos + 1,
+                        message: format!(
+                            "Unnecessary heap allocation for small value: Heap({})",
+                            inner
+                        ),
+                        suggestion: Some(
+                            format!(
+                                "Use '{}' directly; Int/Float/Bool fit in registers",
+                                inner
+                            )
+                            .into(),
+                        ),
+                        fixable: true,
+                    });
+                } else {
+                    // Check if inner is a known small type variable
+                    // Heuristic: if the inner expression is a simple identifier and its type
+                    // is declared as Int/Float/Bool, flag it
+                    check_heap_of_small_type(path, info, line_num, abs_pos, inner, issues);
+                }
+            }
+            search_start = abs_pos + 5;
+        }
+    }
+}
+
+/// Check if a Heap() argument is a known small type
+fn check_heap_of_small_type(
+    path: &Path,
+    _info: &FileInfo,
+    line_num: usize,
+    col: usize,
+    inner: &str,
+    issues: &mut List<LintIssue>,
+) {
+    // If inner is something like "0", "1.0", "true", "false" we already caught it
+    // Here check for typed constructor patterns: Heap(Int), Heap(Bool), Heap(Float)
+    let small_types = ["Int", "Float", "Bool", "Byte", "Char"];
+    for st in &small_types {
+        if inner == *st {
+            issues.push(LintIssue {
+                rule: "unnecessary-heap",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col + 1,
+                message: format!("Unnecessary heap allocation for small type: Heap({})", inner),
+                suggestion: Some(
+                    format!("{} is a small type that fits in a register", inner).into(),
+                ),
+                fixable: false,
+            });
+        }
+    }
+}
+
+/// Find the position of the matching closing paren, accounting for nesting
+fn find_matching_paren(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, ch) in s.chars().enumerate() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Rule 5: MissingErrorContext
+/// `?` operator usage without `.with_context()` or `.map_err()`.
+fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Look for lines ending with `?` or containing `?;` or `?)`
+        // but not preceded by `.with_context(` or `.map_err(`
+        let mut search_start = 0;
+        while let Some(q_pos) = trimmed[search_start..].find('?') {
+            let abs_pos = search_start + q_pos;
+
+            // Check this is actually the ? operator (not inside a string or comment)
+            if abs_pos > 0 {
+                // Must follow a ) or identifier char or ] (expression context)
+                let prev_char = trimmed.as_bytes()[abs_pos - 1];
+                if prev_char == b')' || prev_char == b']' || prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
+                    // Check if preceded by .with_context( or .map_err(
+                    let before = &trimmed[..abs_pos];
+                    let has_context = before.contains(".with_context(")
+                        || before.contains(".map_err(")
+                        || before.contains(".context(");
+
+                    if !has_context {
+                        // Find the expression before ?
+                        let expr_start = before
+                            .rfind(|c: char| c == '=' || c == '(' || c == '{' || c == ';')
+                            .map(|p| p + 1)
+                            .unwrap_or(0);
+                        let expr = before[expr_start..].trim();
+
+                        // Don't flag if expr is just a simple variable or short expression
+                        // Only flag function calls and method calls
+                        if expr.contains('(') || expr.contains('.') {
+                            issues.push(LintIssue {
+                                rule: "missing-error-context",
+                                level: LintLevel::Warning,
+                                file: path.to_path_buf(),
+                                line: line_num + 1,
+                                column: abs_pos + 1,
+                                message: "Error propagation with '?' lacks context".to_string(),
+                                suggestion: Some(
+                                    "Add .with_context(|| \"description\") before '?'".into(),
+                                ),
+                                fixable: false,
+                            });
+                        }
+                    }
+                }
+            }
+            search_start = abs_pos + 1;
+            if search_start >= trimmed.len() {
+                break;
+            }
+        }
+    }
+}
+
+/// Rule 6: LargeCopy
+/// Function parameters taking large struct types by value (>4 fields).
+fn check_large_copy(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Look for function signatures
+        if !trimmed.starts_with("fn ") && !trimmed.starts_with("pub fn ") {
+            continue;
+        }
+
+        // Extract parameter list
+        if let Some(paren_start) = trimmed.find('(') {
+            if let Some(paren_end) = trimmed.rfind(')') {
+                let params = &trimmed[paren_start + 1..paren_end];
+
+                // Parse each parameter
+                for param in split_params(params) {
+                    let param = param.trim();
+                    if param.is_empty() || param == "&self" || param == "&mut self" || param == "self" {
+                        continue;
+                    }
+
+                    // param format: "name: Type"
+                    if let Some(colon_pos) = param.find(':') {
+                        let param_name = param[..colon_pos].trim();
+                        let param_type = param[colon_pos + 1..].trim();
+
+                        // Skip references
+                        if param_type.starts_with('&') {
+                            continue;
+                        }
+
+                        // Check if the type is a known large struct
+                        let type_name = param_type
+                            .split('<')
+                            .next()
+                            .unwrap_or(param_type)
+                            .trim();
+
+                        if let Some((_, field_count)) = info.type_decls.get(type_name) {
+                            if *field_count > 4 {
+                                issues.push(LintIssue {
+                                    rule: "large-copy",
+                                    level: LintLevel::Warning,
+                                    file: path.to_path_buf(),
+                                    line: line_num + 1,
+                                    column: paren_start + 2,
+                                    message: format!(
+                                        "Parameter '{}' copies type '{}' ({} fields) by value",
+                                        param_name, type_name, field_count
+                                    ),
+                                    suggestion: Some(
+                                        format!(
+                                            "Pass by reference: '{}: &{}'",
+                                            param_name, param_type
+                                        )
+                                        .into(),
+                                    ),
+                                    fixable: false,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Split parameter list by commas, respecting nested generics and braces
+fn split_params(params: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, ch) in params.chars().enumerate() {
+        match ch {
+            '<' | '(' | '{' | '[' => depth += 1,
+            '>' | ')' | '}' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                result.push(&params[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < params.len() {
+        result.push(&params[start..]);
+    }
+    result
+}
+
+/// Rule 7: UnusedResult
+/// Function calls returning Result/Maybe whose value is not bound or propagated.
+fn check_unused_result(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Skip comments, blank lines, control flow
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("let ")
+            || trimmed.starts_with("return ")
+            || trimmed.starts_with("if ")
+            || trimmed.starts_with("match ")
+            || trimmed.starts_with("}")
+            || trimmed.starts_with("{")
+            || trimmed.starts_with("fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("type ")
+            || trimmed.starts_with("mount ")
+            || trimmed.starts_with("context ")
+            || trimmed.starts_with("implement ")
+            || trimmed.starts_with("@")
+        {
+            continue;
+        }
+
+        // Look for bare function/method calls as statements (ending with ;)
+        if trimmed.ends_with(';') && !trimmed.contains('=') {
+            let stmt = trimmed.trim_end_matches(';').trim();
+
+            // Must contain a function call
+            if !stmt.contains('(') {
+                continue;
+            }
+
+            // Skip if it ends with ? (error is propagated)
+            if stmt.ends_with('?') {
+                continue;
+            }
+
+            // Extract the function name
+            let fn_name = if stmt.contains('.') {
+                // Method call: extract method name
+                // e.g., "foo.bar()" -> "bar"
+                if let Some(dot_pos) = stmt.rfind('.') {
+                    let after_dot = &stmt[dot_pos + 1..];
+                    after_dot
+                        .split('(')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                } else {
+                    ""
+                }
+            } else {
+                // Free function call
+                stmt.split('(').next().unwrap_or("").trim()
+            };
+
+            // Check if this function is known to return Result/Maybe
+            if info.result_returning_fns.contains(fn_name) {
+                issues.push(LintIssue {
+                    rule: "unused-result",
+                    level: LintLevel::Warning,
+                    file: path.to_path_buf(),
+                    line: line_num + 1,
+                    column: 1,
+                    message: format!(
+                        "Return value of '{}' (Result/Maybe) is unused",
+                        fn_name
+                    ),
+                    suggestion: Some(
+                        "Use 'let _ = ...' to explicitly discard, or handle the result".into(),
+                    ),
+                    fixable: false,
+                });
+            }
+        }
+    }
+}
+
+/// Rule 8: MissingCleanup
+/// Types with close()/free() method but no `implement Cleanup for`.
+fn check_missing_cleanup(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for type_name in &info.types_with_resource_methods {
+        if !info.types_with_cleanup.contains(type_name) {
+            // Find the type declaration line for better error reporting
+            let decl_line = info
+                .type_decls
+                .get(type_name)
+                .map(|(line, _)| *line + 1)
+                .unwrap_or(1);
+
+            issues.push(LintIssue {
+                rule: "missing-cleanup",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: decl_line,
+                column: 1,
+                message: format!(
+                    "Type '{}' has close()/free() method but does not implement Cleanup protocol",
+                    type_name
+                ),
+                suggestion: Some(
+                    format!(
+                        "Add 'implement Cleanup for {} {{ fn cleanup(&mut self) {{ self.close(); }} }}'",
+                        type_name
+                    )
+                    .into(),
+                ),
+                fixable: false,
+            });
+        }
+    }
+}
+
+/// Rule 9: DeprecatedSyntax
+/// Check for Rust-isms: struct, impl, !, Vec<T>, etc.
+fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Check for `struct` keyword (should be `type Name is { ... }`)
+        if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
+            let col = line.find("struct").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'type Name is { ... }' instead of 'struct'".to_string(),
+                suggestion: Some("Use 'type X is { ... }' instead of 'struct X { ... }'".into()),
+                fixable: true,
+            });
+        }
+
+        // Check for bare `impl` instead of `implement`
+        // Be careful not to match "implement" itself
+        if (trimmed.starts_with("impl ") || trimmed.starts_with("pub impl "))
+            && !trimmed.starts_with("implement")
+        {
+            let col = line.find("impl").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'implement' instead of 'impl'".to_string(),
+                suggestion: Some("Use 'implement' instead of 'impl'".into()),
+                fixable: true,
+            });
+        }
+
+        // Check for `trait` keyword (should be `type Name is protocol { ... }`)
+        if trimmed.starts_with("trait ") || trimmed.starts_with("pub trait ") {
+            let col = line.find("trait").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'type Name is protocol { ... }' instead of 'trait'".to_string(),
+                suggestion: Some("Use 'type X is protocol { ... }' instead of 'trait X { ... }'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for `enum` keyword (should be sum type)
+        if trimmed.starts_with("enum ") || trimmed.starts_with("pub enum ") {
+            let col = line.find("enum").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'type Name is A | B' instead of 'enum'".to_string(),
+                suggestion: Some("Use 'type X is A | B;' instead of 'enum X { A, B }'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for Vec<T> (should be List<T>)
+        if contains_word(trimmed, "Vec") && trimmed.contains("Vec<") {
+            let col = line.find("Vec<").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'List<T>' instead of 'Vec<T>'".to_string(),
+                suggestion: Some("Use 'List<T>' instead of 'Vec<T>'".into()),
+                fixable: true,
+            });
+        }
+
+        // Check for String type (should be Text)
+        // Be careful: only flag standalone "String" as a type, not inside strings
+        if contains_word(trimmed, "String") && !trimmed.starts_with("//") {
+            // Heuristic: "String" appearing after : or < or as a type annotation
+            if trimmed.contains(": String")
+                || trimmed.contains("<String>")
+                || trimmed.contains("-> String")
+                || trimmed.starts_with("String")
+            {
+                let col = line.find("String").unwrap_or(0) + 1;
+                issues.push(LintIssue {
+                    rule: "deprecated-syntax",
+                    level: LintLevel::Error,
+                    file: path.to_path_buf(),
+                    line: line_num + 1,
+                    column: col,
+                    message: "Use 'Text' instead of 'String'".to_string(),
+                    suggestion: Some("Use 'Text' instead of 'String'".into()),
+                    fixable: false,
+                });
+            }
+        }
+
+        // Check for HashMap (should be Map)
+        if contains_word(trimmed, "HashMap") {
+            let col = line.find("HashMap").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'Map<K, V>' instead of 'HashMap<K, V>'".to_string(),
+                suggestion: Some("Use 'Map<K, V>' instead of 'HashMap<K, V>'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for HashSet (should be Set)
+        if contains_word(trimmed, "HashSet") {
+            let col = line.find("HashSet").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'Set<T>' instead of 'HashSet<T>'".to_string(),
+                suggestion: Some("Use 'Set<T>' instead of 'HashSet<T>'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for ! macro syntax: println!(), format!(), panic!(), assert!(), etc.
+        let macro_patterns = [
+            ("println!(", "print("),
+            ("format!(", "f\"...\""),
+            ("panic!(", "panic("),
+            ("assert!(", "assert("),
+            ("assert_eq!(", "assert_eq("),
+            ("assert_ne!(", "assert_ne("),
+            ("unreachable!(", "unreachable("),
+            ("todo!(", "todo("),
+            ("vec![", "List ["),
+        ];
+        for (bad, good) in &macro_patterns {
+            if trimmed.contains(bad) {
+                let col = line.find(bad).unwrap_or(0) + 1;
+                issues.push(LintIssue {
+                    rule: "deprecated-syntax",
+                    level: LintLevel::Error,
+                    file: path.to_path_buf(),
+                    line: line_num + 1,
+                    column: col,
+                    message: format!("Use '{}' instead of '{}' (Verum has no '!' macro syntax)", good, bad.trim_end_matches('(')),
+                    suggestion: Some(format!("Use '{}' without '!'", good).into()),
+                    fixable: true,
+                });
+            }
+        }
+
+        // Check for `use` keyword (should be `mount`)
+        if trimmed.starts_with("use ") && !trimmed.starts_with("using") {
+            let col = 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'mount' instead of 'use' for imports".to_string(),
+                suggestion: Some("Use 'mount module.name' instead of 'use module::name'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for Box::new (should be Heap())
+        if trimmed.contains("Box::new(") {
+            let col = line.find("Box::new(").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use 'Heap(x)' instead of 'Box::new(x)'".to_string(),
+                suggestion: Some("Use 'Heap(x)' instead of 'Box::new(x)'".into()),
+                fixable: false,
+            });
+        }
+
+        // Check for :: path separator (should be .)
+        // Only flag when it looks like a path, not inside strings
+        if trimmed.contains("::") && !trimmed.starts_with("//") && !trimmed.contains("\"") {
+            // Heuristic: A::B pattern that's not inside a string literal
+            let col = line.find("::").unwrap_or(0) + 1;
+            issues.push(LintIssue {
+                rule: "deprecated-syntax",
+                level: LintLevel::Error,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: col,
+                message: "Use '.' path separator instead of '::' (Verum uses dot paths)".to_string(),
+                suggestion: Some("Replace '::' with '.' in module paths".into()),
+                fixable: false,
+            });
+        }
+    }
+}
+
+/// Rule 10: CbgrHotspot
+/// Tight loops containing reference dereferences that could use &checked.
+fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    let mut in_loop = false;
+    let mut loop_start_line: usize = 0;
+    let mut loop_depth: i32 = 0;
+    let mut loop_has_deref = false;
+    let mut deref_lines: Vec<usize> = Vec::new();
+
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Track loop entry
+        if trimmed.starts_with("for ") || trimmed.starts_with("while ") || trimmed == "loop {" {
+            if !in_loop {
+                in_loop = true;
+                loop_start_line = line_num;
+                loop_has_deref = false;
+                deref_lines.clear();
+                loop_depth = 0;
+            }
+            // Count braces on the loop line itself
+            for ch in trimmed.chars() {
+                match ch {
+                    '{' => loop_depth += 1,
+                    '}' => loop_depth -= 1,
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
+        if in_loop {
+            for ch in trimmed.chars() {
+                match ch {
+                    '{' => loop_depth += 1,
+                    '}' => loop_depth -= 1,
+                    _ => {}
+                }
+            }
+
+            // Check for reference dereferences inside the loop
+            // Patterns: *ref_name, &variable (tier 0 reference creation), .deref()
+            if trimmed.contains('*') && !trimmed.starts_with("//") {
+                // Simple heuristic: * followed by an identifier
+                let mut chars = trimmed.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    if ch == '*' {
+                        if let Some(&next) = chars.peek() {
+                            if next.is_ascii_alphanumeric() || next == '_' {
+                                loop_has_deref = true;
+                                deref_lines.push(line_num);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also flag &T references created inside loops (CBGR overhead per iteration)
+            if (trimmed.contains("&") && !trimmed.contains("&&") && !trimmed.contains("&checked") && !trimmed.contains("&unsafe"))
+                && (trimmed.contains("let ") || trimmed.contains("= &"))
+            {
+                loop_has_deref = true;
+                deref_lines.push(line_num);
+            }
+
+            // Loop end
+            if loop_depth <= 0 {
+                if loop_has_deref && !deref_lines.is_empty() {
+                    issues.push(LintIssue {
+                        rule: "cbgr-hotspot",
+                        level: LintLevel::Info,
+                        file: path.to_path_buf(),
+                        line: loop_start_line + 1,
+                        column: 1,
+                        message: format!(
+                            "Tight loop contains {} reference dereference(s) with CBGR overhead (~15ns each)",
+                            deref_lines.len()
+                        ),
+                        suggestion: Some(
+                            "Consider using &checked references if escape analysis can prove safety (0ns overhead)".into(),
+                        ),
+                        fixable: false,
+                    });
+                }
+                in_loop = false;
+                deref_lines.clear();
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main file linting
+// ---------------------------------------------------------------------------
+
+/// Lint a single file by running all rules.
+fn lint_file(path: &Path) -> Result<List<LintIssue>> {
+    let content = fs::read_to_string(path)?;
+    let mut issues = List::new();
+
+    // Parse file info once for all rules
+    let info = FileInfo::parse(&content);
+
+    // Core rules (1-10)
+    check_unchecked_refinement(path, &info, &mut issues);
+    check_missing_context_decl(path, &info, &mut issues);
+    check_unused_imports(path, &info, &mut issues);
+    check_unnecessary_heap(path, &info, &mut issues);
+    check_missing_error_context(path, &info, &mut issues);
+    check_large_copy(path, &info, &mut issues);
+    check_unused_result(path, &info, &mut issues);
+    check_missing_cleanup(path, &info, &mut issues);
+    check_deprecated_syntax(path, &info, &mut issues);
+    check_cbgr_hotspot(path, &info, &mut issues);
+
+    // Extended rules (11-20)
+    check_extended_rules(path, &info, &mut issues);
+
+    Ok(issues)
+}
+
+/// Extended lint rules (11-20): Verum-specific analysis beyond Clippy.
+fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
+    for (line_num, line) in info.lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") { continue; }
+
+        // Rule 11: mutable-capture-in-spawn
+        // `spawn { ... mut_var ... }` where mut_var is `let mut` in outer scope
+        if trimmed.contains("spawn") && trimmed.contains('{') {
+            // Check if any `let mut` variables from preceding lines are referenced
+            for prev_line in &info.lines[..line_num] {
+                let prev = prev_line.trim();
+                if prev.starts_with("let mut ") {
+                    if let Some(var_name) = prev.strip_prefix("let mut ").and_then(|s| s.split_whitespace().next()) {
+                        let var_name = var_name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                        // Check if the spawn block references this variable
+                        let spawn_block: String = info.lines[line_num..].iter().take(20).cloned().collect::<Vec<_>>().join("\n");
+                        if contains_word(&spawn_block, var_name) {
+                            issues.push(LintIssue {
+                                rule: "mutable-capture-in-spawn",
+                                level: LintLevel::Error,
+                                file: path.to_path_buf(),
+                                line: line_num + 1,
+                                column: 1,
+                                message: format!("Mutable variable `{}` captured by spawn closure", var_name),
+                                suggestion: Some("Use a Channel or Mutex to share mutable state across threads".into()),
+                                fixable: false,
+                            });
+                            break; // one warning per spawn
+                        }
+                    }
+                }
+            }
+        }
+
+        // Rule 12: unbounded-channel
+        if trimmed.contains("Channel.new()") && !trimmed.contains("Channel.new(") {
+            issues.push(LintIssue {
+                rule: "unbounded-channel",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: trimmed.find("Channel.new()").unwrap_or(0) + 1,
+                message: "Channel created without capacity limit".to_string(),
+                suggestion: Some("Use Channel.new(capacity) to prevent OOM under backpressure".into()),
+                fixable: false,
+            });
+        }
+
+        // Rule 13: missing-timeout
+        if (trimmed.contains(".recv()") || trimmed.contains(".await") || trimmed.contains("join("))
+            && !trimmed.contains("timeout") && !trimmed.contains("try_recv") && !trimmed.contains("select")
+        {
+            issues.push(LintIssue {
+                rule: "missing-timeout",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: 1,
+                message: "Blocking operation without timeout".to_string(),
+                suggestion: Some("Consider using select { } with a timeout arm for robustness".into()),
+                fixable: false,
+            });
+        }
+
+        // Rule 15: empty-match-arm
+        if trimmed.contains("=> ()") || trimmed.contains("=> { }") || trimmed.ends_with("=> {},") {
+            issues.push(LintIssue {
+                rule: "empty-match-arm",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: 1,
+                message: "Match arm has empty body".to_string(),
+                suggestion: Some("Add a comment explaining why this arm is intentionally empty, or handle it".into()),
+                fixable: false,
+            });
+        }
+
+        // Rule 17: todo-in-code
+        for marker in &["TODO", "FIXME", "HACK", "XXX"] {
+            if trimmed.contains(marker) && (trimmed.starts_with("//") || trimmed.contains(&format!("// {}", marker))) {
+                issues.push(LintIssue {
+                    rule: "todo-in-code",
+                    level: LintLevel::Warning,
+                    file: path.to_path_buf(),
+                    line: line_num + 1,
+                    column: trimmed.find(marker).unwrap_or(0) + 1,
+                    message: format!("{} comment in code", marker),
+                    suggestion: None,
+                    fixable: false,
+                });
+                break; // one per line
+            }
+        }
+
+        // Rule 18: unsafe-ref-in-public
+        if trimmed.starts_with("pub fn ") && trimmed.contains("&unsafe ") {
+            issues.push(LintIssue {
+                rule: "unsafe-ref-in-public",
+                level: LintLevel::Warning,
+                file: path.to_path_buf(),
+                line: line_num + 1,
+                column: trimmed.find("&unsafe").unwrap_or(0) + 1,
+                message: "Public function exposes &unsafe reference in its signature".to_string(),
+                suggestion: Some("Consider using &T (tier 0) or &checked T (tier 1) in public APIs".into()),
+                fixable: false,
+            });
+        }
+
+        // Rule 20: shadow-binding
+        if trimmed.starts_with("let ") || trimmed.starts_with("let mut ") {
+            let var_start = if trimmed.starts_with("let mut ") { "let mut " } else { "let " };
+            if let Some(var_name) = trimmed.strip_prefix(var_start).and_then(|s| s.split(|c: char| !c.is_alphanumeric() && c != '_').next()) {
+                if !var_name.is_empty() && var_name != "_" {
+                    // Check if same name was bound in an earlier line (not in inner scope)
+                    for prev in &info.lines[..line_num] {
+                        let pt = prev.trim();
+                        if (pt.starts_with("let ") || pt.starts_with("let mut ")) && contains_word(pt, var_name) {
+                            // Simple heuristic: only flag if same indentation level
+                            let cur_indent = line.len() - line.trim_start().len();
+                            let prev_indent = prev.len() - prev.trim_start().len();
+                            if cur_indent == prev_indent {
+                                issues.push(LintIssue {
+                                    rule: "shadow-binding",
+                                    level: LintLevel::Info,
+                                    file: path.to_path_buf(),
+                                    line: line_num + 1,
+                                    column: 1,
+                                    message: format!("Variable `{}` shadows previous binding", var_name),
+                                    suggestion: None,
+                                    fixable: false,
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Issue display
+// ---------------------------------------------------------------------------
+
+/// Print a lint issue with colored output
+fn print_issue(issue: &LintIssue, deny_warnings: bool) {
+    let level_str = match issue.level {
+        LintLevel::Error => "error".red().bold(),
+        LintLevel::Warning => {
+            if deny_warnings {
+                "error".red().bold()
+            } else {
+                "warning".yellow().bold()
+            }
+        }
+        LintLevel::Info => "info".blue().bold(),
+        LintLevel::Hint => "hint".dimmed(),
+    };
+
+    let rule_display = issue.rule.dimmed();
+
+    println!(
+        "{}: {} [{}]",
+        level_str, issue.message, rule_display
+    );
+
+    println!(
+        "  {} {}:{}:{}",
+        "-->".blue(),
+        issue.file.display().to_string().cyan(),
+        issue.line,
+        issue.column
+    );
+
+    if let Some(ref suggestion) = issue.suggestion {
+        println!("  {} {}", "help:".cyan().bold(), suggestion);
+    }
+
+    if issue.fixable {
+        println!("  {} auto-fixable with {}", "note:".cyan(), "--fix".bold());
+    }
+
+    println!();
+}
+
+// ---------------------------------------------------------------------------
+// Public API for workspace support
+// ---------------------------------------------------------------------------
+
+/// Lint specific path (for workspace support)
+pub fn lint_path(path: &Path, fix: bool, deny_warnings: bool) -> Result<()> {
+    if !path.exists() {
+        return Err(CliError::Custom(format!(
+            "Path not found: {}",
+            path.display()
+        )));
+    }
+
+    let mut all_issues = List::new();
+    let mut total_files = 0;
+
+    if path.is_file() {
+        if is_verum_file(path) {
+            total_files += 1;
+            let issues = lint_file(path)?;
+            all_issues.extend(issues);
+        }
+    } else if path.is_dir() {
+        for entry in WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let file_path = entry.path();
+            if file_path.is_file() && is_verum_file(file_path) {
+                total_files += 1;
+                let issues = lint_file(file_path)?;
+                all_issues.extend(issues);
+            }
+        }
+    }
+
+    if all_issues.is_empty() {
+        ui::success(&format!("No lint issues found in {} files", total_files));
+        return Ok(());
+    }
+
+    // Print issues
+    for issue in &all_issues {
+        print_issue(issue, deny_warnings);
+    }
+
+    // Apply fixes if requested
+    if fix {
+        let fixable: List<&LintIssue> = all_issues.iter().filter(|i| i.fixable).collect();
+        if !fixable.is_empty() {
+            let mut fixes_by_file: HashMap<PathBuf, List<&LintIssue>> = HashMap::new();
+            for issue in fixable.iter() {
+                fixes_by_file
+                    .entry(issue.file.clone())
+                    .or_default()
+                    .push(issue);
+            }
+
+            let mut fixed_count = 0;
+            for (file_path, issues) in fixes_by_file {
+                if let Ok(content) = fs::read_to_string(&file_path) {
+                    let fixed_content = apply_fixes(&content, &issues);
+                    if fixed_content != content && fs::write(&file_path, &fixed_content).is_ok() {
+                        fixed_count += issues.len();
+                    }
+                }
+            }
+            ui::success(&format!("Fixed {} issues", fixed_count));
+        }
+    }
+
+    let error_count = all_issues.iter().filter(|i| i.level == LintLevel::Error).count();
+    let warning_count = all_issues.iter().filter(|i| i.level == LintLevel::Warning).count();
+
+    if error_count > 0 {
+        Err(CliError::Custom(format!(
+            "Found {} lint errors",
+            error_count
+        )))
+    } else if deny_warnings && warning_count > 0 {
+        Err(CliError::Custom(format!(
+            "Found {} lint warnings (denied)",
+            warning_count
+        )))
+    } else {
+        Ok(())
+    }
+}

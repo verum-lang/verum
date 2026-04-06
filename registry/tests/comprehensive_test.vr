@@ -1,0 +1,307 @@
+// Comprehensive Test Suite for Verum Registry
+//
+// This file exercises all major features of the registry implementation
+// to validate interpreter execution across the codebase.
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// ============================================================================
+// Domain Types Test
+// ============================================================================
+
+pub fn test_domain_types() {
+    print("=== Testing Domain Types ===");
+
+    // Test Package creation
+    let pkg = Package.new("test-package", "test-owner");
+    assert pkg.name == "test-package";
+    assert pkg.owner == "test-owner";
+    assert pkg.downloads == 0;
+
+    // Test version addition
+    let version = SemVer.new(1, 0, 0);
+    let updated_pkg = pkg.add_version(version);
+    assert len(updated_pkg.versions) == 1;
+
+    print("✓ Domain types work correctly");
+}
+
+// ============================================================================
+// Error Handling Test
+// ============================================================================
+
+pub fn test_error_handling() {
+    print("=== Testing Error Handling ===");
+
+    // Test NotFound error
+    let err1 = RegistryError.NotFound("test-package");
+    assert err1.http_status() == 404;
+    assert err1.is_recoverable();
+
+    // Test Unauthorized error
+    let err2 = RegistryError.Unauthorized("Invalid token");
+    assert err2.http_status() == 401;
+    assert err2.is_recoverable();
+
+    // Test Internal error
+    let err3 = RegistryError.Internal("Database error");
+    assert err3.http_status() == 500;
+    assert !err3.is_recoverable();
+
+    print("✓ Error handling works correctly");
+}
+
+// ============================================================================
+// User Role Test
+// ============================================================================
+
+pub fn test_user_roles() {
+    print("=== Testing User Roles ===");
+
+    // Create regular user
+    let user = User.new("alice", "alice@test.com");
+    assert user.username == "alice";
+    assert user.email == "alice@test.com";
+
+    // Test role methods
+    assert !user.is_admin();
+    assert user.can_publish();
+
+    // Promote to admin
+    let admin = user.with_role(UserRole.Admin);
+    assert admin.is_admin();
+
+    print("✓ User roles work correctly");
+}
+
+// ============================================================================
+// Version Comparison Test
+// ============================================================================
+
+pub fn test_version_comparison() {
+    print("=== Testing Version Comparison ===");
+
+    let v1 = SemVer.new(1, 0, 0);
+    let v2 = SemVer.new(2, 0, 0);
+    let v3 = SemVer.new(1, 5, 0);
+
+    // Test comparison
+    assert v1.compare(v2) == -1;  // v1 < v2
+    assert v2.compare(v1) == 1;   // v2 > v1
+    assert v1.compare(v1) == 0;   // v1 == v1
+
+    // Test stability
+    assert v1.is_stable();
+    assert v2.is_stable();
+
+    print("✓ Version comparison works correctly");
+}
+
+// ============================================================================
+// HTTP Response Test
+// ============================================================================
+
+pub fn test_http_responses() {
+    print("=== Testing HTTP Responses ===");
+
+    // Test success response
+    let success = HttpResponse.ok("{\"status\": \"ok\"}");
+    assert success.status == 200;
+    assert success.body == "{\"status\": \"ok\"}";
+
+    // Test error responses
+    let not_found = HttpResponse.not_found("Package not found");
+    assert not_found.status == 404;
+
+    let unauthorized = HttpResponse.unauthorized("Invalid token");
+    assert unauthorized.status == 401;
+
+    let internal_error = HttpResponse.internal_error("Database error");
+    assert internal_error.status == 500;
+
+    print("✓ HTTP responses work correctly");
+}
+
+// ============================================================================
+// Route Definition Test
+// ============================================================================
+
+pub fn test_route_definitions() {
+    print("=== Testing Route Definitions ===");
+
+    // Create routes
+    let health_route = Route.get("/health", "Health check");
+    assert health_route.method == "GET";
+    assert health_route.path == "/health";
+    assert health_route.description == "Health check";
+
+    let pkg_route = Route.get("/api/v1/packages/{name}", "Get package");
+    assert contains(pkg_route.path, "{name}");
+
+    print("✓ Route definitions work correctly");
+}
+
+// ============================================================================
+// Configuration Test
+// ============================================================================
+
+pub fn test_configuration() {
+    print("=== Testing Configuration ===");
+
+    let config = ServerConfig.new(
+        "127.0.0.1:8080",
+        "postgres://localhost/test",
+        "/tmp/packages",
+        "redis://localhost:6379"
+    );
+
+    assert config.host == "127.0.0.1:8080";
+    assert config.database_url == "postgres://localhost/test";
+    assert config.storage_path == "/tmp/packages";
+    assert config.cache_url == "redis://localhost:6379";
+    assert config.is_valid();
+
+    print("✓ Configuration works correctly");
+}
+
+// ============================================================================
+// Timestamp Test
+// ============================================================================
+
+pub fn test_timestamps() {
+    print("=== Testing Timestamps ===");
+
+    let timestamp = unix_timestamp();
+    assert timestamp > 0;
+
+    // Create package and verify timestamps
+    let pkg = Package.new("test", "owner");
+    assert pkg.created_at > 0;
+    assert pkg.updated_at > 0;
+
+    // Add version and verify updated_at changes
+    let version = SemVer.new(1, 0, 0);
+    let updated = pkg.add_version(version);
+    assert updated.updated_at >= pkg.updated_at;
+
+    print("✓ Timestamps work correctly");
+}
+
+// ============================================================================
+// Publish Status Test
+// ============================================================================
+
+pub fn test_publish_status() {
+    print("=== Testing Publish Status ===");
+
+    // Test success status
+    let success = PublishStatus.Success("test-pkg", "1.0.0");
+    assert success.is_success();
+
+    // Test failure status
+    let failure = PublishStatus.Failure("Invalid manifest");
+    assert !failure.is_success();
+
+    // Test pending status
+    let pending = PublishStatus.Pending;
+    assert !pending.is_success();
+
+    print("✓ Publish status works correctly");
+}
+
+// ============================================================================
+// String Operations Test
+// ============================================================================
+
+pub fn test_string_operations() {
+    print("=== Testing String Operations ===");
+
+    let text = "hello-world";
+
+    // Test contains
+    assert contains(text, "world");
+    assert !contains(text, "foo");
+
+    // Test starts_with
+    assert starts_with(text, "hello");
+    assert !starts_with(text, "world");
+
+    // Test ends_with
+    assert ends_with(text, "world");
+    assert !ends_with(text, "hello");
+
+    // Test length
+    assert len(text) == 11;
+
+    print("✓ String operations work correctly");
+}
+
+// ============================================================================
+// Integration Test: Full Request Flow
+// ============================================================================
+
+pub fn test_full_request_flow() {
+    print("=== Testing Full Request Flow ===");
+
+    // 1. Create configuration
+    let config = ServerConfig.new(
+        "0.0.0.0:8080",
+        "postgres://localhost/registry",
+        "/var/lib/verum",
+        "redis://localhost"
+    );
+    assert config.is_valid();
+
+    // 2. Create user
+    let user = User.new("publisher", "pub@test.com");
+    assert user.can_publish();
+
+    // 3. Create package
+    let pkg = Package.new("awesome-lib", "publisher");
+    assert pkg.downloads == 0;
+
+    // 4. Add version
+    let version = SemVer.new(1, 0, 0);
+    let pkg_with_version = pkg.add_version(version);
+    assert len(pkg_with_version.versions) == 1;
+
+    // 5. Simulate download
+    let pkg_downloaded = pkg_with_version.increment_downloads();
+    assert pkg_downloaded.downloads == 1;
+
+    // 6. Create success response
+    let response = HttpResponse.ok("{\"message\": \"Package published\"}");
+    assert response.status == 200;
+
+    print("✓ Full request flow works correctly");
+}
+
+// ============================================================================
+// Main Test Runner
+// ============================================================================
+
+pub fn main() {
+    print("╔═══════════════════════════════════════════════════════════╗");
+    print("║     VERUM REGISTRY COMPREHENSIVE TEST SUITE              ║");
+    print("╚═══════════════════════════════════════════════════════════╝");
+    print("");
+
+    test_domain_types();
+    test_error_handling();
+    test_user_roles();
+    test_version_comparison();
+    test_http_responses();
+    test_route_definitions();
+    test_configuration();
+    test_timestamps();
+    test_publish_status();
+    test_string_operations();
+    test_full_request_flow();
+
+    print("");
+    print("╔═══════════════════════════════════════════════════════════╗");
+    print("║              ALL TESTS PASSED ✓                          ║");
+    print("╚═══════════════════════════════════════════════════════════╝");
+}

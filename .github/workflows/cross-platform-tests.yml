@@ -1,0 +1,263 @@
+name: Cross-Platform Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should-test: ${{ steps.filter.outputs.should-test }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            should-test:
+              - 'tests/cross_platform/**'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - '.github/workflows/cross-platform-tests.yml'
+
+  test-matrix:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should-test == 'true' || github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux variants
+          - os: ubuntu-22.04
+            name: Ubuntu 22.04
+            rust: stable
+            target: x86_64-unknown-linux-gnu
+
+          - os: ubuntu-22.04
+            name: Ubuntu 22.04 (nightly)
+            rust: nightly
+            target: x86_64-unknown-linux-gnu
+
+          - os: ubuntu-latest
+            name: Ubuntu Latest
+            rust: stable
+            target: x86_64-unknown-linux-gnu
+
+          # macOS variants
+          - os: macos-13
+            name: macOS 13 (Intel)
+            rust: stable
+            target: x86_64-apple-darwin
+
+          - os: macos-14
+            name: macOS 14 (Apple Silicon)
+            rust: stable
+            target: aarch64-apple-darwin
+
+          # Windows variants
+          - os: windows-2022
+            name: Windows Server 2022
+            rust: stable
+            target: x86_64-pc-windows-msvc
+
+          - os: windows-2022
+            name: Windows Server 2022 (GNU)
+            rust: stable
+            target: x86_64-pc-windows-gnu
+
+    runs-on: ${{ matrix.os }}
+    name: Test on ${{ matrix.name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Check Rust version
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Run cross-platform tests
+        run: cargo test --test lib cross_platform --verbose --target ${{ matrix.target }}
+
+      - name: Generate compatibility matrix
+        run: cargo test --test lib cross_platform::compatibility::test_matrix_generation -- --nocapture
+
+      - name: Run platform-specific tests
+        if: runner.os == 'Linux'
+        run: cargo test --test lib cross_platform::platform_specific::linux --verbose
+
+      - name: Run platform-specific tests
+        if: runner.os == 'macOS'
+        run: cargo test --test lib cross_platform::platform_specific::macos --verbose
+
+      - name: Run platform-specific tests
+        if: runner.os == 'Windows'
+        run: cargo test --test lib cross_platform::platform_specific::windows --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: target/debug/deps/*.xml
+
+  docker-tests:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should-test == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - fedora:39
+          - fedora:40
+          - debian:11
+          - debian:12
+          - archlinux:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test on ${{ matrix.distro }}
+        run: |
+          docker run --rm -v $PWD:/workspace -w /workspace ${{ matrix.distro }} sh -c "
+            if command -v apt-get > /dev/null; then
+              apt-get update && apt-get install -y curl build-essential libssl-dev pkg-config
+            elif command -v dnf > /dev/null; then
+              dnf install -y curl gcc g++ openssl-devel
+            elif command -v pacman > /dev/null; then
+              pacman -Sy --noconfirm curl base-devel openssl
+            fi
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            export PATH=\"\$HOME/.cargo/bin:\$PATH\"
+            cargo test --test lib cross_platform --verbose
+          "
+
+  performance-tests:
+    needs: test-matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Run I/O performance tests
+        run: |
+          cargo test --test lib --release \
+            cross_platform::io_backends::test_backend_performance_comparison \
+            -- --nocapture
+
+      - name: Run SIMD performance tests
+        run: |
+          cargo test --test lib --release \
+            cross_platform::simd::test_simd_performance \
+            -- --nocapture
+
+      - name: Run concurrent operation tests
+        run: |
+          cargo test --test lib --release \
+            cross_platform::io_backends::test_high_concurrency_io \
+            -- --nocapture
+
+  coverage:
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Generate coverage
+        run: |
+          cargo tarpaulin --test lib --out Xml --output-dir coverage \
+            -- cross_platform
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: coverage/cobertura.xml
+          flags: cross-platform
+          name: cross-platform-coverage
+
+  report:
+    needs: [test-matrix, docker-tests, performance-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate test report
+        run: |
+          echo "# Cross-Platform Test Report" > test-report.md
+          echo "" >> test-report.md
+          echo "## Test Results" >> test-report.md
+          echo "- Matrix Tests: ${{ needs.test-matrix.result }}" >> test-report.md
+          echo "- Docker Tests: ${{ needs.docker-tests.result }}" >> test-report.md
+          echo "- Performance Tests: ${{ needs.performance-tests.result }}" >> test-report.md
+          cat test-report.md
+
+      - name: Upload report
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-report
+          path: test-report.md

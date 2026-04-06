@@ -1,0 +1,38 @@
+// =============================================================================
+// backend.vr - Backend protocol for terminal rendering
+// =============================================================================
+// Defines the Backend protocol that abstracts over different terminal
+// implementations (ANSI, Windows Console, etc.)
+// =============================================================================
+module backend;
+
+mount core.io.{Write, IoResult};
+mount super.cell.Cell;
+mount super.buffer.Buffer;
+mount super.super.raw.{TerminalSize, CursorShape};
+mount super.super.style.{Style, Color};
+
+/// Backend protocol — abstracts terminal output.
+/// Used by Terminal for actual rendering.
+public type Backend is protocol extends Write {
+    /// Hide the cursor.
+    fn hide_cursor(&mut self) -> IoResult<()>;
+
+    /// Show the cursor.
+    fn show_cursor(&mut self) -> IoResult<()>;
+
+    /// Move cursor to absolute position.
+    fn move_cursor(&mut self, col: Int, row: Int) -> IoResult<()>;
+
+    /// Get terminal size.
+    fn size(&self) -> IoResult<TerminalSize>;
+
+    /// Clear the entire screen.
+    fn clear(&mut self) -> IoResult<()>;
+
+    /// Set cursor shape.
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> IoResult<()>;
+
+    /// Flush output.
+    fn flush(&mut self) -> IoResult<()>;
+};

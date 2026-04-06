@@ -1,0 +1,86 @@
+// Test: Match expressions with if and where guards
+
+fn test_if_guard_basic() {
+    let x = 5;
+    let result = match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero"
+    };
+    result
+}
+
+fn test_if_guard_multiple_conditions() {
+    let x = 15;
+    let result = match x {
+        n if n > 0 && n < 10 => "single digit positive",
+        n if n >= 10 && n < 100 => "double digit",
+        n if n >= 100 => "triple digit or more",
+        _ => "non-positive"
+    };
+    result
+}
+
+fn test_where_guard_basic() {
+    let x = 5;
+    let result = match x {
+        n where n > 0 => "positive",
+        n where n < 0 => "negative",
+        _ => "zero"
+    };
+    result
+}
+
+fn test_where_guard_complex() {
+    let x = 42;
+    let result = match x {
+        n where n % 2 == 0 && n > 10 => "large even",
+        n where n % 2 == 0 => "small even",
+        n where n % 2 == 1 => "odd",
+        _ => "other"
+    };
+    result
+}
+
+fn test_mixed_guards() {
+    let x = 7;
+    let result = match x {
+        0 => "zero",
+        n if n < 5 => "small",
+        n where n >= 5 && n < 10 => "medium",
+        _ => "large"
+    };
+    result
+}
+
+fn test_guard_with_variant() {
+    type Maybe is Some(Int) | None;
+
+    let value = Some(42);
+    let result = match value {
+        Some(x) if x > 0 => "positive some",
+        Some(x) if x < 0 => "negative some",
+        Some(_) => "zero some",
+        None => "none"
+    };
+    result
+}
+
+fn test_guard_with_boolean_ops() {
+    let x = 25;
+    let result = match x {
+        n if n > 0 || n == 0 => "non-negative",
+        _ => "negative"
+    };
+    result
+}
+
+fn main() {
+    println(test_if_guard_basic());
+    println(test_if_guard_multiple_conditions());
+    println(test_where_guard_basic());
+    println(test_where_guard_complex());
+    println(test_mixed_guards());
+    println(test_guard_with_variant());
+    println(test_guard_with_boolean_ops());
+}

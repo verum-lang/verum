@@ -1,0 +1,250 @@
+// Test Case 4: Provide Statements
+// Tests: provide IO = DefaultIO.new();
+
+context Logger {
+    fn log(msg: Text)
+}
+
+context Config {
+    fn get(key: Text) -> Text
+}
+
+context Counter {
+    fn increment()
+    fn get() -> Int
+    fn reset()
+}
+
+context Formatter {
+    fn format(text: Text) -> Text
+}
+
+// Test 4a: Simple provide with inline struct literal
+fn test_simple_provide() {
+    print("Test 4a: Simple provide with inline struct");
+    print("─────────────────────────────────────────");
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[SIMPLE] {msg}"); }
+    };
+
+    use_logger();
+    print("");
+}
+
+fn use_logger() using Logger {
+    Logger.log("Testing simple provide");
+}
+
+// Test 4b: Provide from constructor function
+fn create_config() -> Config {
+    Config {
+        get: fn(key: Text) -> Text {
+            if key == "env" {
+                "development"
+            } else if key == "port" {
+                "8080"
+            } else {
+                "default"
+            }
+        }
+    }
+}
+
+fn test_provide_from_function() {
+    print("Test 4b: Provide from constructor function");
+    print("─────────────────────────────────────────");
+
+    provide Config = create_config();
+
+    use_config();
+    print("");
+}
+
+fn use_config() using Config {
+    let env = Config.get("env");
+    let port = Config.get("port");
+    print(f"Environment: {env}, Port: {port}");
+}
+
+// Test 4c: Multiple provide statements
+fn test_multiple_provides() {
+    print("Test 4c: Multiple provide statements");
+    print("─────────────────────────────────────────");
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[MULTI-LOG] {msg}"); }
+    };
+
+    provide Config = Config {
+        get: fn(key: Text) -> Text { f"<{key}>" }
+    };
+
+    provide Formatter = Formatter {
+        format: fn(text: Text) -> Text { f"*** {text} ***" }
+    };
+
+    use_multiple();
+    print("");
+}
+
+fn use_multiple() using [Logger, Config, Formatter] {
+    let env = Config.get("environment");
+    Logger.log(f"Environment: {env}");
+
+    let formatted = Formatter.format("Hello World");
+    Logger.log(formatted);
+}
+
+// Test 4d: Scoped provide (shadowing)
+fn test_scoped_provide() {
+    print("Test 4d: Scoped provide (shadowing)");
+    print("─────────────────────────────────────────");
+
+    // Outer scope logger
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[OUTER] {msg}"); }
+    };
+
+    use_logger_outer();
+
+    // Inner scope with different logger
+    {
+        provide Logger = Logger {
+            log: fn(msg: Text) { print(f"[INNER] {msg}"); }
+        };
+
+        use_logger_inner();
+    }
+
+    // Back to outer logger
+    use_logger_outer_again();
+    print("");
+}
+
+fn use_logger_outer() using Logger {
+    Logger.log("Outer scope");
+}
+
+fn use_logger_inner() using Logger {
+    Logger.log("Inner scope");
+}
+
+fn use_logger_outer_again() using Logger {
+    Logger.log("Outer scope again");
+}
+
+// Test 4e: Provide with stateful context
+fn create_counter(initial: Int) -> Counter {
+    // In a real implementation, this would use mutable state
+    // For this test, we simulate state
+    let count = initial;
+
+    Counter {
+        increment: fn() {
+            print(f"[COUNTER] Incrementing from {count}");
+        },
+        get: fn() -> Int {
+            count
+        },
+        reset: fn() {
+            print("[COUNTER] Resetting to 0");
+        }
+    }
+}
+
+fn test_stateful_provide() {
+    print("Test 4e: Stateful context");
+    print("─────────────────────────────────────────");
+
+    provide Counter = create_counter(10);
+
+    use_counter();
+    print("");
+}
+
+fn use_counter() using Counter {
+    let current = Counter.get();
+    print(f"Current count: {current}");
+
+    Counter.increment();
+    Counter.increment();
+
+    let updated = Counter.get();
+    print(f"Updated count: {updated}");
+
+    Counter.reset();
+}
+
+// Test 4f: Conditional provide
+fn test_conditional_provide(use_verbose: Bool) {
+    print("Test 4f: Conditional provide");
+    print("─────────────────────────────────────────");
+
+    if use_verbose {
+        provide Logger = Logger {
+            log: fn(msg: Text) { print(f"[VERBOSE] {msg}"); }
+        };
+        conditional_logging();
+    } else {
+        provide Logger = Logger {
+            log: fn(msg: Text) { print(f"[QUIET] {msg}"); }
+        };
+        conditional_logging();
+    }
+    print("");
+}
+
+fn conditional_logging() using Logger {
+    Logger.log("This message adapts to the logger");
+}
+
+// Test 4g: Provide with complex initialization
+fn create_advanced_logger(prefix: Text, show_time: Bool) -> Logger {
+    Logger {
+        log: fn(msg: Text) {
+            if show_time {
+                print(f"[{prefix}] [TIME] {msg}");
+            } else {
+                print(f"[{prefix}] {msg}");
+            }
+        }
+    }
+}
+
+fn test_complex_provide() {
+    print("Test 4g: Complex provide with parameters");
+    print("─────────────────────────────────────────");
+
+    provide Logger = create_advanced_logger("APP", true);
+    use_logger_variant();
+
+    provide Logger = create_advanced_logger("SYS", false);
+    use_logger_variant();
+
+    print("");
+}
+
+fn use_logger_variant() using Logger {
+    Logger.log("Message with configured logger");
+}
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║         Test Case 4: Provide Statements Testing           ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    test_simple_provide();
+    test_provide_from_function();
+    test_multiple_provides();
+    test_scoped_provide();
+    test_stateful_provide();
+    test_conditional_provide(true);
+    test_conditional_provide(false);
+    test_complex_provide();
+
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║             Provide Statements Tests Complete              ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

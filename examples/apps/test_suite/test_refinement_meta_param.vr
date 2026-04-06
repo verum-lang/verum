@@ -1,0 +1,91 @@
+// Test 6: Meta Parameter Refinements
+// Spec: 03-type-system.md Section 1.3 - Meta parameters with refinements
+// Syntax: meta parameters with compile-time constraints
+
+// Test 6.1: Simple meta parameter with refinement
+fn fixed_array<N: meta Int>(value: Int) -> [Int; N]
+    where meta N > 0 {
+    let mut arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        arr[i] = value;
+        i = i + 1;
+    }
+    arr
+}
+
+// Test 6.2: Meta parameter with range constraint
+fn bounded_array<N: meta Int>(value: Int) -> [Int; N]
+    where meta N > 0 && N <= 10 {
+    [value; N]
+}
+
+// Test 6.3: Multiple meta parameters with relationships
+fn matrix<Rows: meta Int, Cols: meta Int>(value: Int) -> [[Int; Cols]; Rows]
+    where meta Rows > 0,
+    where meta Cols > 0 {
+    [[value; Cols]; Rows]
+}
+
+// Test 6.4: Meta parameter for tensor dimensions
+type Tensor<T, Shape: meta [Int]> is [T; Shape.product()]
+    where meta Shape.len() > 0;
+
+fn create_tensor<T, Shape: meta [Int]>(value: T) -> Tensor<T, Shape>
+    where meta Shape.len() > 0,
+    where T: Clone {
+    [value; Shape.product()]
+}
+
+// Test 6.5: Meta parameter with power-of-two constraint
+fn simd_array<N: meta Int>(value: Int) -> [Int; N]
+    where meta N > 0 && (N & (N - 1)) == 0 {
+    [value; N]
+}
+
+// Test 6.6: Meta parameter for type-level computation
+fn fibonacci<N: meta Int>() -> Int
+    where meta N >= 0 {
+    if N == 0 {
+        0
+    } else if N == 1 {
+        1
+    } else {
+        fibonacci<N - 1>() + fibonacci<N - 2>()
+    }
+}
+
+// Test 6.7: Meta parameter with divisibility constraint
+fn aligned_buffer<N: meta Int, Align: meta Int>(value: Int) -> [Int; N]
+    where meta N > 0,
+    where meta Align > 0,
+    where meta N % Align == 0 {
+    [value; N]
+}
+
+// Test 6.8: Test meta parameter refinements
+fn main() {
+    // Test fixed array
+    let arr1 = fixed_array<5>(42);
+    let _ = print(f"Fixed array[5] created");
+
+    // Test bounded array
+    let arr2 = bounded_array<8>(10);
+    let _ = print(f"Bounded array[8] created");
+
+    // Test matrix
+    let mat = matrix<3, 4>(1);
+    let _ = print(f"Matrix 3x4 created");
+
+    // Test SIMD array (power of two)
+    let simd = simd_array<8>(99);
+    let _ = print(f"SIMD array[8] created");
+
+    // Test fibonacci with meta parameter
+    let fib5 = fibonacci<5>();
+    let _ = print(f"Fibonacci(5) = {fib5}");
+
+    // Test aligned buffer
+    let aligned = aligned_buffer<16, 4>(0);
+    let _ = print(f"Aligned buffer[16] with align=4 created");
+}

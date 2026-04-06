@@ -1,0 +1,148 @@
+---
+// Hero component for Verum landing page
+// Emphasizes engineering substance over marketing pathos
+---
+
+<section class="hero-section">
+  <div class="hero-content">
+    <img src="/verum-logo-512.png" alt="Verum" class="hero-logo" width="120" height="120" />
+    <h1 class="hero-title">Verum</h1>
+    <p class="hero-tagline">
+      Memory safety without runtime cost.<br/>
+      Verification without ceremony.
+    </p>
+    <div class="hero-cta">
+      <a href="/introduction" class="primary">Get Started</a>
+      <a href="/guide/types" class="secondary">Learn the Language</a>
+    </div>
+  </div>
+
+  <div class="hero-code">
+    <pre class="code-example"><code><span class="comment">// Three-tier references: choose your tradeoff</span>
+<span class="keyword">fn</span> <span class="function">process</span>(
+    data: <span class="type">&List&lt;Int&gt;</span>,           <span class="comment">// ~15ns CBGR check</span>
+    cache: <span class="type">&checked Cache</span>,      <span class="comment">// 0ns, compiler-proven</span>
+) <span class="keyword">using</span> [<span class="type">Logger</span>] -> <span class="type">Result&lt;Output, Error&gt;</span> {'{'}
+    <span class="comment">// Refinement types catch errors at compile time</span>
+    <span class="keyword">let</span> idx: <span class="type">Int where 0 &lt;= self &lt; data.len()</span> = <span class="number">0</span>;
+
+    <span class="comment">// Explicit dependencies via context system</span>
+    Logger.info(<span class="string">f"Processing {'{'}data.len(){'}'} items"</span>);
+
+    <span class="keyword">Ok</span>(transform(data, cache))
+{'}'}</code></pre>
+  </div>
+</section>
+
+<section class="features-section">
+  <div class="features-grid">
+    <div class="feature-card">
+      <h3>⚡ Semantic Types</h3>
+      <p>
+        <code>List</code>, <code>Text</code>, <code>Map</code> — types describe meaning, not implementation.
+        No hidden allocations, no surprise costs.
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <h3>🔒 CBGR Memory Safety</h3>
+      <p>
+        Capability-Based Generational References provide memory safety at ~15ns overhead.
+        Promote to <code>&checked</code> for zero-cost when the compiler can prove safety.
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <h3>📐 Refinement Types</h3>
+      <p>
+        <code>Int where 0 <= self</code> — constraints verified at compile time.
+        Graduate from runtime checks to static proofs incrementally.
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <h3>🔗 Context System</h3>
+      <p>
+        <code>using [Database, Logger]</code> — explicit dependencies, no hidden state.
+        Dependency injection built into the type system.
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <h3>✓ Gradual Verification</h3>
+      <p>
+        Start with dynamic checks, add proofs where they matter.
+        SMT-backed verification when you need guarantees.
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <h3>⚙️ Cogs Package System</h3>
+      <p>
+        <code>link math from "vcogs.io/math"</code> — semantic imports.
+        Each cog is a gear in your machine.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="tiers-section">
+  <h2>Reference Tiers: Your Choice of Tradeoff</h2>
+  <div class="tier-comparison">
+    <div class="tier-card tier-0">
+      <div class="tier-name">&T</div>
+      <div class="tier-desc">Full CBGR protection</div>
+      <div class="tier-overhead">~15ns per access</div>
+    </div>
+    <div class="tier-card tier-1">
+      <div class="tier-name">&checked T</div>
+      <div class="tier-desc">Compiler-proven safe</div>
+      <div class="tier-overhead">0ns overhead</div>
+    </div>
+    <div class="tier-card tier-2">
+      <div class="tier-name">&unsafe T</div>
+      <div class="tier-desc">Manual safety proof</div>
+      <div class="tier-overhead">0ns overhead</div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4rem;
+    align-items: center;
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: 70vh;
+  }
+
+  .hero-logo {
+    margin-bottom: 1.5rem;
+    filter: drop-shadow(0 0 20px rgba(67, 97, 238, 0.3));
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero-code {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (max-width: 900px) {
+    .hero-section {
+      grid-template-columns: 1fr;
+      text-align: center;
+      min-height: auto;
+      padding: 3rem 1rem;
+    }
+
+    .hero-code {
+      order: 2;
+    }
+  }
+</style>

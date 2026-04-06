@@ -1,0 +1,378 @@
+// Comprehensive Pattern Matching Test Suite for Verum
+// Tests all major pattern matching features
+
+// ============================================================================
+// TEST 1: Simple Variant Pattern Matching
+// ============================================================================
+
+fn test_simple_variant() -> Text {
+    type Maybe is Some(Int) | None;
+
+    let x = Some(42);
+    let result = match x {
+        Some(n) => n,
+        None => 0
+    };
+
+    if result == 42 {
+        "PASS: Simple variant matching"
+    } else {
+        "FAIL: Simple variant matching"
+    }
+}
+
+// ============================================================================
+// TEST 2: Pattern Guards with `if`
+// ============================================================================
+
+fn test_pattern_guard_if() -> Text {
+    let x = 5;
+    let result = match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero"
+    };
+
+    if result == "positive" {
+        "PASS: Pattern guard with if"
+    } else {
+        "FAIL: Pattern guard with if"
+    }
+}
+
+fn test_pattern_guard_if_complex() -> Text {
+    let x = 15;
+    let result = match x {
+        n if n > 0 && n < 10 => "single digit positive",
+        n if n >= 10 && n < 100 => "double digit",
+        n if n >= 100 => "triple digit or more",
+        _ => "non-positive"
+    };
+
+    if result == "double digit" {
+        "PASS: Complex pattern guard with if"
+    } else {
+        "FAIL: Complex pattern guard with if"
+    }
+}
+
+// ============================================================================
+// TEST 3: Pattern Guards with `where`
+// ============================================================================
+
+fn test_pattern_guard_where() -> Text {
+    let x = 5;
+    let result = match x {
+        n where n > 0 => "positive",
+        n where n < 0 => "negative",
+        _ => "zero"
+    };
+
+    if result == "positive" {
+        "PASS: Pattern guard with where"
+    } else {
+        "FAIL: Pattern guard with where"
+    }
+}
+
+fn test_pattern_guard_where_complex() -> Text {
+    let x = 42;
+    let result = match x {
+        n where n % 2 == 0 && n > 10 => "large even",
+        n where n % 2 == 0 => "small even",
+        n where n % 2 == 1 => "odd",
+        _ => "other"
+    };
+
+    if result == "large even" {
+        "PASS: Complex pattern guard with where"
+    } else {
+        "FAIL: Complex pattern guard with where"
+    }
+}
+
+// ============================================================================
+// TEST 4: Record Patterns
+// ============================================================================
+
+fn test_record_pattern_binding() -> Text {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    let result = match p {
+        Point { x, y } => x + y
+    };
+
+    if result == 30 {
+        "PASS: Record pattern binding"
+    } else {
+        "FAIL: Record pattern binding"
+    }
+}
+
+fn test_record_pattern_exact() -> Text {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    let result = match p {
+        Point { x: 10, y: 20 } => "exact match",
+        _ => "no match"
+    };
+
+    if result == "exact match" {
+        "PASS: Record pattern exact match"
+    } else {
+        "FAIL: Record pattern exact match"
+    }
+}
+
+fn test_record_pattern_partial() -> Text {
+    type Point3D is { x: Int, y: Int, z: Int };
+
+    let p = Point3D { x: 1, y: 2, z: 3 };
+    let result = match p {
+        Point3D { x: 1, .. } => "x is one",
+        Point3D { y: 2, .. } => "y is two",
+        _ => "other"
+    };
+
+    if result == "x is one" {
+        "PASS: Record pattern partial match"
+    } else {
+        "FAIL: Record pattern partial match"
+    }
+}
+
+fn test_record_pattern_with_guards() -> Text {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 5, y: 10 };
+    let result = match p {
+        Point { x, y } if x > 0 && y > 0 => "quadrant 1",
+        Point { x, y } if x < 0 && y > 0 => "quadrant 2",
+        Point { x, y } if x < 0 && y < 0 => "quadrant 3",
+        Point { x, y } if x > 0 && y < 0 => "quadrant 4",
+        _ => "on axis"
+    };
+
+    if result == "quadrant 1" {
+        "PASS: Record pattern with guards"
+    } else {
+        "FAIL: Record pattern with guards"
+    }
+}
+
+// ============================================================================
+// TEST 5: Nested Patterns
+// ============================================================================
+
+fn test_nested_variant_patterns() -> Text {
+    type Result is Ok(Int) | Err(Text);
+    type Maybe is Some(Result) | None;
+
+    let x = Some(Ok(42));
+    let result = match x {
+        Some(Ok(n)) => n,
+        Some(Err(_)) => -1,
+        None => 0
+    };
+
+    if result == 42 {
+        "PASS: Nested variant patterns"
+    } else {
+        "FAIL: Nested variant patterns"
+    }
+}
+
+fn test_nested_record_patterns() -> Text {
+    type Inner is { value: Int };
+    type Outer is { inner: Inner, name: Text };
+
+    let obj = Outer {
+        inner: Inner { value: 42 },
+        name: "test"
+    };
+    let result = match obj {
+        Outer { inner: Inner { value: 42 }, .. } => "value is 42",
+        _ => "other"
+    };
+
+    if result == "value is 42" {
+        "PASS: Nested record patterns"
+    } else {
+        "FAIL: Nested record patterns"
+    }
+}
+
+// ============================================================================
+// TEST 6: Or Patterns
+// ============================================================================
+
+fn test_or_patterns() -> Text {
+    let x = 2;
+    let result = match x {
+        1 | 2 | 3 => "small",
+        4 | 5 | 6 => "medium",
+        _ => "large"
+    };
+
+    if result == "small" {
+        "PASS: Or patterns with literals"
+    } else {
+        "FAIL: Or patterns with literals"
+    }
+}
+
+// ============================================================================
+// TEST 7: Variant with Named Fields (Record-Style Variants)
+// ============================================================================
+
+fn test_variant_with_named_fields() -> Text {
+    type Shape is Circle { radius: Int } | Rectangle { width: Int, height: Int };
+
+    let s = Circle { radius: 5 };
+    let result = match s {
+        Circle { radius } => radius * 2,
+        Rectangle { width, height } => width + height
+    };
+
+    if result == 10 {
+        "PASS: Variant with named fields"
+    } else {
+        "FAIL: Variant with named fields"
+    }
+}
+
+// ============================================================================
+// TEST 8: Mixed Patterns (Guards + Variants)
+// ============================================================================
+
+fn test_mixed_guards_and_variants() -> Text {
+    type Maybe is Some(Int) | None;
+
+    let value = Some(42);
+    let result = match value {
+        Some(x) if x > 0 => "positive some",
+        Some(x) if x < 0 => "negative some",
+        Some(_) => "zero some",
+        None => "none"
+    };
+
+    if result == "positive some" {
+        "PASS: Mixed guards and variants"
+    } else {
+        "FAIL: Mixed guards and variants"
+    }
+}
+
+// ============================================================================
+// TEST 9: Literal Patterns
+// ============================================================================
+
+fn test_literal_patterns() -> Text {
+    let x = 1;
+    let result = match x {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        _ => "many"
+    };
+
+    if result == "one" {
+        "PASS: Literal patterns"
+    } else {
+        "FAIL: Literal patterns"
+    }
+}
+
+fn test_string_literal_patterns() -> Text {
+    let s = "hello";
+    let result = match s {
+        "hello" => "greeting",
+        "goodbye" => "farewell",
+        _ => "unknown"
+    };
+
+    if result == "greeting" {
+        "PASS: String literal patterns"
+    } else {
+        "FAIL: String literal patterns"
+    }
+}
+
+// ============================================================================
+// TEST 10: Wildcard and Binding Patterns
+// ============================================================================
+
+fn test_wildcard_pattern() -> Text {
+    type Pair is (Int, Int);
+
+    let p = (10, 20);
+    let result = match p {
+        (x, _) => x
+    };
+
+    if result == 10 {
+        "PASS: Wildcard pattern"
+    } else {
+        "FAIL: Wildcard pattern"
+    }
+}
+
+// ============================================================================
+// MAIN: Run all tests
+// ============================================================================
+
+fn main() {
+    println("=== VERUM PATTERN MATCHING TEST SUITE ===");
+    println("");
+
+    println("--- Simple Variant Patterns ---");
+    println(test_simple_variant());
+
+    println("");
+    println("--- Pattern Guards with if ---");
+    println(test_pattern_guard_if());
+    println(test_pattern_guard_if_complex());
+
+    println("");
+    println("--- Pattern Guards with where ---");
+    println(test_pattern_guard_where());
+    println(test_pattern_guard_where_complex());
+
+    println("");
+    println("--- Record Patterns ---");
+    println(test_record_pattern_binding());
+    println(test_record_pattern_exact());
+    println(test_record_pattern_partial());
+    println(test_record_pattern_with_guards());
+
+    println("");
+    println("--- Nested Patterns ---");
+    println(test_nested_variant_patterns());
+    println(test_nested_record_patterns());
+
+    println("");
+    println("--- Or Patterns ---");
+    println(test_or_patterns());
+
+    println("");
+    println("--- Variant with Named Fields ---");
+    println(test_variant_with_named_fields());
+
+    println("");
+    println("--- Mixed Guards and Variants ---");
+    println(test_mixed_guards_and_variants());
+
+    println("");
+    println("--- Literal Patterns ---");
+    println(test_literal_patterns());
+    println(test_string_literal_patterns());
+
+    println("");
+    println("--- Wildcard Patterns ---");
+    println(test_wildcard_pattern());
+
+    println("");
+    println("=== TEST SUITE COMPLETE ===");
+}

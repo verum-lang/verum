@@ -1,0 +1,51 @@
+// Test nested context usage and propagation
+// Functions that use contexts calling other functions with contexts
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+context Metrics {
+    fn increment(counter: Text);
+}
+
+// Helper function using Logger
+fn log_info(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+// Function using Logger that calls another function with Logger
+fn outer_function(data: Text) using Logger {
+    log_info("Starting outer function");
+    // Do work
+    log_info("Completed outer function");
+}
+
+// Function using multiple contexts calling functions with subsets
+fn orchestrator(query: Text) using [Database, Logger, Metrics] {
+    Logger.log("Orchestrator started");
+    Metrics.increment("orchestrator_calls");
+
+    let result = Database.query(query);
+    log_info("Query executed");
+
+    Metrics.increment("orchestrator_success");
+    Logger.log("Orchestrator completed");
+}
+
+// Function composition with context propagation
+fn process_with_logging(input: Text) using Logger {
+    log_info("Processing started");
+    outer_function(input);
+    log_info("Processing completed");
+}
+
+fn main() {
+    outer_function("test data");
+    orchestrator("SELECT * FROM users");
+    process_with_logging("important data");
+}

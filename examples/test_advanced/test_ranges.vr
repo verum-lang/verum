@@ -1,0 +1,11 @@
+// Test range expressions
+// This test verifies that both exclusive (0..5) and inclusive (0..=3) ranges work correctly
+
+fn main() {
+    for i in 0..5 {
+        println(f"i = {i}")
+    }
+    for j in 0..=3 {
+        println(f"j = {j}")
+    }
+}

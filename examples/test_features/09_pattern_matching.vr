@@ -1,0 +1,39 @@
+// Test pattern matching features
+type Shape is
+    | Circle(Float)
+    | Rectangle(Float, Float)
+    | Point;
+
+fn area(shape: Shape) -> Float {
+    match shape {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle(w, h) => w * h,
+        Point => 0.0
+    }
+}
+
+fn main() {
+    // Tuple destructuring
+    let pair = (10, 20)
+    let (a, b) = pair
+    print(f"a={a}, b={b}")
+    
+    // Match with guards
+    let n = 15
+    let category = match n {
+        x if x < 0 => "negative",
+        x if x == 0 => "zero",
+        x if x < 10 => "small",
+        x if x < 100 => "medium",
+        _ => "large"
+    }
+    print(f"{n} is {category}")
+    
+    // Shape matching
+    let circle = Circle(5.0)
+    let a = area(circle)
+    print(f"Circle area: {a}")
+
+    let rect = Rectangle(4.0, 3.0)
+    print(f"Rectangle area: {area(rect)}")
+}

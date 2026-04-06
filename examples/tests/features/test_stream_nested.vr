@@ -1,0 +1,5 @@
+fn main() {
+    let matrix = [[1, 2], [3, 4], [5, 6]];
+    let flattened = stream [x for row in matrix for x in row];
+    println("Nested stream comprehension");
+}

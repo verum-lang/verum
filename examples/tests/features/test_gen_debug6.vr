@@ -1,0 +1,11 @@
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| -> C { g(f(x)) }
+}
+
+fn main() {
+    let add_one = |x: Int| -> Int { x + 1 };
+    let times_two = |x: Int| -> Int { x * 2 };
+    let composed = compose(add_one, times_two);
+    let result = composed(5);
+    let _ = print(f"Result: {result}");
+}

@@ -1,0 +1,283 @@
+// =============================================================================
+// analysis.vr - Real and Functional Analysis Foundations
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// Defines sequences, limits, continuity, differentiability, integration,
+// measure theory, and functional analysis structures (Banach, Hilbert spaces).
+// Each construction carries its axioms as formal verification obligations.
+//
+// Hierarchy:
+//   Sequence -> CauchySequence -> Convergent
+//   ContinuousFunction -> Differentiable -> SmoothFunction
+//   MeasurableSpace -> MeasureSpace -> ProbabilitySpace
+//   NormedSpace -> BanachSpace -> HilbertSpace
+// =============================================================================
+
+module core.math.analysis;
+
+mount core.math.algebra.{Field, Ring, AbelianGroup};
+mount core.math.topology.{MetricSpace, TopologicalSpace, CompactSpace, ConnectedSpace};
+
+// =============================================================================
+// 1. Sequences and Convergence
+// =============================================================================
+
+/// A sequence is a function from natural numbers to elements of a type.
+public type Sequence<T> is {
+    /// Evaluate the sequence at index n.
+    at: fn(Int) -> T,
+};
+
+/// A limit captures the epsilon-delta notion of convergence.
+public type Limit<T> is protocol {
+    /// The limit value of the sequence.
+    fn limit_value(&self) -> T;
+
+    /// For every epsilon > 0, there exists N such that for all n >= N,
+    /// distance(a_n, L) < epsilon.
+    @verify(formal)
+    fn epsilon_delta(&self, epsilon: &Float) -> Bool;
+};
+
+/// A convergent sequence has a well-defined limit.
+public type Convergent<T> is protocol extends Limit<T> {
+    /// The limit is unique.
+    @verify(formal)
+    fn limit_unique(&self, other_limit: &T) -> Bool;
+};
+
+/// A Cauchy sequence: elements eventually become arbitrarily close.
+public type CauchySequence<T> is protocol {
+    /// Evaluate the sequence at index n.
+    fn at(&self, n: Int) -> T;
+
+    /// For every epsilon > 0, there exists N such that for all m, n >= N,
+    /// distance(a_m, a_n) < epsilon.
+    @verify(formal)
+    fn cauchy_criterion(&self, epsilon: &Float) -> Bool;
+};
+
+/// A complete space: every Cauchy sequence converges.
+public type CompleteSpace is protocol extends MetricSpace {
+    /// Every Cauchy sequence in the space converges to a point in the space.
+    @verify(formal)
+    fn cauchy_convergence(&self, seq: &Int) -> Bool;
+};
+
+/// A bounded sequence: there exists M such that |a_n| <= M for all n.
+public type BoundedSequence<T> is protocol {
+    fn at(&self, n: Int) -> T;
+
+    /// There exists a bound M such that norm(a_n) <= M for all n.
+    @verify(formal)
+    fn bounded(&self) -> Bool;
+};
+
+// =============================================================================
+// 2. Continuity and Differentiability
+// =============================================================================
+
+/// A continuous function in the epsilon-delta sense.
+public type ContinuousFunction<X, Y> is protocol {
+    /// Apply the function.
+    fn apply(&self, x: &X) -> Y;
+
+    /// For every x and every epsilon > 0, there exists delta > 0 such that
+    /// d(x, y) < delta implies d(f(x), f(y)) < epsilon.
+    @verify(formal)
+    fn epsilon_delta_continuity(&self, x: &X, epsilon: &Float) -> Bool;
+};
+
+/// Uniform continuity: delta depends only on epsilon, not on the point.
+public type UniformlyContinuous<X, Y> is protocol extends ContinuousFunction<X, Y> {
+    /// For every epsilon > 0, there exists delta > 0 such that for ALL x, y,
+    /// d(x, y) < delta implies d(f(x), f(y)) < epsilon.
+    @verify(formal)
+    fn uniform_continuity(&self, epsilon: &Float) -> Bool;
+};
+
+/// A differentiable function has a well-defined derivative at each point.
+public type Differentiable is protocol {
+    /// Evaluate the function at x.
+    fn eval(&self, x: Float) -> Float;
+
+    /// The derivative at a point x.
+    fn derivative(&self, x: Float) -> Float;
+
+    /// The limit definition: lim_{h->0} (f(x+h) - f(x)) / h exists
+    /// and equals derivative(x).
+    @verify(formal)
+    fn derivative_limit(&self, x: &Float) -> Bool;
+};
+
+/// A smooth function is infinitely differentiable.
+public type SmoothFunction is protocol extends Differentiable {
+    /// The n-th derivative exists and is continuous for all n.
+    @verify(formal)
+    fn nth_derivative_exists(&self, n: Int) -> Bool;
+};
+
+// =============================================================================
+// 3. Integration
+// =============================================================================
+
+/// A Riemann integrable function on a closed interval [a, b].
+public type RiemannIntegrable is protocol {
+    /// Evaluate the function at x.
+    fn eval(&self, x: Float) -> Float;
+
+    /// The definite integral over [a, b].
+    fn integrate(&self, a: Float, b: Float) -> Float;
+
+    /// Upper and lower Riemann sums converge to the same value.
+    @verify(formal)
+    fn riemann_criterion(&self, a: &Float, b: &Float) -> Bool;
+};
+
+/// A Lebesgue integrable function with respect to a measure.
+public type LebesgueIntegrable is protocol {
+    /// Evaluate the function.
+    fn eval(&self, x: Float) -> Float;
+
+    /// The Lebesgue integral.
+    fn lebesgue_integral(&self) -> Float;
+
+    /// The integral of |f| is finite.
+    @verify(formal)
+    fn absolute_integrability(&self) -> Bool;
+};
+
+// =============================================================================
+// 4. Measure Theory
+// =============================================================================
+
+/// A measurable space: a set equipped with a sigma-algebra.
+public type MeasurableSpace is protocol {
+    /// Test whether a set (by identifier) is measurable.
+    fn is_measurable(&self, set_id: Int) -> Bool;
+
+    /// The empty set is measurable.
+    @verify(formal)
+    fn empty_measurable(&self) -> Bool;
+
+    /// Complements of measurable sets are measurable.
+    @verify(formal)
+    fn complement_measurable(&self, set_id: Int) -> Bool;
+
+    /// Countable unions of measurable sets are measurable.
+    @verify(formal)
+    fn countable_union_measurable(&self, sets: &List<Int>) -> Bool;
+};
+
+/// A measure space: a measurable space with a measure function.
+public type MeasureSpace is protocol extends MeasurableSpace {
+    /// The measure of a measurable set.
+    fn measure(&self, set_id: Int) -> Float;
+
+    /// Non-negativity: mu(A) >= 0 for all measurable A.
+    @verify(formal)
+    fn measure_non_negative(&self, set_id: Int) -> Bool;
+
+    /// Null empty set: mu(empty) = 0.
+    @verify(formal)
+    fn measure_empty(&self) -> Bool;
+
+    /// Countable additivity: mu(union A_i) = sum mu(A_i) for disjoint A_i.
+    @verify(formal)
+    fn countable_additivity(&self, sets: &List<Int>) -> Bool;
+};
+
+/// A probability space is a measure space with total measure 1.
+public type ProbabilitySpace is protocol extends MeasureSpace {
+    /// The total measure is 1.
+    @verify(formal)
+    fn total_measure_one(&self) -> Bool;
+};
+
+// =============================================================================
+// 5. Functional Analysis
+// =============================================================================
+
+/// A Banach space is a complete normed vector space.
+public type BanachSpace is protocol {
+    /// Addition of vectors.
+    fn add(&self, other: &Self) -> Self;
+
+    /// Scalar multiplication.
+    fn scalar_mul(&self, scalar: Float) -> Self;
+
+    /// The norm.
+    fn norm(&self) -> Float;
+
+    /// Completeness: every Cauchy sequence converges.
+    @verify(formal)
+    fn completeness(&self) -> Bool;
+
+    /// Norm triangle inequality.
+    @verify(formal)
+    fn norm_triangle(&self, other: &Self) -> Bool;
+};
+
+/// A Hilbert space is a Banach space with an inner product inducing the norm.
+public type HilbertSpace is protocol extends BanachSpace {
+    /// Inner product of two vectors.
+    fn inner_product(&self, other: &Self) -> Float;
+
+    /// Conjugate symmetry: <x, y> = conj(<y, x>).
+    @verify(formal)
+    fn conjugate_symmetry(&self, other: &Self) -> Bool;
+
+    /// Linearity in the first argument.
+    @verify(formal)
+    fn linearity(&self, other: &Self, alpha: &Float) -> Bool;
+
+    /// Positive definiteness: <x, x> >= 0 and <x, x> = 0 iff x = 0.
+    @verify(formal)
+    fn positive_definite(&self) -> Bool;
+
+    /// The norm is induced by the inner product: ||x|| = sqrt(<x, x>).
+    @verify(formal)
+    fn norm_from_inner(&self) -> Bool;
+
+    /// Parallelogram law: ||x + y||^2 + ||x - y||^2 = 2(||x||^2 + ||y||^2).
+    @verify(formal)
+    fn parallelogram_law(&self, other: &Self) -> Bool;
+};
+
+// =============================================================================
+// 6. Fundamental Theorems (Axiom Statements)
+// =============================================================================
+
+/// Intermediate value theorem: if f is continuous on [a, b] and
+/// f(a) < v < f(b), then there exists c in (a, b) with f(c) = v.
+axiom intermediate_value_theorem(
+    f: Int, a: Float, b: Float, v: Float
+) -> Bool;
+
+/// Mean value theorem: if f is continuous on [a, b] and differentiable
+/// on (a, b), there exists c in (a, b) with f'(c) = (f(b) - f(a)) / (b - a).
+axiom mean_value_theorem(
+    f: Int, a: Float, b: Float
+) -> Bool;
+
+/// Bolzano-Weierstrass theorem: every bounded sequence in R^n has a
+/// convergent subsequence.
+axiom bolzano_weierstrass(seq: Int, bound: Float) -> Bool;
+
+/// Fundamental theorem of calculus (part 1): if f is continuous on [a, b],
+/// then F(x) = integral_a^x f(t) dt is differentiable and F'(x) = f(x).
+axiom fundamental_theorem_calculus_1(f: Int, a: Float, b: Float) -> Bool;
+
+/// Fundamental theorem of calculus (part 2): if f is continuous on [a, b]
+/// and F is an antiderivative, then integral_a^b f(x) dx = F(b) - F(a).
+axiom fundamental_theorem_calculus_2(f: Int, antideriv: Int, a: Float, b: Float) -> Bool;
+
+/// Heine-Borel theorem: a subset of R^n is compact if and only if it is
+/// closed and bounded.
+axiom heine_borel(set_id: Int, dimension: Int) -> Bool;
+
+/// Banach fixed-point theorem: a contraction mapping on a complete metric
+/// space has a unique fixed point.
+axiom banach_fixed_point(f: Int, space: Int, contraction_factor: Float) -> Bool;

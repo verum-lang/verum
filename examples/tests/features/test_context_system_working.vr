@@ -1,0 +1,199 @@
+// Context System Test - Testing What Currently Works
+// Based on testing, the following features are implemented:
+// 1. Context definitions ✓
+// 2. Single context usage (without brackets) ✓
+// 3. Multiple contexts usage (with brackets) ✓
+
+// ============================================================================
+// Test 1: Context Definition
+// ============================================================================
+
+context Database {
+    fn query(sql: Text) -> Text;
+    fn execute(sql: Text);
+    fn transaction();
+}
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+    fn warn(message: Text);
+}
+
+context Cache {
+    fn get(key: Text) -> Text;
+    fn set(key: Text, value: Text);
+    fn delete(key: Text);
+}
+
+context FileSystem {
+    fn read_file(path: Text) -> Text;
+    fn write_file(path: Text, content: Text);
+    fn delete_file(path: Text);
+}
+
+context Http {
+    fn get(url: Text) -> Text;
+    fn post(url: Text, body: Text) -> Text;
+    fn put(url: Text, body: Text) -> Text;
+}
+
+context Auth {
+    fn verify_token(token: Text) -> Bool;
+    fn get_user_id(token: Text) -> Int;
+}
+
+// ============================================================================
+// Test 2: Single Context Usage (without brackets)
+// ============================================================================
+
+fn simple_logging(msg: Text) using Logger {
+    let x = 42;
+}
+
+fn database_query(sql: Text) using Database {
+    let result = 100;
+}
+
+fn cache_lookup(key: Text) using Cache {
+    let value = 200;
+}
+
+fn file_operation(path: Text) using FileSystem {
+    let data = 300;
+}
+
+fn http_request(url: Text) using Http {
+    let response = 400;
+}
+
+fn auth_check(token: Text) using Auth {
+    let valid = true;
+}
+
+// ============================================================================
+// Test 3: Multiple Contexts with Brackets
+// ============================================================================
+
+fn two_contexts(sql: Text, msg: Text) using [Database, Logger] {
+    let result = 42;
+}
+
+fn three_contexts(url: Text, key: Text) using [Http, Cache, Logger] {
+    let x = 100;
+}
+
+fn four_contexts(path: Text, sql: Text) using [Database, Logger, FileSystem, Cache] {
+    let y = 200;
+}
+
+fn five_contexts(url: Text, token: Text) using [Http, Database, Logger, Cache, Auth] {
+    let z = 300;
+}
+
+fn six_contexts(path: Text) using [Database, Logger, Cache, Http, FileSystem, Auth] {
+    let w = 400;
+}
+
+// ============================================================================
+// Test 4: Edge Cases
+// ============================================================================
+
+// Empty function body with context
+fn empty_with_context() using Logger {
+}
+
+// Single statement with context
+fn single_statement_context(msg: Text) using Logger {
+    let result = 42;
+}
+
+// Context with no actual usage (semantic check, not runtime)
+fn unused_context_declaration(x: Int) using Logger {
+    let result = x + 1;
+}
+
+// Multiple empty contexts
+fn multiple_empty_contexts() using [Logger, Database, Cache] {
+}
+
+// ============================================================================
+// Test 5: Functions Without Contexts (control test)
+// ============================================================================
+
+fn no_context_function(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn pure_computation(data: Text) -> Int {
+    42
+}
+
+// ============================================================================
+// Test 6: Mixing Context and Non-Context Functions
+// ============================================================================
+
+fn mixed_flow(x: Int, msg: Text) using Logger {
+    let result = no_context_function(x, 10);
+}
+
+fn mixed_complex(path: Text, x: Int) using [FileSystem, Logger] {
+    let computed = no_context_function(x, 20);
+}
+
+// ============================================================================
+// Test 7: Nested Function Calls with Contexts
+// ============================================================================
+
+fn helper_with_logger(msg: Text) using Logger {
+    let x = 1;
+}
+
+fn caller_with_logger(msg: Text) using Logger {
+    helper_with_logger(msg);
+}
+
+fn multi_context_caller(msg: Text, sql: Text) using [Logger, Database] {
+    let x = 2;
+}
+
+// ============================================================================
+// Test 8: Main Entry Point - Run All Tests
+// ============================================================================
+
+fn main() {
+    // Test single context functions
+    simple_logging("test");
+    database_query("SELECT * FROM users");
+    cache_lookup("key1");
+    file_operation("/path/to/file");
+    http_request("http://example.com");
+    auth_check("token123");
+
+    // Test multiple context functions
+    two_contexts("SELECT 1", "message");
+    three_contexts("http://api.com", "cache_key");
+    four_contexts("/file.txt", "INSERT INTO logs");
+    five_contexts("http://api.com", "auth_token");
+    six_contexts("/data.txt");
+
+    // Test edge cases
+    empty_with_context();
+    single_statement_context("edge");
+    unused_context_declaration(42);
+    multiple_empty_contexts();
+
+    // Test non-context functions
+    let result = no_context_function(5, 10);
+    let pure_result = pure_computation("test");
+
+    // Test mixed functions
+    mixed_flow(10, "flow");
+    mixed_complex("/path", 20);
+
+    // Test nested calls
+    helper_with_logger("helper");
+    caller_with_logger("caller");
+    multi_context_caller("log", "query");
+}

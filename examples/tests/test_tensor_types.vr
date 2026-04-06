@@ -1,0 +1,32 @@
+// Test: Tensor Literals with Various Element Types
+// Grammar: tensor_literal_expr uses type_expr for element type
+
+fn main() {
+    // Test 1: Float tensors (default numeric type)
+    let float_tensor = tensor<3>Float { 1.0, 2.5, 3.14 };
+
+    // Test 2: Int tensors
+    let int_tensor = tensor<4>Int { 1, 2, 3, 4 };
+
+    // Test 3: Bool tensor (if supported)
+    let bool_tensor = tensor<3>Bool { true, false, true };
+
+    // Test 4: Nested type - tensor of custom type (may not be supported)
+    // type Point is { x: Float, y: Float };
+    // let point_tensor = tensor<2>Point {
+    //     { x: 1.0, y: 2.0 },
+    //     { x: 3.0, y: 4.0 }
+    // };
+
+    // Test 5: Mixed numeric expressions in tensor
+    let expr_tensor = tensor<5>Int { 1 + 1, 2 * 2, 3 + 3, 4 * 4, 5 + 5 };
+
+    // Test 6: Tensor with negative numbers
+    let neg_tensor = tensor<4>Float { -1.0, -2.5, 3.0, -4.5 };
+
+    // Test 7: Tensor with zero values
+    let zero_tensor = tensor<3>Int { 0, 0, 0 };
+
+    // Test 8: Large values
+    let large_tensor = tensor<3>Float { 1e6, 2.5e3, 9.99e10 };
+}

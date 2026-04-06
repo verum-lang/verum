@@ -1,0 +1,73 @@
+// JSON Builder Application
+// Demonstrates: string manipulation, nested structures, formatting
+
+type JsonValue is
+    JsonNull |
+    JsonBool(Bool) |
+    JsonNumber(Float) |
+    JsonString(Text) |
+    JsonArray([JsonValue]) |
+    JsonObject([(Text, JsonValue)]);
+
+// Convert JsonValue to string representation
+fn json_to_string(value: JsonValue) -> Text {
+    match value {
+        JsonNull => "null",
+        JsonBool(b) => if b { "true" } else { "false" },
+        JsonNumber(n) => f"{n}",
+        JsonString(s) => f"\"{s}\"",
+        JsonArray(items) => "[]",  // Simplified - array formatting complex
+        JsonObject(pairs) => "{}"  // Simplified - object formatting complex
+    }
+}
+
+// Build simple JSON values
+fn make_string(s: Text) -> JsonValue {
+    JsonString(s)
+}
+
+fn make_number(n: Float) -> JsonValue {
+    JsonNumber(n)
+}
+
+fn make_bool(b: Bool) -> JsonValue {
+    JsonBool(b)
+}
+
+fn make_null() -> JsonValue {
+    JsonNull
+}
+
+fn main() {
+    let _ = print("=== JSON Builder Demo ===");
+    let _ = print("");
+
+    // Create various JSON values
+    let _ = print("Creating JSON values:");
+
+    let null_val = make_null();
+    let _ = print(f"  null: {json_to_string(null_val)}");
+
+    let bool_true = make_bool(true);
+    let bool_false = make_bool(false);
+    let _ = print(f"  true: {json_to_string(bool_true)}");
+    let _ = print(f"  false: {json_to_string(bool_false)}");
+
+    let num = make_number(42.5);
+    let _ = print(f"  number: {json_to_string(num)}");
+
+    let str = make_string("hello world");
+    let _ = print(f"  string: {json_to_string(str)}");
+
+    let _ = print("");
+    let _ = print("JSON Types supported:");
+    let _ = print("  - null");
+    let _ = print("  - boolean (true/false)");
+    let _ = print("  - number (Float)");
+    let _ = print("  - string (Text)");
+    let _ = print("  - array (nested)");
+    let _ = print("  - object (key-value pairs)");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

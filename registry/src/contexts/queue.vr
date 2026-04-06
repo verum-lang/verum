@@ -1,0 +1,11 @@
+// Queue protocol for background job processing
+mount core.base.{Result, Text};
+
+pub type QueueError is
+    | ConnectionFailed(Text)
+    | PublishFailed(Text);
+
+pub context protocol Queue {
+    async fn ping(self) -> Result<(), QueueError>;
+    async fn publish(self, topic: Text, message: Text) -> Result<(), QueueError>;
+}

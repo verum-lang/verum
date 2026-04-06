@@ -1,0 +1,63 @@
+// Test const evaluation - compile-time constants
+// Constants should be evaluated at compile time
+
+// Simple numeric constants
+const PI: Float = 3.14159;
+const TAU: Float = PI * 2.0;
+const E: Float = 2.71828;
+
+// Integer constants
+const MAX_SIZE: Int = 1000;
+const BUFFER_SIZE: Int = MAX_SIZE * 2;
+const HALF_BUFFER: Int = BUFFER_SIZE / 2;
+
+// Boolean constants
+const DEBUG_MODE: Bool = true;
+const PRODUCTION_MODE: Bool = false;
+
+// String constants
+const APP_NAME: Text = "Verum Meta Test";
+const VERSION: Text = "1.0.0";
+
+// Constants with complex expressions
+const CIRCLE_AREA: Float = PI * 10.0 * 10.0;
+const VOLUME: Int = 10 * 20 * 30;
+
+// Constants using other constants
+const DOUBLE_TAU: Float = TAU * 2.0;
+const QUAD_BUFFER: Int = BUFFER_SIZE * 2;
+
+fn main() {
+    // Test numeric constants
+    let _ = println(f"PI: {PI}");
+    let _ = println(f"TAU: {TAU}");
+    let _ = println(f"E: {E}");
+
+    // Test integer constants
+    let _ = println(f"MAX_SIZE: {MAX_SIZE}");
+    let _ = println(f"BUFFER_SIZE: {BUFFER_SIZE}");
+    let _ = println(f"HALF_BUFFER: {HALF_BUFFER}");
+
+    // Test boolean constants
+    let _ = println(f"DEBUG_MODE: {DEBUG_MODE}");
+    let _ = println(f"PRODUCTION_MODE: {PRODUCTION_MODE}");
+
+    // Test string constants
+    let _ = println(f"APP_NAME: {APP_NAME}");
+    let _ = println(f"VERSION: {VERSION}");
+
+    // Test complex constants
+    let _ = println(f"CIRCLE_AREA: {CIRCLE_AREA}");
+    let _ = println(f"VOLUME: {VOLUME}");
+
+    // Test derived constants
+    let _ = println(f"DOUBLE_TAU: {DOUBLE_TAU}");
+    let _ = println(f"QUAD_BUFFER: {QUAD_BUFFER}");
+
+    // Use constants in runtime expressions
+    let runtime_calc = MAX_SIZE + 500;
+    let _ = println(f"Runtime calc: {runtime_calc}");
+
+    let pi_squared = PI * PI;
+    let _ = println(f"PI squared: {pi_squared}");
+}

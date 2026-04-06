@@ -1,0 +1,13 @@
+// Test async with yield
+async fn generator_test() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+    100
+}
+
+fn main() {
+    print("Test: Async with yield");
+    let result = generator_test().await;
+    print(f"Result: {result}");
+}

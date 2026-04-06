@@ -1,0 +1,46 @@
+// Benchmark: PB-004 - CBGR reference checking overhead
+// Priority: High
+// Expected: ~15ns per CBGR check
+
+fn process_managed(arr: &List<Int>) -> Int {
+    let mut sum = 0;
+    for i in 0..len(arr) {
+        sum = sum + arr[i];
+    }
+    sum
+}
+
+fn process_checked(arr: &checked List<Int>) -> Int {
+    let mut sum = 0;
+    for i in 0..len(arr) {
+        sum = sum + arr[i];
+    }
+    sum
+}
+
+fn main() {
+    // Create test data
+    let data = [i for i in 0..100000];
+
+    // Benchmark managed references (~15ns overhead per check)
+    let start = now();
+    let mut total = 0;
+    for _ in 0..100 {
+        total = total + process_managed(&data);
+    }
+    let elapsed_managed = now() - start;
+    print(f"Managed refs: {elapsed_managed}ms (total={total})");
+
+    // Benchmark checked references (0ns overhead)
+    let start = now();
+    let mut total = 0;
+    for _ in 0..100 {
+        total = total + process_checked(&checked data);
+    }
+    let elapsed_checked = now() - start;
+    print(f"Checked refs: {elapsed_checked}ms (total={total})");
+
+    // Calculate overhead
+    let overhead_per_check = (elapsed_managed - elapsed_checked) / (100 * 100000);
+    print(f"Estimated overhead: {overhead_per_check * 1000000}ns per check");
+}

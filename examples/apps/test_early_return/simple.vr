@@ -1,0 +1,13 @@
+// Simple early return test
+
+fn test_return(n: Int) -> Int {
+    if n > 10 {
+        return 100;
+    }
+    n
+}
+
+fn main() {
+    print(f"test_return(5) = {test_return(5)}");
+    print(f"test_return(15) = {test_return(15)}");
+}

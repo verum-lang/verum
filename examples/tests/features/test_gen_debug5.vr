@@ -1,0 +1,6 @@
+type Pair<A, B> is { first: A, second: B };
+
+fn main() {
+    let pair_nums: Pair<Int, Float> = Pair { first: 42, second: 3.14 };
+    let _ = print(f"Pair: ({pair_nums.first}, {pair_nums.second})");
+}

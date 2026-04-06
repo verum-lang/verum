@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "files": {
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_generics/src/main.vr": {
+      "hash": "e16046e60bf69107d93d91d4d7be013c7e4117844d1f4b19a2006d3dfbd0d46b",
+      "timestamp": {
+        "secs_since_epoch": 1765183782,
+        "nanos_since_epoch": 273619599
+      },
+      "size": 7366
+    },
+    "/Users/taaliman/projects/luxquant/axiom/examples/apps/test_generics/src/debug_list.vr": {
+      "hash": "65b41395dea862cc5ab011ef6632925da025ea5e317d800f7da3f7616920b259",
+      "timestamp": {
+        "secs_since_epoch": 1765183755,
+        "nanos_since_epoch": 246077909
+      },
+      "size": 661
+    }
+  },
+  "artifacts": {}
+}

@@ -1,0 +1,11 @@
+ffi LibC {
+    @extern("C")
+    fn strlen(s: *const u8) -> usize;
+
+    @extern("C")
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+}
+
+fn main() {
+    let _ = println("FFI declarations parsed successfully!");
+}

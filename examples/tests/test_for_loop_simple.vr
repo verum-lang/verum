@@ -1,0 +1,6 @@
+// Simple test case from the issue
+fn main() {
+    for i in 1..5 {
+        print(i);
+    }
+}

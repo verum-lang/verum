@@ -1,0 +1,13 @@
+// Minimal test for where guards
+
+fn main() {
+    let _ = print("=== Where Guard Test ===");
+
+    let x = 5.0;
+    match x {
+        n where n > 0.0 => { let _ = print("positive"); },
+        _ => { let _ = print("other"); }
+    }
+
+    let _ = print("=== Done ===");
+}

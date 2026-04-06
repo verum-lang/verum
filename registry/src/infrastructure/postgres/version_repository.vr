@@ -1,0 +1,420 @@
+// PostgreSQL Implementation of PackageVersionRepository
+//
+// Provides concrete PostgreSQL implementation for package version persistence.
+// Uses Database context for all operations.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount core.collections.Map;
+
+mount super.super.super.domain.package.{PackageVersion, Dependency};
+mount super.super.super.domain.version.SemVer;
+mount super.super.super.domain.errors.RegistryError;
+mount super.super.super.domain.refinements.{PackageName, ValidatedPackageName, QueryOffset, QueryLimit};
+mount super.super.super.domain.repositories.PackageVersionRepository;
+mount super.super.super.domain.semver_constraint.{parse_constraint, satisfies, sort_versions_descending};
+mount super.super.super.contexts.database.{Database, DatabaseError};
+
+pub type PostgresPackageVersionRepository is {};
+
+implement PostgresPackageVersionRepository {
+    pub fn new() -> PostgresPackageVersionRepository {
+        PostgresPackageVersionRepository {}
+    }
+}
+
+implement PackageVersionRepository for PostgresPackageVersionRepository {
+    async fn get_version(package_name: PackageName, version: SemVer) -> Result<Maybe<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM package_versions WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => row_to_version(r).map(Maybe.Some),
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn get_all_versions(package_name: PackageName) -> Result<List<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM package_versions WHERE package_name = $1 ORDER BY published_at DESC",
+            sql_params_1(package_name.clone())
+        ).await;
+
+        rows_to_versions(rows)
+    }
+
+    async fn save(version: PackageVersion) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let deps_str = deps_to_string(&version.dependencies);
+        let dev_deps_str = deps_to_string(&version.dev_dependencies);
+
+        Database.execute_with(
+            "INSERT INTO package_versions (package_name, version, description, dependencies, dev_dependencies, published_at, published_by, checksum, tarball_url, readme)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (package_name, version) DO NOTHING",
+            sql_params_10(
+                version.package_name.clone(),
+                version.version.to_string(),
+                version.description.clone(),
+                deps_str,
+                dev_deps_str,
+                version.published_at.to_string(),
+                version.published_by.clone(),
+                version.checksum.clone(),
+                version.tarball_url.clone(),
+                version.readme.clone()
+            )
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn delete(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>
+        using [Database]
+    {
+        Database.execute_with(
+            "DELETE FROM package_versions WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await.map(|_| ()).map_err(db_to_registry)
+    }
+
+    async fn exists(package_name: PackageName, version: SemVer) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM package_versions WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn get_latest_version(package_name: PackageName) -> Result<Maybe<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        // Get latest non-yanked version, ordered by semantic version
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM package_versions
+             WHERE package_name = $1 AND yanked = false
+             ORDER BY published_at DESC
+             LIMIT 1",
+            sql_params_1(package_name.clone())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => row_to_version(r).map(Maybe.Some),
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn find_matching_versions(package_name: PackageName, constraint: Text) -> Result<List<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        // Get all versions for the package
+        let all_versions = get_all_versions(package_name).await?;
+
+        // Parse the constraint string
+        let parsed_constraint = match parse_constraint(constraint) {
+            Result.Ok(c) => c,
+            Result.Err(e) => return Result.Err(e),
+        };
+
+        // Filter versions that satisfy the constraint
+        let mut matching = List.new();
+        for version in all_versions {
+            if satisfies(version.version, parsed_constraint) {
+                matching.push(version);
+            }
+        }
+
+        // Sort by version (highest first)
+        sort_versions_descending(&mut matching);
+
+        Result.Ok(matching)
+    }
+
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM package_versions ORDER BY published_at DESC LIMIT $2 OFFSET $1",
+            sql_params_2(offset.to_string(), limit.to_string())
+        ).await;
+
+        rows_to_versions(rows)
+    }
+
+    async fn count_versions(package_name: PackageName) -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one_with(
+            "SELECT COUNT(*) as count FROM package_versions WHERE package_name = $1",
+            sql_params_1(package_name.clone())
+        ).await;
+
+        match row {
+            Result.Ok(r) => Result.Ok(get_count(&r)),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn yank_version(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let result = Database.execute_with(
+            "UPDATE package_versions SET yanked = true WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.version_not_found(package_name, version.to_string()))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn unyank_version(package_name: PackageName, version: SemVer) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let result = Database.execute_with(
+            "UPDATE package_versions SET yanked = false WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.version_not_found(package_name, version.to_string()))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn is_yanked(package_name: PackageName, version: SemVer) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_optional_with(
+            "SELECT yanked FROM package_versions WHERE package_name = $1 AND version = $2",
+            sql_params_2(package_name.clone(), version.to_string())
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match r.get("yanked") {
+                    Maybe.Some(y) => Result.Ok(y == "true" || y == "1" || y == "t"),
+                    Maybe.None => Result.Ok(false),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Err(RegistryError.version_not_found(package_name, version.to_string())),
+            Result.Err(e) => Result.Err(db_to_registry(e)),
+        }
+    }
+
+    async fn get_versions_by_publisher(publisher: Text, offset: QueryOffset, limit: QueryLimit) -> Result<List<PackageVersion>, RegistryError>
+        using [Database]
+    {
+        let rows = Database.query_with(
+            "SELECT * FROM package_versions WHERE published_by = $1 ORDER BY published_at DESC LIMIT $3 OFFSET $2",
+            sql_params_3(publisher, offset.to_string(), limit.to_string())
+        ).await;
+
+        rows_to_versions(rows)
+    }
+}
+
+// Helper functions
+fn row_to_version(row: Map<Text, Text>) -> Result<PackageVersion, RegistryError> {
+    let package_name = get_validated_name(&row, "package_name")?;
+    let version_str = get_text(&row, "version")?;
+    let version = SemVer.parse(version_str)?;
+    let description = get_text(&row, "description")?;
+    let deps_str = get_text(&row, "dependencies")?;
+    let dev_deps_str = get_text(&row, "dev_dependencies")?;
+    let published_at = get_int(&row, "published_at")?;
+    let published_by = get_text(&row, "published_by")?;
+    let checksum = get_text(&row, "checksum")?;
+    let tarball_url = get_text(&row, "tarball_url")?;
+    let readme = get_text(&row, "readme")?;
+
+    Result.Ok(PackageVersion {
+        package_name: package_name,
+        version: version,
+        description: description,
+        dependencies: parse_deps(deps_str),
+        dev_dependencies: parse_deps(dev_deps_str),
+        published_at: published_at,
+        published_by: published_by,
+        checksum: checksum,
+        tarball_url: tarball_url,
+        readme: readme,
+    })
+}
+
+fn rows_to_versions(result: Result<List<Map<Text, Text>>, DatabaseError>) -> Result<List<PackageVersion>, RegistryError> {
+    match result {
+        Result.Ok(rows) => {
+            let mut versions = List.new();
+            for row in rows {
+                match row_to_version(row) {
+                    Result.Ok(v) => versions.push(v),
+                    Result.Err(e) => return Result.Err(e),
+                }
+            }
+            Result.Ok(versions)
+        },
+        Result.Err(e) => Result.Err(db_to_registry(e)),
+    }
+}
+
+fn deps_to_string(deps: &List<Dependency>) -> Text {
+    // Format: "name1:constraint1,name2:constraint2"
+    let mut result = "";
+    let mut first = true;
+    for dep in deps.clone() {
+        if !first { result = result + ","; }
+        result = result + dep.name + ":" + dep.version_constraint;
+        first = false;
+    }
+    result
+}
+
+fn parse_deps(s: Text) -> List<Dependency> {
+    let mut deps = List.new();
+    if s.len() == 0 { return deps; }
+
+    for part in s.split(",") {
+        let kv = part.split(":");
+        if kv.len() == 2 {
+            match ValidatedPackageName.try_from(kv.get(0).unwrap().clone()) {
+                Result.Ok(name) => {
+                    deps.push(Dependency.new(name, kv.get(1).unwrap().clone()));
+                },
+                Result.Err(_) => {}, // Skip invalid
+            }
+        }
+    }
+    deps
+}
+
+fn db_to_registry(e: DatabaseError) -> RegistryError {
+    match e {
+        DatabaseError.NotFound => RegistryError.database_error("Not found"),
+        DatabaseError.ConnectionFailed(m) => RegistryError.database_error(f"Connection: {m}"),
+        DatabaseError.QueryFailed(m) => RegistryError.database_error(f"Query: {m}"),
+        DatabaseError.DuplicateKey(m) => RegistryError.database_error(f"Duplicate: {m}"),
+        DatabaseError.TransactionFailed(m) => RegistryError.database_error(f"Transaction: {m}"),
+    }
+}
+
+fn get_validated_name(row: &Map<Text, Text>, key: Text) -> Result<ValidatedPackageName, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => {
+            match ValidatedPackageName.try_from(v.clone()) {
+                Result.Ok(name) => Result.Ok(name),
+                Result.Err(err) => Result.Err(RegistryError.validation_error(key, err)),
+            }
+        },
+        Maybe.None => Result.Err(RegistryError.database_error(f"Missing field: {key}")),
+    }
+}
+
+fn get_int(row: &Map<Text, Text>, key: Text) -> Result<Int, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => Result.Ok(parse_int(v)),
+        Maybe.None => Result.Err(RegistryError.database_error(f"Missing field: {key}")),
+    }
+}
+
+fn get_text(row: &Map<Text, Text>, key: Text) -> Result<Text, RegistryError> {
+    match row.get(key) {
+        Maybe.Some(v) => Result.Ok(v.clone()),
+        Maybe.None => Result.Ok(""), // Default to empty for optional fields
+    }
+}
+
+fn get_count(row: &Map<Text, Text>) -> Int {
+    match row.get("count") {
+        Maybe.Some(c) => parse_int(c),
+        Maybe.None => 0,
+    }
+}
+
+fn parse_int(s: &Text) -> Int {
+    let mut result = 0;
+    let mut is_neg = false;
+    let mut started = false;
+
+    for ch in s.chars() {
+        let cs = ch.to_string();
+        if cs == "-" && !started {
+            is_neg = true;
+            started = true;
+        } else if cs >= "0" && cs <= "9" {
+            started = true;
+            let digit = match cs {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_neg { -result } else { result }
+}
+
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p
+}
+
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p.push(p2);
+    p
+}
+
+fn sql_params_3(p1: Text, p2: Text, p3: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p.push(p2);
+    p.push(p3);
+    p
+}
+
+fn sql_params_10(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text, p6: Text, p7: Text, p8: Text, p9: Text, p10: Text) -> List<Text> {
+    let mut p = List.new();
+    p.push(p1);
+    p.push(p2);
+    p.push(p3);
+    p.push(p4);
+    p.push(p5);
+    p.push(p6);
+    p.push(p7);
+    p.push(p8);
+    p.push(p9);
+    p.push(p10);
+    p
+}

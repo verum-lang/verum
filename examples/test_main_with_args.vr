@@ -1,0 +1,10 @@
+// Test main function with command-line arguments
+
+fn main(args: List<Text>) -> Int {
+    print("Command-line arguments:")
+    for arg in args {
+        print(f"  - {arg}")
+    }
+    print(f"Total arguments: {args.len()}")
+    0
+}

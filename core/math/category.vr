@@ -1,0 +1,738 @@
+// =============================================================================
+// category.vr - Category Theory Foundations
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: docs/detailed/13-formal-proofs.md
+//
+// A comprehensive category theory library defining categories, functors,
+// natural transformations, adjunctions, monads, limits, colimits, toposes,
+// sheaves, and Kan extensions. Each construction carries its axioms as
+// formal verification obligations.
+//
+// This module aspires to surpass existing formalizations (Lean's Mathlib,
+// Coq's MathComp, Agda's stdlib) in both breadth and ergonomics.
+// =============================================================================
+
+module core.math.category;
+
+// =============================================================================
+// 1. Categories
+// =============================================================================
+
+/// A category consists of objects, morphisms between objects, an identity
+/// morphism for each object, and a composition operation satisfying
+/// associativity and identity laws.
+///
+/// Type parameters:
+///   Obj  - The type of objects
+///   Mor  - The type of morphisms (indexed by source and target objects)
+public type Category<Obj, Mor> is protocol {
+    /// Identity morphism for an object.
+    fn id(a: &Obj) -> Mor;
+
+    /// Compose two morphisms: g after f (f then g).
+    fn compose(f: &Mor, g: &Mor) -> Mor;
+
+    /// Source object of a morphism.
+    fn source(f: &Mor) -> Obj;
+
+    /// Target object of a morphism.
+    fn target(f: &Mor) -> Obj;
+
+    /// Left identity: compose(id(source(f)), f) = f
+    @verify(formal)
+    fn left_identity(f: &Mor) -> Bool;
+
+    /// Right identity: compose(f, id(target(f))) = f
+    @verify(formal)
+    fn right_identity(f: &Mor) -> Bool;
+
+    /// Associativity: compose(compose(f, g), h) = compose(f, compose(g, h))
+    @verify(formal)
+    fn associativity(f: &Mor, g: &Mor, h: &Mor) -> Bool;
+};
+
+/// A morphism between two objects in a category.
+public type Morphism<C, A, B> is {
+    /// The category this morphism lives in.
+    category: C,
+    /// The morphism data.
+    data: Int,
+};
+
+// =============================================================================
+// 2. Functors
+// =============================================================================
+
+/// A functor maps objects and morphisms from one category to another,
+/// preserving identity and composition.
+public type Functor<C, D> is protocol {
+    /// Map an object from C to D.
+    fn map_obj(a: &Int) -> Int;
+
+    /// Map a morphism from C to D.
+    fn map_mor(f: &Int) -> Int;
+
+    /// Preserves identity: map_mor(id_C(a)) = id_D(map_obj(a))
+    @verify(formal)
+    fn preserves_identity(a: &Int) -> Bool;
+
+    /// Preserves composition: map_mor(compose(f, g)) = compose(map_mor(f), map_mor(g))
+    @verify(formal)
+    fn preserves_composition(f: &Int, g: &Int) -> Bool;
+};
+
+/// An endofunctor is a functor from a category to itself.
+public type Endofunctor<C> is protocol extends Functor<C, C> {};
+
+/// A contravariant functor reverses the direction of morphisms.
+public type ContravariantFunctor<C, D> is protocol {
+    /// Map an object from C to D.
+    fn map_obj(a: &Int) -> Int;
+
+    /// Map a morphism, reversing direction.
+    fn map_mor(f: &Int) -> Int;
+
+    /// Preserves identity: map_mor(id(a)) = id(map_obj(a))
+    @verify(formal)
+    fn preserves_identity(a: &Int) -> Bool;
+
+    /// Reverses composition: map_mor(compose(f, g)) = compose(map_mor(g), map_mor(f))
+    @verify(formal)
+    fn reverses_composition(f: &Int, g: &Int) -> Bool;
+};
+
+/// A faithful functor is injective on morphisms.
+public type FaithfulFunctor<C, D> is protocol extends Functor<C, D> {
+    /// Injective on hom-sets: map_mor(f) = map_mor(g) implies f = g
+    @verify(formal)
+    fn faithful(f: &Int, g: &Int) -> Bool;
+};
+
+/// A full functor is surjective on morphisms.
+public type FullFunctor<C, D> is protocol extends Functor<C, D> {
+    /// Surjective on hom-sets: for every h in Hom_D(F(a), F(b)),
+    /// there exists f in Hom_C(a, b) with F(f) = h
+    @verify(formal)
+    fn full(a: &Int, b: &Int, h: &Int) -> Bool;
+};
+
+/// A fully faithful functor is both full and faithful.
+public type FullyFaithfulFunctor<C, D> is protocol extends FullFunctor<C, D> + FaithfulFunctor<C, D> {};
+
+// =============================================================================
+// 3. Natural Transformations
+// =============================================================================
+
+/// A natural transformation between two functors F, G : C -> D
+/// assigns to each object A in C a morphism component(A) : F(A) -> G(A)
+/// satisfying the naturality condition.
+public type NaturalTransformation<C, D, F, G> is protocol {
+    /// The component morphism at object A.
+    fn component(a: &Int) -> Int;
+
+    /// Naturality: for every f : A -> B in C,
+    /// compose(G.map_mor(f), component(A)) = compose(component(B), F.map_mor(f))
+    @verify(formal)
+    fn naturality(a: &Int, b: &Int, f: &Int) -> Bool;
+};
+
+/// A natural isomorphism is a natural transformation where each component
+/// is an isomorphism.
+public type NaturalIsomorphism<C, D, F, G> is protocol extends NaturalTransformation<C, D, F, G> {
+    /// The inverse component at each object.
+    fn inverse_component(a: &Int) -> Int;
+
+    /// component(a) composed with inverse_component(a) = id
+    @verify(formal)
+    fn left_inverse(a: &Int) -> Bool;
+
+    /// inverse_component(a) composed with component(a) = id
+    @verify(formal)
+    fn right_inverse(a: &Int) -> Bool;
+};
+
+// =============================================================================
+// 4. Adjunctions
+// =============================================================================
+
+/// An adjunction between functors F : C -> D (left adjoint) and
+/// G : D -> C (right adjoint). Written F -| G.
+///
+/// Equivalent characterizations:
+///   - Hom_D(F(A), B) is naturally isomorphic to Hom_C(A, G(B))
+///   - Unit eta : Id_C -> GF and counit epsilon : FG -> Id_D
+///     satisfying triangle identities
+public type Adjunction<C, D, F, G> is protocol {
+    /// Unit: eta_A : A -> G(F(A)) for each A in C.
+    fn unit(a: &Int) -> Int;
+
+    /// Counit: epsilon_B : F(G(B)) -> B for each B in D.
+    fn counit(b: &Int) -> Int;
+
+    /// Triangle identity 1: epsilon_{F(A)} . F(eta_A) = id_{F(A)}
+    @verify(formal)
+    fn triangle_identity_left(a: &Int) -> Bool;
+
+    /// Triangle identity 2: G(epsilon_B) . eta_{G(B)} = id_{G(B)}
+    @verify(formal)
+    fn triangle_identity_right(b: &Int) -> Bool;
+
+    /// The adjunction transposition: Hom(F(A), B) -> Hom(A, G(B)).
+    fn transpose_left(a: &Int, b: &Int, f: &Int) -> Int;
+
+    /// The inverse transposition: Hom(A, G(B)) -> Hom(F(A), B).
+    fn transpose_right(a: &Int, b: &Int, g: &Int) -> Int;
+
+    /// Transpositions are mutually inverse.
+    @verify(formal)
+    fn transpose_inverse(a: &Int, b: &Int, f: &Int) -> Bool;
+};
+
+// =============================================================================
+// 5. Monads
+// =============================================================================
+
+/// A monad on a category C is an endofunctor T : C -> C equipped with
+/// two natural transformations: return (unit) and join (multiplication),
+/// satisfying the monad laws.
+public type Monad<C> is protocol {
+    /// The endofunctor action on objects.
+    fn map_obj(a: &Int) -> Int;
+
+    /// The endofunctor action on morphisms.
+    fn map_mor(f: &Int) -> Int;
+
+    /// Unit (return): eta_A : A -> T(A).
+    fn unit(a: &Int) -> Int;
+
+    /// Multiplication (join): mu_A : T(T(A)) -> T(A).
+    fn join(a: &Int) -> Int;
+
+    /// Left unit law: join . T(unit) = id
+    @verify(formal)
+    fn left_unit_law(a: &Int) -> Bool;
+
+    /// Right unit law: join . unit_T = id
+    @verify(formal)
+    fn right_unit_law(a: &Int) -> Bool;
+
+    /// Associativity: join . T(join) = join . join_T
+    @verify(formal)
+    fn associativity_law(a: &Int) -> Bool;
+};
+
+/// A comonad is the categorical dual of a monad.
+public type Comonad<C> is protocol {
+    /// The endofunctor action on objects.
+    fn map_obj(a: &Int) -> Int;
+
+    /// The endofunctor action on morphisms.
+    fn map_mor(f: &Int) -> Int;
+
+    /// Counit (extract): epsilon_A : W(A) -> A.
+    fn extract(a: &Int) -> Int;
+
+    /// Comultiplication (duplicate): delta_A : W(A) -> W(W(A)).
+    fn duplicate(a: &Int) -> Int;
+
+    /// Left counit law: extract . duplicate = id
+    @verify(formal)
+    fn left_counit_law(a: &Int) -> Bool;
+
+    /// Right counit law: W(extract) . duplicate = id
+    @verify(formal)
+    fn right_counit_law(a: &Int) -> Bool;
+
+    /// Coassociativity: W(duplicate) . duplicate = duplicate . duplicate
+    @verify(formal)
+    fn coassociativity_law(a: &Int) -> Bool;
+};
+
+/// Kleisli composition for a monad, providing the bind (>>=) operation.
+public type KleisliCategory<C, T> is protocol {
+    /// Kleisli composition: (A -> T(B)) . (B -> T(C)) -> (A -> T(C)).
+    fn kleisli_compose(f: &Int, g: &Int) -> Int;
+
+    /// Bind operation: T(A) -> (A -> T(B)) -> T(B).
+    fn bind(ta: &Int, f: &Int) -> Int;
+};
+
+// =============================================================================
+// 6. Limits and Colimits
+// =============================================================================
+
+/// A cone over a diagram D in category C with apex A.
+public type Cone<C, D, A> is protocol {
+    /// The apex of the cone.
+    fn apex() -> Int;
+
+    /// The leg of the cone at index i.
+    fn leg(i: &Int) -> Int;
+
+    /// Compatibility: for each morphism f : i -> j in D,
+    /// D(f) . leg(i) = leg(j)
+    @verify(formal)
+    fn compatibility(i: &Int, j: &Int, f: &Int) -> Bool;
+};
+
+/// A limit is a universal cone.
+public type Limit<C, D> is protocol extends Cone<C, D, Int> {
+    /// Universal property: for any other cone, there exists a unique
+    /// mediating morphism.
+    fn mediate(other_apex: &Int, other_legs: &Int) -> Int;
+
+    /// The mediating morphism is unique.
+    @verify(formal)
+    fn uniqueness(other_apex: &Int, other_legs: &Int, m1: &Int, m2: &Int) -> Bool;
+};
+
+/// A cocone is the dual of a cone.
+public type Cocone<C, D, A> is protocol {
+    /// The nadir (apex) of the cocone.
+    fn nadir() -> Int;
+
+    /// The leg of the cocone at index i.
+    fn leg(i: &Int) -> Int;
+
+    /// Compatibility: for each morphism f : i -> j in D,
+    /// leg(j) . D(f) = leg(i)
+    @verify(formal)
+    fn compatibility(i: &Int, j: &Int, f: &Int) -> Bool;
+};
+
+/// A colimit is a universal cocone.
+public type Colimit<C, D> is protocol extends Cocone<C, D, Int> {
+    /// Universal property: for any other cocone, there exists a unique
+    /// mediating morphism.
+    fn mediate(other_nadir: &Int, other_legs: &Int) -> Int;
+
+    /// The mediating morphism is unique.
+    @verify(formal)
+    fn uniqueness(other_nadir: &Int, other_legs: &Int, m1: &Int, m2: &Int) -> Bool;
+};
+
+// =============================================================================
+// 7. Products and Coproducts
+// =============================================================================
+
+/// A categorical product of objects A and B.
+public type Product<C, A, B> is protocol {
+    /// The product object.
+    fn product_obj() -> Int;
+
+    /// First projection: pi_1 : A x B -> A.
+    fn proj1() -> Int;
+
+    /// Second projection: pi_2 : A x B -> B.
+    fn proj2() -> Int;
+
+    /// Universal property: for any f : X -> A and g : X -> B,
+    /// there exists a unique h : X -> A x B with proj1 . h = f and proj2 . h = g.
+    fn pair(f: &Int, g: &Int) -> Int;
+
+    /// proj1 . pair(f, g) = f
+    @verify(formal)
+    fn proj1_pair(f: &Int, g: &Int) -> Bool;
+
+    /// proj2 . pair(f, g) = g
+    @verify(formal)
+    fn proj2_pair(f: &Int, g: &Int) -> Bool;
+
+    /// Uniqueness of the pairing.
+    @verify(formal)
+    fn pair_unique(f: &Int, g: &Int, h: &Int) -> Bool;
+};
+
+/// A categorical coproduct (sum) of objects A and B.
+public type Coproduct<C, A, B> is protocol {
+    /// The coproduct object.
+    fn coproduct_obj() -> Int;
+
+    /// First injection: iota_1 : A -> A + B.
+    fn inj1() -> Int;
+
+    /// Second injection: iota_2 : B -> A + B.
+    fn inj2() -> Int;
+
+    /// Universal property: for any f : A -> X and g : B -> X,
+    /// there exists a unique h : A + B -> X with h . inj1 = f and h . inj2 = g.
+    fn copair(f: &Int, g: &Int) -> Int;
+
+    /// copair(f, g) . inj1 = f
+    @verify(formal)
+    fn copair_inj1(f: &Int, g: &Int) -> Bool;
+
+    /// copair(f, g) . inj2 = g
+    @verify(formal)
+    fn copair_inj2(f: &Int, g: &Int) -> Bool;
+};
+
+// =============================================================================
+// 8. Equalizers and Coequalizers
+// =============================================================================
+
+/// An equalizer of two parallel morphisms f, g : A -> B.
+public type Equalizer<C> is protocol {
+    /// The equalizer object E.
+    fn equalizer_obj() -> Int;
+
+    /// The equalizing morphism e : E -> A such that f . e = g . e.
+    fn equalizer_mor() -> Int;
+
+    /// f . e = g . e
+    @verify(formal)
+    fn equalizes(f: &Int, g: &Int) -> Bool;
+
+    /// Universal property: for any h : X -> A with f . h = g . h,
+    /// there exists a unique u : X -> E with e . u = h.
+    fn mediate(h: &Int) -> Int;
+};
+
+/// A coequalizer of two parallel morphisms f, g : A -> B.
+public type Coequalizer<C> is protocol {
+    /// The coequalizer object Q.
+    fn coequalizer_obj() -> Int;
+
+    /// The coequalizing morphism q : B -> Q such that q . f = q . g.
+    fn coequalizer_mor() -> Int;
+
+    /// q . f = q . g
+    @verify(formal)
+    fn coequalizes(f: &Int, g: &Int) -> Bool;
+
+    /// Universal property.
+    fn mediate(h: &Int) -> Int;
+};
+
+// =============================================================================
+// 9. Pullbacks and Pushouts
+// =============================================================================
+
+/// A pullback (fiber product) of f : A -> C and g : B -> C.
+public type Pullback<Cat> is protocol {
+    /// The pullback object P.
+    fn pullback_obj() -> Int;
+
+    /// First projection p1 : P -> A.
+    fn pb_proj1() -> Int;
+
+    /// Second projection p2 : P -> B.
+    fn pb_proj2() -> Int;
+
+    /// Commutativity: f . p1 = g . p2
+    @verify(formal)
+    fn commutes(f: &Int, g: &Int) -> Bool;
+
+    /// Universal property.
+    fn pb_mediate(h1: &Int, h2: &Int) -> Int;
+};
+
+/// A pushout (fiber coproduct) of f : C -> A and g : C -> B.
+public type Pushout<Cat> is protocol {
+    /// The pushout object Q.
+    fn pushout_obj() -> Int;
+
+    /// First injection i1 : A -> Q.
+    fn po_inj1() -> Int;
+
+    /// Second injection i2 : B -> Q.
+    fn po_inj2() -> Int;
+
+    /// Commutativity: i1 . f = i2 . g
+    @verify(formal)
+    fn commutes(f: &Int, g: &Int) -> Bool;
+
+    /// Universal property.
+    fn po_mediate(h1: &Int, h2: &Int) -> Int;
+};
+
+// =============================================================================
+// 10. Yoneda Lemma
+// =============================================================================
+
+/// The Yoneda embedding: an object A in C is represented by the
+/// functor Hom(A, -) : C -> Set.
+///
+/// Yoneda lemma: Nat(Hom(A, -), F) is naturally isomorphic to F(A)
+/// for any functor F : C -> Set.
+public type YonedaEmbedding<C> is protocol {
+    /// The representable functor Hom(A, -) applied to an object B.
+    fn hom(a: &Int, b: &Int) -> Int;
+
+    /// The Yoneda map: given a natural transformation alpha : Hom(A, -) -> F,
+    /// extract the element alpha_A(id_A) in F(A).
+    fn yoneda_map(alpha: &Int, a: &Int) -> Int;
+
+    /// The inverse Yoneda map: given x in F(A), construct the natural
+    /// transformation by f |-> F(f)(x).
+    fn yoneda_inv(x: &Int, a: &Int) -> Int;
+
+    /// yoneda_map(yoneda_inv(x)) = x
+    @verify(formal)
+    fn yoneda_iso_left(x: &Int, a: &Int) -> Bool;
+
+    /// yoneda_inv(yoneda_map(alpha)) = alpha
+    @verify(formal)
+    fn yoneda_iso_right(alpha: &Int, a: &Int) -> Bool;
+};
+
+// =============================================================================
+// 11. Topos Theory
+// =============================================================================
+
+/// A subobject classifier is an object Omega with a morphism
+/// true : 1 -> Omega such that every monomorphism m : S >-> A
+/// is a pullback of true along a unique characteristic morphism chi : A -> Omega.
+public type SubobjectClassifier<C> is protocol {
+    /// The subobject classifier object.
+    fn omega() -> Int;
+
+    /// The truth morphism: 1 -> Omega.
+    fn truth() -> Int;
+
+    /// Characteristic morphism for a monomorphism.
+    fn characteristic(mono: &Int) -> Int;
+
+    /// The monomorphism is a pullback of truth along characteristic.
+    @verify(formal)
+    fn classifies(mono: &Int) -> Bool;
+};
+
+/// An elementary topos is a category with finite limits, exponentials,
+/// and a subobject classifier.
+public type Topos<C> is protocol {
+    /// Terminal object (1).
+    fn terminal() -> Int;
+
+    /// The subobject classifier.
+    fn omega() -> Int;
+
+    /// Truth morphism.
+    fn truth() -> Int;
+
+    /// Exponential object B^A.
+    fn exponential(a: &Int, b: &Int) -> Int;
+
+    /// Evaluation morphism: eval : B^A x A -> B.
+    fn eval_mor(a: &Int, b: &Int) -> Int;
+
+    /// Currying (lambda abstraction): given f : C x A -> B,
+    /// produce curry(f) : C -> B^A.
+    fn curry(f: &Int) -> Int;
+
+    /// eval . (curry(f) x id_A) = f
+    @verify(formal)
+    fn curry_eval(f: &Int) -> Bool;
+
+    /// The category has all finite limits.
+    @verify(formal)
+    fn has_finite_limits() -> Bool;
+};
+
+// =============================================================================
+// 12. Presheaves and Sheaves
+// =============================================================================
+
+/// A presheaf on a category C is a contravariant functor from C to Set.
+public type Presheaf<C> is protocol {
+    /// Value at an object: F(U).
+    fn sections(u: &Int) -> Int;
+
+    /// Restriction map: for f : V -> U, restrict : F(U) -> F(V).
+    fn restrict(f: &Int, s: &Int) -> Int;
+
+    /// Restriction along identity is identity.
+    @verify(formal)
+    fn restrict_identity(u: &Int, s: &Int) -> Bool;
+
+    /// Restriction is functorial: restrict(g . f, s) = restrict(f, restrict(g, s)).
+    @verify(formal)
+    fn restrict_composition(f: &Int, g: &Int, s: &Int) -> Bool;
+};
+
+/// A sheaf is a presheaf satisfying the gluing axiom: local data that
+/// agrees on overlaps can be uniquely glued into global data.
+public type Sheaf<C> is protocol extends Presheaf<C> {
+    /// Locality: if two sections agree on every element of a covering,
+    /// they are equal.
+    @verify(formal)
+    fn locality(u: &Int, s1: &Int, s2: &Int, cover: &Int) -> Bool;
+
+    /// Gluing: given compatible local sections on a covering,
+    /// there exists a global section restricting to each local section.
+    @verify(formal)
+    fn gluing(u: &Int, cover: &Int, local_sections: &Int) -> Bool;
+};
+
+// =============================================================================
+// 13. Kan Extensions
+// =============================================================================
+
+/// A left Kan extension of a functor F along a functor K.
+/// Lan_K(F) is the best approximation of F from the left along K.
+public type LeftKanExtension<C, D, E> is protocol {
+    /// The left Kan extension functor Lan_K(F) : D -> E.
+    fn lan_obj(d: &Int) -> Int;
+
+    /// The left Kan extension on morphisms.
+    fn lan_mor(f: &Int) -> Int;
+
+    /// The universal natural transformation eta : F -> Lan_K(F) . K.
+    fn lan_unit(c: &Int) -> Int;
+
+    /// Universal property: for any H : D -> E with alpha : F -> H . K,
+    /// there exists a unique beta : Lan_K(F) -> H with
+    /// beta_K . eta = alpha.
+    fn lan_mediate(h: &Int, alpha: &Int) -> Int;
+
+    /// Uniqueness of the mediating transformation.
+    @verify(formal)
+    fn lan_unique(h: &Int, alpha: &Int, beta1: &Int, beta2: &Int) -> Bool;
+};
+
+/// A right Kan extension of a functor F along a functor K.
+/// Ran_K(F) is the best approximation of F from the right along K.
+public type RightKanExtension<C, D, E> is protocol {
+    /// The right Kan extension functor Ran_K(F) : D -> E.
+    fn ran_obj(d: &Int) -> Int;
+
+    /// The right Kan extension on morphisms.
+    fn ran_mor(f: &Int) -> Int;
+
+    /// The universal natural transformation epsilon : Ran_K(F) . K -> F.
+    fn ran_counit(c: &Int) -> Int;
+
+    /// Universal property: for any H : D -> E with alpha : H . K -> F,
+    /// there exists a unique beta : H -> Ran_K(F) with
+    /// epsilon . beta_K = alpha.
+    fn ran_mediate(h: &Int, alpha: &Int) -> Int;
+
+    /// Uniqueness of the mediating transformation.
+    @verify(formal)
+    fn ran_unique(h: &Int, alpha: &Int, beta1: &Int, beta2: &Int) -> Bool;
+};
+
+// =============================================================================
+// 14. Monoidal Categories
+// =============================================================================
+
+/// A monoidal category is a category equipped with a bifunctor (tensor product)
+/// and a unit object satisfying coherence conditions.
+public type MonoidalCategory<C> is protocol {
+    /// Tensor product of two objects.
+    fn tensor_obj(a: &Int, b: &Int) -> Int;
+
+    /// Tensor product of two morphisms.
+    fn tensor_mor(f: &Int, g: &Int) -> Int;
+
+    /// The unit object I.
+    fn unit_obj() -> Int;
+
+    /// Associator: (A tensor B) tensor C -> A tensor (B tensor C).
+    fn associator(a: &Int, b: &Int, c: &Int) -> Int;
+
+    /// Left unitor: I tensor A -> A.
+    fn left_unitor(a: &Int) -> Int;
+
+    /// Right unitor: A tensor I -> A.
+    fn right_unitor(a: &Int) -> Int;
+
+    /// Pentagon identity (associativity coherence).
+    @verify(formal)
+    fn pentagon(a: &Int, b: &Int, c: &Int, d: &Int) -> Bool;
+
+    /// Triangle identity (unit coherence).
+    @verify(formal)
+    fn triangle(a: &Int, b: &Int) -> Bool;
+};
+
+/// A symmetric monoidal category has a braiding natural isomorphism.
+public type SymmetricMonoidalCategory<C> is protocol extends MonoidalCategory<C> {
+    /// Braiding: A tensor B -> B tensor A.
+    fn braiding(a: &Int, b: &Int) -> Int;
+
+    /// Braiding is an involution: braiding_{B,A} . braiding_{A,B} = id.
+    @verify(formal)
+    fn braiding_involution(a: &Int, b: &Int) -> Bool;
+
+    /// Hexagon identity (braiding coherence).
+    @verify(formal)
+    fn hexagon(a: &Int, b: &Int, c: &Int) -> Bool;
+};
+
+/// A closed monoidal category has internal hom objects.
+public type ClosedMonoidalCategory<C> is protocol extends MonoidalCategory<C> {
+    /// Internal hom: [A, B] (the exponential object).
+    fn internal_hom(a: &Int, b: &Int) -> Int;
+
+    /// Evaluation: [A, B] tensor A -> B.
+    fn eval_mor(a: &Int, b: &Int) -> Int;
+
+    /// Currying: (C tensor A -> B) -> (C -> [A, B]).
+    fn curry(f: &Int) -> Int;
+
+    /// Adjunction: Hom(C tensor A, B) is naturally isomorphic to Hom(C, [A, B]).
+    @verify(formal)
+    fn tensor_hom_adjunction(a: &Int, b: &Int, c: &Int) -> Bool;
+};
+
+// =============================================================================
+// 15. Abelian Categories
+// =============================================================================
+
+/// An abelian category is an additive category where every morphism has a
+/// kernel and cokernel, every monomorphism is a kernel, and every epimorphism
+/// is a cokernel.
+public type AbelianCategory<C> is protocol {
+    /// Zero object (both initial and terminal).
+    fn zero_obj() -> Int;
+
+    /// Zero morphism between any two objects.
+    fn zero_mor(a: &Int, b: &Int) -> Int;
+
+    /// Biproduct (direct sum) of two objects.
+    fn biproduct(a: &Int, b: &Int) -> Int;
+
+    /// Kernel of a morphism f : A -> B.
+    fn kernel(f: &Int) -> Int;
+
+    /// Cokernel of a morphism f : A -> B.
+    fn cokernel(f: &Int) -> Int;
+
+    /// Image of a morphism.
+    fn image(f: &Int) -> Int;
+
+    /// Every monomorphism is a kernel of some morphism.
+    @verify(formal)
+    fn mono_is_kernel(m: &Int) -> Bool;
+
+    /// Every epimorphism is a cokernel of some morphism.
+    @verify(formal)
+    fn epi_is_cokernel(e: &Int) -> Bool;
+};
+
+// =============================================================================
+// 16. Enriched Categories
+// =============================================================================
+
+/// A category enriched over a monoidal category V.
+/// Hom-objects are objects of V rather than mere sets.
+public type EnrichedCategory<V> is protocol {
+    /// Hom-object in V between two objects.
+    fn hom_obj(a: &Int, b: &Int) -> Int;
+
+    /// Composition morphism in V: Hom(B, C) tensor Hom(A, B) -> Hom(A, C).
+    fn composition(a: &Int, b: &Int, c: &Int) -> Int;
+
+    /// Identity element: I -> Hom(A, A).
+    fn identity(a: &Int) -> Int;
+
+    /// Associativity of enriched composition.
+    @verify(formal)
+    fn enriched_associativity(a: &Int, b: &Int, c: &Int, d: &Int) -> Bool;
+
+    /// Unit laws for enriched composition.
+    @verify(formal)
+    fn enriched_unit(a: &Int, b: &Int) -> Bool;
+};

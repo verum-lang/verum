@@ -1,0 +1,25 @@
+// Tuples Test - Simplified
+
+fn swap(pair: (Int, Int)) -> (Int, Int) {
+    (pair.1, pair.0)
+}
+
+fn main() {
+    print("=== Tuples Test ===");
+
+    // Basic tuple
+    let pair = (10, 20);
+    print(f"pair.0 = {pair.0}");
+    print(f"pair.1 = {pair.1}");
+
+    // Swap
+    let swapped = swap(pair);
+    print(f"swapped.0 = {swapped.0}");
+    print(f"swapped.1 = {swapped.1}");
+
+    // Triple
+    let triple = (1, 2, 3);
+    print(f"triple = ({triple.0}, {triple.1}, {triple.2})");
+
+    print("=== Done ===");
+}

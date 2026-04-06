@@ -1,0 +1,21 @@
+// Test: Context group declaration
+context Logger {
+    fn log(self, msg: Text)
+}
+
+context Database {
+    fn query(self, sql: Text) -> Int
+}
+
+context Cache {
+    fn get(self, key: Text) -> Maybe<Text>
+    fn set(self, key: Text, value: Text)
+}
+
+context group WebStack {
+    Logger,
+    Database,
+    Cache
+}
+
+fn dummy() {}

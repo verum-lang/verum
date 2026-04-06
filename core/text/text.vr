@@ -1,0 +1,3465 @@
+// =============================================================================
+// text.vr - UTF-8 Text type
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core (memory, maybe, result, protocols, iterator)
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI operations:
+// - Uses core/memory.vr native allocator (CBGR-backed)
+// - UTF-8 validation implemented natively
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// Text is Verum's primary string type. It is:
+// - Always valid UTF-8
+// - Flat layout: {ptr, len, cap} — 24 bytes
+// - Null-terminated for C interop
+// - cap == 0 indicates static/immutable string literal
+//
+// =============================================================================
+
+module core.text.text;
+mount core.*;
+
+// Import intrinsics as functions
+mount core.intrinsics.{
+    text_from_static, utf8_decode_char as intrinsic_utf8_decode_char,
+    text_parse_int, text_parse_float, int_to_text,
+    char_to_uppercase, char_to_lowercase,
+};
+
+// =============================================================================
+// Native UTF-8 Helper Functions
+// =============================================================================
+
+/// Get UTF-8 character length from leading byte.
+///
+/// Returns 1-4 based on the leading byte pattern:
+/// - 0xxxxxxx: 1 byte (ASCII)
+/// - 110xxxxx: 2 bytes
+/// - 1110xxxx: 3 bytes
+/// - 11110xxx: 4 bytes
+@inline
+fn utf8_char_len(byte: Byte) -> Int {
+    let b = byte as Int;
+    if (b & 0x80) == 0 {
+        1  // ASCII
+    } else if (b & 0xE0) == 0xC0 {
+        2
+    } else if (b & 0xF0) == 0xE0 {
+        3
+    } else if (b & 0xF8) == 0xF0 {
+        4
+    } else {
+        1  // Invalid, treat as 1 byte
+    }
+}
+
+/// Decode a UTF-8 character and return both the character and its byte length.
+///
+/// Wraps the `utf8_decode_char` intrinsic and computes byte length from the
+/// leading byte, returning both as a tuple.
+@inline
+fn utf8_decode_char_len(bytes: &[Byte], byte_idx: Int) -> (Char, Int) {
+    let ch: Char = intrinsic_utf8_decode_char(bytes, byte_idx) as Char;
+    let len = utf8_char_len(bytes[byte_idx]);
+    (ch, len)
+}
+
+/// Validate UTF-8 byte sequence.
+///
+/// Returns true if the bytes form valid UTF-8, false otherwise.
+fn utf8_validate(bytes: &[Byte]) -> Bool {
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let b = bytes[i] as Int;
+
+        if (b & 0x80) == 0 {
+            // ASCII byte (0xxxxxxx)
+            i = i + 1;
+        } else if (b & 0xE0) == 0xC0 {
+            // 2-byte sequence (110xxxxx 10xxxxxx)
+            if i + 1 >= len {
+                return false;
+            }
+            let b1 = bytes[i + 1] as Int;
+            if (b1 & 0xC0) != 0x80 {
+                return false;
+            }
+            // Overlong check: must be > 0x7F
+            let codepoint = ((b & 0x1F) << 6) | (b1 & 0x3F);
+            if codepoint < 0x80 {
+                return false;
+            }
+            i = i + 2;
+        } else if (b & 0xF0) == 0xE0 {
+            // 3-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
+            if i + 2 >= len {
+                return false;
+            }
+            let b1 = bytes[i + 1] as Int;
+            let b2 = bytes[i + 2] as Int;
+            if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 {
+                return false;
+            }
+            // Overlong check && surrogate check
+            let codepoint = ((b & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+            if codepoint < 0x800 || (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
+                return false;
+            }
+            i = i + 3;
+        } else if (b & 0xF8) == 0xF0 {
+            // 4-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            if i + 3 >= len {
+                return false;
+            }
+            let b1 = bytes[i + 1] as Int;
+            let b2 = bytes[i + 2] as Int;
+            let b3 = bytes[i + 3] as Int;
+            if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
+                return false;
+            }
+            // Overlong check && range check (max U+10FFFF)
+            let codepoint = ((b & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+            if codepoint < 0x10000 || codepoint > 0x10FFFF {
+                return false;
+            }
+            i = i + 4;
+        } else {
+            // Invalid leading byte (10xxxxxx or 11111xxx)
+            return false;
+        }
+    }
+
+    true
+}
+
+// =============================================================================
+// Text Type — Flat {ptr, len, cap}
+// =============================================================================
+
+/// UTF-8 encoded text string.
+///
+/// Text is the semantic string type in Verum - it represents human-readable
+/// text as opposed to arbitrary byte sequences.
+///
+/// Layout: {ptr, len, cap} — 24 bytes.
+/// - ptr: pointer to UTF-8 byte data (null-terminated for C compat)
+/// - len: byte length (not including null terminator)
+/// - cap: allocated capacity (0 = static/immutable string literal)
+///
+/// # Examples
+///
+/// ```verum
+/// let hello = "Hello, World!";
+///
+/// // Concatenation
+/// let greeting = "Hello, " + name + "!";
+///
+/// // Format strings
+/// let msg = f"Value: {x}, Count: {n}";
+/// ```
+@opaque
+public type Text is {
+    ptr: &unsafe Byte,   // Pointer to UTF-8 byte data
+    len: Int,            // Length in bytes
+    cap: Int,            // Capacity (0 = immutable/static)
+};
+
+implement Text {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    /// Create an empty text.
+    public fn new() -> Text {
+        Text {
+            ptr: null_ptr(),
+            len: 0,
+            cap: 0,
+        }
+    }
+
+    /// Create text with a given capacity.
+    public fn with_capacity(cap: Int) -> Text {
+        if cap <= 0 {
+            Text.new()
+        } else {
+            let ptr = unsafe { alloc(cap + 1, 1) };  // +1 for null terminator
+            if is_null(ptr) {
+                panic("Out of memory");
+            }
+            Text {
+                ptr: ptr,
+                len: 0,
+                cap: cap,
+            }
+        }
+    }
+
+    /// Create text from a byte slice (must be valid UTF-8).
+    public fn from_utf8(bytes: &[Byte]) -> Result<Text, Utf8Error> {
+        // Validate UTF-8
+        if !utf8_validate(bytes) {
+            return Err(Utf8Error.new(0));
+        }
+
+        Ok(Text.from_utf8_unchecked(bytes))
+    }
+
+    /// Create text from bytes without validation.
+    /// # Safety
+    /// The bytes must be valid UTF-8.
+    unsafe fn from_utf8_unchecked(bytes: &[Byte]) -> Text {
+        let len = bytes.len();
+        if len == 0 {
+            return Text.new();
+        }
+        let ptr = alloc(len + 1, 1);  // +1 for null terminator
+        if is_null(ptr) {
+            panic("Out of memory");
+        }
+        memcpy(ptr, bytes.as_ptr(), len);
+        ptr_write(ptr_offset(ptr, len) as &unsafe Byte, 0 as Byte);  // null terminate
+        Text {
+            ptr: ptr,
+            len: len,
+            cap: len,
+        }
+    }
+
+    /// Create text from a static string literal.
+    meta fn from_static(s: &Text) -> Text {
+        // String literals are compile-time evaluated
+        text_from_static(s)
+    }
+
+    /// Create a Text containing a single character.
+    public fn from_char(ch: Char) -> Text {
+        let mut t = Text.new();
+        t.push(ch);
+        t
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    /// Length in bytes.
+    public fn len(&self) -> Int {
+        self.len
+    }
+
+    /// Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    /// Capacity in bytes.
+    public fn capacity(&self) -> Int {
+        self.cap
+    }
+
+    /// Get underlying bytes.
+    /// Return self as a string slice reference.
+    ///
+    /// Since Text IS the string type in Verum, this simply returns &self.
+    /// Provided for API compatibility with code that expects an `as_str()` method.
+    public fn as_str(&self) -> &Text {
+        self
+    }
+
+    public fn as_bytes(&self) -> &[Byte] {
+        if self.len == 0 {
+            slice_from_raw_parts(null_ptr(), 0)
+        } else {
+            slice_from_raw_parts(self.ptr, self.len)
+        }
+    }
+
+    /// Get raw pointer to bytes.
+    public fn as_ptr(&self) -> &unsafe Byte {
+        self.ptr
+    }
+
+    /// Number of Unicode characters (code points).
+    public fn char_count(&self) -> Int {
+        let mut count = 0;
+        let bytes = self.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let char_len = unsafe { utf8_char_len(bytes[i]) };
+            i = i + char_len;
+            count = count + 1;
+        }
+        count
+    }
+
+    // =========================================================================
+    // Character Access
+    // =========================================================================
+
+    /// Get character at byte index.
+    public fn char_at(&self, byte_idx: Int) -> Maybe<Char> {
+        let bytes = self.as_bytes();
+        if byte_idx < 0 || byte_idx >= bytes.len() {
+            return None;
+        }
+        // Decode UTF-8 character
+        Some(intrinsic_utf8_decode_char(bytes, byte_idx))
+    }
+
+    /// Get byte at index.
+    public fn byte_at(&self, idx: Int) -> Maybe<Byte> {
+        let bytes = self.as_bytes();
+        if idx >= 0 && idx < bytes.len() {
+            Some(bytes[idx])
+        } else {
+            None
+        }
+    }
+
+    /// Get nth character (0-indexed).
+    public fn nth_char(&self, n: Int) -> Maybe<Char> {
+        self.chars().nth(n)
+    }
+
+    /// Iterate over characters.
+    public fn chars(&self) -> Chars {
+        Chars {
+            bytes: self.as_bytes(),
+            pos: 0,
+        }
+    }
+
+    /// Collect all characters into a List.
+    ///
+    /// This is a convenience alias that eagerly collects the chars() iterator
+    /// into a List<Char>.
+    public fn to_chars(&self) -> List<Char> {
+        self.chars().collect()
+    }
+
+    /// Iterate over bytes.
+    public fn bytes(&self) -> ByteIter {
+        ByteIter {
+            bytes: self.as_bytes(),
+            pos: 0,
+        }
+    }
+
+    /// Iterate over characters with byte indices.
+    public fn char_indices(&self) -> CharIndices {
+        CharIndices {
+            bytes: self.as_bytes(),
+            pos: 0,
+        }
+    }
+
+    /// Iterate over lines.
+    public fn lines(&self) -> Lines {
+        Lines { text: self, pos: 0 }
+    }
+
+    // =========================================================================
+    // Slicing
+    // =========================================================================
+
+    /// Get a substring by byte range.
+    /// Panics if range doesn't align with UTF-8 character boundaries.
+    public fn slice(&self, start: Int, end: Int) -> Text {
+        let bytes = self.as_bytes();
+        let len = bytes.len();
+
+        assert(start >= 0 && start <= len, "slice start out of bounds");
+        assert(end >= start && end <= len, "slice end out of bounds");
+
+        // Validate UTF-8 boundaries
+        assert(
+            start == 0 || is_utf8_char_boundary(bytes[start]),
+            "slice start not on UTF-8 boundary"
+        );
+        assert(
+            end == len || is_utf8_char_boundary(bytes[end]),
+            "slice end not on UTF-8 boundary"
+        );
+
+        let slice_len = end - start;
+        unsafe {
+            Text.from_utf8_unchecked(slice_from_raw_parts(
+                ptr_offset(self.as_ptr(), start),
+                slice_len
+            ))
+        }
+    }
+
+    /// Get substring from start to end.
+    public fn substring(&self, start: Int, end: Int) -> Text {
+        self.slice(start, end)
+    }
+
+    /// Split the text at a byte index, returning both halves.
+    ///
+    /// The index must be a UTF-8 character boundary.
+    /// Panics if the index is out of bounds or not on a char boundary.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let t = "Hello, World!";
+    /// let (left, right) = t.split_at(7);
+    /// assert_eq(left, "Hello, ");
+    /// assert_eq(right, "World!");
+    /// ```
+    public fn split_at(&self, mid: Int) -> (Text, Text) {
+        assert(mid >= 0 && mid <= self.len());
+        assert(self.is_char_boundary(mid));
+        let left = self.slice(0, mid);
+        let right = self.slice(mid, self.len());
+        (left, right)
+    }
+
+    // =========================================================================
+    // Searching
+    // =========================================================================
+
+    /// Check if starts with prefix.
+    public fn starts_with(&self, prefix: &Text) -> Bool {
+        let self_bytes = self.as_bytes();
+        let prefix_bytes = prefix.as_bytes();
+        let plen = prefix_bytes.len();
+
+        if plen > self_bytes.len() {
+            return false;
+        }
+
+        let mut i = 0;
+        while i < plen {
+            if self_bytes[i] != prefix_bytes[i] {
+                return false;
+            }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Check if ends with suffix.
+    public fn ends_with(&self, suffix: &Text) -> Bool {
+        let self_bytes = self.as_bytes();
+        let suffix_bytes = suffix.as_bytes();
+        let slen = suffix_bytes.len();
+
+        if slen > self_bytes.len() {
+            return false;
+        }
+
+        let offset = self_bytes.len() - slen;
+        let mut i = 0;
+        while i < slen {
+            if self_bytes[offset + i] != suffix_bytes[i] {
+                return false;
+            }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Check if contains substring.
+    public fn contains(&self, needle: &Text) -> Bool {
+        let self_bytes = self.as_bytes();
+        let needle_bytes = needle.as_bytes();
+        let nlen = needle_bytes.len();
+        if nlen > self_bytes.len() {
+            return false;
+        }
+        if nlen == 0 {
+            return true;
+        }
+        let end = self_bytes.len() - nlen + 1;
+        let mut i = 0;
+        while i < end {
+            let mut found = true;
+            let mut j = 0;
+            while j < nlen {
+                if self_bytes[i + j] != needle_bytes[j] {
+                    found = false;
+                    break;
+                }
+                j = j + 1;
+            }
+            if found {
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Find first occurrence of substring.
+    public fn find(&self, needle: &Text) -> Maybe<Int> {
+        let self_bytes = self.as_bytes();
+        let needle_bytes = needle.as_bytes();
+        let nlen = needle_bytes.len();
+
+        if nlen > self_bytes.len() {
+            return None;
+        }
+
+        if nlen == 0 {
+            return Some(0);
+        }
+
+        let end = self_bytes.len() - nlen + 1;
+        let mut i = 0;
+        while i < end {
+            let mut found = true;
+            let mut j = 0;
+            while j < nlen {
+                if self_bytes[i + j] != needle_bytes[j] {
+                    found = false;
+                    break;
+                }
+                j = j + 1;
+            }
+            if found {
+                return Some(i);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Find last occurrence of substring.
+    public fn rfind(&self, needle: &Text) -> Maybe<Int> {
+        let self_bytes = self.as_bytes();
+        let needle_bytes = needle.as_bytes();
+        let nlen = needle_bytes.len();
+
+        if nlen > self_bytes.len() {
+            return None;
+        }
+
+        if nlen == 0 {
+            return Some(self_bytes.len());
+        }
+
+        let mut i = self_bytes.len() - nlen;
+        while i >= 0 {
+            let mut found = true;
+            let mut j = 0;
+            while j < nlen {
+                if self_bytes[i + j] != needle_bytes[j] {
+                    found = false;
+                    break;
+                }
+                j = j + 1;
+            }
+            if found {
+                return Some(i);
+            }
+            if i == 0 { break; }
+            i = i - 1;
+        }
+        None
+    }
+
+    /// Find character.
+    public fn find_char(&self, ch: Char) -> Maybe<Int> {
+        for (idx, c) in self.char_indices() {
+            if c == ch {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    // =========================================================================
+    // Modification (returns new Text)
+    // =========================================================================
+
+    /// Append another text.
+    public fn concat(&self, other: &Text) -> Text {
+        if other.is_empty() {
+            return self.clone();
+        }
+        if self.is_empty() {
+            return other.clone();
+        }
+
+        let new_len = self.len() + other.len();
+        let mut res = Text.with_capacity(new_len);
+
+        // Copy self
+        let self_bytes = self.as_bytes();
+        for i in range(0, self_bytes.len()) {
+            res.push_byte(self_bytes[i]);
+        }
+
+        // Copy other
+        let other_bytes = other.as_bytes();
+        for i in range(0, other_bytes.len()) {
+            res.push_byte(other_bytes[i]);
+        }
+
+        res
+    }
+
+    /// Push a single character.
+    public fn push(&mut self, ch: Char) {
+        let mut buf = [0_u8; 4];
+        let len = ch.encode_utf8(&mut buf);
+        for i in range(0, len) {
+            self.push_byte(buf[i]);
+        }
+    }
+
+    /// Push a byte (internal, assumes valid UTF-8 context).
+    public fn push_byte(&mut self, byte: Byte) {
+        if self.len >= self.cap {
+            self.grow();
+        }
+        unsafe {
+            ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, byte);
+        }
+        self.len = self.len + 1;
+        // Maintain null terminator
+        unsafe {
+            ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, 0 as Byte);
+        }
+    }
+
+    /// Push a string.
+    public fn push_str(&mut self, s: &Text) {
+        let bytes = s.as_bytes();
+        for i in range(0, bytes.len()) {
+            self.push_byte(bytes[i]);
+        }
+    }
+
+    /// Grow storage to fit at least one more byte.
+    fn grow(&mut self) {
+        let new_cap = if self.cap == 0 {
+            16  // Initial allocation
+        } else {
+            self.cap * 2
+        };
+        let new_ptr = unsafe { alloc(new_cap + 1, 1) };  // +1 for null terminator
+        if is_null(new_ptr) {
+            panic("Out of memory");
+        }
+        if self.len > 0 && !is_null(self.ptr) {
+            unsafe {
+                memcpy(new_ptr, self.ptr, self.len);
+            }
+            // Free old allocation if it was heap-allocated (cap > 0)
+            if self.cap > 0 {
+                unsafe {
+                    dealloc(self.ptr, self.cap + 1, 1);
+                }
+            }
+        }
+        self.ptr = new_ptr;
+        self.cap = new_cap;
+    }
+
+    /// Convert to uppercase (full Unicode).
+    public fn to_uppercase(&self) -> Text {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut res = Text.with_capacity(blen);
+        let mut i = 0;
+        while i < blen {
+            let b = bytes[i];
+            if b < 128 {
+                // ASCII fast path
+                if b >= 97 && b <= 122 {
+                    res.push_byte(b - 32);
+                } else {
+                    res.push_byte(b);
+                }
+                i = i + 1;
+            } else {
+                // Multi-byte UTF-8: decode → case convert → re-encode
+                let ch = intrinsic_utf8_decode_char(bytes, i);
+                let upper = char_to_uppercase(ch);
+                let mut buf = [0_u8; 4];
+                let enc_len = upper.encode_utf8(&mut buf);
+                let char_len = utf8_char_len(b);
+                let mut j = 0;
+                while j < enc_len {
+                    res.push_byte(buf[j]);
+                    j = j + 1;
+                }
+                i = i + char_len;
+            }
+        }
+        res
+    }
+
+    /// Convert to lowercase (full Unicode).
+    public fn to_lowercase(&self) -> Text {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut res = Text.with_capacity(blen);
+        let mut i = 0;
+        while i < blen {
+            let b = bytes[i];
+            if b < 128 {
+                // ASCII fast path
+                if b >= 65 && b <= 90 {
+                    res.push_byte(b + 32);
+                } else {
+                    res.push_byte(b);
+                }
+                i = i + 1;
+            } else {
+                // Multi-byte UTF-8: decode → case convert → re-encode
+                let ch = intrinsic_utf8_decode_char(bytes, i);
+                let lower = char_to_lowercase(ch);
+                let mut buf = [0_u8; 4];
+                let enc_len = lower.encode_utf8(&mut buf);
+                let char_len = utf8_char_len(b);
+                let mut j = 0;
+                while j < enc_len {
+                    res.push_byte(buf[j]);
+                    j = j + 1;
+                }
+                i = i + char_len;
+            }
+        }
+        res
+    }
+
+    /// Alias for to_uppercase.
+    public fn to_upper(&self) -> Text {
+        self.to_uppercase()
+    }
+
+    /// Alias for to_lowercase.
+    public fn to_lower(&self) -> Text {
+        self.to_lowercase()
+    }
+
+    /// Trim whitespace from both ends.
+    public fn trim(&self) -> Text {
+        self.trim_start().trim_end()
+    }
+
+    /// Trim whitespace from start.
+    public fn trim_start(&self) -> Text {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        while i < blen {
+            let b = bytes[i];
+            // ASCII whitespace: space(32), tab(9), newline(10), carriage-return(13), form-feed(12)
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                return self.slice(i, blen);
+            }
+        }
+        Text.new()
+    }
+
+    /// Trim whitespace from end.
+    public fn trim_end(&self) -> Text {
+        let bytes = self.as_bytes();
+        let mut end = bytes.len();
+        // Walk backwards through bytes, finding last non-whitespace character
+        let mut i = bytes.len();
+        while i > 0 {
+            // Find the start of the previous character
+            i = i - 1;
+            while i > 0 && !is_utf8_char_boundary(bytes[i]) {
+                i = i - 1;
+            }
+            // Now i is at a character boundary - decode the character
+            match self.char_at(i) {
+                Some(ch) => {
+                    if !ch.is_whitespace() {
+                        end = i + ch.len_utf8();
+                        break;
+                    }
+                }
+                None => {
+                    break;
+                }
+            }
+            if i == 0 {
+                // All characters are whitespace
+                end = 0;
+            }
+        }
+        self.slice(0, end)
+    }
+
+    /// Replace all occurrences of pattern with replacement.
+    public fn replace(&self, pattern: &Text, replacement: &Text) -> Text {
+        let mut res = Text.new();
+        let bytes = self.as_bytes();
+        let pat_bytes = pattern.as_bytes();
+        let blen = bytes.len();
+        let plen = pat_bytes.len();
+
+        if plen == 0 {
+            return self.clone();
+        }
+
+        let mut pos = 0;
+        while pos < blen {
+            // inline byte-level search for pattern starting at pos
+            let mut found_at = -1;
+            let search_end = blen - plen + 1;
+            let mut i = pos;
+            while i < search_end {
+                let mut match_ok = true;
+                let mut j = 0;
+                while j < plen {
+                    if bytes[i + j] != pat_bytes[j] {
+                        match_ok = false;
+                        break;
+                    }
+                    j = j + 1;
+                }
+                if match_ok {
+                    found_at = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if found_at >= 0 {
+                res.push_str(&self.slice(pos, found_at));
+                res.push_str(replacement);
+                pos = found_at + plen;
+            } else {
+                res.push_str(&self.slice(pos, blen));
+                break;
+            }
+        }
+
+        res
+    }
+
+    /// Split by separator.
+    public fn split(&self, sep: &Text) -> List<Text> {
+        let mut res = List.new();
+        let bytes = self.as_bytes();
+        let sep_bytes = sep.as_bytes();
+        let blen = bytes.len();
+        let slen = sep_bytes.len();
+
+        if slen == 0 {
+            res.push(self.clone());
+            return res;
+        }
+
+        let mut start = 0;
+        while start <= blen {
+            // inline byte-level search for separator
+            let mut found_at = -1;
+            let search_end = blen - slen + 1;
+            let mut i = start;
+            while i < search_end {
+                let mut match_ok = true;
+                let mut j = 0;
+                while j < slen {
+                    if bytes[i + j] != sep_bytes[j] {
+                        match_ok = false;
+                        break;
+                    }
+                    j = j + 1;
+                }
+                if match_ok {
+                    found_at = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if found_at >= 0 {
+                res.push(self.slice(start, found_at));
+                start = found_at + slen;
+            } else {
+                res.push(self.slice(start, blen));
+                break;
+            }
+        }
+
+        res
+    }
+
+    /// Split by whitespace.
+    public fn split_whitespace(&self) -> List<Text> {
+        let mut res = List.new();
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        let mut word_start = -1;
+
+        while i < blen {
+            let b = bytes[i];
+            let is_ws = b == 32 || b == 9 || b == 10 || b == 13 || b == 12;
+            if is_ws {
+                if word_start >= 0 {
+                    res.push(self.slice(word_start, i));
+                    word_start = -1;
+                }
+            } else {
+                if word_start < 0 {
+                    word_start = i;
+                }
+            }
+            i = i + 1;
+        }
+        if word_start >= 0 {
+            res.push(self.slice(word_start, blen));
+        }
+
+        res
+    }
+
+    /// Split by whitespace into words. Alias for split_whitespace.
+    ///
+    /// # Example
+    /// ```verum
+    /// let text = "hello world  foo";
+    /// assert_eq(text.words(), ["hello", "world", "foo"]);
+    /// ```
+    public fn words(&self) -> List<Text> {
+        self.split_whitespace()
+    }
+
+    /// Trim matching prefix repeatedly.
+    public fn trim_start_matches(&self, pattern: &Text) -> Text {
+        let mut s = self.clone();
+        while s.starts_with(pattern) && !pattern.is_empty() {
+            s = s.slice(pattern.len(), s.len());
+        }
+        s
+    }
+
+    /// Trim matching suffix repeatedly.
+    public fn trim_end_matches(&self, pattern: &Text) -> Text {
+        let mut s = self.clone();
+        while s.ends_with(pattern) && !pattern.is_empty() {
+            s = s.slice(0, s.len() - pattern.len());
+        }
+        s
+    }
+
+    /// Trim matching pattern from both ends repeatedly.
+    public fn trim_matches(&self, pattern: &Text) -> Text {
+        self.trim_start_matches(pattern).trim_end_matches(pattern)
+    }
+
+    /// Split by ASCII whitespace (space, tab, newline, carriage return).
+    /// Faster than split_whitespace for ASCII-only text since it only
+    /// checks single bytes rather than decoding Unicode characters.
+    public fn split_ascii_whitespace(&self) -> List<Text> {
+        let mut res: List<Text> = List.new();
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut word_start = -1;
+        let mut i = 0;
+        while i < blen {
+            let b = bytes[i];
+            let is_ws = b == 32 || b == 9 || b == 10 || b == 13;
+            if is_ws {
+                if word_start >= 0 {
+                    res.push(self.slice(word_start, i));
+                    word_start = -1;
+                }
+            } else {
+                if word_start < 0 {
+                    word_start = i;
+                }
+            }
+            i = i + 1;
+        }
+        if word_start >= 0 {
+            res.push(self.slice(word_start, blen));
+        }
+        res
+    }
+
+    /// Get byte index of the nth character (0-indexed).
+    /// Returns None if n >= char_count().
+    public fn byte_index_of_char(&self, n: Int) -> Maybe<Int> {
+        let bytes = self.as_bytes();
+        let mut char_idx = 0;
+        let mut i = 0;
+        while i < bytes.len() {
+            if char_idx == n {
+                return Some(i);
+            }
+            let char_len = unsafe { utf8_char_len(bytes[i]) };
+            i = i + char_len;
+            char_idx = char_idx + 1;
+        }
+        if char_idx == n {
+            // n == char_count(), return byte length (past the end)
+            return Some(i);
+        }
+        None
+    }
+
+    /// Pad on the left to reach target width.
+    public fn pad_left(&self, width: Int, fill: Char) -> Text {
+        let current = self.char_count();
+        if current >= width {
+            return self.clone();
+        }
+        let fill_byte = fill as Byte;
+        let mut res = Text.new();
+        let pad_count = width - current;
+        let mut i = 0;
+        while i < pad_count {
+            res.push_byte(fill_byte);
+            i = i + 1;
+        }
+        res.push_str(self);
+        res
+    }
+
+    /// Pad on the right to reach target width.
+    public fn pad_right(&self, width: Int, fill: Char) -> Text {
+        let current = self.char_count();
+        if current >= width {
+            return self.clone();
+        }
+        let fill_byte = fill as Byte;
+        let mut res = self.clone();
+        let pad_count = width - current;
+        let mut i = 0;
+        while i < pad_count {
+            res.push_byte(fill_byte);
+            i = i + 1;
+        }
+        res
+    }
+
+    /// Alias for pad_left (modern naming: start = left in LTR text).
+    public fn pad_start(&self, width: Int, fill: Char) -> Text {
+        self.pad_left(width, fill)
+    }
+
+    /// Alias for pad_right (modern naming: end = right in LTR text).
+    public fn pad_end(&self, width: Int, fill: Char) -> Text {
+        self.pad_right(width, fill)
+    }
+
+    /// Split into at most n parts.
+    public fn splitn(&self, n: Int, sep: &Text) -> List<Text> {
+        let mut res = List.new();
+        let mut start = 0;
+        let bytes = self.as_bytes();
+
+        while start <= bytes.len() && res.len() < n - 1 {
+            match self.slice(start, bytes.len()).find(sep) {
+                Some(offset) => {
+                    res.push(self.slice(start, start + offset));
+                    start = start + offset + sep.len();
+                }
+                None => {
+                    res.push(self.slice(start, bytes.len()));
+                    return res;
+                }
+            }
+        }
+
+        if start <= bytes.len() {
+            res.push(self.slice(start, bytes.len()));
+        }
+
+        res
+    }
+
+    /// Split from the right, returning parts in left-to-right order.
+    public fn rsplit(&self, sep: &Text) -> List<Text> {
+        let mut res = List.new();
+        let mut end = self.len();
+
+        while end > 0 {
+            match self.slice(0, end).rfind(sep) {
+                Some(offset) => {
+                    res.push(self.slice(offset + sep.len(), end));
+                    end = offset;
+                }
+                None => {
+                    res.push(self.slice(0, end));
+                    end = 0;
+                }
+            }
+        }
+
+        if end == 0 && res.is_empty() {
+            res.push(self.clone());
+        }
+
+        res.reverse();
+        res
+    }
+
+    /// Split from the right into at most n parts.
+    public fn rsplitn(&self, n: Int, sep: &Text) -> List<Text> {
+        let mut res = List.new();
+        let mut end = self.len();
+
+        while end > 0 && res.len() < n - 1 {
+            match self.slice(0, end).rfind(sep) {
+                Some(offset) => {
+                    res.push(self.slice(offset + sep.len(), end));
+                    end = offset;
+                }
+                None => {
+                    res.push(self.slice(0, end));
+                    return res;
+                }
+            }
+        }
+
+        if end >= 0 {
+            res.push(self.slice(0, end));
+        }
+
+        // Reverse to get left-to-right order
+        res.reverse();
+        res
+    }
+
+    /// Join texts with separator.
+    public fn join(parts: &[Text], sep: &Text) -> Text {
+        if parts.is_empty() {
+            return Text.new();
+        }
+
+        let mut res = parts[0].clone();
+        for i in range(1, parts.len()) {
+            res.push_str(sep);
+            res.push_str(&parts[i]);
+        }
+        res
+    }
+
+    /// Repeat text n times.
+    public fn repeat(&self, n: Int) -> Text {
+        if n <= 0 {
+            return Text.new();
+        }
+
+        let mut res = Text.with_capacity(self.len() * n);
+        let mut i = 0;
+        while i < n {
+            res.push_str(self);
+            i = i + 1;
+        }
+        res
+    }
+
+    // =========================================================================
+    // Parsing
+    // =========================================================================
+
+    /// Parse to Int (base 10). Returns Result for error handling.
+    public fn parse_int(&self) -> Result<Int, ParseError> {
+        text_parse_int(self)
+    }
+
+    /// Parse to Int directly (returns 0 on parse failure).
+    /// Convenience method for cases where error handling is not needed.
+    public fn to_int(&self) -> Int {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        // skip leading whitespace (space, tab, newline, carriage return, form feed)
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        let mut neg = false;
+        if i < blen && bytes[i] == 45 {
+            neg = true;
+            i = i + 1;
+        } else if i < blen && bytes[i] == 43 {
+            i = i + 1;
+        }
+        let mut val: Int = 0;
+        while i < blen {
+            let b = bytes[i];
+            if b >= 48 && b <= 57 {
+                val = val * 10 + (b as Int - 48);
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        if neg { 0 - val } else { val }
+    }
+
+    /// Parse Text to Float (pure Verum, returns 0.0 on invalid input).
+    public fn to_float(&self) -> Float {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        // skip whitespace
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        if i >= blen { return 0.0; }
+        let mut sign = 1.0;
+        if bytes[i] == 45 { sign = -1.0; i = i + 1; }
+        else if bytes[i] == 43 { i = i + 1; }
+        let mut integer_part = 0.0;
+        while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+            integer_part = integer_part * 10.0 + ((bytes[i] as Int - 48) as Float);
+            i = i + 1;
+        }
+        let mut frac_part = 0.0;
+        if i < blen && bytes[i] == 46 {
+            i = i + 1;
+            let mut place = 0.1;
+            while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+                frac_part = frac_part + ((bytes[i] as Int - 48) as Float) * place;
+                place = place * 0.1;
+                i = i + 1;
+            }
+        }
+        let mut val = sign * (integer_part + frac_part);
+        // Handle exponent: e.g., 1.5e3
+        if i < blen && (bytes[i] == 101 || bytes[i] == 69) {
+            i = i + 1;
+            let mut exp_sign = 1;
+            if i < blen && bytes[i] == 45 { exp_sign = -1; i = i + 1; }
+            else if i < blen && bytes[i] == 43 { i = i + 1; }
+            let mut exp = 0;
+            while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+                exp = exp * 10 + (bytes[i] as Int - 48);
+                i = i + 1;
+            }
+            let mut multiplier = 1.0;
+            let mut j = 0;
+            while j < exp { multiplier = multiplier * 10.0; j = j + 1; }
+            if exp_sign < 0 { val = val / multiplier; }
+            else { val = val * multiplier; }
+        }
+        val
+    }
+
+    /// Parse to Int with a given radix (2 to 36).
+    ///
+    /// Supports optional leading `-` for negative numbers.
+    /// Digits above 9 use letters a-z (case insensitive).
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// assert_eq("FF".parse_int_radix(16), Ok(255));
+    /// assert_eq("1010".parse_int_radix(2), Ok(10));
+    /// assert_eq("777".parse_int_radix(8), Ok(511));
+    /// ```
+    public fn parse_int_radix(&self, radix: Int) -> Result<Int, ParseError> {
+        if radix < 2 || radix > 36 {
+            return Err(ParseError.new("radix must be between 2 and 36"));
+        }
+        if self.is_empty() {
+            return Err(ParseError.new("empty string"));
+        }
+
+        let mut result: Int = 0;
+        let mut negative = false;
+        let mut start = 0;
+        let the_bytes = self.as_bytes();
+
+        // Check for sign
+        if the_bytes[0] == 45 { // '-'
+            negative = true;
+            start = 1;
+        } else if the_bytes[0] == 43 { // '+'
+            start = 1;
+        }
+
+        if start >= the_bytes.len() {
+            return Err(ParseError.new("no digits"));
+        }
+
+        for i in range(start, the_bytes.len()) {
+            let b = the_bytes[i] as Int;
+            let digit: Int = if b >= 48 && b <= 57 {
+                // '0'-'9'
+                b - 48
+            } else if b >= 65 && b <= 90 {
+                // 'A'-'Z'
+                b - 65 + 10
+            } else if b >= 97 && b <= 122 {
+                // 'a'-'z'
+                b - 97 + 10
+            } else {
+                return Err(ParseError.new("invalid character"));
+            };
+
+            if digit >= radix {
+                return Err(ParseError.new("digit out of range for radix"));
+            }
+
+            result = result * radix + digit;
+        }
+
+        if negative {
+            result = 0 - result;
+        }
+        Ok(result)
+    }
+
+    /// Parse to Float.
+    public fn parse_float(&self) -> Result<Float, ParseError> {
+        text_parse_float(self)
+    }
+
+    /// Parse to Bool.
+    public fn parse_bool(&self) -> Result<Bool, ParseError> {
+        if *self == "true" {
+            Ok(true)
+        } else if *self == "false" {
+            Ok(false)
+        } else {
+            Err(ParseError.new("invalid boolean"))
+        }
+    }
+
+    // =========================================================================
+    // Conversion
+    // =========================================================================
+
+    /// Convert Int to Text (pure Verum, no C runtime).
+    public fn from_int(n: Int) -> Text {
+        if n == 0 {
+            return "0";
+        }
+        let negative = n < 0;
+        let mut val = if negative { 0 - n } else { n };
+
+        // Push digits in reverse order (least significant first)
+        let mut buf = Text.new();
+        while val > 0 {
+            let digit = (val % 10) as Byte;
+            buf.push_byte(digit + 48);  // '0' = 48
+            val = val / 10;
+        }
+        if negative {
+            buf.push_byte(45);  // '-' = 45
+        }
+
+        // Reverse to get correct order
+        let bytes = buf.as_bytes();
+        let blen = bytes.len();
+        let mut result = Text.with_capacity(blen);
+        let mut i = blen - 1;
+        while i >= 0 {
+            result.push_byte(bytes[i]);
+            if i == 0 { break; }
+            i = i - 1;
+        }
+        result
+    }
+
+    /// Convert Float to Text (pure Verum, no C runtime dependency).
+    public fn from_float(f: Float) -> Text {
+        // NaN check: NaN != NaN per IEEE 754
+        if f != f {
+            return "NaN";
+        }
+        // Infinity checks
+        if f > 1.7e308 {
+            return "Infinity";
+        }
+        if f < -1.7e308 {
+            return "-Infinity";
+        }
+        // Zero
+        if f == 0.0 {
+            return "0";
+        }
+
+        let negative = f < 0.0;
+        let mut val = if negative { 0.0 - f } else { f };
+
+        let mut result = Text.new();
+        if negative {
+            result.push_byte(45); // '-'
+        }
+
+        if val >= 1.0 && val < 1e15 {
+            // Normal range: integer.fractional
+            let int_part = val as Int;
+            let frac = val - (int_part as Float);
+
+            // Append integer part digits
+            let int_text = Text.from_int(int_part);
+            let int_bytes = int_text.as_bytes();
+            let mut i = 0;
+            while i < int_bytes.len() {
+                result.push_byte(int_bytes[i]);
+                i = i + 1;
+            }
+
+            // Fractional part (up to 6 digits, trim trailing zeros)
+            if frac > 1e-10 {
+                result.push_byte(46); // '.'
+                let frac_scaled = ((frac * 1000000.0) + 0.5) as Int;
+                // Build 6 fractional digits (reversed)
+                let mut frac_digits: List<Byte> = [];
+                let mut fv = frac_scaled;
+                let mut d = 0;
+                while d < 6 {
+                    frac_digits.push(((fv % 10) as Byte) + 48);
+                    fv = fv / 10;
+                    d = d + 1;
+                }
+                // Trim trailing zeros from output (= leading zeros in reversed frac_digits)
+                let mut trim_start = 0;
+                while trim_start < 5 && frac_digits[trim_start] == 48 {
+                    trim_start = trim_start + 1;
+                }
+                // Append in correct order (index 5→trim_start = most→least significant)
+                d = 5;
+                while d >= trim_start {
+                    result.push_byte(frac_digits[d]);
+                    if d == trim_start { break; }
+                    d = d - 1;
+                }
+            }
+        } else if val >= 1e-4 && val < 1.0 {
+            // Small decimals: 0.xxxx
+            result.push_byte(48); // '0'
+            result.push_byte(46); // '.'
+
+            // Leading zeros
+            let mut v = val;
+            while v < 0.1 {
+                result.push_byte(48); // '0'
+                v = v * 10.0;
+            }
+
+            // Significant digits
+            let significant = ((val * 1e15) + 0.5) as Int;
+            let sig_text = Text.from_int(significant);
+            let sig_bytes = sig_text.as_bytes();
+            // Trim trailing zeros
+            let mut end_idx = sig_bytes.len() - 1;
+            while end_idx > 0 && sig_bytes[end_idx] == 48 {
+                end_idx = end_idx - 1;
+            }
+            let mut i = 0;
+            while i <= end_idx {
+                result.push_byte(sig_bytes[i]);
+                i = i + 1;
+            }
+        } else {
+            // Scientific notation for very large/small values
+            let mut exponent = 0;
+            let mut normalized = val;
+
+            if normalized >= 10.0 {
+                while normalized >= 10.0 {
+                    normalized = normalized / 10.0;
+                    exponent = exponent + 1;
+                }
+            } else if normalized < 1.0 {
+                while normalized < 1.0 {
+                    normalized = normalized * 10.0;
+                    exponent = exponent - 1;
+                }
+            }
+
+            // Mantissa integer digit
+            let int_digit = normalized as Int;
+            result.push_byte((int_digit as Byte) + 48);
+            let mfrac = normalized - (int_digit as Float);
+
+            // Mantissa fractional digits (up to 6, trim trailing zeros)
+            if mfrac > 1e-10 {
+                let mut frac_buf: List<Byte> = [];
+                let mut fr = mfrac;
+                let mut digits_written = 0;
+                while fr > 1e-10 && digits_written < 6 {
+                    fr = fr * 10.0;
+                    let digit = fr as Int;
+                    frac_buf.push((digit as Byte) + 48);
+                    fr = fr - (digit as Float);
+                    digits_written = digits_written + 1;
+                }
+                // Trim trailing zeros
+                let mut fend = frac_buf.len() - 1;
+                while fend > 0 && frac_buf[fend] == 48 {
+                    fend = fend - 1;
+                }
+                result.push_byte(46); // '.'
+                let mut i = 0;
+                while i <= fend {
+                    result.push_byte(frac_buf[i]);
+                    i = i + 1;
+                }
+            }
+
+            // Exponent
+            result.push_byte(101); // 'e'
+            if exponent < 0 {
+                result.push_byte(45); // '-'
+                exponent = 0 - exponent;
+            }
+            let exp_text = Text.from_int(exponent);
+            let exp_bytes = exp_text.as_bytes();
+            let mut i = 0;
+            while i < exp_bytes.len() {
+                result.push_byte(exp_bytes[i]);
+                i = i + 1;
+            }
+        }
+
+        result
+    }
+
+    /// Convert Bool to Text.
+    public fn from_bool(b: Bool) -> Text {
+        if b { "true" } else { "false" }
+    }
+
+    // =========================================================================
+    // Production-Grade Methods
+    // =========================================================================
+
+    /// Remove prefix and return remainder, or None if prefix doesn't match.
+    public fn strip_prefix(&self, prefix: &Text) -> Maybe<Text> {
+        if self.starts_with(prefix) {
+            Some(self.slice(prefix.len(), self.len()))
+        } else {
+            None
+        }
+    }
+
+    /// Remove suffix and return remainder, or None if suffix doesn't match.
+    public fn strip_suffix(&self, suffix: &Text) -> Maybe<Text> {
+        if self.ends_with(suffix) {
+            Some(self.slice(0, self.len() - suffix.len()))
+        } else {
+            None
+        }
+    }
+
+    /// Remove prefix if present, otherwise return self unchanged.
+    public fn remove_prefix(&self, prefix: &Text) -> Text {
+        if self.starts_with(prefix) {
+            self.slice(prefix.len(), self.len())
+        } else {
+            self.clone()
+        }
+    }
+
+    /// Remove suffix if present, otherwise return self unchanged.
+    public fn remove_suffix(&self, suffix: &Text) -> Text {
+        if self.ends_with(suffix) {
+            self.slice(0, self.len() - suffix.len())
+        } else {
+            self.clone()
+        }
+    }
+
+    /// Split on the first occurrence of separator.
+    /// Returns (before, after) or None if separator not found.
+    public fn split_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
+        match self.find(sep) {
+            Some(idx) => Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
+            None => None,
+        }
+    }
+
+    /// Split on the last occurrence of separator.
+    /// Returns (before, after) or None if separator not found.
+    public fn rsplit_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
+        match self.rfind(sep) {
+            Some(idx) => Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
+            None => None,
+        }
+    }
+
+    /// Case-insensitive equality comparison.
+    public fn eq_ignore_case(&self, other: &Text) -> Bool {
+        self.to_lowercase() == other.to_lowercase()
+    }
+
+    /// Count non-overlapping occurrences of pattern.
+    public fn count_matches(&self, pattern: &Text) -> Int {
+        if pattern.is_empty() {
+            return self.char_count() + 1;
+        }
+        let mut count = 0;
+        let mut start = 0;
+        let bytes = self.as_bytes();
+        while start <= bytes.len() - pattern.len() {
+            match self.slice(start, bytes.len()).find(pattern) {
+                Some(offset) => {
+                    count = count + 1;
+                    start = start + offset + pattern.len();
+                }
+                None => {
+                    return count;
+                }
+            }
+        }
+        count
+    }
+
+    /// Find the byte position of a substring. Alias for `find`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let s = "hello world";
+    /// assert_eq(s.index_of("world"), Some(6));
+    /// assert_eq(s.index_of("xyz"), None);
+    /// ```
+    public fn index_of(&self, needle: &Text) -> Maybe<Int> {
+        self.find(needle)
+    }
+
+    /// Count non-overlapping occurrences of a substring. Alias for `count_matches`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let s = "abcabcabc";
+    /// assert_eq(s.count("abc"), 3);
+    /// ```
+    public fn count(&self, needle: &Text) -> Int {
+        self.count_matches(needle)
+    }
+
+    /// Try to parse as Int, returning None on failure.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq("42".try_to_int(), Some(42));
+    /// assert_eq("abc".try_to_int(), None);
+    /// ```
+    public fn try_to_int(&self) -> Maybe<Int> {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        // skip leading whitespace
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        if i >= blen {
+            return None;
+        }
+        let mut neg = false;
+        if bytes[i] == 45 {
+            neg = true;
+            i = i + 1;
+        } else if bytes[i] == 43 {
+            i = i + 1;
+        }
+        if i >= blen || bytes[i] < 48 || bytes[i] > 57 {
+            return None;
+        }
+        let mut val: Int = 0;
+        let mut has_digits = false;
+        while i < blen {
+            let b = bytes[i];
+            if b >= 48 && b <= 57 {
+                val = val * 10 + (b as Int - 48);
+                has_digits = true;
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        // Reject trailing non-whitespace characters
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                return None;
+            }
+        }
+        if !has_digits {
+            return None;
+        }
+        if neg { Some(0 - val) } else { Some(val) }
+    }
+
+    /// Try to parse as Float, returning None on failure.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq("3.14".try_to_float(), Some(3.14));
+    /// assert_eq("abc".try_to_float(), None);
+    /// ```
+    public fn try_to_float(&self) -> Maybe<Float> {
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+        let mut i = 0;
+        // skip whitespace
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                break;
+            }
+        }
+        if i >= blen {
+            return None;
+        }
+        let mut sign = 1.0;
+        if bytes[i] == 45 { sign = -1.0; i = i + 1; }
+        else if bytes[i] == 43 { i = i + 1; }
+        if i >= blen || (bytes[i] < 48 || bytes[i] > 57) && bytes[i] != 46 {
+            return None;
+        }
+        let mut integer_part = 0.0;
+        let mut has_digits = false;
+        while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+            integer_part = integer_part * 10.0 + ((bytes[i] as Int - 48) as Float);
+            has_digits = true;
+            i = i + 1;
+        }
+        let mut frac_part = 0.0;
+        if i < blen && bytes[i] == 46 {
+            i = i + 1;
+            let mut place = 0.1;
+            while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+                frac_part = frac_part + ((bytes[i] as Int - 48) as Float) * place;
+                place = place * 0.1;
+                has_digits = true;
+                i = i + 1;
+            }
+        }
+        if !has_digits {
+            return None;
+        }
+        let mut val = sign * (integer_part + frac_part);
+        // Handle exponent
+        if i < blen && (bytes[i] == 101 || bytes[i] == 69) {
+            i = i + 1;
+            let mut exp_sign = 1;
+            if i < blen && bytes[i] == 45 { exp_sign = -1; i = i + 1; }
+            else if i < blen && bytes[i] == 43 { i = i + 1; }
+            let mut exp = 0;
+            while i < blen && bytes[i] >= 48 && bytes[i] <= 57 {
+                exp = exp * 10 + (bytes[i] as Int - 48);
+                i = i + 1;
+            }
+            let mut multiplier = 1.0;
+            for _ in range(0, exp) {
+                multiplier = multiplier * 10.0;
+            }
+            if exp_sign < 0 {
+                val = val / multiplier;
+            } else {
+                val = val * multiplier;
+            }
+        }
+        // Reject trailing non-whitespace
+        while i < blen {
+            let b = bytes[i];
+            if b == 32 || b == 9 || b == 10 || b == 13 || b == 12 {
+                i = i + 1;
+            } else {
+                return None;
+            }
+        }
+        Some(val)
+    }
+
+    /// Check if all bytes are ASCII (< 128).
+    public fn is_ascii(&self) -> Bool {
+        let bytes = self.as_bytes();
+        for i in range(0, bytes.len()) {
+            if (bytes[i] as Int) >= 128 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Reverse the character order (not byte order).
+    public fn reverse(&self) -> Text {
+        let mut chars: List<Char> = [];
+        for ch in self.chars() {
+            chars.push(ch);
+        }
+        chars.reverse();
+        let mut result = Text.with_capacity(self.len());
+        for ch in chars.iter() {
+            result.push(*ch);
+        }
+        result
+    }
+
+    /// Center text within a given width, padding with fill character.
+    public fn center(&self, width: Int, fill: Char) -> Text {
+        let char_len = self.char_count();
+        if char_len >= width {
+            return self.clone();
+        }
+        let total_pad = width - char_len;
+        let left_pad = total_pad / 2;
+        let right_pad = total_pad - left_pad;
+        let mut result = Text.with_capacity(width);
+        for _ in range(0, left_pad) {
+            result.push(fill);
+        }
+        result.push_str(self);
+        for _ in range(0, right_pad) {
+            result.push(fill);
+        }
+        result
+    }
+
+    /// Check if text contains any of the given characters.
+    public fn contains_any(&self, chars: &List<Char>) -> Bool {
+        for ch in self.chars() {
+            for target in chars.iter() {
+                if ch == *target {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Find the byte index of the first occurrence of any character in the set.
+    public fn index_of_any(&self, chars: &List<Char>) -> Maybe<Int> {
+        let bytes = self.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let ch_len = utf8_char_len(bytes[i]);
+            match self.char_at(i) {
+                Some(ch) => {
+                    for target in chars.iter() {
+                        if ch == *target {
+                            return Some(i);
+                        }
+                    }
+                }
+                None => {}
+            }
+            i = i + ch_len;
+        }
+        None
+    }
+
+    /// Check if byte index is a UTF-8 character boundary.
+    public fn is_char_boundary(&self, idx: Int) -> Bool {
+        if idx < 0 {
+            return false;
+        }
+        let bytes = self.as_bytes();
+        if idx > bytes.len() {
+            return false;
+        }
+        if idx == 0 || idx == bytes.len() {
+            return true;
+        }
+        is_utf8_char_boundary(bytes[idx])
+    }
+
+    // =========================================================================
+    // Mutating Methods
+    // =========================================================================
+
+    /// Truncate text to at most `new_len` bytes.
+    /// If `new_len` falls within a multi-byte character, truncates to the
+    /// previous character boundary.
+    public fn truncate(&mut self, new_len: Int) {
+        if new_len >= self.len {
+            return;
+        }
+        // Find the nearest character boundary at or before new_len
+        let mut boundary = new_len;
+        let bytes = self.as_bytes();
+        while boundary > 0 && !is_utf8_char_boundary(bytes[boundary]) {
+            boundary = boundary - 1;
+        }
+        self.len = boundary;
+        // Maintain null terminator
+        if !is_null(self.ptr) {
+            unsafe {
+                ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, 0 as Byte);
+            }
+        }
+    }
+
+    /// Clear the text, making it empty. Preserves allocated capacity.
+    public fn clear(&mut self) {
+        self.truncate(0);
+    }
+
+    /// Remove and return the last character, or None if empty.
+    public fn pop(&mut self) -> Maybe<Char> {
+        if self.is_empty() {
+            return None;
+        }
+        let bytes = self.as_bytes();
+        // Find the start of the last character by walking backwards
+        let mut last_start = bytes.len() - 1;
+        while last_start > 0 && !is_utf8_char_boundary(bytes[last_start]) {
+            last_start = last_start - 1;
+        }
+        let ch = self.char_at(last_start);
+        self.truncate(last_start);
+        ch
+    }
+
+    /// Insert a character at byte position `idx`.
+    /// Panics if `idx` is not on a UTF-8 character boundary.
+    public fn insert(&mut self, idx: Int, ch: Char) {
+        assert(idx >= 0 && idx <= self.len(), "insert index out of bounds");
+        assert(self.is_char_boundary(idx), "insert position must be a UTF-8 character boundary");
+
+        // Encode the character to bytes
+        let mut buf: [Byte; 4] = [0, 0, 0, 0];
+        let ch_len = ch.encode_utf8(&mut buf);
+
+        // Build a new string: before + char + after
+        let before = if idx > 0 { self.slice(0, idx) } else { Text.new() };
+        let after = if idx < self.len() { self.slice(idx, self.len()) } else { Text.new() };
+
+        let mut result = Text.with_capacity(self.len() + ch_len);
+        result.push_str(&before);
+        result.push(ch);
+        result.push_str(&after);
+
+        *self = result;
+    }
+
+    /// Insert a string at byte position `idx`.
+    /// Panics if `idx` is not on a UTF-8 character boundary.
+    public fn insert_str(&mut self, idx: Int, s: &Text) {
+        if s.is_empty() {
+            // nothing to do
+        } else {
+            assert(idx >= 0 && idx <= self.len(), "insert_str index out of bounds");
+            assert(self.is_char_boundary(idx), "insert_str position must be a UTF-8 character boundary");
+
+            let before = if idx > 0 { self.slice(0, idx) } else { Text.new() };
+            let after = if idx < self.len() { self.slice(idx, self.len()) } else { Text.new() };
+
+            let mut result = Text.with_capacity(self.len() + s.len());
+            result.push_str(&before);
+            result.push_str(s);
+            result.push_str(&after);
+
+            *self = result;
+        }
+    }
+
+    /// Replace a byte range [start, end) with replacement text.
+    /// Both start and end must be on UTF-8 character boundaries.
+    public fn replace_range(&mut self, start: Int, end: Int, replacement: &Text) {
+        assert(start >= 0 && start <= self.len(), "replace_range start out of bounds");
+        assert(end >= start && end <= self.len(), "replace_range end out of bounds");
+        assert(self.is_char_boundary(start), "replace_range start must be a UTF-8 character boundary");
+        assert(self.is_char_boundary(end), "replace_range end must be a UTF-8 character boundary");
+
+        let before = if start > 0 { self.slice(0, start) } else { Text.new() };
+        let after = if end < self.len() { self.slice(end, self.len()) } else { Text.new() };
+
+        let mut result = Text.with_capacity(before.len() + replacement.len() + after.len());
+        result.push_str(&before);
+        result.push_str(replacement);
+        result.push_str(&after);
+
+        *self = result;
+    }
+
+    /// Remove and return the character at byte position `idx`.
+    /// Panics if `idx` is not on a UTF-8 character boundary or is out of bounds.
+    public fn remove(&mut self, idx: Int) -> Char {
+        assert(idx >= 0 && idx < self.len(), "remove index out of bounds");
+        assert(self.is_char_boundary(idx), "remove position must be a UTF-8 character boundary");
+
+        let ch = match self.char_at(idx) {
+            Some(c) => c,
+            None => panic("invalid UTF-8 at remove index"),
+        };
+        let ch_len = ch.len_utf8();
+
+        let before = if idx > 0 { self.slice(0, idx) } else { Text.new() };
+        let after = if idx + ch_len < self.len() { self.slice(idx + ch_len, self.len()) } else { Text.new() };
+
+        let mut result = Text.with_capacity(self.len() - ch_len);
+        result.push_str(&before);
+        result.push_str(&after);
+
+        *self = result;
+        ch
+    }
+
+    /// Retain only characters matching the predicate.
+    public fn retain(&mut self, predicate: fn(Char) -> Bool) {
+        let mut result = Text.with_capacity(self.len());
+        for ch in self.chars() {
+            if predicate(ch) {
+                result.push(ch);
+            }
+        }
+        *self = result;
+    }
+
+    // =========================================================================
+    // Pattern Matching Iterators
+    // =========================================================================
+
+    /// Returns an iterator over non-overlapping matches of `pattern`.
+    public fn matches(&self, pattern: &Text) -> TextMatches {
+        TextMatches {
+            haystack: self.clone(),
+            pattern: pattern.clone(),
+            pos: 0,
+        }
+    }
+
+    /// Returns an iterator over non-overlapping matches of `pattern` with byte indices.
+    public fn match_indices(&self, pattern: &Text) -> TextMatchIndices {
+        TextMatchIndices {
+            haystack: self.clone(),
+            pattern: pattern.clone(),
+            pos: 0,
+        }
+    }
+
+    /// Replace first `count` occurrences of pattern with replacement.
+    public fn replacen(&self, pattern: &Text, replacement: &Text, count: Int) -> Text {
+        if count <= 0 {
+            return self.clone();
+        }
+        let mut res = Text.new();
+        let mut pos = 0;
+        let mut replaced = 0;
+        let bytes = self.as_bytes();
+
+        while pos < bytes.len() && replaced < count {
+            match self.slice(pos, bytes.len()).find(pattern) {
+                Some(offset) => {
+                    res.push_str(&self.slice(pos, pos + offset));
+                    res.push_str(replacement);
+                    pos = pos + offset + pattern.len();
+                    replaced = replaced + 1;
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+        // Append remaining
+        if pos < bytes.len() {
+            res.push_str(&self.slice(pos, bytes.len()));
+        }
+        res
+    }
+
+    // =========================================================================
+    // ASCII Case Conversion (for whole Text)
+    // =========================================================================
+
+    /// Convert ASCII characters to uppercase, leaving non-ASCII unchanged.
+    public fn to_ascii_uppercase(&self) -> Text {
+        let mut res = Text.with_capacity(self.len());
+        for ch in self.chars() {
+            res.push(ch.to_ascii_uppercase());
+        }
+        res
+    }
+
+    /// Convert ASCII characters to lowercase, leaving non-ASCII unchanged.
+    public fn to_ascii_lowercase(&self) -> Text {
+        let mut res = Text.with_capacity(self.len());
+        for ch in self.chars() {
+            res.push(ch.to_ascii_lowercase());
+        }
+        res
+    }
+
+    // =========================================================================
+    // Text Classification
+    // =========================================================================
+
+    /// Check if all characters are numeric.
+    /// Returns false for empty text.
+    public fn is_numeric(&self) -> Bool {
+        if self.is_empty() {
+            return false;
+        }
+        for ch in self.chars() {
+            if !ch.is_numeric() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if all characters are alphabetic.
+    /// Returns false for empty text.
+    public fn is_alphabetic(&self) -> Bool {
+        if self.is_empty() {
+            return false;
+        }
+        for ch in self.chars() {
+            if !ch.is_alphabetic() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if all characters are alphanumeric.
+    /// Returns false for empty text.
+    public fn is_alphanumeric(&self) -> Bool {
+        if self.is_empty() {
+            return false;
+        }
+        for ch in self.chars() {
+            if !ch.is_alphanumeric() {
+                return false;
+            }
+        }
+        true
+    }
+
+    // =========================================================================
+    // Builder & Capacity Management
+    // =========================================================================
+
+    /// Reserve capacity for at least `additional` more bytes beyond current length.
+    public fn reserve(&mut self, additional: Int) {
+        let needed = self.len + additional;
+        if needed <= self.cap {
+            return;
+        }
+        while self.cap < needed {
+            self.grow();
+        }
+    }
+
+    /// Shrink capacity to fit current length as closely as possible.
+    public fn shrink_to_fit(&mut self) {
+        if self.cap <= self.len || self.cap == 0 {
+            return;
+        }
+        let cloned = self.clone();
+        *self = cloned;
+    }
+
+    /// Shrink capacity to at least min_capacity.
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        let effective_min = min_capacity.max(self.len);
+        if self.cap <= effective_min {
+            return;
+        }
+        let cloned = self.clone();
+        *self = cloned;
+    }
+
+    /// Consume this text and return its bytes as an owned list.
+    public fn into_bytes(self) -> List<Byte> {
+        let bytes = self.as_bytes();
+        let mut result: List<Byte> = List.with_capacity(bytes.len());
+        for i in range(0, bytes.len()) {
+            result.push(bytes[i]);
+        }
+        result
+    }
+
+    /// Encode this text as UTF-16, returning a list of code units.
+    ///
+    /// Each character is encoded as one or two 16-bit code units.
+    /// BMP characters (U+0000..U+FFFF) produce one code unit.
+    /// Supplementary characters (U+10000..U+10FFFF) produce a surrogate pair.
+    public fn encode_utf16(&self) -> List<Int> {
+        let mut result: List<Int> = [];
+        let mut buf: [Int; 2] = [0, 0];
+        let mut iter = self.chars();
+        while let Some(ch) = iter.next() {
+            let count = ch.encode_utf16(&mut buf);
+            result.push(buf[0]);
+            if count == 2 {
+                result.push(buf[1]);
+            }
+        }
+        result
+    }
+
+    /// Decode a UTF-16 encoded slice into a Text.
+    ///
+    /// Returns an error if the input contains invalid surrogate pairs
+    /// (unpaired surrogates or reversed pairs).
+    public fn from_utf16(units: &[Int]) -> Result<Text, Utf16Error> {
+        let len = units.len();
+        let mut result: Text = "";
+        let mut i = 0;
+
+        while i < len {
+            let code = units[i];
+            if code >= 0xD800 && code <= 0xDBFF {
+                // High surrogate — must be followed by low surrogate
+                if i + 1 >= len {
+                    return Err(Utf16Error { index: i });
+                }
+                let low = units[i + 1];
+                if low < 0xDC00 || low > 0xDFFF {
+                    return Err(Utf16Error { index: i });
+                }
+                let codepoint = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                result.push(codepoint as Char);
+                i = i + 2;
+            } else if code >= 0xDC00 && code <= 0xDFFF {
+                // Lone low surrogate — invalid
+                return Err(Utf16Error { index: i });
+            } else {
+                // BMP character
+                result.push(code as Char);
+                i = i + 1;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Decode a UTF-16 encoded slice into a Text, replacing invalid
+    /// surrogate pairs with U+FFFD REPLACEMENT CHARACTER.
+    public fn from_utf16_lossy(units: &[Int]) -> Text {
+        let len = units.len();
+        let mut result: Text = "";
+        let mut i = 0;
+        let replacement = 0xFFFD as Char;
+
+        while i < len {
+            let code = units[i];
+            if code >= 0xD800 && code <= 0xDBFF {
+                // High surrogate
+                if i + 1 < len {
+                    let low = units[i + 1];
+                    if low >= 0xDC00 && low <= 0xDFFF {
+                        let codepoint = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                        result.push(codepoint as Char);
+                        i = i + 2;
+                    } else {
+                        result.push(replacement);
+                        i = i + 1;
+                    }
+                } else {
+                    result.push(replacement);
+                    i = i + 1;
+                }
+            } else if code >= 0xDC00 && code <= 0xDFFF {
+                // Lone low surrogate
+                result.push(replacement);
+                i = i + 1;
+            } else {
+                result.push(code as Char);
+                i = i + 1;
+            }
+        }
+        result
+    }
+
+    /// Convert ASCII uppercase to lowercase in-place.
+    public fn make_ascii_lowercase(&mut self) {
+        let bytes = self.as_bytes();
+        let len = bytes.len();
+        let ptr = self.as_ptr();
+        for i in range(0, len) {
+            let b = bytes[i];
+            if (b as Int) >= 65 && (b as Int) <= 90 {
+                unsafe {
+                    ptr_write(ptr_offset(ptr, i) as &unsafe Byte, (b as Int + 32) as Byte);
+                }
+            }
+        }
+    }
+
+    /// Convert ASCII lowercase to uppercase in-place.
+    public fn make_ascii_uppercase(&mut self) {
+        let bytes = self.as_bytes();
+        let len = bytes.len();
+        let ptr = self.as_ptr();
+        for i in range(0, len) {
+            let b = bytes[i];
+            if (b as Int) >= 97 && (b as Int) <= 122 {
+                unsafe {
+                    ptr_write(ptr_offset(ptr, i) as &unsafe Byte, (b as Int - 32) as Byte);
+                }
+            }
+        }
+    }
+
+    /// Split keeping the separator at the end of each part.
+    public fn split_inclusive(&self, sep: &Text) -> List<Text> {
+        if self.is_empty() {
+            []
+        } else if sep.is_empty() {
+            let mut result: List<Text> = [];
+            result.push(self.clone());
+            result
+        } else {
+            let mut result: List<Text> = [];
+            let bytes = self.as_bytes();
+            let sep_len = sep.len();
+            let mut start = 0;
+            while start < bytes.len() {
+                let remaining = self.slice(start, bytes.len());
+                let found = remaining.find(sep);
+                match found {
+                    Some(offset) => {
+                        let end = start + offset + sep_len;
+                        result.push(self.slice(start, end));
+                        start = end;
+                    }
+                    None => {
+                        result.push(self.slice(start, bytes.len()));
+                        start = bytes.len();
+                    }
+                }
+            }
+            result
+        }
+    }
+
+    /// Remove all non-overlapping occurrences of a pattern in-place.
+    public fn remove_matches(&mut self, pattern: &Text) {
+        if !pattern.is_empty() && !self.is_empty() {
+            let replaced = self.replace(pattern, &"");
+            *self = replaced;
+        }
+    }
+
+    // =========================================================================
+    // Additional Text Classification & Transformation
+    // =========================================================================
+
+    /// Check if all characters in the text are whitespace.
+    ///
+    /// Returns false for empty strings (must contain at least one character).
+    public fn is_whitespace(&self) -> Bool {
+        if self.is_empty() {
+            false
+        } else {
+            let bytes = self.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            let mut all_ws = true;
+            while i < len {
+                let byte = bytes[i] as Int;
+                // Fast path for ASCII whitespace
+                if byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 12 {
+                    i = i + 1;
+                } else if byte < 128 {
+                    all_ws = false;
+                    i = len;  // break
+                } else {
+                    // For non-ASCII, decode the character and check
+                    let ch_len = utf8_char_len(bytes[i]);
+                    let ch_result = self.char_at(i);
+                    match ch_result {
+                        Some(ch) => {
+                            if !ch.is_whitespace() {
+                                all_ws = false;
+                                i = len;  // break
+                            } else {
+                                i = i + ch_len;
+                            }
+                        },
+                        None => {
+                            all_ws = false;
+                            i = len;  // break
+                        },
+                    }
+                }
+            }
+            all_ws
+        }
+    }
+
+    /// Check if the text is empty or contains only whitespace characters.
+    public fn is_blank(&self) -> Bool {
+        if self.is_empty() {
+            true
+        } else {
+            self.is_whitespace()
+        }
+    }
+
+    /// Capitalize the first character of the text and lowercase the rest.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq("hello".capitalize(), "Hello");
+    /// assert_eq("HELLO".capitalize(), "Hello");
+    /// ```
+    public fn capitalize(&self) -> Text {
+        if self.is_empty() {
+            "".clone()
+        } else {
+            let first_opt = self.char_at(0);
+            match first_opt {
+                Some(first_ch) => {
+                    let first_len = first_ch.len_utf8();
+                    let upper = first_ch.to_uppercase();
+                    let mut result = Text.new();
+                    result.push(upper);
+                    if first_len < self.len() {
+                        let rest = self.slice(first_len, self.len());
+                        let lower_rest = rest.to_lowercase();
+                        result.push_str(&lower_rest);
+                    }
+                    result
+                },
+                None => "".clone(),
+            }
+        }
+    }
+
+    /// Capitalize the first character of each word.
+    ///
+    /// Words are separated by whitespace.
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq("hello world".to_title_case(), "Hello World");
+    /// ```
+    public fn to_title_case(&self) -> Text {
+        if self.is_empty() {
+            "".clone()
+        } else {
+            let mut result = Text.with_capacity(self.len());
+            let mut word_start = true;
+            let bytes = self.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            while i < len {
+                let ch_opt = self.char_at(i);
+                match ch_opt {
+                    Some(ch) => {
+                        let ch_len = ch.len_utf8();
+                        if ch.is_whitespace() {
+                            result.push(ch);
+                            word_start = true;
+                        } else if word_start {
+                            result.push(ch.to_uppercase());
+                            word_start = false;
+                        } else {
+                            result.push(ch.to_lowercase());
+                        }
+                        i = i + ch_len;
+                    },
+                    None => {
+                        i = i + 1;
+                    },
+                }
+            }
+            result
+        }
+    }
+
+    /// Swap the case of each character (uppercase becomes lowercase and vice versa).
+    ///
+    /// # Example
+    /// ```verum
+    /// assert_eq("Hello World".swapcase(), "hELLO wORLD");
+    /// ```
+    public fn swapcase(&self) -> Text {
+        let mut result = Text.with_capacity(self.len());
+        let bytes = self.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        while i < len {
+            let ch_opt = self.char_at(i);
+            match ch_opt {
+                Some(ch) => {
+                    let ch_len = ch.len_utf8();
+                    if ch.is_uppercase() {
+                        result.push(ch.to_lowercase());
+                    } else if ch.is_lowercase() {
+                        result.push(ch.to_uppercase());
+                    } else {
+                        result.push(ch);
+                    }
+                    i = i + ch_len;
+                },
+                None => {
+                    i = i + 1;
+                },
+            }
+        }
+        result
+    }
+
+    /// Check if all cased characters are uppercase.
+    ///
+    /// Returns false for empty strings or strings with no cased characters.
+    public fn is_uppercase(&self) -> Bool {
+        if self.is_empty() {
+            false
+        } else {
+            let mut has_cased = false;
+            let mut all_upper = true;
+            let bytes = self.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            while i < len {
+                let ch_opt = self.char_at(i);
+                match ch_opt {
+                    Some(ch) => {
+                        let ch_len = ch.len_utf8();
+                        if ch.is_uppercase() {
+                            has_cased = true;
+                        } else if ch.is_lowercase() {
+                            all_upper = false;
+                            i = len;  // break
+                        }
+                        i = i + ch_len;
+                    },
+                    None => {
+                        i = i + 1;
+                    },
+                }
+            }
+            has_cased && all_upper
+        }
+    }
+
+    /// Check if all cased characters are lowercase.
+    ///
+    /// Returns false for empty strings or strings with no cased characters.
+    public fn is_lowercase(&self) -> Bool {
+        if self.is_empty() {
+            false
+        } else {
+            let mut has_cased = false;
+            let mut all_lower = true;
+            let bytes = self.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            while i < len {
+                let ch_opt = self.char_at(i);
+                match ch_opt {
+                    Some(ch) => {
+                        let ch_len = ch.len_utf8();
+                        if ch.is_lowercase() {
+                            has_cased = true;
+                        } else if ch.is_uppercase() {
+                            all_lower = false;
+                            i = len;  // break
+                        }
+                        i = i + ch_len;
+                    },
+                    None => {
+                        i = i + 1;
+                    },
+                }
+            }
+            has_cased && all_lower
+        }
+    }
+
+    /// Replace tab characters with spaces.
+    ///
+    /// Each tab is replaced with enough spaces to reach the next tab stop,
+    /// where tab stops are at every `tab_size` columns.
+    public fn expand_tabs(&self, tab_size: Int) -> Text {
+        if self.is_empty() || tab_size <= 0 {
+            self.clone()
+        } else {
+            let mut result = Text.new();
+            let mut col = 0;
+            let bytes = self.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            while i < len {
+                let ch_opt = self.char_at(i);
+                match ch_opt {
+                    Some(ch) => {
+                        let ch_len = ch.len_utf8();
+                        if ch == '\t' {
+                            let spaces = tab_size - (col % tab_size);
+                            for _ in range(0, spaces) {
+                                result.push(' ');
+                            }
+                            col = col + spaces;
+                        } else if ch == '\n' {
+                            result.push(ch);
+                            col = 0;
+                        } else {
+                            result.push(ch);
+                            col = col + 1;
+                        }
+                        i = i + ch_len;
+                    },
+                    None => {
+                        i = i + 1;
+                    },
+                }
+            }
+            result
+        }
+    }
+
+    /// Pad the string on the left with zeros to fill the given width.
+    ///
+    /// If the string starts with a sign prefix ('+' or '-'), the zeros are
+    /// inserted after the sign.
+    public fn zfill(&self, width: Int) -> Text {
+        let char_count = self.char_count();
+        if char_count >= width {
+            self.clone()
+        } else {
+            let mut result = Text.with_capacity(width);
+            let pad_count = width - char_count;
+            // Check for sign prefix
+            if !self.is_empty() {
+                let first_opt = self.char_at(0);
+                match first_opt {
+                    Some(first_ch) => {
+                        if first_ch == '+' || first_ch == '-' {
+                            result.push(first_ch);
+                            for _ in range(0, pad_count) {
+                                result.push('0');
+                            }
+                            if self.len() > 1 {
+                                let rest = self.slice(1, self.len());
+                                result.push_str(&rest);
+                            }
+                        } else {
+                            for _ in range(0, pad_count) {
+                                result.push('0');
+                            }
+                            result.push_str(self);
+                        }
+                    },
+                    None => {
+                        for _ in range(0, pad_count) {
+                            result.push('0');
+                        }
+                    },
+                }
+            } else {
+                for _ in range(0, pad_count) {
+                    result.push('0');
+                }
+            }
+            result
+        }
+    }
+
+    /// Convert to Text (identity — Text is already text).
+    ///
+    /// Provided for protocol conformance and generic code that calls
+    /// `.to_text()` on values of any type implementing Display.
+    public fn to_text(&self) -> Text {
+        self.clone()
+    }
+}
+
+// =============================================================================
+// Pattern Matching Iterators
+// =============================================================================
+
+/// Iterator over non-overlapping matches of a pattern in text.
+public type TextMatches is {
+    haystack: Text,
+    pattern: Text,
+    pos: Int,
+};
+
+implement Iterator for TextMatches {
+    type Item = Text;
+
+    fn next(&mut self) -> Maybe<Text> {
+        if self.pos > self.haystack.len() {
+            return None;
+        }
+        let remaining = self.haystack.slice(self.pos, self.haystack.len());
+        match remaining.find(&self.pattern) {
+            Some(offset) => {
+                let match_start = self.pos + offset;
+                self.pos = match_start + self.pattern.len();
+                Some(self.pattern.clone())
+            }
+            None => None,
+        }
+    }
+}
+
+implement IntoIterator for TextMatches {
+    type Item = Text;
+    type IntoIter = TextMatches;
+
+    fn into_iter(self) -> TextMatches {
+        self
+    }
+}
+
+/// Iterator over non-overlapping (index, match) pairs.
+public type TextMatchIndices is {
+    haystack: Text,
+    pattern: Text,
+    pos: Int,
+};
+
+implement Iterator for TextMatchIndices {
+    type Item = (Int, Text);
+
+    fn next(&mut self) -> Maybe<(Int, Text)> {
+        if self.pos > self.haystack.len() {
+            return None;
+        }
+        let remaining = self.haystack.slice(self.pos, self.haystack.len());
+        match remaining.find(&self.pattern) {
+            Some(offset) => {
+                let match_start = self.pos + offset;
+                self.pos = match_start + self.pattern.len();
+                Some((match_start, self.pattern.clone()))
+            }
+            None => None,
+        }
+    }
+}
+
+implement IntoIterator for TextMatchIndices {
+    type Item = (Int, Text);
+    type IntoIter = TextMatchIndices;
+
+    fn into_iter(self) -> TextMatchIndices {
+        self
+    }
+}
+
+// =============================================================================
+// Operators
+// =============================================================================
+
+/// Concatenation with + operator.
+implement Add for Text {
+    type Output = Text;
+
+    fn add(self, rhs: Text) -> Text {
+        self.concat(&rhs)
+    }
+}
+
+implement Add<&Text> for Text {
+    type Output = Text;
+
+    fn add(self, rhs: &Text) -> Text {
+        self.concat(rhs)
+    }
+}
+
+/// Append with += operator.
+implement AddAssign<&Text> for Text {
+    fn add_assign(&mut self, rhs: &Text) {
+        self.push_str(rhs);
+    }
+}
+
+implement AddAssign<Text> for Text {
+    fn add_assign(&mut self, rhs: Text) {
+        self.push_str(&rhs);
+    }
+}
+
+// =============================================================================
+// Protocol Implementations
+// =============================================================================
+
+implement Clone for Text {
+    fn clone(&self) -> Text {
+        if self.len == 0 {
+            return Text.new();
+        }
+        let ptr = unsafe { alloc(self.len + 1, 1) };  // +1 for null terminator
+        if is_null(ptr) {
+            panic("Out of memory");
+        }
+        unsafe {
+            memcpy(ptr, self.ptr, self.len);
+            ptr_write(ptr_offset(ptr, self.len) as &unsafe Byte, 0 as Byte);
+        }
+        Text {
+            ptr: ptr,
+            len: self.len,
+            cap: self.len,
+        }
+    }
+}
+
+implement Drop for Text {
+    fn drop(&mut self) {
+        // Only free heap-allocated text (cap > 0). Static strings have cap == 0.
+        if self.cap > 0 && !is_null(self.ptr) {
+            unsafe {
+                dealloc(self.ptr, self.cap + 1, 1);
+            }
+        }
+    }
+}
+
+implement Eq for Text {
+    fn eq(&self, other: &Text) -> Bool {
+        let self_bytes = self.as_bytes();
+        let other_bytes = other.as_bytes();
+
+        if self_bytes.len() != other_bytes.len() {
+            return false;
+        }
+
+        for i in range(0, self_bytes.len()) {
+            if self_bytes[i] != other_bytes[i] {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+implement Ord for Text {
+    fn cmp(&self, other: &Text) -> Ordering {
+        let self_bytes = self.as_bytes();
+        let other_bytes = other.as_bytes();
+        let min_len = self_bytes.len().min(other_bytes.len());
+
+        for i in range(0, min_len) {
+            if self_bytes[i] < other_bytes[i] {
+                return Ordering.Less;
+            }
+            if self_bytes[i] > other_bytes[i] {
+                return Ordering.Greater;
+            }
+        }
+
+        if self_bytes.len() < other_bytes.len() {
+            Ordering.Less
+        } else if self_bytes.len() > other_bytes.len() {
+            Ordering.Greater
+        } else {
+            Ordering.Equal
+        }
+    }
+}
+
+implement Hash for Text {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write(self.as_bytes());
+    }
+}
+
+implement Default for Text {
+    fn default() -> Text {
+        Text.new()
+    }
+}
+
+implement Debug for Text {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_char('"')?;
+        for ch in self.chars() {
+            match ch {
+                '\n' => f.write_str("\\n")?,
+                '\r' => f.write_str("\\r")?,
+                '\t' => f.write_str("\\t")?,
+                '\\' => f.write_str("\\\\")?,
+                '"' => f.write_str("\\\"")?,
+                c if c.is_control() => {
+                    f.write_str(&f"\\u{{{c as Int:04x}}}")?;
+                }
+                c => f.write_char(c)?,
+            }
+        }
+        f.write_char('"')
+    }
+}
+
+implement Display for Text {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self)
+    }
+}
+
+implement AsRef<[Byte]> for Text {
+    fn as_ref(&self) -> &[Byte] {
+        self.as_bytes()
+    }
+}
+
+implement From<&str> for Text {
+    fn from(s: &str) -> Text {
+        unsafe { Text.from_utf8_unchecked(s.as_bytes()) }
+    }
+}
+
+implement From<Char> for Text {
+    fn from(ch: Char) -> Text {
+        Text.from_char(ch)
+    }
+}
+
+// =============================================================================
+// FromStr implementations for primitive types
+// =============================================================================
+
+implement FromStr for Int {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int, ParseError> {
+        s.parse_int()
+    }
+}
+
+implement FromStr for Float {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Float, ParseError> {
+        s.parse_float()
+    }
+}
+
+implement FromStr for Bool {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Bool, ParseError> {
+        s.parse_bool()
+    }
+}
+
+implement FromStr for Text {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Text, ParseError> {
+        Ok(s.clone())
+    }
+}
+
+// =============================================================================
+// FromStr for Sized Integer Types
+// =============================================================================
+// These parse text as Int first, then use TryFrom<Int> for range-checked
+// narrowing conversion.
+
+implement FromStr for Int8 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int8, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = Int8.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for Int8")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for Int16 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int16, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = Int16.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for Int16")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for Int32 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int32, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = Int32.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for Int32")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for UInt8 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<UInt8, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = UInt8.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for UInt8")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for UInt16 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<UInt16, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = UInt16.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for UInt16")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for UInt32 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<UInt32, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = UInt32.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for UInt32")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for UInt64 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<UInt64, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                let converted = UInt64.try_from(val);
+                match converted {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(ParseError.new(&"value out of range for UInt64")),
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for Int64 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int64, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => Ok(val as Int64),
+        }
+    }
+}
+
+implement FromStr for Int128 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Int128, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => Ok(val as Int128),
+        }
+    }
+}
+
+implement FromStr for UInt128 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<UInt128, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                if val < 0 {
+                    Err(ParseError.new(&"value out of range for UInt128"))
+                } else {
+                    Ok(val as UInt128)
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for ISize {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<ISize, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => Ok(val as ISize),
+        }
+    }
+}
+
+implement FromStr for USize {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<USize, ParseError> {
+        let n = s.parse_int();
+        match n {
+            Err(e) => Err(e),
+            Ok(val) => {
+                if val < 0 {
+                    Err(ParseError.new(&"value out of range for USize"))
+                } else {
+                    Ok(val as USize)
+                }
+            },
+        }
+    }
+}
+
+implement FromStr for Float32 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Float32, ParseError> {
+        let f = s.parse_float();
+        match f {
+            Err(e) => Err(e),
+            Ok(val) => Ok(val as Float32),
+        }
+    }
+}
+
+implement FromStr for Float64 {
+    type ParseError = ParseError;
+
+    fn from_str(s: &Text) -> Result<Float64, ParseError> {
+        let f = s.parse_float();
+        match f {
+            Err(e) => Err(e),
+            Ok(val) => Ok(val as Float64),
+        }
+    }
+}
+
+implement FromIterator<Char> for Text {
+    fn from_iter<I: Iterator<Item = Char>>(mut iter: I) -> Text {
+        let mut t = Text.new();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(ch) => {
+                    t.push(ch);
+                }
+            }
+        }
+        t
+    }
+}
+
+implement Extend<Char> for Text {
+    fn extend<I: Iterator<Item = Char>>(&mut self, iter: I) {
+        for ch in iter {
+            self.push(ch);
+        }
+    }
+}
+
+implement Extend<Text> for Text {
+    fn extend<I: Iterator<Item = Text>>(&mut self, iter: I) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+/// Character iterator.
+public type Chars is {
+    bytes: &[Byte],
+    pos: Int,
+};
+
+implement Iterator for Chars {
+    type Item = Char;
+
+    fn next(&mut self) -> Maybe<Char> {
+        if self.pos >= self.bytes.len() {
+            return None;
+        }
+
+        let (ch, len) = utf8_decode_char_len(self.bytes, self.pos);
+        self.pos = self.pos + len;
+        Some(ch)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.bytes.len() - self.pos;
+        // At least remaining/4 chars (4 bytes max per char)
+        // At most remaining chars (1 byte min per char)
+        ((remaining + 3) / 4, Some(remaining))
+    }
+}
+
+/// Byte iterator.
+public type ByteIter is {
+    bytes: &[Byte],
+    pos: Int,
+};
+
+implement Iterator for ByteIter {
+    type Item = Byte;
+
+    fn next(&mut self) -> Maybe<Byte> {
+        if self.pos >= self.bytes.len() {
+            return None;
+        }
+        let b = self.bytes[self.pos];
+        self.pos = self.pos + 1;
+        Some(b)
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.bytes.len() - self.pos;
+        (remaining, Some(remaining))
+    }
+}
+
+/// Character indices iterator.
+public type CharIndices is {
+    bytes: &[Byte],
+    pos: Int,
+};
+
+implement Iterator for CharIndices {
+    type Item = (Int, Char);
+
+    fn next(&mut self) -> Maybe<(Int, Char)> {
+        if self.pos >= self.bytes.len() {
+            return None;
+        }
+
+        let start = self.pos;
+        let (ch, len) = utf8_decode_char_len(self.bytes, self.pos);
+        self.pos = self.pos + len;
+        Some((start, ch))
+    }
+}
+
+/// Lines iterator.
+public type Lines is {
+    text: &Text,
+    pos: Int,
+};
+
+implement Iterator for Lines {
+    type Item = Text;
+
+    fn next(&mut self) -> Maybe<Text> {
+        let bytes = self.text.as_bytes();
+        if self.pos >= bytes.len() {
+            return None;
+        }
+
+        let start = self.pos;
+        let mut end = start;
+
+        // Find end of line
+        while end < bytes.len() && bytes[end] != 10 {
+            end = end + 1;
+        }
+
+        // Skip \r if present (Windows line endings)
+        let line_end = if end > start && bytes[end - 1] == 13 {
+            end - 1
+        } else {
+            end
+        };
+
+        // Move past newline
+        self.pos = if end < bytes.len() { end + 1 } else { end };
+
+        Some(self.text.slice(start, line_end))
+    }
+}
+
+// =============================================================================
+// IntoIterator implementations for text iterators
+// =============================================================================
+// These explicit implementations ensure for loops work even if blanket impl
+// resolution has issues across module boundaries.
+
+implement IntoIterator for Chars {
+    type Item = Char;
+    type IntoIter = Chars;
+
+    fn into_iter(self) -> Chars {
+        self
+    }
+}
+
+implement IntoIterator for ByteIter {
+    type Item = Byte;
+    type IntoIter = ByteIter;
+
+    fn into_iter(self) -> ByteIter {
+        self
+    }
+}
+
+implement IntoIterator for CharIndices {
+    type Item = (Int, Char);
+    type IntoIter = CharIndices;
+
+    fn into_iter(self) -> CharIndices {
+        self
+    }
+}
+
+implement IntoIterator for Lines {
+    type Item = Text;
+    type IntoIter = Lines;
+
+    fn into_iter(self) -> Lines {
+        self
+    }
+}
+
+// =============================================================================
+// FusedIterator implementations for text iterators
+// =============================================================================
+
+implement FusedIterator for Chars {}
+implement FusedIterator for CharIndices {}
+implement FusedIterator for Lines {}
+implement FusedIterator for ByteIter {}
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// UTF-8 validation error.
+public type Utf8Error is {
+    valid_up_to: Int,
+};
+
+implement Utf8Error {
+    fn new(valid_up_to: Int) -> Utf8Error {
+        Utf8Error { valid_up_to: valid_up_to }
+    }
+}
+
+implement Debug for Utf8Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&f"Utf8Error {{ valid_up_to: {self.valid_up_to} }}")
+    }
+}
+
+implement Display for Utf8Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("invalid utf-8: error at byte index ")?;
+        f.write_str(&self.valid_up_to.to_text())
+    }
+}
+
+/// UTF-16 decoding error.
+///
+/// Indicates an invalid surrogate pair at the given index in the input slice.
+public type Utf16Error is {
+    index: Int,
+};
+
+implement Debug for Utf16Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&f"Utf16Error {{ index: {self.index} }}")
+    }
+}
+
+implement Display for Utf16Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("invalid utf-16: unpaired surrogate at index ")?;
+        f.write_str(&self.index.to_text())
+    }
+}
+
+/// Parse error.
+public type ParseError is {
+    message: Text,
+};
+
+implement ParseError {
+    fn new(msg: &Text) -> ParseError {
+        ParseError { message: msg.clone() }
+    }
+}
+
+implement Debug for ParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("ParseError: ")?;
+        f.write_str(&self.message)
+    }
+}
+
+implement Display for ParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Check if byte is a UTF-8 char boundary.
+fn is_utf8_char_boundary(byte: Byte) -> Bool {
+    // UTF-8 continuation bytes are 10xxxxxx
+    (byte as Int) & 0xC0 != 0x80
+}

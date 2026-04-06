@@ -1,0 +1,20 @@
+fn main() {
+    // Test that type inference works with compound assignments
+    let mut x = 0;  // Inferred as Int
+    x += 10;        // Should work
+    print(f"x after +=: {x}");
+
+    let mut y = 0.0;  // Inferred as Float
+    y += 10.5;        // Should work
+    print(f"y after +=: {y}");
+
+    // Test that mixed types are handled correctly
+    let mut z = 5;
+    z += 3;
+    z *= 2;
+    z -= 4;
+    z /= 2;
+    print(f"z after operations: {z}");  // (5+3)*2-4)/2 = 5
+
+    print("Type inference with compound assignments works!");
+}

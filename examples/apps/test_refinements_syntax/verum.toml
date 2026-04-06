@@ -1,0 +1,5 @@
+[package]
+name = "test_refinements_syntax"
+version = "0.1.0"
+
+[dependencies]

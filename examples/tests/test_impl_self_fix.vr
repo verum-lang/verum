@@ -1,0 +1,36 @@
+// Test that self parameter works in implement blocks
+// This tests the fix for "self keyword requires method context" error
+
+type Point is { x: Int, y: Int };
+
+// Test inherent impl with self parameter
+implement Point {
+    fn get_x(self) -> Int {
+        self.x
+    }
+
+    fn get_y(self) -> Int {
+        self.y
+    }
+
+    fn sum(self) -> Int {
+        self.x + self.y
+    }
+}
+
+// Test protocol with self parameter
+type Summable is protocol {
+    fn compute(self) -> Int;
+};
+
+implement Summable for Point {
+    fn compute(self) -> Int {
+        self.x + self.y
+    }
+}
+
+fn main() -> Int {
+    // This test just verifies type checking passes
+    // The actual execution may not work yet due to method resolution
+    42
+}

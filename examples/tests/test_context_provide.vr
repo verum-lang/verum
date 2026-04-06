@@ -1,0 +1,10 @@
+// Test: Provide statement
+context Logger {
+    fn log(self, msg: Text)
+}
+
+type SimpleLogger is { prefix: Text };
+
+fn main() {
+    provide Logger = SimpleLogger { prefix: "[INFO]" };
+}

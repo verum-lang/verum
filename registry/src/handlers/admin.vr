@@ -1,0 +1,761 @@
+// Verum Registry - Admin Handlers
+//
+// HTTP handlers for administrative operations
+// Following industry standards for registry administration
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text};
+mount core.time.unix_timestamp;
+
+// Import context protocols
+mount super.super.contexts.{Database, Auth};
+mount super.super.domain.errors.{RegistryError};
+mount super.super.domain.user.{UserRole};
+
+// ============================================================================
+// DTOs for Admin Operations
+// ============================================================================
+
+/// User summary for admin listing
+pub type AdminUserDto is {
+    id: Int,
+    username: Text,
+    email: Text,
+    role: Text,
+    is_active: Bool,
+    created_at: Int,
+    package_count: Int,
+    last_login: Int,
+};
+
+/// Package summary for admin listing
+pub type AdminPackageDto is {
+    name: Text,
+    owner: Text,
+    version_count: Int,
+    downloads: Int,
+    created_at: Int,
+    last_updated: Int,
+    is_blocked: Bool,
+    block_reason: Text,
+};
+
+/// Request to suspend a user
+pub type SuspendUserRequestDto is {
+    user_id: Int,
+    reason: Text,
+};
+
+/// Request to block a package
+pub type BlockPackageRequestDto is {
+    package_name: Text,
+    reason: Text,
+};
+
+/// Request to unblock a package
+pub type UnblockPackageRequestDto is {
+    package_name: Text,
+};
+
+/// Admin operation response
+pub type AdminResponseDto is {
+    success: Bool,
+    message: Text,
+    affected_id: Maybe<Text>,
+};
+
+implement AdminResponseDto {
+    pub fn success(message: Text, affected_id: Maybe<Text>) -> AdminResponseDto {
+        AdminResponseDto {
+            success: true,
+            message: message,
+            affected_id: affected_id,
+        }
+    }
+
+    pub fn error(message: Text) -> AdminResponseDto {
+        AdminResponseDto {
+            success: false,
+            message: message,
+            affected_id: Maybe.None,
+        }
+    }
+}
+
+/// Paginated user list response
+pub type AdminUserListResponseDto is {
+    users: List<AdminUserDto>,
+    total: Int,
+    page: Int,
+    per_page: Int,
+};
+
+/// Paginated package list response
+pub type AdminPackageListResponseDto is {
+    packages: List<AdminPackageDto>,
+    total: Int,
+    page: Int,
+    per_page: Int,
+};
+
+/// Registry statistics for admin dashboard
+pub type RegistryStatsDto is {
+    total_users: Int,
+    total_packages: Int,
+    total_versions: Int,
+    total_downloads: Int,
+    active_users_30d: Int,
+    new_packages_30d: Int,
+    storage_used_mb: Int,
+};
+
+// ============================================================================
+// SQL Parameter Helpers
+// ============================================================================
+
+/// Create a list with 1 SQL parameter
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params
+}
+
+/// Create a list with 2 SQL parameters
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params
+}
+
+/// Create a list with 3 SQL parameters
+fn sql_params_3(p1: Text, p2: Text, p3: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params
+}
+
+// ============================================================================
+// HTTP Handlers
+// ============================================================================
+
+/// List all users in the registry (admin only)
+///
+/// GET /api/v1/admin/users?page=1&per_page=50
+///
+/// Returns a paginated list of all users with admin-specific information.
+/// Only accessible to users with admin role.
+pub async fn list_all_users(
+    page: Int,
+    per_page: Int,
+    auth_token: Text
+) -> Result<AdminUserListResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Validate pagination
+    if page < 1 {
+        return Result.Err(RegistryError.validation_error("page", "Page must be >= 1"));
+    }
+
+    if per_page < 1 || per_page > 100 {
+        return Result.Err(RegistryError.validation_error("per_page", "Per page must be between 1 and 100"));
+    }
+
+    // Calculate offset
+    let offset = (page - 1) * per_page;
+
+    // Get total count
+    let count_rows = Database.query("SELECT COUNT(*) as count FROM users").await?;
+    let total = if count_rows.len() > 0 {
+        match count_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Fetch users with pagination
+    let rows = Database.query_with(
+        "SELECT u.*, COUNT(DISTINCT po.package_name) as package_count FROM users u LEFT JOIN package_owners po ON u.id = po.user_id GROUP BY u.id ORDER BY u.created_at DESC LIMIT $1 OFFSET $2",
+        sql_params_2(f"{per_page}", f"{offset}")
+    ).await?;
+
+    // Convert to DTOs
+    let mut users = List.new();
+    for row in rows {
+        let user_id = match row.get("id") {
+            Maybe.Some(id_str) => parse_id_from_text(&id_str),
+            Maybe.None => 0,
+        };
+
+        let username = match row.get("username") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let email = match row.get("email") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let role = match row.get("role") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "regular",
+        };
+
+        let is_active = match row.get("is_active") {
+            Maybe.Some(v) => v == "true" || v == "1",
+            Maybe.None => true,
+        };
+
+        let created_at = match row.get("created_at") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let package_count = match row.get("package_count") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let last_login = match row.get("last_login") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        users.push(AdminUserDto {
+            id: user_id,
+            username: username,
+            email: email,
+            role: role,
+            is_active: is_active,
+            created_at: created_at,
+            package_count: package_count,
+            last_login: last_login,
+        });
+    }
+
+    Result.Ok(AdminUserListResponseDto {
+        users: users,
+        total: total,
+        page: page,
+        per_page: per_page,
+    })
+}
+
+/// Suspend a user account (admin only)
+///
+/// POST /api/v1/admin/users/{user_id}/suspend
+///
+/// Suspends a user account, preventing them from publishing or updating packages.
+/// The user can still view packages but cannot perform write operations.
+pub async fn suspend_user(
+    req: SuspendUserRequestDto,
+    auth_token: Text
+) -> Result<AdminResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Validate request
+    if req.reason.is_empty() {
+        return Result.Err(RegistryError.validation_error("reason", "Suspension reason is required"));
+    }
+
+    if req.reason.len() > 500 {
+        return Result.Err(RegistryError.validation_error("reason", "Reason too long (max 500 chars)"));
+    }
+
+    // Verify user exists
+    let user_row = match Database.fetch_optional_with(
+        "SELECT id, username, role FROM users WHERE id = $1",
+        sql_params_1(f"{req.user_id}")
+    ).await? {
+        Maybe.Some(row) => row,
+        Maybe.None => {
+            return Result.Err(RegistryError.validation_error("user_id", "User not found"));
+        }
+    };
+
+    let target_username = match user_row.get("username") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    let target_role = match user_row.get("role") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "regular",
+    };
+
+    // Prevent suspending other admins
+    if target_role == "admin" {
+        return Result.Err(RegistryError.validation_error("user_id", "Cannot suspend admin users"));
+    }
+
+    // Suspend user
+    Database.execute_with(
+        "UPDATE users SET is_active = $1, suspension_reason = $2, suspended_at = $3 WHERE id = $4",
+        sql_params_3("0", req.reason.clone(), f"{unix_timestamp()}")
+    ).await?;
+
+    // Additional: Could also revoke active API tokens here
+    Database.execute_with(
+        "UPDATE tokens SET is_active = $1 WHERE user_id = $2",
+        sql_params_2("0", f"{req.user_id}")
+    ).await?;
+
+    Result.Ok(AdminResponseDto.success(
+        f"User {target_username} has been suspended",
+        Maybe.Some(f"{req.user_id}")
+    ))
+}
+
+/// Unsuspend a user account (admin only)
+///
+/// POST /api/v1/admin/users/{user_id}/unsuspend
+///
+/// Reinstates a suspended user account, allowing them to publish again.
+pub async fn unsuspend_user(
+    user_id: Int,
+    auth_token: Text
+) -> Result<AdminResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Verify user exists
+    let user_row = match Database.fetch_optional_with(
+        "SELECT username FROM users WHERE id = $1",
+        sql_params_1(f"{user_id}")
+    ).await? {
+        Maybe.Some(row) => row,
+        Maybe.None => {
+            return Result.Err(RegistryError.validation_error("user_id", "User not found"));
+        }
+    };
+
+    let target_username = match user_row.get("username") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+
+    // Unsuspend user
+    Database.execute_with(
+        "UPDATE users SET is_active = $1, suspension_reason = NULL, suspended_at = NULL WHERE id = $2",
+        sql_params_2("1", f"{user_id}")
+    ).await?;
+
+    Result.Ok(AdminResponseDto.success(
+        f"User {target_username} has been unsuspended",
+        Maybe.Some(f"{user_id}")
+    ))
+}
+
+/// List all packages in the registry (admin only)
+///
+/// GET /api/v1/admin/packages?page=1&per_page=50
+///
+/// Returns a paginated list of all packages with admin-specific information.
+pub async fn list_all_packages(
+    page: Int,
+    per_page: Int,
+    auth_token: Text
+) -> Result<AdminPackageListResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Validate pagination
+    if page < 1 {
+        return Result.Err(RegistryError.validation_error("page", "Page must be >= 1"));
+    }
+
+    if per_page < 1 || per_page > 100 {
+        return Result.Err(RegistryError.validation_error("per_page", "Per page must be between 1 and 100"));
+    }
+
+    // Calculate offset
+    let offset = (page - 1) * per_page;
+
+    // Get total count
+    let count_rows = Database.query("SELECT COUNT(DISTINCT name) as count FROM packages").await?;
+    let total = if count_rows.len() > 0 {
+        match count_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Fetch packages with pagination
+    let rows = Database.query_with(
+        "SELECT name, owner, COUNT(*) as version_count, SUM(downloads) as total_downloads, MIN(created_at) as created_at, MAX(updated_at) as last_updated, is_blocked, block_reason FROM packages GROUP BY name ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+        sql_params_2(f"{per_page}", f"{offset}")
+    ).await?;
+
+    // Convert to DTOs
+    let mut packages = List.new();
+    for row in rows {
+        let name = match row.get("name") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let owner = match row.get("owner") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        let version_count = match row.get("version_count") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let downloads = match row.get("total_downloads") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let created_at = match row.get("created_at") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let last_updated = match row.get("last_updated") {
+            Maybe.Some(v) => parse_id_from_text(&v),
+            Maybe.None => 0,
+        };
+
+        let is_blocked = match row.get("is_blocked") {
+            Maybe.Some(v) => v == "true" || v == "1",
+            Maybe.None => false,
+        };
+
+        let block_reason = match row.get("block_reason") {
+            Maybe.Some(v) => v.clone(),
+            Maybe.None => "",
+        };
+
+        packages.push(AdminPackageDto {
+            name: name,
+            owner: owner,
+            version_count: version_count,
+            downloads: downloads,
+            created_at: created_at,
+            last_updated: last_updated,
+            is_blocked: is_blocked,
+            block_reason: block_reason,
+        });
+    }
+
+    Result.Ok(AdminPackageListResponseDto {
+        packages: packages,
+        total: total,
+        page: page,
+        per_page: per_page,
+    })
+}
+
+/// Block a package (admin only)
+///
+/// POST /api/v1/admin/packages/{package_name}/block
+///
+/// Blocks a package, preventing it from being downloaded or installed.
+/// Useful for removing malicious, abusive, or policy-violating packages.
+pub async fn block_package(
+    req: BlockPackageRequestDto,
+    auth_token: Text
+) -> Result<AdminResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Validate request
+    if req.package_name.is_empty() {
+        return Result.Err(RegistryError.validation_error("package_name", "Package name cannot be empty"));
+    }
+
+    if req.reason.is_empty() {
+        return Result.Err(RegistryError.validation_error("reason", "Block reason is required"));
+    }
+
+    if req.reason.len() > 500 {
+        return Result.Err(RegistryError.validation_error("reason", "Reason too long (max 500 chars)"));
+    }
+
+    // Verify package exists
+    let package_exists = Database.fetch_optional_with(
+        "SELECT name FROM packages WHERE name = $1",
+        sql_params_1(req.package_name.clone())
+    ).await?;
+
+    match package_exists {
+        Maybe.None => {
+            return Result.Err(RegistryError.package_not_found(req.package_name));
+        },
+        Maybe.Some(_) => {},
+    }
+
+    // Block package
+    Database.execute_with(
+        "UPDATE packages SET is_blocked = $1, block_reason = $2, blocked_at = $3 WHERE name = $4",
+        sql_params_3("1", req.reason.clone(), f"{unix_timestamp()}")
+    ).await?;
+
+    Result.Ok(AdminResponseDto.success(
+        f"Package {req.package_name} has been blocked",
+        Maybe.Some(req.package_name)
+    ))
+}
+
+/// Unblock a package (admin only)
+///
+/// POST /api/v1/admin/packages/{package_name}/unblock
+///
+/// Unblocks a package, allowing it to be downloaded again.
+pub async fn unblock_package(
+    req: UnblockPackageRequestDto,
+    auth_token: Text
+) -> Result<AdminResponseDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Validate request
+    if req.package_name.is_empty() {
+        return Result.Err(RegistryError.validation_error("package_name", "Package name cannot be empty"));
+    }
+
+    // Verify package exists
+    let package_exists = Database.fetch_optional_with(
+        "SELECT name FROM packages WHERE name = $1",
+        sql_params_1(req.package_name.clone())
+    ).await?;
+
+    match package_exists {
+        Maybe.None => {
+            return Result.Err(RegistryError.package_not_found(req.package_name));
+        },
+        Maybe.Some(_) => {},
+    }
+
+    // Unblock package
+    Database.execute_with(
+        "UPDATE packages SET is_blocked = $1, block_reason = NULL, blocked_at = NULL WHERE name = $2",
+        sql_params_2("0", req.package_name.clone())
+    ).await?;
+
+    Result.Ok(AdminResponseDto.success(
+        f"Package {req.package_name} has been unblocked",
+        Maybe.Some(req.package_name)
+    ))
+}
+
+/// Get registry statistics (admin only)
+///
+/// GET /api/v1/admin/stats
+///
+/// Returns comprehensive statistics about the registry for the admin dashboard.
+pub async fn get_registry_stats(auth_token: Text) -> Result<RegistryStatsDto, RegistryError>
+    using [Database, Auth]
+{
+    // Verify authentication and admin role
+    let auth_user = match Auth.verify_token(auth_token).await {
+        Result.Ok(u) => u,
+        Result.Err(_) => return Result.Err(RegistryError.invalid_token("Invalid or expired token")),
+    };
+
+    if auth_user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Admin access required"));
+    }
+
+    // Get total users
+    let user_count_rows = Database.query("SELECT COUNT(*) as count FROM users").await?;
+    let total_users = if user_count_rows.len() > 0 {
+        match user_count_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Get total packages
+    let package_count_rows = Database.query("SELECT COUNT(DISTINCT name) as count FROM packages").await?;
+    let total_packages = if package_count_rows.len() > 0 {
+        match package_count_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Get total versions
+    let version_count_rows = Database.query("SELECT COUNT(*) as count FROM packages").await?;
+    let total_versions = if version_count_rows.len() > 0 {
+        match version_count_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Get total downloads
+    let download_count_rows = Database.query("SELECT SUM(downloads) as total FROM packages").await?;
+    let total_downloads = if download_count_rows.len() > 0 {
+        match download_count_rows[0].get("total") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Calculate 30-day threshold
+    let now = unix_timestamp();
+    let thirty_days_ago = now - (30 * 24 * 60 * 60);
+
+    // Get active users in last 30 days
+    let active_users_rows = Database.query_with(
+        "SELECT COUNT(*) as count FROM users WHERE last_login > $1",
+        sql_params_1(f"{thirty_days_ago}")
+    ).await?;
+    let active_users_30d = if active_users_rows.len() > 0 {
+        match active_users_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Get new packages in last 30 days
+    let new_packages_rows = Database.query_with(
+        "SELECT COUNT(DISTINCT name) as count FROM packages WHERE created_at > $1",
+        sql_params_1(f"{thirty_days_ago}")
+    ).await?;
+    let new_packages_30d = if new_packages_rows.len() > 0 {
+        match new_packages_rows[0].get("count") {
+            Maybe.Some(count_str) => parse_id_from_text(&count_str),
+            Maybe.None => 0,
+        }
+    } else {
+        0
+    };
+
+    // Storage used (placeholder - would query storage service in production)
+    let storage_used_mb = 0;
+
+    Result.Ok(RegistryStatsDto {
+        total_users: total_users,
+        total_packages: total_packages,
+        total_versions: total_versions,
+        total_downloads: total_downloads,
+        active_users_30d: active_users_30d,
+        new_packages_30d: new_packages_30d,
+        storage_used_mb: storage_used_mb,
+    })
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Parse text to integer with error handling
+fn parse_id_from_text(id_str: &Text) -> Int {
+    // Simple digit-by-digit parsing
+    let mut result = 0;
+    let mut is_negative = false;
+    let mut started = false;
+
+    for ch in id_str.chars() {
+        let ch_str = ch.to_string();
+
+        if ch_str == "-" && !started {
+            is_negative = true;
+            started = true;
+        } else if ch_str == "0" || ch_str == "1" || ch_str == "2" || ch_str == "3" ||
+                  ch_str == "4" || ch_str == "5" || ch_str == "6" || ch_str == "7" ||
+                  ch_str == "8" || ch_str == "9" {
+            started = true;
+            let digit = match ch_str {
+                "0" => 0,
+                "1" => 1,
+                "2" => 2,
+                "3" => 3,
+                "4" => 4,
+                "5" => 5,
+                "6" => 6,
+                "7" => 7,
+                "8" => 8,
+                "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_negative {
+        -result
+    } else {
+        result
+    }
+}

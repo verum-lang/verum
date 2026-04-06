@@ -1,0 +1,300 @@
+// =============================================================================
+// hyperbolic.vr - Hyperbolic Functions
+// =============================================================================
+// Layer: 1 (Scalar Mathematics)
+//
+// Provides hyperbolic functions and their inverses:
+// - sinh, cosh, tanh: hyperbolic trigonometric functions
+// - asinh, acosh, atanh: inverse hyperbolic functions
+//
+// # Definitions
+//
+// sinh(x) = (e^x - e^(-x)) / 2
+// cosh(x) = (e^x + e^(-x)) / 2
+// tanh(x) = sinh(x) / cosh(x) = (e^2x - 1) / (e^2x + 1)
+//
+// # Precision
+//
+// All functions aim for < 1 ULP error using careful implementations
+// that avoid catastrophic cancellation for small arguments.
+//
+// Spec: docs/architecture/math-spec.md Section 3.3
+// =============================================================================
+
+module core.math.hyperbolic;
+
+mount super.constants.{PI, LN2, INFINITY, NEG_INFINITY, NAN};
+mount super.elementary.{exp, log, sqrt, abs};
+mount super.ieee754.{is_nan, is_infinite, copysign};
+
+// =============================================================================
+// Hyperbolic Functions
+// =============================================================================
+
+// Hyperbolic sine
+// Domain: (-∞, ∞), Range: (-∞, ∞)
+//
+// sinh(x) = (e^x - e^(-x)) / 2
+//
+// For small |x|, uses Taylor series to avoid cancellation.
+// For large |x|, uses sinh(x) ≈ sign(x) * e^|x| / 2.
+public fn sinh(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if is_infinite(x) { return x; }
+
+    let ax = abs(x);
+
+    if ax < 1e-10 {
+        // Taylor: x + x³/6 + x⁵/120 + ...
+        x + x * x * x / 6.0
+    } else if ax < 0.5 {
+        // More Taylor terms for medium range
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x5 = x3 * x2;
+        let x7 = x5 * x2;
+        x + x3 / 6.0 + x5 / 120.0 + x7 / 5040.0
+    } else if ax > 20.0 {
+        // Large |x|: sinh(x) ≈ sign(x) * e^|x| / 2
+        copysign(exp(ax) / 2.0, x)
+    } else {
+        // General case: (e^x - e^(-x)) / 2
+        (exp(x) - exp(-x)) / 2.0
+    }
+}
+
+// Hyperbolic cosine
+// Domain: (-∞, ∞), Range: [1, ∞)
+//
+// cosh(x) = (e^x + e^(-x)) / 2
+//
+// Always >= 1, symmetric: cosh(-x) = cosh(x)
+public fn cosh(x: Float) -> Float{>= 1.0} {
+    if is_nan(x) { return NAN; }
+    if is_infinite(x) { return INFINITY; }
+
+    let ax = abs(x);
+
+    if ax < 1e-10 {
+        // Taylor: 1 + x²/2 + x⁴/24 + ...
+        1.0 + x * x / 2.0
+    } else if ax < 0.5 {
+        let x2 = x * x;
+        let x4 = x2 * x2;
+        let x6 = x4 * x2;
+        1.0 + x2 / 2.0 + x4 / 24.0 + x6 / 720.0
+    } else if ax > 20.0 {
+        // Large |x|: cosh(x) ≈ e^|x| / 2
+        exp(ax) / 2.0
+    } else {
+        // General case: (e^x + e^(-x)) / 2
+        (exp(x) + exp(-x)) / 2.0
+    }
+}
+
+// Hyperbolic tangent
+// Domain: (-∞, ∞), Range: (-1, 1)
+//
+// tanh(x) = sinh(x) / cosh(x) = (e^2x - 1) / (e^2x + 1)
+//
+// Asymptotes to ±1 as x → ±∞
+public fn tanh(x: Float) -> Float{it > -1.0 && it < 1.0} {
+    if is_nan(x) { return NAN; }
+
+    if x > 20.0 { return 1.0; }
+    if x < -20.0 { return -1.0; }
+
+    if abs(x) < 1e-10 {
+        // Taylor: x - x³/3 + 2x⁵/15 - ...
+        x - x * x * x / 3.0
+    } else if abs(x) < 0.5 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x5 = x3 * x2;
+        let x7 = x5 * x2;
+        x - x3 / 3.0 + 2.0 * x5 / 15.0 - 17.0 * x7 / 315.0
+    } else {
+        // General case: (e^2x - 1) / (e^2x + 1)
+        let e2x = exp(2.0 * x);
+        (e2x - 1.0) / (e2x + 1.0)
+    }
+}
+
+// Hyperbolic secant
+// Domain: (-∞, ∞), Range: (0, 1]
+//
+// sech(x) = 1 / cosh(x) = 2 / (e^x + e^(-x))
+public fn sech(x: Float) -> Float{it > 0.0 && it <= 1.0} {
+    1.0 / cosh(x)
+}
+
+// Hyperbolic cosecant
+// Domain: (-∞, 0) ∪ (0, ∞), Range: (-∞, 0) ∪ (0, ∞)
+//
+// csch(x) = 1 / sinh(x)
+public fn csch(x: Float{!= 0.0}) -> Float {
+    1.0 / sinh(x)
+}
+
+// Hyperbolic cotangent
+// Domain: (-∞, 0) ∪ (0, ∞), Range: (-∞, -1) ∪ (1, ∞)
+//
+// coth(x) = cosh(x) / sinh(x) = 1 / tanh(x)
+public fn coth(x: Float{!= 0.0}) -> Float {
+    cosh(x) / sinh(x)
+}
+
+// =============================================================================
+// Inverse Hyperbolic Functions
+// =============================================================================
+
+// Inverse hyperbolic sine (area hyperbolic sine)
+// Domain: (-∞, ∞), Range: (-∞, ∞)
+//
+// asinh(x) = ln(x + √(x² + 1))
+//
+// For small |x|, uses Taylor series.
+// For large |x|, uses asinh(x) ≈ sign(x) * (ln(2|x|))
+public fn asinh(x: Float) -> Float {
+    if is_nan(x) { return NAN; }
+    if is_infinite(x) { return x; }
+
+    let ax = abs(x);
+
+    if ax < 1e-10 {
+        // Taylor: x - x³/6 + 3x⁵/40 - ...
+        x - x * x * x / 6.0
+    } else if ax < 0.5 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x5 = x3 * x2;
+        let x7 = x5 * x2;
+        x - x3 / 6.0 + 3.0 * x5 / 40.0 - 15.0 * x7 / 336.0
+    } else if ax > 1e10 {
+        // Large |x|: asinh(x) ≈ sign(x) * (ln(2) + ln(|x|))
+        copysign(LN2 + log(ax), x)
+    } else {
+        // General case: ln(x + √(x² + 1))
+        copysign(log(ax + sqrt(ax * ax + 1.0)), x)
+    }
+}
+
+// Inverse hyperbolic cosine (area hyperbolic cosine)
+// Domain: [1, ∞), Range: [0, ∞)
+//
+// acosh(x) = ln(x + √(x² - 1))
+//
+// Only defined for x >= 1.
+public fn acosh(x: Float{>= 1.0}) -> Float{>= 0.0} {
+    if x == 1.0 { return 0.0; }
+    if is_nan(x) { return NAN; }
+    if is_infinite(x) { return INFINITY; }
+
+    if x > 1e10 {
+        // Large x: acosh(x) ≈ ln(2) + ln(x)
+        LN2 + log(x)
+    } else if x < 1.5 {
+        // Near 1: use series for accuracy
+        // acosh(1+ε) ≈ √(2ε) * (1 - ε/12 + ...)
+        let t = x - 1.0;
+        let sq = sqrt(2.0 * t);
+        sq * (1.0 - t / 12.0 + 3.0 * t * t / 160.0)
+    } else {
+        // General case: ln(x + √(x² - 1))
+        log(x + sqrt(x * x - 1.0))
+    }
+}
+
+// Safe inverse hyperbolic cosine
+public fn acosh_safe(x: Float) -> Maybe<Float{>= 0.0}> {
+    if x < 1.0 {
+        Maybe.None
+    } else {
+        Maybe.Some(acosh(x))
+    }
+}
+
+// Inverse hyperbolic tangent (area hyperbolic tangent)
+// Domain: (-1, 1), Range: (-∞, ∞)
+//
+// atanh(x) = 0.5 * ln((1 + x) / (1 - x))
+//
+// Only defined for |x| < 1.
+public fn atanh(x: Float{it > -1.0 && it < 1.0}) -> Float {
+    if is_nan(x) { return NAN; }
+
+    if abs(x) < 1e-10 {
+        // Taylor: x + x³/3 + x⁵/5 + ...
+        x + x * x * x / 3.0
+    } else if abs(x) < 0.5 {
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x5 = x3 * x2;
+        let x7 = x5 * x2;
+        x + x3 / 3.0 + x5 / 5.0 + x7 / 7.0
+    } else {
+        // General case: 0.5 * ln((1 + x) / (1 - x))
+        0.5 * log((1.0 + x) / (1.0 - x))
+    }
+}
+
+// Safe inverse hyperbolic tangent
+public fn atanh_safe(x: Float) -> Maybe<Float> {
+    if x <= -1.0 || x >= 1.0 {
+        Maybe.None
+    } else {
+        Maybe.Some(atanh(x))
+    }
+}
+
+// Inverse hyperbolic secant
+// Domain: (0, 1], Range: [0, ∞)
+//
+// asech(x) = acosh(1/x)
+public fn asech(x: Float{it > 0.0 && it <= 1.0}) -> Float{>= 0.0} {
+    acosh(1.0 / x)
+}
+
+// Inverse hyperbolic cosecant
+// Domain: (-∞, 0) ∪ (0, ∞), Range: (-∞, 0) ∪ (0, ∞)
+//
+// acsch(x) = asinh(1/x)
+public fn acsch(x: Float{!= 0.0}) -> Float {
+    asinh(1.0 / x)
+}
+
+// Inverse hyperbolic cotangent
+// Domain: (-∞, -1) ∪ (1, ∞), Range: (-∞, 0) ∪ (0, ∞)
+//
+// acoth(x) = 0.5 * ln((x + 1) / (x - 1))
+public fn acoth(x: Float{it < -1.0 || it > 1.0}) -> Float {
+    0.5 * log((x + 1.0) / (x - 1.0))
+}
+
+// =============================================================================
+// Gudermannian Function
+// =============================================================================
+
+// Gudermannian function
+// Domain: (-∞, ∞), Range: (-π/2, π/2)
+//
+// gd(x) = 2 * atan(tanh(x/2))
+//      = atan(sinh(x))
+//      = 2 * atan(e^x) - π/2
+//
+// Connects circular and hyperbolic functions:
+// sin(gd(x)) = tanh(x)
+// tan(gd(x)) = sinh(x)
+public fn gudermannian(x: Float) -> Float {
+    super.elementary.atan(sinh(x))
+}
+
+// Inverse Gudermannian function
+// Domain: (-π/2, π/2), Range: (-∞, ∞)
+//
+// gd⁻¹(x) = asinh(tan(x))
+//         = atanh(sin(x))
+//         = ln(tan(π/4 + x/2))
+public fn inverse_gudermannian(x: Float) -> Float {
+    asinh(super.elementary.tan(x))
+}

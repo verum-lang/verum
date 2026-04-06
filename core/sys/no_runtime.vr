@@ -1,0 +1,109 @@
+module sys.no_runtime;
+
+// =============================================================================
+// sys/no_runtime.vr - No-runtime mode declarations
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// Activated by: @cfg(runtime = "none") or @cfg(runtime = "embedded")
+// =============================================================================
+//
+// When building for embedded or bare-metal targets, the full Verum runtime
+// (async executor, CBGR generation tracker, thread pool, channels) is not
+// available. This module provides synchronous replacements for async
+// primitives so that code written with async/await can be compiled for
+// embedded targets without modification.
+//
+// Transformation rules:
+//   - async fn f() -> T  =>  fn f() -> T  (strip async)
+//   - await expr          =>  expr          (identity)
+//   - spawn(task)         =>  task()        (inline execution)
+//   - select { ... }      =>  first-ready poll (compile-time error if > 1)
+//   - channels            =>  compile-time error (no threads)
+//
+// These stubs are only linked when the full runtime is absent.
+// =============================================================================
+
+// =============================================================================
+// Async-to-Sync Stubs
+// =============================================================================
+
+/// Identity transformation for block_on — in no-runtime mode, the "future"
+/// is already a synchronous value, so we simply return it.
+public fn block_on<T>(future: T) -> T {
+    future
+}
+
+/// Synchronous spawn — executes the task inline and returns the result.
+/// There are no threads in embedded mode, so "spawn" is just a function call.
+public fn spawn_sync<T>(task: fn() -> T) -> T {
+    task()
+}
+
+// =============================================================================
+// Synchronous Channel Stubs (bounded, single-element)
+// =============================================================================
+// For code that uses channels as synchronous single-element buffers
+// (e.g., one-shot result passing within a single thread).
+
+type SyncChannel<T> is Empty | Full(T);
+
+implement SyncChannel {
+    public fn new() -> SyncChannel<T> {
+        Empty
+    }
+
+    /// Send a value. Returns false if the channel already holds a value.
+    public fn send(&mut self, value: T) -> Bool {
+        match self {
+            Empty => {
+                *self = Full(value);
+                true
+            }
+            Full(_) => false,
+        }
+    }
+
+    /// Receive the value. Returns the value wrapped in Some, or None if empty.
+    public fn recv(&mut self) -> Maybe<T> {
+        match self {
+            Empty => None,
+            Full(v) => {
+                let result = v;
+                *self = Empty;
+                Some(result)
+            }
+        }
+    }
+
+    public fn is_empty(&self) -> Bool {
+        match self {
+            Empty => true,
+            Full(_) => false,
+        }
+    }
+}
+
+// =============================================================================
+// No-op Mutex for Single-Threaded Embedded
+// =============================================================================
+
+type NoOpMutex<T> is {
+    value: T,
+};
+
+implement NoOpMutex {
+    public fn new(value: T) -> NoOpMutex<T> {
+        NoOpMutex { value: value }
+    }
+
+    /// Lock is a no-op in single-threaded mode — just returns a reference.
+    public fn lock(&mut self) -> &mut T {
+        &mut self.value
+    }
+
+    /// Unlock is a no-op.
+    public fn unlock(&mut self) {
+        // Nothing to do — single-threaded
+    }
+}

@@ -1,0 +1,19 @@
+// Test 7: Simplest possible protocol implementation test
+
+type Showable is protocol {
+    fn show_it(self) -> Text;
+}
+
+implement Showable for Int {
+    fn show_it(self) -> Text {
+        "an integer"
+    }
+}
+
+fn main() {
+    print("Test 7: Simple Int protocol implementation");
+    let x = 42;
+    let result = x.show_it();
+    print(result);
+    print("SUCCESS");
+}

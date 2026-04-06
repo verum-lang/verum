@@ -1,0 +1,8 @@
+// Test empty FFI boundary
+
+ffi EmptyBoundary {
+}
+
+fn main() -> Int {
+    0
+}

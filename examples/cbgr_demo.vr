@@ -1,0 +1,272 @@
+// cbgr_demo.vr
+// Demonstrates the three-tier memory safety model
+
+// TIER 1: CBGR References (&T) - Default safe option
+// - Automatic memory safety (~15ns overhead)
+// - No manual lifetime management
+// - Perfect for most code
+
+fn sum_list_cbgr(items: &List<Int>) -> Int {
+    // CBGR ensures memory safety automatically
+    // ~15ns overhead per reference access
+    let mut total = 0;
+    for item in items {
+        total = total + *item;  // Safe access
+    }
+    total
+}
+
+fn process_data_cbgr(data: &Data) -> Result<Output, Error> {
+    // CBGR prevents:
+    // - Use-after-free
+    // - Double-free
+    // - Dangling pointers
+    // - Data races
+
+    let processed = transform(data);  // Safe reference
+    validate(processed);  // Safe reference
+    Ok(Output.from(processed))
+}
+
+// TIER 2: Checked References (&checked T) - Zero-cost verified
+// - Compile-time safety proof required
+// - Zero runtime overhead
+// - Use after profiling shows bottleneck
+
+@checked  // Tells compiler to verify safety
+fn sum_list_checked(items: &checked List<Int>) -> Int {
+    // Compiler proves this is safe at compile time
+    // Zero runtime overhead
+    let mut total = 0;
+    for item in items {
+        total = total + *item;  // Proven safe, no checks
+    }
+    total
+}
+
+@checked
+fn binary_search(arr: &checked List<Int>, target: Int) -> Maybe<Int> {
+    // Compiler verifies all accesses are in bounds
+    let mut low = 0;
+    let mut high = arr.len() - 1;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        let val = arr[mid];  // Proven in bounds
+
+        if val == target {
+            return Some(mid);
+        } else if val < target {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    None
+}
+
+// TIER 3: Unsafe References (&unsafe T) - Manual management
+// - Zero cost, no safety checks
+// - Use only when absolutely necessary
+// - Requires careful reasoning
+
+@unsafe
+fn sum_array_unsafe(ptr: &unsafe Int, len: usize) -> Int {
+    // SAFETY: Caller must ensure:
+    // 1. ptr points to valid memory
+    // 2. len elements are accessible
+    // 3. Memory remains valid during this function
+    // 4. No concurrent modifications
+
+    let mut total = 0;
+    for i in 0..len {
+        unsafe {
+            // Manual pointer arithmetic
+            // No safety checks at all
+            total = total + *ptr.offset(i);
+        }
+    }
+    total
+}
+
+// Performance comparison example
+fn benchmark_memory_safety() {
+    let data = List.from_fn(10000, |i| i);
+
+    // Benchmark CBGR (safe, small overhead)
+    let start = Time.now();
+    let sum1 = sum_list_cbgr(&data);
+    let cbgr_time = Time.now() - start;
+
+    print(f"CBGR sum: {sum1}, time: {cbgr_time}");
+
+    // Benchmark checked (verified safe, zero overhead)
+    let start = Time.now();
+    let sum2 = sum_list_checked(&data);
+    let checked_time = Time.now() - start;
+
+    print(f"Checked sum: {sum2}, time: {checked_time}");
+
+    // Benchmark unsafe (manual, zero overhead, risky)
+    let start = Time.now();
+    let sum3 = sum_array_unsafe(&data[0], data.len());
+    let unsafe_time = Time.now() - start;
+
+    print(f"Unsafe sum: {sum3}, time: {unsafe_time}");
+}
+
+// Migration path: Start safe, optimize later
+// Step 1: Write with CBGR (safe by default)
+fn initial_implementation(data: &List<Item>) -> Result<Output, Error> {
+    // Uses CBGR, automatic safety
+    let filtered = data.filter(|item| item.is_valid());
+    let processed = filtered.map(|item| process_item(item));
+    let result = combine_results(processed);
+    Ok(result)
+}
+
+// Step 2: Profile and identify bottleneck
+// (Use profiling tools to measure)
+
+// Step 3: Optimize hot path with checked references
+@checked
+fn optimized_implementation(data: &checked List<Item>) -> Result<Output, Error> {
+    // Same logic, but compiler verifies safety
+    // Zero runtime overhead
+    let filtered = data.filter(|item| item.is_valid());
+    let processed = filtered.map(|item| process_item(item));
+    let result = combine_results(processed);
+    Ok(result)
+}
+
+// Real-world example: String processing
+
+// CBGR version (safe, default)
+fn count_words_cbgr(text: &Text) -> Int {
+    text.split_whitespace().len()
+}
+
+// Checked version (optimized after profiling)
+@checked
+fn count_words_checked(text: &checked Text) -> Int {
+    // Compiler verifies string operations are safe
+    text.split_whitespace().len()
+}
+
+// Data structure with mixed references
+type CachedData<T> is {
+    raw: &T,              // CBGR reference (safe)
+    processed: Heap<T>,    // Owned data
+    metadata: Metadata
+};
+
+fn process_cached_data<T>(cache: &CachedData<T>) -> Result<T, Error> {
+    // CBGR ensures cache.raw is always valid
+    let value = *cache.raw;
+
+    // Process based on metadata
+    if cache.metadata.needs_refresh {
+        refresh_cache(cache)
+    } else {
+        Ok(value)
+    }
+}
+
+// Smart pointer usage with CBGR
+fn shared_ownership_example() {
+    mount core.smart_ptr.*;
+
+    // Counted<T> for shared ownership with CBGR
+    let data = Counted.new(Data { value: 42 });
+
+    // Multiple owners, CBGR ensures safety
+    let owner1 = data.clone();
+    let owner2 = data.clone();
+
+    // All references are safe
+    print(*owner1);
+    print(*owner2);
+}
+
+// Thread-safe shared ownership
+fn thread_safe_example() {
+    mount core.smart_ptr.*;
+
+    // Shared<T> for thread-safe reference counting
+    let data = Shared.new(Data { value: 42 });
+
+    // Can be sent across threads safely
+    spawn {
+        let local = data.clone();
+        print(f"Thread 1: {*local}");
+    };
+
+    spawn {
+        let local = data.clone();
+        print(f"Thread 2: {*local}");
+    };
+}
+
+// Memory safety in async contexts
+async fn async_memory_safety() {
+    let data = Heap.new(AsyncData { pending: true });
+
+    // Spawn task with data
+    let task = spawn async {
+        // CBGR ensures data is valid even across await points
+        let result = fetch_remote_data().await;
+
+        process_with_data(&data, result).await
+    };
+
+    // Wait for task
+    task.await?
+}
+
+// Error handling with memory safety
+fn error_handling_safety(input: &Text) -> Result<Output, Error> {
+    // CBGR ensures 'input' remains valid even through error paths
+
+    let parsed = parse_input(input)?;  // Safe if error returned
+    let validated = validate(parsed)?;  // Safe if error returned
+    let processed = process(validated)?;  // Safe if error returned
+
+    Ok(processed)
+}
+
+fn main() {
+    print("=== CBGR Memory Safety Demo ===\n");
+
+    // Demonstrate the three tiers
+    print("--- Tier 1: CBGR (Safe by default) ---");
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let sum = sum_list_cbgr(&numbers);
+    print(f"Sum (CBGR): {sum}");
+
+    print("\n--- Tier 2: Checked (Verified safe) ---");
+    let sum = sum_list_checked(&numbers);
+    print(f"Sum (Checked): {sum}");
+
+    let target = 7;
+    match binary_search(&numbers, target) {
+        Some(idx) => print(f"Found {target} at index {idx}"),
+        None => print(f"{target} not found")
+    }
+
+    print("\n--- Performance Comparison ---");
+    benchmark_memory_safety();
+
+    print("\n--- Smart Pointers ---");
+    shared_ownership_example();
+
+    print("\n--- Thread Safety ---");
+    thread_safe_example();
+
+    print("\n=== Key Takeaways ===");
+    print("1. Start with CBGR (&T) - safe by default");
+    print("2. Profile to find bottlenecks");
+    print("3. Optimize with checked (&checked T) where needed");
+    print("4. Use unsafe (&unsafe T) only as last resort");
+    print("5. Let the compiler prove safety whenever possible");
+}

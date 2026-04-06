@@ -1,0 +1,25 @@
+// Test 5: Protocol Bounds on Generic Functions
+// Tests: using protocol bounds in generic function definitions
+
+type Showable is protocol {
+    fn show(&self) -> Int;
+}
+
+type Number is {
+    val: Int
+}
+
+implement Showable for Number {
+    fn show(&self) -> Int {
+        self.val
+    }
+}
+
+fn display<T: Showable>(item: T) -> Int {
+    item.show()
+}
+
+fn main() -> Int {
+    let n = Number { val: 99 };
+    display(n)
+}

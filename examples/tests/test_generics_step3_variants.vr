@@ -1,0 +1,33 @@
+// Step 3: Test generic variant types
+
+type Maybe<T> is
+  | Just(T)
+  | Nothing
+
+type Result<T, E> is
+  | Ok(T)
+  | Err(E)
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Just(val) => Just(f(val)),
+        Nothing => Nothing
+    }
+}
+
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Just(val) => val,
+        Nothing => default
+    }
+}
+
+fn main() -> Int {
+    let m1 = Just(42);
+    let m2 = Nothing;
+    let double = fn(x: Int) -> Int { x * 2 };
+    let m3 = map_maybe(m1, double);
+    let r1 = unwrap_or(m3, 0);
+    let r2 = unwrap_or(m2, 99);
+    r1
+}

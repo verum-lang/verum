@@ -1,0 +1,22 @@
+[package]
+name = "verum_mlir_sys"
+version = "21.0.0"
+edition = "2024"
+description = "Low-level FFI bindings for MLIR C API, built from local LLVM sources"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/luxquant/axiom"
+readme = "README.md"
+
+# Tells cargo this crate links to native MLIR libraries
+# Prevents multiple crates from linking the same native library
+links = "verum-mlir"
+
+[features]
+default = []
+
+[build-dependencies]
+bindgen = "0.72.1"
+
+[dependencies]
+
+[dev-dependencies]

@@ -1,0 +1,19 @@
+// Test: Conditional yield
+// Tests if yield can be used conditionally
+
+fn filtered_gen(limit: Int) -> Stream<Int> {
+    let mut i = 0;
+    while i < limit {
+        if i % 2 == 0 {
+            yield i;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {
+    let gen = filtered_gen(10);
+    for value in gen {
+        print(value);
+    }
+}

@@ -1,0 +1,16 @@
+// Test 8: Context with return values
+context IdGenerator {
+    fn next_id(self) -> Int
+}
+
+fn create_entity() using IdGenerator -> Int {
+    IdGenerator.next_id()
+}
+
+type SequentialIdGen is { counter: Int };
+
+fn main() {
+    provide IdGenerator = SequentialIdGen { counter: 0 };
+    let id1 = create_entity();
+    let id2 = create_entity();
+}

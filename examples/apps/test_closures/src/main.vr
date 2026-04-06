@@ -1,0 +1,153 @@
+// Comprehensive test for Verum lambda/closure syntax
+// Tests all closure features according to the grammar
+
+fn main() -> Int {
+    println("=== Verum Closure Test Suite ===");
+    println("");
+
+    // Test 1: Basic single-parameter closure
+    println("Test 1: Basic single-parameter closure");
+    let add_one = |x| x + 1;
+    let result1 = add_one(5);
+    print("add_one(5) = ");
+    println(result1);
+    println("");
+
+    // Test 2: Multi-parameter closure
+    println("Test 2: Multi-parameter closure");
+    let add = |x, y| x + y;
+    let result2 = add(3, 4);
+    print("add(3, 4) = ");
+    println(result2);
+    println("");
+
+    // Test 3: Typed closure with explicit types
+    println("Test 3: Typed closure with explicit return type");
+    let double: fn(Int) -> Int = |x: Int| -> Int { x * 2 };
+    let result3 = double(7);
+    print("double(7) = ");
+    println(result3);
+    println("");
+
+    // Test 4: Closure capturing variables
+    println("Test 4: Closure capturing variables");
+    let multiplier = 10;
+    let multiply_by_ten = |x| x * multiplier;
+    let result4 = multiply_by_ten(5);
+    print("multiply_by_ten(5) with multiplier=10: ");
+    println(result4);
+    println("");
+
+    // Test 5: Closure with block expression
+    println("Test 5: Closure with block expression");
+    let complex_calc = |x| {
+        let y = x * 2;
+        let z = y + 1;
+        z * 3
+    };
+    let result5 = complex_calc(4);
+    print("complex_calc(4) = ");
+    println(result5);
+    println("");
+
+    // Test 6: Higher-order function using closures
+    println("Test 6: Higher-order function using closures");
+    let apply_twice = |f, x| f(f(x));
+    let increment = |n| n + 1;
+    let result6 = apply_twice(increment, 10);
+    print("apply_twice(increment, 10) = ");
+    println(result6);
+    println("");
+
+    // Test 7: Closure as function argument
+    println("Test 7: Closure as function argument");
+    let result7 = map_value(5, |x| x * x);
+    print("map_value(5, |x| x * x) = ");
+    println(result7);
+    println("");
+
+    // Test 8: Closure as return value
+    println("Test 8: Closure as return value");
+    let make_adder = |n| |x| x + n;
+    let add_five = make_adder(5);
+    let result8 = add_five(10);
+    print("make_adder(5)(10) = ");
+    println(result8);
+    println("");
+
+    // Test 9: Zero-parameter closure
+    println("Test 9: Zero-parameter closure");
+    let get_constant = || 42;
+    let result9 = get_constant();
+    print("get_constant() = ");
+    println(result9);
+    println("");
+
+    // Test 10: Nested closures
+    println("Test 10: Nested closures");
+    let outer = |x| {
+        let inner = |y| x + y;
+        inner(10)
+    };
+    let result10 = outer(5);
+    print("outer(5) with nested closure = ");
+    println(result10);
+    println("");
+
+    // Test 11: Closure with multiple captured variables
+    println("Test 11: Closure with multiple captured variables");
+    let a = 2;
+    let b = 3;
+    let combined = |x| x * a + b;
+    let result11 = combined(5);
+    print("combined(5) with a=2, b=3: ");
+    println(result11);
+    println("");
+
+    // Test 12: Closure in list operations
+    println("Test 12: Closure in list operations");
+    let numbers = [1, 2, 3, 4, 5];
+    let doubled_sum = map_list(numbers, |x| x * 2);
+    print("Sum of doubled list [1,2,3,4,5] -> [2,4,6,8,10]: ");
+    println(doubled_sum);
+    println("");
+
+    println("=== All tests completed successfully! ===");
+    
+    return 0;
+}
+
+// Helper function: takes a value and applies a closure to it
+fn map_value(value: Int, f: fn(Int) -> Int) -> Int {
+    return f(value);
+}
+
+// Helper function: maps a closure over a list
+// Note: This is a simplified version - list comprehensions would be better
+fn map_list(list: [Int], f: fn(Int) -> Int) -> Int {
+    // For now, just demonstrate that the closure is called
+    // Return the sum of mapped values
+    let mut sum = 0;
+    for item in list {
+        sum = sum + f(item);
+    }
+    return sum;
+}
+
+/* Note: Async closures would be tested like this (when async is fully available):
+
+Test 13: Async closure
+println("Test 13: Async closure");
+let async_fetch = async |url| {
+    let data = fetch(url).await;
+    return data;
+};
+let result13 = async_fetch("https://example.com").await;
+println(result13);
+
+The syntax according to the grammar is:
+- closure_expr = [ 'async' ] , closure_params , [ '->' , type_expr ] , expression ;
+- This allows: async |x| expression
+- Or with block: async |x| { ... }
+- Can also use async block: async { ... }
+*/

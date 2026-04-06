@@ -1,0 +1,607 @@
+// =============================================================================
+// canvas.vr - Braille / half-block / block pixel canvas widget
+// =============================================================================
+module canvas;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.Block;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+mount core.math.{abs, sqrt, floor, round};
+
+// =============================================================================
+// CanvasMode — resolution mode for pixel rendering
+// =============================================================================
+
+/// Canvas resolution mode.
+public type CanvasMode is
+    | Braille      // 2x4 dots per cell = highest resolution
+    | HalfBlock    // 2x1 per cell (upper/lower half blocks ▀▄)
+    | Block;       // 1x1 per cell (full block █)
+
+// =============================================================================
+// Shape protocol — anything drawable on a canvas
+// =============================================================================
+
+/// Shape protocol — any drawable shape.
+public type Shape is protocol {
+    fn draw(&self, painter: &mut Painter);
+};
+
+// =============================================================================
+// Built-in shapes: LineShape, RectShape, CircleShape
+// =============================================================================
+
+/// A line from (x1,y1) to (x2,y2).
+public type LineShape is {
+    x1: Float,
+    y1: Float,
+    x2: Float,
+    y2: Float,
+    color: Color,
+};
+
+implement LineShape {
+    public fn new(x1: Float, y1: Float, x2: Float, y2: Float, color: Color) -> LineShape {
+        LineShape { x1: x1, y1: y1, x2: x2, y2: y2, color: color }
+    }
+}
+
+implement Shape for LineShape {
+    fn draw(&self, painter: &mut Painter) {
+        painter.set_color(self.color);
+        painter.line(self.x1, self.y1, self.x2, self.y2);
+    }
+}
+
+/// An axis-aligned rectangle outline.
+public type RectShape is {
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float,
+    color: Color,
+};
+
+implement RectShape {
+    public fn new(x: Float, y: Float, width: Float, height: Float, color: Color) -> RectShape {
+        RectShape { x: x, y: y, width: width, height: height, color: color }
+    }
+}
+
+implement Shape for RectShape {
+    fn draw(&self, painter: &mut Painter) {
+        painter.set_color(self.color);
+        painter.rect_outline(self.x, self.y, self.width, self.height);
+    }
+}
+
+/// A circle.
+public type CircleShape is {
+    cx: Float,
+    cy: Float,
+    radius: Float,
+    color: Color,
+};
+
+implement CircleShape {
+    public fn new(cx: Float, cy: Float, radius: Float, color: Color) -> CircleShape {
+        CircleShape { cx: cx, cy: cy, radius: radius, color: color }
+    }
+}
+
+implement Shape for CircleShape {
+    fn draw(&self, painter: &mut Painter) {
+        painter.set_color(self.color);
+        painter.circle(self.cx, self.cy, self.radius);
+    }
+}
+
+// =============================================================================
+// Built-in shapes: LineSeries, ScatterPlot
+// =============================================================================
+
+/// A connected line series (polyline) through a list of points.
+public type LineSeries is {
+    points: List<(Float, Float)>,
+    color: Color,
+};
+
+implement LineSeries {
+    public fn new(points: List<(Float, Float)>, color: Color) -> LineSeries {
+        LineSeries { points: points, color: color }
+    }
+}
+
+implement Shape for LineSeries {
+    fn draw(&self, painter: &mut Painter) {
+        if self.points.len() < 2 { return; }
+        painter.set_color(self.color);
+        for i in 0..(self.points.len() - 1) {
+            let (x1, y1) = self.points[i];
+            let (x2, y2) = self.points[i + 1];
+            painter.line(x1, y1, x2, y2);
+        }
+    }
+}
+
+/// A scatter plot — individual points rendered as single pixels.
+public type ScatterPlot is {
+    points: List<(Float, Float)>,
+    color: Color,
+};
+
+implement ScatterPlot {
+    public fn new(points: List<(Float, Float)>, color: Color) -> ScatterPlot {
+        ScatterPlot { points: points, color: color }
+    }
+}
+
+implement Shape for ScatterPlot {
+    fn draw(&self, painter: &mut Painter) {
+        painter.set_color(self.color);
+        for (x, y) in &self.points {
+            painter.set_pixel(*x, *y);
+        }
+    }
+}
+
+// =============================================================================
+// Marker — rendering fidelity selector (replacing CanvasMode)
+// =============================================================================
+
+/// Marker determines the resolution mode for canvas rendering.
+/// Equivalent to CanvasMode but with clearer naming per spec Section 15.6.
+public type Marker is
+    | Dot         // 1x1 per cell (same as Block)
+    | Braille     // 2x4 dots per cell = highest resolution
+    | HalfBlock   // 2x1 per cell (upper/lower half blocks)
+    | Block;      // 1x1 per cell (full block)
+
+// =============================================================================
+// PixelCanvas — low-level pixel buffer
+// =============================================================================
+
+/// Low-level pixel buffer for canvas rendering.
+/// Stores a grid of boolean pixels and their associated colors.
+public type PixelCanvas is {
+    pixels: List<Bool>,
+    colors: List<Color>,
+    width: Int,     // pixel width
+    height: Int,    // pixel height
+};
+
+implement PixelCanvas {
+    /// Create a new pixel canvas filled with off pixels.
+    public fn new(width: Int, height: Int) -> PixelCanvas {
+        let size = width * height;
+        let mut pixels = List.with_capacity(size);
+        let mut colors = List.with_capacity(size);
+        for _ in 0..size {
+            pixels.push(false);
+            colors.push(Color.Reset);
+        }
+        PixelCanvas { pixels: pixels, colors: colors, width: width, height: height }
+    }
+
+    /// Set a pixel at (x, y) to on with a given color.
+    public fn set(&mut self, x: Int, y: Int, color: Color) {
+        if x >= 0 && x < self.width && y >= 0 && y < self.height {
+            let idx = y * self.width + x;
+            self.pixels[idx] = true;
+            self.colors[idx] = color;
+        }
+    }
+
+    /// Get whether a pixel at (x, y) is on.
+    public fn get(&self, x: Int, y: Int) -> Bool {
+        if x >= 0 && x < self.width && y >= 0 && y < self.height {
+            self.pixels[y * self.width + x]
+        } else {
+            false
+        }
+    }
+
+    /// Get the color of a pixel at (x, y).
+    public fn get_color(&self, x: Int, y: Int) -> Color {
+        if x >= 0 && x < self.width && y >= 0 && y < self.height {
+            self.colors[y * self.width + x]
+        } else {
+            Color.Reset
+        }
+    }
+
+    /// Clear all pixels.
+    public fn clear(&mut self) {
+        for i in 0..self.pixels.len() {
+            self.pixels[i] = false;
+            self.colors[i] = Color.Reset;
+        }
+    }
+}
+
+// =============================================================================
+// Painter — high-level drawing API that maps world coords to pixel coords
+// =============================================================================
+
+/// Painter provides a coordinate-mapped drawing API.
+/// World coordinates (Float) are mapped to pixel coordinates (Int) based on
+/// the canvas bounds.
+public type Painter is {
+    canvas: &mut PixelCanvas,
+    color: Color,
+    x_bounds: (Float, Float),
+    y_bounds: (Float, Float),
+};
+
+implement Painter {
+    /// Map a world-space x coordinate to a pixel x coordinate.
+    fn map_x(&self, x: Float) -> Int {
+        let min = self.x_bounds.0;
+        let max = self.x_bounds.1;
+        if max <= min { return 0; }
+        let ratio = (x - min) / (max - min);
+        let px = ratio * (self.canvas.width as Float);
+        floor(px) as Int
+    }
+
+    /// Map a world-space y coordinate to a pixel y coordinate.
+    /// Note: pixel y=0 is top, world y increases upward, so we invert.
+    fn map_y(&self, y: Float) -> Int {
+        let min = self.y_bounds.0;
+        let max = self.y_bounds.1;
+        if max <= min { return 0; }
+        let ratio = (y - min) / (max - min);
+        let py = (1.0 - ratio) * (self.canvas.height as Float);
+        floor(py) as Int
+    }
+
+    /// Set a single pixel in world coordinates.
+    public fn set_pixel(&mut self, x: Float, y: Float) {
+        let px = self.map_x(x);
+        let py = self.map_y(y);
+        self.canvas.set(px, py, self.color);
+    }
+
+    /// Set the current drawing color.
+    public fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
+
+    /// Draw a line from (x1,y1) to (x2,y2) using Bresenham's algorithm.
+    public fn line(&mut self, x1: Float, y1: Float, x2: Float, y2: Float) {
+        let px1 = self.map_x(x1);
+        let py1 = self.map_y(y1);
+        let px2 = self.map_x(x2);
+        let py2 = self.map_y(y2);
+
+        let mut cx = px1;
+        let mut cy = py1;
+
+        let dx = abs((px2 - px1) as Float) as Int;
+        let dy = abs((py2 - py1) as Float) as Int;
+        let sx = if px1 < px2 { 1 } else { -1 };
+        let sy = if py1 < py2 { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        loop {
+            self.canvas.set(cx, cy, self.color);
+
+            if cx == px2 && cy == py2 { break; }
+
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err = err - dy;
+                cx = cx + sx;
+            }
+            if e2 < dx {
+                err = err + dx;
+                cy = cy + sy;
+            }
+        }
+    }
+
+    /// Draw a rectangle outline in world coordinates.
+    public fn rect_outline(&mut self, x: Float, y: Float, w: Float, h: Float) {
+        // Top edge
+        self.line(x, y + h, x + w, y + h);
+        // Bottom edge
+        self.line(x, y, x + w, y);
+        // Left edge
+        self.line(x, y, x, y + h);
+        // Right edge
+        self.line(x + w, y, x + w, y + h);
+    }
+
+    /// Draw a circle using the midpoint circle algorithm.
+    public fn circle(&mut self, cx: Float, cy: Float, r: Float) {
+        // Map center and radius to pixel space
+        let pcx = self.map_x(cx);
+        let pcy = self.map_y(cy);
+
+        // Radius in pixels (use x-axis scale)
+        let x_min = self.x_bounds.0;
+        let x_max = self.x_bounds.1;
+        let pr = if x_max > x_min {
+            floor(r / (x_max - x_min) * (self.canvas.width as Float)) as Int
+        } else {
+            0
+        };
+
+        if pr <= 0 { return; }
+
+        // Midpoint circle algorithm
+        let mut px = pr;
+        let mut py = 0;
+        let mut d = 1 - pr;
+
+        while px >= py {
+            // Plot all 8 octants
+            self.canvas.set(pcx + px, pcy + py, self.color);
+            self.canvas.set(pcx - px, pcy + py, self.color);
+            self.canvas.set(pcx + px, pcy - py, self.color);
+            self.canvas.set(pcx - px, pcy - py, self.color);
+            self.canvas.set(pcx + py, pcy + px, self.color);
+            self.canvas.set(pcx - py, pcy + px, self.color);
+            self.canvas.set(pcx + py, pcy - px, self.color);
+            self.canvas.set(pcx - py, pcy - px, self.color);
+
+            py = py + 1;
+
+            if d <= 0 {
+                d = d + 2 * py + 1;
+            } else {
+                px = px - 1;
+                d = d + 2 * py - 2 * px + 1;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Braille dot mapping
+// =============================================================================
+// Braille patterns: U+2800 base, dots arranged:
+//   Dot 1 (0x01)  Dot 4 (0x08)     col 0  col 1
+//   Dot 2 (0x02)  Dot 5 (0x10)     row 0  row 0
+//   Dot 3 (0x04)  Dot 6 (0x20)     row 1  row 1
+//   Dot 7 (0x40)  Dot 8 (0x80)     row 2  row 2
+//                                    row 3  row 3
+// Each terminal cell represents a 2x4 pixel grid.
+
+/// Braille dot bit offsets: BRAILLE_DOTS[row][col]
+/// Row 0-3, Col 0-1.
+const BRAILLE_DOTS: List<List<Int>> = [
+    [0x01, 0x08],  // row 0
+    [0x02, 0x10],  // row 1
+    [0x04, 0x20],  // row 2
+    [0x40, 0x80],  // row 3
+];
+
+/// Braille base codepoint.
+const BRAILLE_BASE: Int = 0x2800;
+
+/// Convert a braille codepoint to a UTF-8 text character.
+fn braille_char(codepoint: Int) -> Text {
+    // Braille block U+2800..U+28FF is in the 3-byte UTF-8 range
+    // Encoding: 1110xxxx 10xxxxxx 10xxxxxx
+    let b1 = 0xE0 | ((codepoint >> 12) & 0x0F);
+    let b2 = 0x80 | ((codepoint >> 6) & 0x3F);
+    let b3 = 0x80 | (codepoint & 0x3F);
+    Text.from_bytes([b1 as UInt8, b2 as UInt8, b3 as UInt8])
+}
+
+// =============================================================================
+// Canvas widget
+// =============================================================================
+
+/// Canvas — a pixel-level drawing widget supporting braille, half-block,
+/// and full-block rendering modes.
+public type Canvas is {
+    mode: CanvasMode,
+    marker: Marker,
+    block: Maybe<Block>,
+    x_bounds: (Float, Float),
+    y_bounds: (Float, Float),
+    background_color: Color,
+    style: Style,
+    shapes: List<Heap<dyn Shape>>,
+};
+
+implement Canvas {
+    /// Create a new canvas with default settings.
+    public fn new() -> Canvas {
+        Canvas {
+            mode: CanvasMode.Braille,
+            marker: Marker.Braille,
+            block: None,
+            x_bounds: (0.0, 1.0),
+            y_bounds: (0.0, 1.0),
+            background_color: Color.Reset,
+            style: Style.DEFAULT,
+            shapes: List.new(),
+        }
+    }
+
+    /// Set the rendering mode.
+    public fn mode(self, mode: CanvasMode) -> Canvas {
+        Canvas { mode: mode, ..self }
+    }
+
+    /// Set the block wrapper.
+    public fn block(self, block: Block) -> Canvas {
+        Canvas { block: Some(block), ..self }
+    }
+
+    /// Set the horizontal world-coordinate bounds.
+    public fn x_bounds(self, min: Float, max: Float) -> Canvas {
+        Canvas { x_bounds: (min, max), ..self }
+    }
+
+    /// Set the vertical world-coordinate bounds.
+    public fn y_bounds(self, min: Float, max: Float) -> Canvas {
+        Canvas { y_bounds: (min, max), ..self }
+    }
+
+    /// Set the marker (rendering fidelity).
+    public fn marker(self, marker: Marker) -> Canvas {
+        Canvas { marker: marker, ..self }
+    }
+
+    /// Set the background color for empty canvas cells.
+    public fn background_color(self, color: Color) -> Canvas {
+        Canvas { background_color: color, ..self }
+    }
+
+    /// Add a shape to be drawn.
+    public fn paint(self, shape: Heap<dyn Shape>) -> Canvas {
+        let mut shapes = self.shapes;
+        shapes.push(shape);
+        Canvas { shapes: shapes, ..self }
+    }
+}
+
+implement Styled for Canvas {
+    fn style(self, style: Style) -> Canvas {
+        Canvas { style: style, ..self }
+    }
+}
+
+implement Widget for Canvas {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // Render block and compute inner area
+        let canvas_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if canvas_area.width < 1 || canvas_area.height < 1 { return; }
+
+        buf.set_style(canvas_area, self.style);
+
+        // Determine pixel resolution based on mode
+        let (px_per_col, px_per_row) = match self.mode {
+            Braille   => (2, 4),
+            HalfBlock => (1, 2),
+            Block     => (1, 1),
+        };
+
+        let pixel_w = canvas_area.width * px_per_col;
+        let pixel_h = canvas_area.height * px_per_row;
+
+        // Create pixel canvas and painter
+        let mut pixel_canvas = PixelCanvas.new(pixel_w, pixel_h);
+        let mut painter = Painter {
+            canvas: &mut pixel_canvas,
+            color: Color.White,
+            x_bounds: self.x_bounds,
+            y_bounds: self.y_bounds,
+        };
+
+        // Draw all shapes
+        for shape in &self.shapes {
+            shape.draw(&mut painter);
+        }
+
+        // Render pixel canvas to terminal buffer
+        match self.mode {
+            Braille => {
+                render_braille(&pixel_canvas, canvas_area, buf);
+            }
+            HalfBlock => {
+                render_half_block(&pixel_canvas, canvas_area, buf);
+            }
+            Block => {
+                render_block(&pixel_canvas, canvas_area, buf);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Rendering backends
+// =============================================================================
+
+/// Render pixel canvas as braille characters.
+/// Each terminal cell = 2 columns x 4 rows of pixels.
+fn render_braille(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
+    for cy in 0..area.height {
+        for cx in 0..area.width {
+            let mut pattern = 0;
+            let mut cell_color = Color.Reset;
+
+            // Sample the 2x4 dot grid for this cell
+            for row in 0..4 {
+                for col in 0..2 {
+                    let px = cx * 2 + col;
+                    let py = cy * 4 + row;
+                    if canvas.get(px, py) {
+                        pattern = pattern | BRAILLE_DOTS[row][col];
+                        // Use the color of the last set pixel
+                        let c = canvas.get_color(px, py);
+                        match c {
+                            Reset => {}
+                            _ => { cell_color = c; }
+                        }
+                    }
+                }
+            }
+
+            if pattern != 0 {
+                let ch = braille_char(BRAILLE_BASE + pattern);
+                let s = Style.new().fg(cell_color);
+                buf.get_mut(area.x + cx, area.y + cy).set_char(&ch, s);
+            }
+        }
+    }
+}
+
+/// Render pixel canvas as half-block characters.
+/// Each terminal cell = 1 column x 2 rows of pixels.
+/// Uses ▀ (upper half) when only top is set, ▄ (lower half) when only bottom,
+/// █ (full block) when both, space when neither.
+fn render_half_block(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
+    for cy in 0..area.height {
+        for cx in 0..area.width {
+            let top_on = canvas.get(cx, cy * 2);
+            let bot_on = canvas.get(cx, cy * 2 + 1);
+            let top_color = canvas.get_color(cx, cy * 2);
+            let bot_color = canvas.get_color(cx, cy * 2 + 1);
+
+            if top_on && bot_on {
+                // Both halves set — use full block with top color fg, bottom color bg
+                let s = Style.new().fg(top_color).bg(bot_color);
+                buf.get_mut(area.x + cx, area.y + cy).set_char("█", s);
+            } else if top_on {
+                // Only top half — use upper half block ▀
+                let s = Style.new().fg(top_color);
+                buf.get_mut(area.x + cx, area.y + cy).set_char("▀", s);
+            } else if bot_on {
+                // Only bottom half — use lower half block ▄
+                let s = Style.new().fg(bot_color);
+                buf.get_mut(area.x + cx, area.y + cy).set_char("▄", s);
+            }
+            // Neither set — leave cell empty
+        }
+    }
+}
+
+/// Render pixel canvas as full block characters.
+/// Each terminal cell = 1x1 pixel.
+fn render_block(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
+    for cy in 0..area.height {
+        for cx in 0..area.width {
+            if canvas.get(cx, cy) {
+                let color = canvas.get_color(cx, cy);
+                let s = Style.new().fg(color);
+                buf.get_mut(area.x + cx, area.y + cy).set_char("█", s);
+            }
+        }
+    }
+}

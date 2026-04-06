@@ -1,0 +1,21 @@
+// Test basic implement block
+type Counter is {
+    value: Int
+};
+
+implement Counter {
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+    
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn main() {
+    let _ = print("Testing implement blocks...");
+    let mut c = Counter { value: 0 };
+    let _ = print(f"Initial: {c.value}");
+    let _ = print("Done!");
+}

@@ -1,0 +1,75 @@
+// Test edge cases and potential failures
+
+// Test 1: Multiple parameters in variants
+type Event is
+    | Click { x: Int, y: Int, button: Text }
+    | KeyPress { key: Text, shift: Bool }
+    | Scroll { delta: Int };
+
+fn describe_event(e: Event) -> Text {
+    match e {
+        Event.Click { x, y, button } => f"Click at ({x},{y}) with {button}",
+        Event.KeyPress { key, shift } => if shift { f"Shift+{key}" } else { key },
+        Event.Scroll { delta } => f"Scroll {delta}",
+    }
+}
+
+// Test 2: Nested if-else
+fn complex_condition(x: Int, y: Int) -> Text {
+    if x > 0 {
+        if y > 0 {
+            "both positive"
+        } else if y == 0 {
+            "x positive, y zero"
+        } else {
+            "x positive, y negative"
+        }
+    } else if x == 0 {
+        "x is zero"
+    } else {
+        "x is negative"
+    }
+}
+
+// Test 3: Boolean operations
+fn test_booleans(a: Bool, b: Bool) -> Text {
+    let and_result = a && b;
+    let or_result = a || b;
+    let not_result = !a;
+    f"AND: {and_result}, OR: {or_result}, NOT: {not_result}"
+}
+
+fn main() {
+    print("═══════════════════════════════════════════════════════════");
+    print("EDGE CASES TEST SUITE");
+    print("═══════════════════════════════════════════════════════════");
+    print("");
+
+    // Test Event
+    print("Test 1: Variants with Multiple Named Fields");
+    let e1 = Event.Click { x: 100, y: 200, button: "left" };
+    let e2 = Event.KeyPress { key: "A", shift: true };
+    let e3 = Event.Scroll { delta: -5 };
+    print(f"  {describe_event(e1)}");
+    print(f"  {describe_event(e2)}");
+    print(f"  {describe_event(e3)}");
+    print("");
+
+    // Test nested if-else
+    print("Test 2: Nested Conditionals");
+    print(f"  complex_condition(5, 3): {complex_condition(5, 3)}");
+    print(f"  complex_condition(5, 0): {complex_condition(5, 0)}");
+    print(f"  complex_condition(0, 5): {complex_condition(0, 5)}");
+    print("");
+
+    // Test boolean operations
+    print("Test 3: Boolean Operations");
+    print(f"  test_booleans(true, true): {test_booleans(true, true)}");
+    print(f"  test_booleans(true, false): {test_booleans(true, false)}");
+    print(f"  test_booleans(false, true): {test_booleans(false, true)}");
+    print("");
+
+    print("═══════════════════════════════════════════════════════════");
+    print("EDGE CASES COMPLETE");
+    print("═══════════════════════════════════════════════════════════");
+}

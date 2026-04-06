@@ -1,0 +1,9 @@
+// Test unix_timestamp import
+link std.time.unix_timestamp;
+link core.base.{Text, Int};
+
+fn main() {
+    print("Testing unix_timestamp...");
+    let now = unix_timestamp();
+    print(f"Current timestamp: {now}");
+}

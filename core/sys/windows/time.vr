@@ -1,0 +1,651 @@
+module sys.windows.time;
+
+// =============================================================================
+// sys/windows/time.vr - Windows Time and Duration Utilities
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/kernel32
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides time-related types and functions for Windows:
+// - Duration: Represents a span of time
+// - Instant: Represents a point in monotonic time
+// - High-precision timing using QueryPerformanceCounter
+// - System time access
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.5
+// =============================================================================
+
+mount core.intrinsics.spin_hint;
+mount super.kernel32.{
+    LargeInteger,
+    SystemTime,
+    QueryPerformanceCounter,
+    QueryPerformanceFrequency,
+    GetTickCount64,
+    GetSystemTime,
+    GetLocalTime,
+    GetSystemTimeAsFileTime,
+    GetSystemTimePreciseAsFileTime,
+    Sleep,
+    SleepEx,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Nanoseconds per second
+public const NANOS_PER_SEC: UInt64 = 1_000_000_000;
+
+/// Nanoseconds per millisecond
+public const NANOS_PER_MILLI: UInt64 = 1_000_000;
+
+/// Nanoseconds per microsecond
+public const NANOS_PER_MICRO: UInt64 = 1_000;
+
+/// Milliseconds per second
+public const MILLIS_PER_SEC: UInt64 = 1_000;
+
+/// Microseconds per second
+public const MICROS_PER_SEC: UInt64 = 1_000_000;
+
+/// Windows FILETIME units per second (100-nanosecond intervals)
+public const FILETIME_UNITS_PER_SEC: UInt64 = 10_000_000;
+
+/// Windows epoch offset (from 1601-01-01 to 1970-01-01) in FILETIME units
+public const WINDOWS_EPOCH_OFFSET: UInt64 = 116444736000000000;
+
+// =============================================================================
+// Duration Type
+// =============================================================================
+
+/// Duration type (nanoseconds)
+public type Duration is (UInt64);
+
+implement Duration {
+    /// Create duration from nanoseconds.
+    @inline
+    public fn from_nanos(nanos: UInt64) -> Duration {
+        Duration(nanos)
+    }
+
+    /// Create duration from microseconds.
+    @inline
+    public fn from_micros(micros: UInt64) -> Duration {
+        Duration(micros * NANOS_PER_MICRO)
+    }
+
+    /// Create duration from milliseconds.
+    @inline
+    public fn from_millis(millis: UInt64) -> Duration {
+        Duration(millis * NANOS_PER_MILLI)
+    }
+
+    /// Create duration from seconds.
+    @inline
+    public fn from_secs(secs: UInt64) -> Duration {
+        Duration(secs * NANOS_PER_SEC)
+    }
+
+    /// Create duration from seconds (floating point).
+    public fn from_secs_f64(secs: Float64) -> Duration {
+        Duration((secs * NANOS_PER_SEC as Float64) as UInt64)
+    }
+
+    /// Zero duration.
+    @inline
+    public fn zero() -> Duration {
+        Duration(0)
+    }
+
+    /// Get total nanoseconds.
+    @inline
+    public fn as_nanos(&self) -> UInt64 {
+        self.0
+    }
+
+    /// Get total microseconds.
+    @inline
+    public fn as_micros(&self) -> UInt64 {
+        self.0 / NANOS_PER_MICRO
+    }
+
+    /// Get total milliseconds.
+    @inline
+    public fn as_millis(&self) -> UInt64 {
+        self.0 / NANOS_PER_MILLI
+    }
+
+    /// Get total seconds.
+    @inline
+    public fn as_secs(&self) -> UInt64 {
+        self.0 / NANOS_PER_SEC
+    }
+
+    /// Get total seconds as floating point.
+    @inline
+    public fn as_secs_f64(&self) -> Float64 {
+        self.0 as Float64 / NANOS_PER_SEC as Float64
+    }
+
+    /// Get the subsecond nanoseconds.
+    @inline
+    public fn subsec_nanos(&self) -> UInt32 {
+        (self.0 % NANOS_PER_SEC) as UInt32
+    }
+
+    /// Get the subsecond milliseconds.
+    @inline
+    public fn subsec_millis(&self) -> UInt32 {
+        ((self.0 % NANOS_PER_SEC) / NANOS_PER_MILLI) as UInt32
+    }
+
+    /// Check if duration is zero.
+    @inline
+    public fn is_zero(&self) -> Bool {
+        self.0 == 0
+    }
+
+    /// Add two durations.
+    @inline
+    public fn add(&self, other: Duration) -> Duration {
+        Duration(self.0 + other.0)
+    }
+
+    /// Subtract durations (saturating at zero).
+    @inline
+    public fn sub(&self, other: Duration) -> Duration {
+        if self.0 > other.0 {
+            Duration(self.0 - other.0)
+        } else {
+            Duration(0)
+        }
+    }
+
+    /// Multiply duration by a factor.
+    @inline
+    public fn mul(&self, factor: UInt64) -> Duration {
+        Duration(self.0 * factor)
+    }
+
+    /// Divide duration by a factor.
+    @inline
+    public fn div(&self, divisor: UInt64) -> Duration {
+        Duration(self.0 / divisor)
+    }
+}
+
+// =============================================================================
+// Instant Type (using QueryPerformanceCounter)
+// =============================================================================
+
+/// Instant type (monotonic time point using performance counter)
+public type Instant is (UInt64);  // Performance counter ticks
+
+/// Cached performance frequency (initialized on first use)
+static mut PERF_FREQUENCY: UInt64 = 0;
+static mut PERF_FREQUENCY_INITIALIZED: Bool = false;
+
+/// Get performance counter frequency (cached).
+fn get_frequency() -> UInt64 {
+    unsafe {
+        if !PERF_FREQUENCY_INITIALIZED {
+            let mut freq = LargeInteger(0);
+            QueryPerformanceFrequency(&mut freq);
+            PERF_FREQUENCY = freq.0 as UInt64;
+            PERF_FREQUENCY_INITIALIZED = true;
+        }
+        PERF_FREQUENCY
+    }
+}
+
+implement Instant {
+    /// Get the current instant (monotonic time).
+    @inline
+    public fn now() -> Instant {
+        let mut counter = LargeInteger(0);
+        QueryPerformanceCounter(&mut counter);
+        Instant(counter.0 as UInt64)
+    }
+
+    /// Get elapsed time since this instant.
+    @inline
+    public fn elapsed(&self) -> Duration {
+        let now = Instant.now();
+        self.duration_since(now)
+    }
+
+    /// Get duration from this instant to another.
+    @inline
+    public fn duration_since(&self, later: Instant) -> Duration {
+        let freq = get_frequency();
+        let ticks = if later.0 > self.0 {
+            later.0 - self.0
+        } else {
+            0
+        };
+
+        // Convert ticks to nanoseconds
+        // ticks * 1_000_000_000 / freq
+        // Use 128-bit math to avoid overflow
+        let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
+        Duration(nanos)
+    }
+
+    /// Check if this instant is before another.
+    @inline
+    public fn is_before(&self, other: Instant) -> Bool {
+        self.0 < other.0
+    }
+
+    /// Add a duration to this instant.
+    @inline
+    public fn add(&self, duration: Duration) -> Instant {
+        let freq = get_frequency();
+        // Convert nanoseconds to ticks
+        let ticks = (duration.0 as UInt128 * freq as UInt128 / NANOS_PER_SEC as UInt128) as UInt64;
+        Instant(self.0 + ticks)
+    }
+
+    /// Subtract a duration from this instant.
+    @inline
+    public fn sub(&self, duration: Duration) -> Instant {
+        let freq = get_frequency();
+        let ticks = (duration.0 as UInt128 * freq as UInt128 / NANOS_PER_SEC as UInt128) as UInt64;
+        if self.0 > ticks {
+            Instant(self.0 - ticks)
+        } else {
+            Instant(0)
+        }
+    }
+}
+
+// =============================================================================
+// Clock Functions
+// =============================================================================
+
+/// Get monotonic time in nanoseconds (using QueryPerformanceCounter).
+public fn monotonic_nanos() -> UInt64 {
+    let mut counter = LargeInteger(0);
+    QueryPerformanceCounter(&mut counter);
+    let freq = get_frequency();
+    (counter.0 as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64
+}
+
+/// Get monotonic time in microseconds (using QueryPerformanceCounter).
+public fn monotonic_micros() -> UInt64 {
+    let mut counter = LargeInteger(0);
+    QueryPerformanceCounter(&mut counter);
+    let freq = get_frequency();
+    (counter.0 as UInt128 * MICROS_PER_SEC as UInt128 / freq as UInt128) as UInt64
+}
+
+/// Get monotonic time in milliseconds (using GetTickCount64).
+///
+/// This is faster but less precise than monotonic_nanos.
+public fn monotonic_millis() -> UInt64 {
+    GetTickCount64()
+}
+
+/// Get the performance counter frequency in Hz.
+public fn get_perf_freq() -> UInt64 {
+    get_frequency() as UInt64
+}
+
+/// Get real-time (wall clock) in nanoseconds since Unix epoch.
+public fn realtime_nanos() -> UInt64 {
+    let mut filetime = LargeInteger(0);
+    GetSystemTimePreciseAsFileTime(&mut filetime);
+
+    // Convert from Windows FILETIME to Unix timestamp
+    let windows_time = filetime.0 as UInt64;
+    if windows_time > WINDOWS_EPOCH_OFFSET {
+        let unix_time = windows_time - WINDOWS_EPOCH_OFFSET;
+        // Convert 100ns intervals to nanoseconds
+        unix_time * 100
+    } else {
+        0
+    }
+}
+
+/// Get Unix timestamp in seconds.
+public fn unix_timestamp() -> UInt64 {
+    realtime_nanos() / NANOS_PER_SEC
+}
+
+/// Get system time as SystemTime structure.
+public fn system_time() -> SystemTime {
+    let mut st = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
+    GetSystemTime(&mut st);
+    st
+}
+
+/// Get local time as SystemTime structure.
+public fn local_time() -> SystemTime {
+    let mut st = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
+    GetLocalTime(&mut st);
+    st
+}
+
+// =============================================================================
+// Sleep Functions
+// =============================================================================
+
+/// Sleep for the specified duration.
+public fn sleep(duration: Duration) {
+    let millis = duration.as_millis();
+    if millis > 0 {
+        Sleep(millis as UInt32);
+    }
+}
+
+/// Sleep for milliseconds.
+public fn sleep_ms(ms: UInt64) {
+    if ms > 0 {
+        Sleep(ms as UInt32);
+    }
+}
+
+/// Sleep for microseconds.
+///
+/// Note: Windows Sleep has 1ms minimum resolution.
+/// For sub-millisecond delays, this uses busy-wait.
+public fn sleep_us(us: UInt64) {
+    if us >= 1000 {
+        Sleep((us / 1000) as UInt32);
+    } else if us > 0 {
+        // Busy-wait for sub-millisecond precision
+        let start = Instant.now();
+        let target = Duration.from_micros(us);
+        while start.elapsed().as_micros() < us {
+            spin_hint();
+        }
+    }
+}
+
+/// Sleep until a specific instant.
+public fn sleep_until(deadline: Instant) {
+    let now = Instant.now();
+    if deadline.0 > now.0 {
+        let duration = now.duration_since(deadline);
+        sleep(duration);
+    }
+}
+
+// =============================================================================
+// Timing Utilities
+// =============================================================================
+
+/// Measure elapsed time for a closure.
+///
+/// Returns (result, duration).
+public fn time_it<T>(f: fn() -> T) -> (T, Duration) {
+    let start = Instant.now();
+    let result = f();
+    let elapsed = start.elapsed();
+    (result, elapsed)
+}
+
+/// Simple stopwatch for timing code sections.
+public type Stopwatch is {
+    start: UInt64,      // Performance counter ticks
+    running: Bool,
+    accumulated: UInt64,  // Accumulated ticks
+};
+
+implement Stopwatch {
+    /// Create a new stopped stopwatch.
+    public fn new() -> Stopwatch {
+        Stopwatch {
+            start: 0,
+            running: false,
+            accumulated: 0,
+        }
+    }
+
+    /// Create and immediately start a stopwatch.
+    public fn started() -> Stopwatch {
+        let mut sw = Stopwatch.new();
+        sw.start();
+        sw
+    }
+
+    /// Start or resume the stopwatch.
+    public fn start(&mut self) {
+        if !self.running {
+            let mut counter = LargeInteger(0);
+            QueryPerformanceCounter(&mut counter);
+            self.start = counter.0 as UInt64;
+            self.running = true;
+        }
+    }
+
+    /// Stop the stopwatch (pause timing).
+    public fn stop(&mut self) {
+        if self.running {
+            let mut counter = LargeInteger(0);
+            QueryPerformanceCounter(&mut counter);
+            let now = counter.0 as UInt64;
+            self.accumulated += now - self.start;
+            self.running = false;
+        }
+    }
+
+    /// Reset the stopwatch to zero.
+    public fn reset(&mut self) {
+        self.start = 0;
+        self.running = false;
+        self.accumulated = 0;
+    }
+
+    /// Reset and immediately start.
+    public fn restart(&mut self) {
+        self.reset();
+        self.start();
+    }
+
+    /// Get elapsed time as Duration.
+    public fn elapsed(&self) -> Duration {
+        let freq = get_frequency();
+        let total_ticks = if self.running {
+            let mut counter = LargeInteger(0);
+            QueryPerformanceCounter(&mut counter);
+            let now = counter.0 as UInt64;
+            self.accumulated + (now - self.start)
+        } else {
+            self.accumulated
+        };
+        let nanos = (total_ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
+        Duration(nanos)
+    }
+
+    /// Check if the stopwatch is currently running.
+    public fn is_running(&self) -> Bool {
+        self.running
+    }
+
+    /// Get a lap time (elapsed since last lap or start).
+    ///
+    /// Does not reset the stopwatch.
+    public fn lap(&mut self) -> Duration {
+        let elapsed = self.elapsed();
+        // Reset accumulated but keep running
+        if self.running {
+            let mut counter = LargeInteger(0);
+            QueryPerformanceCounter(&mut counter);
+            self.start = counter.0 as UInt64;
+        }
+        self.accumulated = 0;
+        elapsed
+    }
+}
+
+// =============================================================================
+// Performance Counter
+// =============================================================================
+
+/// High-resolution performance counter.
+///
+/// Uses QueryPerformanceCounter which is the fastest monotonic
+/// time source on Windows.
+public type PerfCounter is (UInt64);
+
+implement PerfCounter {
+    /// Read the current performance counter.
+    @inline
+    public fn now() -> PerfCounter {
+        let mut counter = LargeInteger(0);
+        QueryPerformanceCounter(&mut counter);
+        PerfCounter(counter.0 as UInt64)
+    }
+
+    /// Get elapsed time since this counter reading.
+    @inline
+    public fn elapsed(&self) -> Duration {
+        let mut counter = LargeInteger(0);
+        QueryPerformanceCounter(&mut counter);
+        let now = counter.0 as UInt64;
+        let freq = get_frequency();
+        let ticks = now - self.0;
+        let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
+        Duration(nanos)
+    }
+
+    /// Get elapsed ticks (raw performance counter units).
+    @inline
+    public fn elapsed_ticks(&self) -> UInt64 {
+        let mut counter = LargeInteger(0);
+        QueryPerformanceCounter(&mut counter);
+        counter.0 as UInt64 - self.0
+    }
+
+    /// Difference between two counter readings.
+    @inline
+    public fn diff(&self, earlier: &PerfCounter) -> Duration {
+        let freq = get_frequency();
+        let ticks = self.0 - earlier.0;
+        let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
+        Duration(nanos)
+    }
+}
+
+// =============================================================================
+// Deadline Timer
+// =============================================================================
+
+/// A deadline timer for timeout management.
+public type DeadlineTimer is {
+    deadline: UInt64,  // Performance counter ticks
+    has_deadline: Bool,
+};
+
+implement DeadlineTimer {
+    /// Create a timer with no deadline (infinite timeout).
+    public fn none() -> DeadlineTimer {
+        DeadlineTimer {
+            deadline: 0,
+            has_deadline: false,
+        }
+    }
+
+    /// Create a timer that expires after a duration.
+    public fn after(duration: Duration) -> DeadlineTimer {
+        let now = Instant.now();
+        let deadline_instant = now.add(duration);
+        DeadlineTimer {
+            deadline: deadline_instant.0,
+            has_deadline: true,
+        }
+    }
+
+    /// Create a timer that expires at a specific instant.
+    public fn at(instant: Instant) -> DeadlineTimer {
+        DeadlineTimer {
+            deadline: instant.0,
+            has_deadline: true,
+        }
+    }
+
+    /// Check if the deadline has passed.
+    public fn is_expired(&self) -> Bool {
+        if !self.has_deadline {
+            false
+        } else {
+            Instant.now().0 >= self.deadline
+        }
+    }
+
+    /// Get remaining time until deadline.
+    ///
+    /// Returns None if no deadline or deadline has passed.
+    public fn remaining(&self) -> Maybe<Duration> {
+        if !self.has_deadline {
+            return None;
+        }
+
+        let now = Instant.now();
+        if now.0 >= self.deadline {
+            None
+        } else {
+            let freq = get_frequency();
+            let ticks = self.deadline - now.0;
+            let nanos = (ticks as UInt128 * NANOS_PER_SEC as UInt128 / freq as UInt128) as UInt64;
+            Some(Duration(nanos))
+        }
+    }
+
+    /// Check if this timer has a deadline set.
+    public fn has_deadline(&self) -> Bool {
+        self.has_deadline
+    }
+
+    /// Get the deadline as an Instant.
+    public fn deadline(&self) -> Maybe<Instant> {
+        if self.has_deadline {
+            Some(Instant(self.deadline))
+        } else {
+            None
+        }
+    }
+
+    /// Get remaining milliseconds for use with WaitForSingleObject etc.
+    ///
+    /// Returns INFINITE if no deadline.
+    public fn remaining_ms(&self) -> UInt32 {
+        if !self.has_deadline {
+            super.kernel32.INFINITE
+        } else {
+            match self.remaining() {
+                Some(d) => {
+                    let ms = d.as_millis();
+                    if ms > 0xFFFFFFFE {
+                        0xFFFFFFFE
+                    } else {
+                        ms as UInt32
+                    }
+                }
+                None => 0,
+            }
+        }
+    }
+}

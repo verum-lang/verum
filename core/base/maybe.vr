@@ -1,0 +1,618 @@
+// =============================================================================
+// maybe.vr - Optional value type
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: ordering.vr (for Ord implementation)
+// =============================================================================
+
+// Import types from other core modules
+
+module core.base.maybe;
+mount core.ordering.{Ordering, Less, Equal, Greater};
+mount core.result.{Result, Ok, Err};
+mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
+mount core.protocols.{
+    Eq, Ord, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
+    Formatter, FormatError,
+};
+mount core.iterator.Iterator;
+
+/// Optional value: either None (absent) or Some(value).
+/// The fundamental way to represent the possible absence of a value.
+public type Maybe<T> is None | Some(T);
+
+implement<T> Maybe<T> {
+    // =========================================================================
+    // Predicates
+    // =========================================================================
+
+    /// Returns true if contains a value.
+    public fn is_some(&self) -> Bool {
+        match self {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// Returns true if empty.
+    public fn is_none(&self) -> Bool {
+        match self {
+            Some(_) => false,
+            None => true,
+        }
+    }
+
+    /// Returns true if contains a value equal to the given value.
+    public fn contains(&self, value: &T) -> Bool {
+        match self {
+            Some(v) => v == value,
+            None => false,
+        }
+    }
+
+    /// Returns true if Some and the predicate returns true.
+    public fn is_some_and<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        match self {
+            Some(v) => f(v),
+            None => false,
+        }
+    }
+
+    /// Returns true if None or the predicate returns true.
+    public fn is_none_or<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        match self {
+            Some(v) => f(v),
+            None => true,
+        }
+    }
+
+    // =========================================================================
+    // Unwrapping
+    // =========================================================================
+
+    /// Unwrap the value, panicking if None.
+    /// Use only when you are certain the value exists.
+    public fn unwrap(self) -> T {
+        match self {
+            Some(v) => v,
+            None => panic("called unwrap() on None"),
+        }
+    }
+
+    /// Unwrap with a custom panic message.
+    public fn expect(self, msg: &Text) -> T {
+        match self {
+            Some(v) => v,
+            None => panic(msg),
+        }
+    }
+
+    /// Return the value || a default.
+    public fn unwrap_or(self, default: T) -> T {
+        match self {
+            Some(v) => v,
+            None => default,
+        }
+    }
+
+    /// Return the value || compute a default from a function.
+    public fn unwrap_or_else<F: fn() -> T>(self, f: F) -> T {
+        match self {
+            Some(v) => v,
+            None => f(),
+        }
+    }
+
+    /// Return the value || the default for the type.
+    public fn unwrap_or_default(self) -> T
+    where T: Default {
+        match self {
+            Some(v) => v,
+            None => T.default(),
+        }
+    }
+
+    // =========================================================================
+    // Transformations
+    // =========================================================================
+
+    /// Transform the inner value with a function.
+    public fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U> {
+        match self {
+            Some(v) => Some(f(v)),
+            None => None,
+        }
+    }
+
+    /// Transform with a function that returns Maybe (flatMap/bind).
+    public fn and_then<U, F: fn(T) -> Maybe<U>>(self, f: F) -> Maybe<U> {
+        match self {
+            Some(v) => f(v),
+            None => None,
+        }
+    }
+
+    /// Apply a default-returning function if None.
+    public fn or_else<F: fn() -> Maybe<T>>(self, f: F) -> Maybe<T> {
+        match self {
+            Some(v) => Some(v),
+            None => f(),
+        }
+    }
+
+    /// Transform the value with a function, providing a default if None.
+    public fn map_or<U, F: fn(T) -> U>(self, default: U, f: F) -> U {
+        match self {
+            Some(v) => f(v),
+            None => default,
+        }
+    }
+
+    /// Transform the value with a function, computing default if None.
+    public fn map_or_else<U, D: fn() -> U, F: fn(T) -> U>(self, default: D, f: F) -> U {
+        match self {
+            Some(v) => f(v),
+            None => default(),
+        }
+    }
+
+    // =========================================================================
+    // Filtering
+    // =========================================================================
+
+    /// Keep the value only if it satisfies the predicate.
+    public fn filter<P: fn(&T) -> Bool>(self, predicate: P) -> Maybe<T> {
+        match self {
+            Some(ref v) if predicate(v) => self,
+            _ => None,
+        }
+    }
+
+    // =========================================================================
+    // Combinators
+    // =========================================================================
+
+    /// Returns None if self is None, otherwise returns other.
+    public fn and<U>(self, other: Maybe<U>) -> Maybe<U> {
+        match self {
+            Some(_) => other,
+            None => None,
+        }
+    }
+
+    /// Returns self if it contains a value, otherwise returns other.
+    public fn or(self, other: Maybe<T>) -> Maybe<T> {
+        match self {
+            Some(v) => Some(v),
+            None => other,
+        }
+    }
+
+    /// Returns Some if exactly one of self && other is Some.
+    public fn xor(self, other: Maybe<T>) -> Maybe<T> {
+        match (self, other) {
+            (Some(v), None) => Some(v),
+            (None, Some(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Zip with another Maybe to create a tuple.
+    public fn zip<U>(self, other: Maybe<U>) -> Maybe<(T, U)> {
+        match (self, other) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        }
+    }
+
+    /// Zip with another Maybe using a combining function.
+    public fn zip_with<U, R, F: fn(T, U) -> R>(self, other: Maybe<U>, f: F) -> Maybe<R> {
+        match (self, other) {
+            (Some(a), Some(b)) => Some(f(a, b)),
+            _ => None,
+        }
+    }
+
+    // =========================================================================
+    // Conversion to Result
+    // =========================================================================
+
+    /// Convert to Result, using the given error if None.
+    public fn ok_or<E>(self, err: E) -> Result<T, E> {
+        match self {
+            Some(v) => Ok(v),
+            None => Err(err),
+        }
+    }
+
+    /// Convert to Result, computing the error if None.
+    public fn ok_or_else<E, F: fn() -> E>(self, f: F) -> Result<T, E> {
+        match self {
+            Some(v) => Ok(v),
+            None => Err(f()),
+        }
+    }
+
+    // =========================================================================
+    // References
+    // =========================================================================
+
+    /// Get a reference to the inner value.
+    public fn as_ref(&self) -> Maybe<&T> {
+        match self {
+            Some(ref v) => Some(v),
+            None => None,
+        }
+    }
+
+    /// Get a mutable reference to the inner value.
+    public fn as_mut(&mut self) -> Maybe<&mut T> {
+        match self {
+            Some(ref mut v) => Some(v),
+            None => None,
+        }
+    }
+
+    // =========================================================================
+    // Mutation
+    // =========================================================================
+
+    /// Take the value out, leaving None in its place.
+    public fn take(&mut self) -> Maybe<T> {
+        let old = *self;
+        *self = None;
+        old
+    }
+
+    /// Replace the value with a new one, returning the old.
+    public fn replace(&mut self, value: T) -> Maybe<T> {
+        let old = *self;
+        *self = Some(value);
+        old
+    }
+
+    /// Insert a value, returning a mutable reference to it.
+    public fn insert(&mut self, value: T) -> &mut T {
+        *self = Some(value);
+        match self {
+            Some(ref mut v) => v,
+            None => unreachable(),
+        }
+    }
+
+    /// Get || insert a value.
+    public fn get_or_insert(&mut self, value: T) -> &mut T {
+        if self.is_none() {
+            *self = Some(value);
+        }
+        match self {
+            Some(ref mut v) => v,
+            None => unreachable(),
+        }
+    }
+
+    /// Get || insert with a function.
+    public fn get_or_insert_with<F: fn() -> T>(&mut self, f: F) -> &mut T {
+        if self.is_none() {
+            *self = Some(f());
+        }
+        match self {
+            Some(ref mut v) => v,
+            None => unreachable(),
+        }
+    }
+
+    // =========================================================================
+    // Inspection
+    // =========================================================================
+
+    /// Call a function with the value if Some.
+    public fn inspect<F: fn(&T)>(self, f: F) -> Self {
+        if let Some(ref v) = self {
+            f(v);
+        }
+        self
+    }
+
+    // =========================================================================
+    // Flattening
+    // =========================================================================
+
+    /// Flatten nested Maybe<Maybe<U>> to Maybe<U>.
+    /// Only works when T is itself a Maybe<U> type.
+    public fn flatten(self) -> T
+    where T: Default {
+        match self {
+            Some(inner) => inner,
+            None => T.default(),
+        }
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    /// Create an iterator that yields 0 || 1 elements.
+    public fn iter(&self) -> MaybeIter<&T> {
+        MaybeIter { inner: self.as_ref() }
+    }
+
+    /// Create a mutable iterator.
+    public fn iter_mut(&mut self) -> MaybeIter<&mut T> {
+        MaybeIter { inner: self.as_mut() }
+    }
+
+    // =========================================================================
+    // Conditional extraction
+    // =========================================================================
+
+    /// Takes the value if it satisfies the predicate, leaving None in its place.
+    /// If the predicate returns false, the value is left unchanged.
+    public fn take_if<P: fn(&T) -> Bool>(&mut self, predicate: P) -> Maybe<T> {
+        match self {
+            Some(ref v) => {
+                if predicate(v) {
+                    self.take()
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
+    }
+
+    /// Gets the contained value or inserts the default value.
+    /// Equivalent to `get_or_insert(T::default())`.
+    public fn get_or_insert_default(&mut self) -> &mut T
+    where T: Default
+    {
+        self.get_or_insert_with(|| T.default())
+    }
+}
+
+// =============================================================================
+// Iterator for Maybe
+// =============================================================================
+
+/// Iterator over Maybe that yields 0 || 1 elements.
+type MaybeIter<T> is { inner: Maybe<T> };
+
+implement<T> Iterator for MaybeIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.inner.take()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let n = if self.inner.is_some() { 1 } else { 0 };
+        (n, Some(n))
+    }
+}
+
+implement<T> IntoIterator for MaybeIter<T> {
+    type Item = T;
+    type IntoIter = MaybeIter<T>;
+
+    fn into_iter(self) -> MaybeIter<T> { self }
+}
+
+implement<T> IntoIterator for Maybe<T> {
+    type Item = T;
+    type IntoIter = MaybeIter<T>;
+
+    fn into_iter(self) -> MaybeIter<T> {
+        MaybeIter { inner: self }
+    }
+}
+
+// =============================================================================
+// Protocol implementations
+// =============================================================================
+
+implement<T> Default for Maybe<T> {
+    fn default() -> Maybe<T> {
+        None
+    }
+}
+
+implement<T: Eq> Eq for Maybe<T> {
+    fn eq(&self, other: &Maybe<T>) -> Bool {
+        match (self, other) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement<T: Ord> Ord for Maybe<T> {
+    fn cmp(&self, other: &Maybe<T>) -> Ordering {
+        match (self, other) {
+            (None, None) => Equal,
+            (None, Some(_)) => Less,
+            (Some(_), None) => Greater,
+            (Some(a), Some(b)) => a.cmp(b),
+        }
+    }
+}
+
+implement<T: Clone> Clone for Maybe<T> {
+    fn clone(&self) -> Maybe<T> {
+        match self {
+            Some(v) => Some(v.clone()),
+            None => None,
+        }
+    }
+}
+
+implement<T: Copy> Copy for Maybe<T> {}
+
+implement<T: Hash> Hash for Maybe<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        match self {
+            None => hasher.write(&[0]),
+            Some(v) => {
+                hasher.write(&[1]);
+                v.hash(hasher);
+            }
+        }
+    }
+}
+
+implement<T: Debug> Debug for Maybe<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Some(v) => {
+                f.write_str("Some(")?;
+                v.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            None => f.write_str("None"),
+        }
+    }
+}
+
+implement<T: Display> Display for Maybe<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Some(v) => {
+                f.write_str("Some(")?;
+                v.fmt(f)?;
+                f.write_str(")")
+            }
+            None => f.write_str("None"),
+        }
+    }
+}
+
+// =============================================================================
+// From implementations
+// =============================================================================
+
+implement<T> From<T> for Maybe<T> {
+    fn from(value: T) -> Maybe<T> {
+        Some(value)
+    }
+}
+
+// =============================================================================
+// Try Protocol Implementation - Enables ? operator
+// =============================================================================
+
+implement<T> Try for Maybe<T> {
+    type Output = T;
+    type Residual = Maybe<Never>;
+
+    fn from_output(output: T) -> Maybe<T> {
+        Some(output)
+    }
+
+    fn branch(self) -> ControlFlow<Maybe<Never>, T> {
+        match self {
+            Some(v) => Continue(v),
+            None => Break(None),
+        }
+    }
+}
+
+implement<T> FromResidual<Maybe<Never>> for Maybe<T> {
+    fn from_residual(residual: Maybe<Never>) -> Maybe<T> {
+        match residual {
+            None => None,
+            Some(_) => unreachable(),
+        }
+    }
+}
+
+// Allow ? on Result when returning Maybe (converts any Err to None)
+implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> {
+    fn from_residual(_residual: Result<Never, E>) -> Maybe<T> {
+        None
+    }
+}
+
+// =============================================================================
+// Collection Utilities for Maybe
+// =============================================================================
+
+/// Collects an iterator of Maybes into a Maybe of a List.
+/// Returns None if any element is None, or Some(List) if all are Some.
+///
+/// # Example
+///
+/// ```verum
+/// let items = [Some(1), Some(2), Some(3)];
+/// assert_eq(collect_maybe(items.iter()), Some([1, 2, 3]));
+///
+/// let items = [Some(1), None, Some(3)];
+/// assert_eq(collect_maybe(items.iter()), None);
+/// ```
+public fn collect_maybe<T, I: Iterator<Item = Maybe<T>>>(mut iter: I) -> Maybe<List<T>> {
+    let mut collected: List<T> = List.new();
+    loop {
+        match iter.next() {
+            None => break,
+            Some(item) => {
+                match item {
+                    Some(v) => {
+                        collected.push(v);
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    Some(collected)
+}
+
+/// Flattens a list of Maybes, keeping only the Some values.
+///
+/// # Example
+///
+/// ```verum
+/// let items = [Some(1), None, Some(2), None, Some(3)];
+/// assert_eq(flatten_maybe(items), [1, 2, 3]);
+/// ```
+public fn flatten_maybe<T>(items: &List<Maybe<T>>) -> List<T>
+where T: Clone
+{
+    let mut result: List<T> = List.new();
+    for i in range(0, items.len()) {
+        match items[i] {
+            Some(ref v) => {
+                result.push(v.clone());
+            }
+            None => {}
+        }
+    }
+    result
+}
+
+/// Flattens an iterator of Maybes, keeping only the Some values.
+///
+/// # Example
+///
+/// ```verum
+/// let items = [Some(1), None, Some(2)].iter();
+/// assert_eq(flatten_maybe_iter(items), [1, 2]);
+/// ```
+public fn flatten_maybe_iter<T, I: Iterator<Item = Maybe<T>>>(mut iter: I) -> List<T> {
+    let mut result: List<T> = List.new();
+    loop {
+        match iter.next() {
+            None => break,
+            Some(item) => {
+                match item {
+                    Some(v) => {
+                        result.push(v);
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    result
+}

@@ -1,0 +1,523 @@
+// Verum Registry - Rate Limiting Middleware
+//
+// Token bucket algorithm for API rate limiting with per-user and global limits.
+//
+// Features:
+// - Token bucket algorithm with refill
+// - Per-user and per-IP rate limiting
+// - Sliding window counters
+// - Refinement types for validated limits
+// - Context-based cache integration
+
+mount core.collections.{Map, List};
+mount core.base.{Result, Maybe, Text, Int, Float, Bool};
+mount core.time.unix_timestamp;
+
+// Import context protocols
+mount super.super.contexts.{Cache, Logger, Metrics};
+mount super.super.domain.errors.{RegistryError};
+
+// ============================================================================
+// Types - Rate Limiting
+// ============================================================================
+
+/// Rate limit configuration
+pub type RateLimitConfig is {
+    /// Maximum requests per window
+    max_requests: Int where |n| n > 0,
+
+    /// Time window in seconds
+    window_secs: Int where |n| n > 0,
+
+    /// Token refill rate (tokens per second)
+    refill_rate: Float where |r| r > 0.0,
+
+    /// Bucket capacity (max tokens)
+    bucket_capacity: Int where |n| n > 0,
+
+    /// Whether to use per-user limits (vs per-IP)
+    per_user: Bool,
+
+    /// Burst allowance (extra tokens for bursts)
+    burst_allowance: Int where |n| n >= 0,
+};
+
+/// Token bucket for rate limiting
+///
+/// Implements token bucket algorithm:
+/// - Tokens refill at constant rate
+/// - Each request consumes one token
+/// - Requests fail when bucket is empty
+///
+/// Invariants:
+/// - tokens >= 0
+/// - tokens <= capacity
+/// - last_refill <= current timestamp
+pub type TokenBucket is {
+    /// Current token count
+    tokens: Float where |t| t >= 0.0,
+
+    /// Maximum bucket capacity
+    capacity: Int where |c| c > 0,
+
+    /// Refill rate (tokens per second)
+    refill_rate: Float where |r| r > 0.0,
+
+    /// Last refill timestamp
+    last_refill: Int where |t| t <= unix_timestamp(),
+
+    /// Total requests served
+    requests_served: Int where |n| n >= 0,
+
+    /// Total requests rejected
+    requests_rejected: Int where |n| n >= 0,
+};
+
+/// Rate limit exceeded error with retry information
+pub type RateLimitExceeded is {
+    /// User or IP that exceeded limit
+    identifier: Text,
+
+    /// Current request count
+    current_requests: Int,
+
+    /// Maximum allowed requests
+    max_requests: Int,
+
+    /// Window duration in seconds
+    window_secs: Int,
+
+    /// Seconds until retry is allowed
+    retry_after_secs: Int where |n| n >= 0,
+
+    /// Timestamp when limit resets
+    reset_at: Int,
+};
+
+/// Rate limit check result
+pub type RateLimitResult is
+    | Allowed(RateLimitState)
+    | Denied(RateLimitExceeded);
+
+/// Current rate limit state for client
+pub type RateLimitState is {
+    /// Requests remaining in window
+    remaining: Int where |n| n >= 0,
+
+    /// Total requests allowed
+    limit: Int where |n| n > 0,
+
+    /// Window reset timestamp
+    reset_at: Int,
+
+    /// Current tokens in bucket
+    tokens: Float where |t| t >= 0.0,
+};
+
+/// Rate limit key for cache storage
+pub type RateLimitKey is {
+    /// User ID or IP address
+    identifier: Text,
+
+    /// Rate limit scope (global, user, endpoint)
+    scope: Text,
+
+    /// Optional endpoint path
+    endpoint: Maybe<Text>,
+};
+
+// ============================================================================
+// Rate Limiter Protocol
+// ============================================================================
+
+/// Context protocol for rate limiting
+pub context protocol RateLimiter {
+    /// Check if request is allowed
+    async fn check_limit(
+        self,
+        identifier: Text,
+        scope: Text
+    ) -> Result<RateLimitResult, RegistryError>;
+
+    /// Consume a token for request
+    async fn consume_token(
+        self,
+        identifier: Text,
+        scope: Text
+    ) -> Result<RateLimitState, RegistryError>;
+
+    /// Get current rate limit state
+    async fn get_state(
+        self,
+        identifier: Text,
+        scope: Text
+    ) -> Result<RateLimitState, RegistryError>;
+
+    /// Reset rate limit for identifier
+    async fn reset_limit(
+        self,
+        identifier: Text,
+        scope: Text
+    ) -> Result<(), RegistryError>;
+}
+
+// ============================================================================
+// Middleware Functions
+// ============================================================================
+
+/// Create rate limiter with configuration
+///
+/// Example:
+/// ```
+/// let config = RateLimitConfig {
+///     max_requests: 100,
+///     window_secs: 60,
+///     refill_rate: 1.67,  // 100 requests per minute
+///     bucket_capacity: 100,
+///     per_user: true,
+///     burst_allowance: 10,
+/// };
+/// let limiter = create_rate_limiter(config);
+/// ```
+pub fn create_rate_limiter(config: RateLimitConfig) -> RateLimitConfig {
+    config
+}
+
+/// Check rate limit for request
+///
+/// Returns RateLimitResult indicating if request is allowed or denied.
+pub async fn check_rate_limit(
+    identifier: Text,
+    scope: Text,
+    config: RateLimitConfig
+) -> Result<RateLimitResult, RegistryError>
+    using [Cache, Logger, Metrics]
+{
+    // Build cache key
+    let cache_key = build_rate_limit_key(identifier, scope);
+
+    // Get current bucket state
+    let bucket = match load_token_bucket(&cache_key, &config).await {
+        Result.Ok(b) => b,
+        Result.Err(err) => {
+            Logger.error(f"Failed to load token bucket: {err}");
+            return Result.Err(err);
+        },
+    };
+
+    // Refill bucket based on time elapsed
+    let refilled_bucket = refill_bucket(bucket, &config);
+
+    // Check if tokens available
+    if refilled_bucket.tokens >= 1.0 {
+        let state = RateLimitState {
+            remaining: refilled_bucket.tokens.to_int(),  // Convert float to int
+            limit: config.max_requests,
+            reset_at: calculate_reset_time(&refilled_bucket, &config),
+            tokens: refilled_bucket.tokens,
+        };
+
+        Logger.debug(f"Rate limit allowed for {identifier}: {state.remaining} remaining");
+        Metrics.increment_counter("rate_limit.allowed").await;
+
+        Result.Ok(RateLimitResult.Allowed(state))
+    } else {
+        let retry_after = calculate_retry_after(&refilled_bucket, &config);
+
+        let exceeded = RateLimitExceeded {
+            identifier,
+            current_requests: refilled_bucket.requests_served,
+            max_requests: config.max_requests,
+            window_secs: config.window_secs,
+            retry_after_secs: retry_after,
+            reset_at: calculate_reset_time(&refilled_bucket, &config),
+        };
+
+        Logger.warn(f"Rate limit exceeded for {identifier}");
+        Metrics.increment_counter("rate_limit.exceeded").await;
+
+        Result.Ok(RateLimitResult.Denied(exceeded))
+    }
+}
+
+/// Consume token and allow request
+///
+/// Decrements available tokens and updates state in cache.
+pub async fn consume_rate_limit_token(
+    identifier: Text,
+    scope: Text,
+    config: RateLimitConfig
+) -> Result<RateLimitState, RegistryError>
+    using [Cache, Logger, Metrics]
+{
+    // Build cache key
+    let cache_key = build_rate_limit_key(identifier, scope);
+
+    // Get current bucket state
+    let bucket = load_token_bucket(&cache_key, &config).await?;
+
+    // Refill bucket
+    let refilled_bucket = refill_bucket(bucket, &config);
+
+    // Check if tokens available
+    if refilled_bucket.tokens < 1.0 {
+        Logger.warn(f"No tokens available for {identifier}");
+        return Result.Err(RegistryError.rate_limit_exceeded(
+            f"Rate limit exceeded for {identifier}"
+        ));
+    }
+
+    // Consume token
+    let consumed_bucket = TokenBucket {
+        tokens: refilled_bucket.tokens - 1.0,
+        capacity: refilled_bucket.capacity,
+        refill_rate: refilled_bucket.refill_rate,
+        last_refill: refilled_bucket.last_refill,
+        requests_served: refilled_bucket.requests_served + 1,
+        requests_rejected: refilled_bucket.requests_rejected,
+    };
+
+    // Save updated bucket
+    save_token_bucket(&cache_key, &consumed_bucket, &config).await?;
+
+    let state = RateLimitState {
+        remaining: consumed_bucket.tokens.to_int(),  // Convert float to int
+        limit: config.max_requests,
+        reset_at: calculate_reset_time(&consumed_bucket, &config),
+        tokens: consumed_bucket.tokens,
+    };
+
+    Logger.debug(f"Token consumed for {identifier}: {state.remaining} remaining");
+    Metrics.increment_counter("rate_limit.consumed").await;
+
+    Result.Ok(state)
+}
+
+/// Get current rate limit state without consuming token
+pub async fn get_rate_limit_state(
+    identifier: Text,
+    scope: Text,
+    config: RateLimitConfig
+) -> Result<RateLimitState, RegistryError>
+    using [Cache, Logger]
+{
+    let cache_key = build_rate_limit_key(identifier, scope);
+    let bucket = load_token_bucket(&cache_key, &config).await?;
+    let refilled_bucket = refill_bucket(bucket, &config);
+
+    Result.Ok(RateLimitState {
+        remaining: refilled_bucket.tokens.to_int(),  // Convert float to int
+        limit: config.max_requests,
+        reset_at: calculate_reset_time(&refilled_bucket, &config),
+        tokens: refilled_bucket.tokens,
+    })
+}
+
+/// Reset rate limit for identifier
+pub async fn reset_rate_limit(
+    identifier: Text,
+    scope: Text,
+    config: RateLimitConfig
+) -> Result<(), RegistryError>
+    using [Cache, Logger]
+{
+    let cache_key = build_rate_limit_key(identifier, scope);
+    let result = Cache.delete(&cache_key).await;
+
+    Logger.info(f"Rate limit reset for {identifier} in scope {scope}");
+
+    result
+}
+
+// ============================================================================
+// Token Bucket Algorithm
+// ============================================================================
+
+/// Create new token bucket with full capacity
+fn create_token_bucket(config: &RateLimitConfig) -> TokenBucket {
+    let now = unix_timestamp();
+
+    // Convert capacity to float for token count
+    let initial_tokens = config.bucket_capacity * 1.0;
+
+    TokenBucket {
+        tokens: initial_tokens,
+        capacity: config.bucket_capacity,
+        refill_rate: config.refill_rate,
+        last_refill: now,
+        requests_served: 0,
+        requests_rejected: 0,
+    }
+}
+
+/// Refill bucket based on elapsed time
+///
+/// Implements token bucket refill:
+/// - Calculate elapsed time since last refill
+/// - Add tokens = elapsed * refill_rate
+/// - Cap at bucket capacity
+fn refill_bucket(bucket: TokenBucket, config: &RateLimitConfig) -> TokenBucket {
+    let now = unix_timestamp();
+    let elapsed = (now - bucket.last_refill) * 1.0;  // Convert to float
+    let new_tokens = bucket.tokens + (elapsed * bucket.refill_rate);
+
+    // Cap at capacity + burst allowance
+    let max_tokens = (config.bucket_capacity + config.burst_allowance) * 1.0;
+    let capped_tokens = if new_tokens > max_tokens {
+        max_tokens
+    } else {
+        new_tokens
+    };
+
+    TokenBucket {
+        tokens: capped_tokens,
+        capacity: bucket.capacity,
+        refill_rate: bucket.refill_rate,
+        last_refill: now,
+        requests_served: bucket.requests_served,
+        requests_rejected: bucket.requests_rejected,
+    }
+}
+
+/// Calculate time until rate limit resets
+fn calculate_reset_time(bucket: &TokenBucket, config: &RateLimitConfig) -> Int {
+    bucket.last_refill + config.window_secs
+}
+
+/// Calculate retry-after delay in seconds
+fn calculate_retry_after(bucket: &TokenBucket, config: &RateLimitConfig) -> Int {
+    // Calculate seconds needed to refill 1 token
+    let tokens_needed = 1.0 - bucket.tokens;
+    let seconds_needed = tokens_needed / bucket.refill_rate;
+
+    // Round up to next integer (simplified ceiling function)
+    let seconds_int = seconds_needed.to_int();
+    if seconds_needed > seconds_int * 1.0 {
+        seconds_int + 1
+    } else {
+        seconds_int
+    }
+}
+
+// ============================================================================
+// Cache Integration
+// ============================================================================
+
+/// Build cache key for rate limit storage
+fn build_rate_limit_key(identifier: Text, scope: Text) -> Text {
+    f"rate_limit:{scope}:{identifier}"
+}
+
+/// Load token bucket from cache
+async fn load_token_bucket(
+    cache_key: &Text,
+    config: &RateLimitConfig
+) -> Result<TokenBucket, RegistryError>
+    using [Cache]
+{
+    // Try to load from cache
+    let cached = Cache.get(cache_key).await;
+
+    match cached {
+        Result.Ok(Maybe.Some(data)) => {
+            // Parse bucket from cached data
+            parse_token_bucket(data)
+        },
+        Result.Ok(Maybe.None) => {
+            // No cached bucket, create new one
+            Result.Ok(create_token_bucket(config))
+        },
+        Result.Err(err) => {
+            Result.Err(err)
+        },
+    }
+}
+
+/// Save token bucket to cache
+async fn save_token_bucket(
+    cache_key: &Text,
+    bucket: &TokenBucket,
+    config: &RateLimitConfig
+) -> Result<(), RegistryError>
+    using [Cache]
+{
+    let data = serialize_token_bucket(bucket);
+    let ttl_secs = config.window_secs * 2;  // 2x window for safety
+
+    Cache.set(cache_key, data, ttl_secs).await
+}
+
+/// Serialize token bucket to cache format
+fn serialize_token_bucket(bucket: &TokenBucket) -> Text {
+    // Format: tokens,capacity,refill_rate,last_refill,served,rejected
+    f"{bucket.tokens},{bucket.capacity},{bucket.refill_rate},{bucket.last_refill},{bucket.requests_served},{bucket.requests_rejected}"
+}
+
+/// Parse token bucket from cache format
+fn parse_token_bucket(data: Text) -> Result<TokenBucket, RegistryError> {
+    // Split serialized data
+    let parts = data.split(",");
+
+    if parts.len() != 6 {
+        return Result.Err(RegistryError.internal_error("Invalid bucket format"));
+    }
+
+    // Parse fields (simplified - would use proper parsing in real impl)
+    Result.Ok(TokenBucket {
+        tokens: 0.0,  // Would parse parts[0]
+        capacity: 100,  // Would parse parts[1]
+        refill_rate: 1.0,  // Would parse parts[2]
+        last_refill: 0,  // Would parse parts[3]
+        requests_served: 0,  // Would parse parts[4]
+        requests_rejected: 0,  // Would parse parts[5]
+    })
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Create rate limit headers for HTTP response
+///
+/// Returns standard rate limit headers:
+/// - X-RateLimit-Limit: Total requests allowed
+/// - X-RateLimit-Remaining: Requests remaining
+/// - X-RateLimit-Reset: Reset timestamp
+pub fn create_rate_limit_headers(state: &RateLimitState) -> Map<Text, Text> {
+    let mut headers = Map.new();
+
+    headers.insert("X-RateLimit-Limit", state.limit.to_string());
+    headers.insert("X-RateLimit-Remaining", state.remaining.to_string());
+    headers.insert("X-RateLimit-Reset", state.reset_at.to_string());
+
+    headers
+}
+
+/// Create retry-after header for rate limit exceeded
+pub fn create_retry_after_header(exceeded: &RateLimitExceeded) -> Map<Text, Text> {
+    let mut headers = Map.new();
+
+    headers.insert("Retry-After", exceeded.retry_after_secs.to_string());
+    headers.insert("X-RateLimit-Limit", exceeded.max_requests.to_string());
+    headers.insert("X-RateLimit-Reset", exceeded.reset_at.to_string());
+
+    headers
+}
+
+/// Extract identifier from request
+///
+/// Uses user ID if authenticated, otherwise falls back to IP address
+pub fn extract_rate_limit_identifier(
+    user_id: Maybe<Text>,
+    client_ip: Text,
+    config: &RateLimitConfig
+) -> Text {
+    if config.per_user {
+        match user_id {
+            Maybe.Some(id) => id,
+            Maybe.None => client_ip,
+        }
+    } else {
+        client_ip
+    }
+}

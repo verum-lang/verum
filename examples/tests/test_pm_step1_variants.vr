@@ -1,0 +1,22 @@
+// Step 1: Simple variant pattern matching
+
+type Maybe<T> is
+  | Some(T)
+  | None
+
+fn test_simple_variant() -> Int {
+  let x = Some(42);
+  match x {
+    Some(n) => n,
+    None => 0
+  }
+}
+
+fn main() -> Int {
+  println("Testing simple variant matching...");
+  let result = test_simple_variant();
+  println("Result: {}", result);
+  assert(result == 42, "Test failed");
+  println("PASSED: Simple variant matching");
+  0
+}

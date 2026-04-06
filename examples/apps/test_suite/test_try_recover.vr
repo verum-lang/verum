@@ -1,0 +1,21 @@
+// Test: Try-recover expression
+// Tests if try/recover can handle errors
+
+fn may_fail(should_fail: Bool) -> Result<Int, Text> {
+    if should_fail {
+        Err("Operation failed")
+    } else {
+        Ok(42)
+    }
+}
+
+fn main() {
+    let result = try {
+        may_fail(true)?
+    } recover {
+        print("Recovered from error");
+        0
+    };
+
+    print(result);
+}

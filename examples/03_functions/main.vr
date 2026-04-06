@@ -1,0 +1,57 @@
+// 03 — Functions
+// Function definition, parameters, return types, and expression bodies.
+
+// Parameters always require explicit types.
+// The last expression in a block is the return value (no semicolon needed).
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Expression-bodied function (single expression after `=`)
+fn double(x: Int) -> Int = x * 2;
+
+// Return type can be inferred for expression-bodied functions
+fn square(x: Int) = x * x;
+
+// Functions with no return value (unit return)
+fn greet(name: Text) {
+    print(f"Hello, {name}!")
+}
+
+// Early return with `return` keyword (needs semicolon)
+fn abs(x: Int) -> Int {
+    if x < 0 {
+        return -x;
+    }
+    x
+}
+
+// Nested / helper functions
+fn fibonacci(n: Int) -> Int {
+    fn helper(n: Int, a: Int, b: Int) -> Int {
+        if n == 0 { a }
+        else { helper(n - 1, b, a + b) }
+    }
+    helper(n, 0, 1)
+}
+
+// Multiple parameters
+fn clamp(value: Int, low: Int, high: Int) -> Int {
+    if value < low { low }
+    else if value > high { high }
+    else { value }
+}
+
+fn main() {
+    print(f"add(3, 4) = {add(3, 4)}")
+    print(f"double(7) = {double(7)}")
+    print(f"square(5) = {square(5)}")
+
+    greet("Verum")
+
+    print(f"abs(-42) = {abs(-42)}")
+    print(f"abs(10)  = {abs(10)}")
+
+    print(f"fibonacci(10) = {fibonacci(10)}")
+    print(f"clamp(15, 0, 10) = {clamp(15, 0, 10)}")
+}

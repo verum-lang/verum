@@ -1,0 +1,237 @@
+// Package domain types
+// Defines Package, PackageVersion, PackageMetadata, and Dependency types
+//
+// This module uses refinement types from refinements.vr to ensure
+// type-level validation of package names, URLs, licenses, etc.
+
+mount core.collections.{List, Map};
+mount core.base.{Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// SemVer is imported from version.vr (sibling module)
+mount super.version.SemVer;
+
+// Import refinement types for validated fields
+mount super.refinements.{
+    ValidatedPackageName,
+    ValidatedUrl,
+    SpdxLicense,
+    Description,
+    ShortText,
+    Sha256Hash,
+    NonEmptyText
+};
+
+// Dependency represents a package dependency
+// NOTE: Dependency must be defined BEFORE types that use it
+pub type Dependency is {
+    name: ValidatedPackageName,  // Use validated package name
+    version_constraint: Text,     // Version constraint syntax (e.g., "^1.0.0")
+    optional: Bool
+};
+
+implement Dependency {
+    pub fn new(name: ValidatedPackageName, version_constraint: Text) -> Dependency {
+        Dependency {
+            name: name,
+            version_constraint: version_constraint,
+            optional: false
+        }
+    }
+
+    pub fn optional(self) -> Dependency {
+        Dependency {
+            name: self.name,
+            version_constraint: self.version_constraint,
+            optional: true
+        }
+    }
+}
+
+// Package represents a registered package in the registry
+// Uses refinement types to ensure validity at the type level
+pub type Package is {
+    name: ValidatedPackageName,      // Validated package name
+    description: Description,         // Max 1000 chars
+    owner: Text,                      // Username (could use Username refinement)
+    created_at: Int,
+    updated_at: Int,
+    versions: List<SemVer>,
+    downloads: Int,
+    repository_url: Text,             // Optional URL (empty or ValidatedUrl)
+    homepage_url: Text,               // Optional URL (empty or ValidatedUrl)
+    license: SpdxLicense,             // SPDX license identifier
+    keywords: List<ShortText>         // Keywords max 100 chars each
+}
+    invariant {
+        // Name is never empty (guaranteed by ValidatedPackageName)
+        !self.name.is_empty(),
+        // Time ordering: created_at must be before or equal to updated_at
+        self.created_at <= self.updated_at,
+        // Downloads counter is never negative
+        self.downloads >= 0,
+        // Versions list is valid (non-negative length)
+        self.versions.len() >= 0,
+    };
+
+implement Package {
+    /// Create a new Package with validated name and license
+    /// Note: Caller must ensure name is valid using ValidatedPackageName.try_from()
+    pub fn new(name: ValidatedPackageName, owner: Text) -> Package {
+        let now = unix_timestamp();
+        Package {
+            name: name,
+            description: "",  // Empty description is valid (0 <= len <= 1000)
+            owner: owner,
+            created_at: now,
+            updated_at: now,
+            versions: List.new(),
+            downloads: 0,
+            repository_url: "",  // Empty URL means not set
+            homepage_url: "",    // Empty URL means not set
+            license: "MIT",      // MIT is a valid SPDX license
+            keywords: List.new()
+        }
+    }
+
+    pub fn with_description(self, description: Description) -> Package {
+        Package {
+            name: self.name,
+            description: description,
+            owner: self.owner,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            versions: self.versions,
+            downloads: self.downloads,
+            repository_url: self.repository_url,
+            homepage_url: self.homepage_url,
+            license: self.license,
+            keywords: self.keywords
+        }
+    }
+
+    pub fn add_version(self, version: SemVer) -> Package {
+        let mut updated_versions = self.versions;
+        updated_versions.push(version);
+
+        Package {
+            name: self.name,
+            description: self.description,
+            owner: self.owner,
+            created_at: self.created_at,
+            updated_at: unix_timestamp(),
+            versions: updated_versions,
+            downloads: self.downloads,
+            repository_url: self.repository_url,
+            homepage_url: self.homepage_url,
+            license: self.license,
+            keywords: self.keywords
+        }
+    }
+
+    pub fn increment_downloads(self) -> Package
+        requires { self.downloads >= 0 }
+        ensures { result.downloads == self.downloads + 1 }
+    {
+        Package {
+            name: self.name,
+            description: self.description,
+            owner: self.owner,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            versions: self.versions,
+            downloads: self.downloads + 1,
+            repository_url: self.repository_url,
+            homepage_url: self.homepage_url,
+            license: self.license,
+            keywords: self.keywords
+        }
+    }
+}
+
+// PackageVersion represents a specific version of a package
+// Uses refinement types for validated fields
+pub type PackageVersion is {
+    package_name: ValidatedPackageName,  // Validated package name
+    version: SemVer,
+    description: Description,            // Max 1000 chars
+    dependencies: List<Dependency>,
+    dev_dependencies: List<Dependency>,
+    published_at: Int,
+    published_by: Text,                  // Username (could use Username refinement)
+    checksum: Sha256Hash,                // SHA-256 checksum (64 hex chars)
+    tarball_url: Text,                   // URL to tarball (empty or ValidatedUrl)
+    readme: Text                         // README content (no length limit for now)
+};
+
+implement PackageVersion {
+    pub fn new(package_name: ValidatedPackageName, version: SemVer, published_by: Text) -> PackageVersion {
+        PackageVersion {
+            package_name: package_name,
+            version: version,
+            description: "",  // Empty description is valid
+            dependencies: List.new(),
+            dev_dependencies: List.new(),
+            published_at: unix_timestamp(),
+            published_by: published_by,
+            checksum: "0000000000000000000000000000000000000000000000000000000000000000",  // Placeholder SHA-256
+            tarball_url: "",  // Empty until uploaded
+            readme: ""
+        }
+    }
+
+    pub fn with_dependencies(self, dependencies: List<Dependency>) -> PackageVersion {
+        PackageVersion {
+            package_name: self.package_name,
+            version: self.version,
+            description: self.description,
+            dependencies: dependencies,
+            dev_dependencies: self.dev_dependencies,
+            published_at: self.published_at,
+            published_by: self.published_by,
+            checksum: self.checksum,
+            tarball_url: self.tarball_url,
+            readme: self.readme
+        }
+    }
+}
+
+// PackageMetadata contains metadata about a package
+// Uses refinement types for validated fields
+pub type PackageMetadata is {
+    name: ValidatedPackageName,      // Validated package name
+    description: Description,         // Max 1000 chars
+    version: Text,                    // Version string (could use ValidatedSemVer)
+    authors: List<Text>,              // Author names/emails
+    license: SpdxLicense,             // SPDX license identifier
+    repository: Text,                 // Repository URL (empty or ValidatedUrl)
+    homepage: Text,                   // Homepage URL (empty or ValidatedUrl)
+    documentation: Text,              // Documentation URL (empty or ValidatedUrl)
+    keywords: List<ShortText>,        // Keywords max 100 chars each
+    categories: List<ShortText>       // Categories max 100 chars each
+};
+
+implement PackageMetadata {
+    pub fn new(name: ValidatedPackageName, version: Text) -> PackageMetadata {
+        PackageMetadata {
+            name: name,
+            description: "",
+            version: version,
+            authors: List.new(),
+            license: "MIT",  // MIT is a valid SPDX license
+            repository: "",
+            homepage: "",
+            documentation: "",
+            keywords: List.new(),
+            categories: List.new()
+        }
+    }
+
+    /// Validate that required fields are present
+    /// Note: Type system already enforces most constraints
+    pub fn validate(self) -> Bool {
+        // Name and version are always valid due to refinement types
+        // Just check they're not default/empty values
+        self.version.len() > 0
+    }
+}

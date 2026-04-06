@@ -1,0 +1,234 @@
+// stdlib_collections/main.vr
+// Advanced collection types and operations demonstrating Set, nested structures,
+// and complex data transformations
+
+fn main() {
+    print("=== Advanced Collections Example ===")
+    print("")
+
+    test_set_operations()
+    test_nested_collections()
+    test_complex_transformations()
+    test_custom_types_with_collections()
+
+    print("")
+    print("=== All Collection Tests Completed ===")
+}
+
+fn test_set_operations() {
+    print("--- Set Operations ---")
+
+    // Create sets
+    let mut primes = Set.new<Int>()
+    primes.insert(2)
+    primes.insert(3)
+    primes.insert(5)
+    primes.insert(7)
+    primes.insert(11)
+
+    let mut evens = Set.new<Int>()
+    evens.insert(2)
+    evens.insert(4)
+    evens.insert(6)
+    evens.insert(8)
+    evens.insert(10)
+
+    print(f"Primes: {primes}")
+    print(f"Evens: {evens}")
+    print(f"Prime count: {primes.len()}")
+
+    // Set membership
+    let has_five = primes.contains(5)
+    print(f"Primes contains 5: {has_five}")
+
+    // Set intersection
+    let prime_evens = primes.intersection(evens)
+    print(f"Prime evens (intersection): {prime_evens}")
+
+    // Set union
+    let all_numbers = primes.union(evens)
+    print(f"All numbers (union): {all_numbers}")
+
+    // Set difference
+    let odd_primes = primes.difference(evens)
+    print(f"Odd primes (difference): {odd_primes}")
+
+    // Symmetric difference
+    let symmetric = primes.symmetric_difference(evens)
+    print(f"Symmetric difference: {symmetric}")
+
+    // Set is subset/superset
+    let small_set = Set.from_list([2, 3])
+    print(f"{{2, 3}} is subset of primes: {small_set.is_subset(primes)}")
+
+    print("")
+}
+
+fn test_nested_collections() {
+    print("--- Nested Collections ---")
+
+    // List of Lists (matrix-like structure)
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ]
+    print(f"Matrix: {matrix}")
+
+    // Access nested elements
+    let row1 = matrix.get(0).unwrap_or([])
+    let element = row1.get(1).unwrap_or(0)
+    print(f"Element at [0][1]: {element}")
+
+    // Map of Lists
+    let mut teams = Map.new<Text, List<Text>>()
+    teams.insert("Engineering", ["Alice", "Bob", "Charlie"])
+    teams.insert("Marketing", ["David", "Eve"])
+    teams.insert("Sales", ["Frank", "Grace", "Henry", "Ivy"])
+
+    print(f"Teams: {teams}")
+
+    // Access nested data
+    let eng_team = teams.get("Engineering").unwrap_or([])
+    print(f"Engineering team size: {eng_team.len()}")
+
+    // Map of Maps (nested dictionaries)
+    let mut user_preferences = Map.new<Text, Map<Text, Bool>>()
+
+    let mut alice_prefs = Map.new<Text, Bool>()
+    alice_prefs.insert("dark_mode", true)
+    alice_prefs.insert("notifications", true)
+    alice_prefs.insert("analytics", false)
+
+    let mut bob_prefs = Map.new<Text, Bool>()
+    bob_prefs.insert("dark_mode", false)
+    bob_prefs.insert("notifications", false)
+    bob_prefs.insert("analytics", true)
+
+    user_preferences.insert("alice@example.com", alice_prefs)
+    user_preferences.insert("bob@example.com", bob_prefs)
+
+    // Deep access
+    let alice_settings = user_preferences.get("alice@example.com")
+    match alice_settings {
+        Maybe.Some(prefs) => {
+            let dark_mode = prefs.get("dark_mode").unwrap_or(false)
+            print(f"Alice dark mode: {dark_mode}")
+        },
+        Maybe.None => print("Alice not found"),
+    }
+
+    print("")
+}
+
+fn test_complex_transformations() {
+    print("--- Complex Transformations ---")
+
+    // Create a list of products
+    let products = [
+        Product { name: "Laptop", price: 999, category: "Electronics", in_stock: true },
+        Product { name: "Mouse", price: 25, category: "Electronics", in_stock: true },
+        Product { name: "Desk", price: 350, category: "Furniture", in_stock: false },
+        Product { name: "Chair", price: 200, category: "Furniture", in_stock: true },
+        Product { name: "Monitor", price: 400, category: "Electronics", in_stock: true },
+    ]
+
+    // Filter: only in-stock electronics
+    let available_electronics = products
+        .filter(|p| p.in_stock && p.category == "Electronics")
+
+    print(f"Available electronics: {available_electronics.len()} items")
+
+    // Map: extract just names
+    let product_names = products.map(|p| p.name)
+    print(f"Product names: {product_names}")
+
+    // Group by category using fold
+    let mut by_category = products.fold(
+        Map.new<Text, List<Product>>(),
+        |mut acc, product| {
+            let category_list = acc.get(product.category).unwrap_or([])
+            category_list.push(product)
+            acc.insert(product.category, category_list)
+            acc
+        }
+    )
+
+    print("Products by category:")
+    let electronics = by_category.get("Electronics").unwrap_or([])
+    print(f"  Electronics: {electronics.len()} items")
+    let furniture = by_category.get("Furniture").unwrap_or([])
+    print(f"  Furniture: {furniture.len()} items")
+
+    // Calculate total value of in-stock items
+    let total_value = products
+        .filter(|p| p.in_stock)
+        .fold(0, |acc, p| acc + p.price)
+
+    print(f"Total value of in-stock items: ${total_value}")
+
+    // Find expensive items (price > 300)
+    let expensive = products
+        .filter(|p| p.price > 300)
+        .map(|p| f"{p.name} (${p.price})")
+
+    print(f"Expensive items: {expensive}")
+
+    print("")
+}
+
+fn test_custom_types_with_collections() {
+    print("--- Custom Types with Collections ---")
+
+    // Create a graph structure using Map of Sets
+    let mut graph = Map.new<Text, Set<Text>>()
+
+    // Build adjacency list
+    graph.insert("A", Set.from_list(["B", "C"]))
+    graph.insert("B", Set.from_list(["C", "D"]))
+    graph.insert("C", Set.from_list(["D"]))
+    graph.insert("D", Set.from_list([]))
+
+    print("Graph (adjacency list):")
+    print(f"  A -> {graph.get('A').unwrap_or(Set.new())}")
+    print(f"  B -> {graph.get('B').unwrap_or(Set.new())}")
+    print(f"  C -> {graph.get('C').unwrap_or(Set.new())}")
+    print(f"  D -> {graph.get('D').unwrap_or(Set.new())}")
+
+    // Count total edges
+    let total_edges = graph
+        .values()
+        .fold(0, |acc, neighbors| acc + neighbors.len())
+    print(f"Total edges: {total_edges}")
+
+    // Create a priority queue simulation with List
+    let mut tasks = [
+        Task { name: "Fix bug", priority: 5 },
+        Task { name: "Write docs", priority: 2 },
+        Task { name: "Deploy", priority: 8 },
+        Task { name: "Code review", priority: 4 },
+    ]
+
+    // Sort by priority (highest first) - using custom comparison
+    tasks.sort_by(|a, b| b.priority - a.priority)
+
+    print("Tasks by priority (high to low):")
+    for task in tasks {
+        print(f"  {task.name} (priority: {task.priority})")
+    }
+
+    print("")
+}
+
+// Custom type definitions
+type Product is {
+    name: Text,
+    price: Int,
+    category: Text,
+    in_stock: Bool,
+}
+
+type Task is {
+    name: Text,
+    priority: Int,
+}

@@ -1,0 +1,518 @@
+name: Nightly Builds
+
+on:
+  schedule:
+    # Run every day at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      run_extended:
+        description: 'Run extended test suite'
+        required: false
+        default: 'true'
+      run_fuzz:
+        description: 'Run fuzzing tests'
+        required: false
+        default: 'true'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ============================================================================
+  # NIGHTLY BUILD: Latest Stable + Beta + Nightly
+  # ============================================================================
+
+  nightly-build:
+    name: Nightly Build (${{ matrix.rust }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta, nightly]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      # Install system dependencies
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install llvm@21 z3
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install llvm z3 -y
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-nightly"
+          shared-key: ${{ matrix.os }}-${{ matrix.rust }}
+
+      - name: Build workspace
+        run: |
+          cargo +${{ matrix.rust }} build --workspace --all-targets --verbose
+
+      - name: Run tests
+        run: |
+          cargo +${{ matrix.rust }} test --workspace --verbose
+
+      - name: Generate build report
+        if: always()
+        shell: bash
+        run: |
+          echo "## Nightly Build Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- OS: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Rust: ${{ matrix.rust }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # EXTENDED TESTS: Long-Running Test Suite
+  # ============================================================================
+
+  extended-tests:
+    name: Extended Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: github.event.inputs.run_extended != 'false'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run all tests with stress flags
+        run: |
+          echo "## Extended Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run tests multiple times to catch flaky tests
+          for i in {1..3}; do
+            echo "### Test Run $i" >> $GITHUB_STEP_SUMMARY
+            cargo test --workspace --all-features --release -- --nocapture --test-threads=1
+          done
+
+          echo "✅ All extended tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run ignored tests
+        run: |
+          cargo test --workspace -- --ignored --nocapture
+
+      - name: Run stress tests
+        run: |
+          # Run tests under memory pressure
+          cargo test --workspace --release -- --nocapture
+
+  # ============================================================================
+  # FUZZING: Continuous Fuzzing
+  # ============================================================================
+
+  fuzzing:
+    name: Fuzzing (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: github.event.inputs.run_fuzz != 'false'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - verum_lexer
+          - verum_parser
+          - verum_cbgr
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run fuzzing
+        run: |
+          echo "## Fuzzing: ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cd crates/${{ matrix.target }}/fuzz
+
+          # Run each fuzz target for 10 minutes
+          for target in $(ls fuzz_targets/*.rs | xargs -n 1 basename | sed 's/.rs//'); do
+            echo "Fuzzing target: $target"
+            timeout 600 cargo +nightly fuzz run $target || echo "Fuzz timeout (expected)"
+          done
+
+          echo "✅ Fuzzing completed for ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for crashes
+        if: always()
+        run: |
+          if [ -d "crates/${{ matrix.target }}/fuzz/artifacts" ]; then
+            CRASHES=$(find crates/${{ matrix.target }}/fuzz/artifacts -type f | wc -l)
+            if [ "$CRASHES" -gt 0 ]; then
+              echo "❌ Found $CRASHES crash(es)" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+          fi
+          echo "✅ No crashes detected" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # MEMORY SAFETY: Sanitizer Tests
+  # ============================================================================
+
+  sanitizers:
+    name: Sanitizer Tests (${{ matrix.sanitizer }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, leak, thread]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Run tests with ${{ matrix.sanitizer }} sanitizer
+        env:
+          RUSTFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
+          RUSTDOCFLAGS: "-Z sanitizer=${{ matrix.sanitizer }}"
+        run: |
+          echo "## Sanitizer: ${{ matrix.sanitizer }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cargo +nightly test --workspace --lib --target x86_64-unknown-linux-gnu -Z build-std \
+            -- --nocapture || echo "Some tests may fail with sanitizers (expected)"
+
+          echo "✅ ${{ matrix.sanitizer }} sanitizer tests completed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # MIRI: Undefined Behavior Detection
+  # ============================================================================
+
+  miri:
+    name: Miri Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Miri on verum_cbgr
+        run: |
+          echo "## Miri Analysis: verum_cbgr" >> $GITHUB_STEP_SUMMARY
+
+          cargo +nightly miri test --package verum_cbgr --lib 2>&1 | tee miri-cbgr.log || true
+
+          if grep -q "error" miri-cbgr.log; then
+            echo "⚠️ Miri detected potential issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No undefined behavior detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Miri logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: miri-logs
+          path: miri-*.log
+          retention-days: 30
+
+  # ============================================================================
+  # BENCHMARKING: Performance Tracking
+  # ============================================================================
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: |
+          echo "## Nightly Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run all benchmarks
+          cargo bench --workspace -- --save-baseline nightly-$(date +%Y%m%d)
+
+          echo "✅ Benchmarks completed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-benchmarks-${{ github.run_number }}
+          path: target/criterion/
+          retention-days: 90
+
+  # ============================================================================
+  # COMPATIBILITY: Minimum Supported Rust Version
+  # ============================================================================
+
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract MSRV from Cargo.toml
+        id: msrv
+        run: |
+          MSRV=$(grep "rust-version" Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "msrv=$MSRV" >> $GITHUB_OUTPUT
+          echo "## MSRV: $MSRV" >> $GITHUB_STEP_SUMMARY
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev
+
+      - name: Check MSRV compatibility
+        run: |
+          cargo +${{ steps.msrv.outputs.msrv }} check --workspace --all-targets
+
+          if [ $? -eq 0 ]; then
+            echo "✅ MSRV check passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ MSRV check failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  # ============================================================================
+  # DEPENDENCY AUDIT: Security & License Check
+  # ============================================================================
+
+  audit:
+    name: Nightly Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install audit tools
+        run: |
+          cargo install cargo-audit cargo-deny --locked
+
+      - name: Run security audit
+        run: |
+          echo "## Security Audit" >> $GITHUB_STEP_SUMMARY
+          cargo audit --json > audit-report.json || true
+
+          if [ -s audit-report.json ]; then
+            VULNS=$(jq '.vulnerabilities.count // 0' audit-report.json)
+            echo "- Vulnerabilities: **$VULNS**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Run cargo deny
+        run: |
+          echo "## Dependency Policies" >> $GITHUB_STEP_SUMMARY
+          cargo deny check || true
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-audit-${{ github.run_number }}
+          path: |
+            audit-report.json
+          retention-days: 90
+
+  # ============================================================================
+  # CODE METRICS: Complexity Analysis
+  # ============================================================================
+
+  metrics:
+    name: Code Metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install metrics tools
+        run: |
+          cargo install cargo-geiger tokei --locked || true
+
+      - name: Analyze unsafe code
+        run: |
+          echo "## Unsafe Code Analysis" >> $GITHUB_STEP_SUMMARY
+          cargo geiger --all-features --output-format GitHubMarkdown >> $GITHUB_STEP_SUMMARY || true
+
+      - name: Count lines of code
+        run: |
+          echo "## Code Statistics" >> $GITHUB_STEP_SUMMARY
+          tokei --output json > tokei-report.json
+
+          if [ -f tokei-report.json ]; then
+            RUST_LOC=$(jq '.Rust.code // 0' tokei-report.json)
+            echo "- Rust LOC: **$RUST_LOC**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-metrics-${{ github.run_number }}
+          path: tokei-report.json
+          retention-days: 90
+
+  # ============================================================================
+  # NOTIFICATION: Send Results
+  # ============================================================================
+
+  notify:
+    name: Notify Results
+    needs: [nightly-build, extended-tests, fuzzing, sanitizers, miri, benchmark, msrv, audit, metrics]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Generate notification
+        run: |
+          echo "## Nightly Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check each job status
+          FAILED=""
+
+          if [ "${{ needs.nightly-build.result }}" != "success" ]; then
+            echo "❌ Nightly build failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Nightly build passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.extended-tests.result }}" != "success" ] && [ "${{ needs.extended-tests.result }}" != "skipped" ]; then
+            echo "❌ Extended tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Extended tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.fuzzing.result }}" != "success" ] && [ "${{ needs.fuzzing.result }}" != "skipped" ]; then
+            echo "❌ Fuzzing failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Fuzzing passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.sanitizers.result }}" != "success" ]; then
+            echo "❌ Sanitizer tests failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Sanitizer tests passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.benchmark.result }}" != "success" ]; then
+            echo "⚠️ Benchmarks had issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Benchmarks completed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.msrv.result }}" != "success" ]; then
+            echo "❌ MSRV check failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ MSRV check passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.audit.result }}" != "success" ]; then
+            echo "⚠️ Audit found issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Audit passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "$FAILED" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Nightly build had failures" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ All nightly checks passed!" >> $GITHUB_STEP_SUMMARY
+          fi

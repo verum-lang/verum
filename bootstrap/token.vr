@@ -1,0 +1,444 @@
+// =============================================================================
+// token.vr - Token definitions for the Verum bootstrap compiler
+// =============================================================================
+// All token kinds as integer constants for efficient comparison.
+// Matches the full Verum grammar (grammar/verum.ebnf).
+// =============================================================================
+
+mount core.*;
+
+// =============================================================================
+// Source Location
+// =============================================================================
+
+type Span is {
+    start: Int,
+    end: Int,
+    line: Int,
+    col: Int,
+};
+
+// =============================================================================
+// Token
+// =============================================================================
+
+type Token is {
+    kind: Int,
+    span: Span,
+    value: Text,
+};
+
+implement Token {
+    fn new(kind: Int, start: Int, end: Int, line: Int, col: Int) -> Token {
+        Token {
+            kind: kind,
+            span: Span { start: start, end: end, line: line, col: col },
+            value: "",
+        }
+    }
+
+    fn with_value(kind: Int, start: Int, end: Int, line: Int, col: Int, val: Text) -> Token {
+        Token {
+            kind: kind,
+            span: Span { start: start, end: end, line: line, col: col },
+            value: val,
+        }
+    }
+
+    fn is_eof(&self) -> Bool {
+        self.kind == TK_EOF
+    }
+
+    fn is_error(&self) -> Bool {
+        self.kind == TK_ERROR
+    }
+}
+
+// =============================================================================
+// Token Kind Constants
+// =============================================================================
+
+// --- Special ---
+const TK_EOF: Int = 0;
+const TK_ERROR: Int = 1;
+
+// --- Literals ---
+const TK_IDENT: Int = 2;
+const TK_INTEGER: Int = 3;
+const TK_FLOAT: Int = 4;
+const TK_STRING: Int = 5;
+const TK_FSTRING: Int = 6;
+const TK_CHAR: Int = 7;
+const TK_BYTE_CHAR: Int = 8;
+const TK_BYTE_STRING: Int = 9;
+
+// --- Reserved Keywords (3) ---
+const TK_LET: Int = 10;
+const TK_FN: Int = 11;
+const TK_IS: Int = 12;
+
+// --- Primary Keywords ---
+const TK_TYPE: Int = 13;
+const TK_MATCH: Int = 14;
+const TK_MOUNT: Int = 15;
+const TK_WHERE: Int = 16;
+
+// --- Control Flow ---
+const TK_IF: Int = 17;
+const TK_ELSE: Int = 18;
+const TK_WHILE: Int = 19;
+const TK_FOR: Int = 20;
+const TK_LOOP: Int = 21;
+const TK_BREAK: Int = 22;
+const TK_CONTINUE: Int = 23;
+const TK_RETURN: Int = 24;
+const TK_YIELD: Int = 25;
+
+// --- Async/Concurrency ---
+const TK_ASYNC: Int = 26;
+const TK_AWAIT: Int = 27;
+const TK_SPAWN: Int = 28;
+const TK_SELECT: Int = 29;
+const TK_NURSERY: Int = 30;
+
+// --- Modifiers ---
+const TK_MUT: Int = 31;
+const TK_CONST: Int = 32;
+const TK_VOLATILE: Int = 33;
+const TK_STATIC: Int = 34;
+const TK_PURE: Int = 35;
+const TK_UNSAFE: Int = 36;
+const TK_REF: Int = 37;
+const TK_MOVE: Int = 38;
+const TK_CHECKED: Int = 39;
+
+// --- Type/Implementation ---
+const TK_IMPLEMENT: Int = 40;
+const TK_PROTOCOL: Int = 41;
+const TK_EXTENDS: Int = 42;
+const TK_MODULE: Int = 43;
+
+// --- Context System ---
+const TK_USING: Int = 44;
+const TK_CONTEXT: Int = 45;
+const TK_PROVIDE: Int = 46;
+
+// --- Error Handling ---
+const TK_DEFER: Int = 47;
+const TK_ERRDEFER: Int = 48;
+const TK_THROW: Int = 49;
+const TK_THROWS: Int = 50;
+const TK_TRY: Int = 51;
+
+// --- Variant Constructors ---
+const TK_TRUE: Int = 52;
+const TK_FALSE: Int = 53;
+const TK_NONE: Int = 54;
+const TK_SOME: Int = 55;
+const TK_OK: Int = 56;
+const TK_ERR: Int = 57;
+
+// --- Self ---
+const TK_SELF_VALUE: Int = 58;
+const TK_SELF_TYPE: Int = 59;
+
+// --- Type Operators ---
+const TK_AS: Int = 60;
+const TK_IN: Int = 61;
+
+// --- Visibility ---
+const TK_PUB: Int = 62;
+const TK_PUBLIC: Int = 63;
+const TK_INTERNAL: Int = 64;
+const TK_PROTECTED: Int = 65;
+const TK_PRIVATE: Int = 66;
+
+// --- Collection/Generator ---
+const TK_STREAM: Int = 67;
+const TK_SET: Int = 68;
+const TK_GEN: Int = 69;
+
+// --- FFI ---
+const TK_FFI: Int = 70;
+const TK_EXTERN: Int = 71;
+
+// --- Additional Contextual ---
+const TK_SUPER: Int = 72;
+const TK_COG: Int = 73;
+const TK_INVARIANT: Int = 74;
+const TK_DECREASES: Int = 75;
+const TK_TENSOR: Int = 76;
+const TK_AFFINE: Int = 77;
+const TK_LINEAR: Int = 78;
+const TK_COFIX: Int = 79;
+const TK_FINALLY: Int = 80;
+const TK_RECOVER: Int = 81;
+const TK_ENSURES: Int = 82;
+const TK_REQUIRES: Int = 83;
+const TK_RESULT: Int = 84;
+const TK_VIEW: Int = 85;
+const TK_PATTERN: Int = 86;
+const TK_WITH: Int = 87;
+const TK_UNKNOWN: Int = 88;
+const TK_TYPEOF: Int = 89;
+
+// --- Metaprogramming ---
+const TK_QUOTE: Int = 90;
+const TK_STAGE: Int = 91;
+const TK_LIFT: Int = 92;
+
+// --- Proof Keywords ---
+const TK_THEOREM: Int = 93;
+const TK_AXIOM: Int = 94;
+const TK_LEMMA: Int = 95;
+const TK_COROLLARY: Int = 96;
+const TK_PROOF: Int = 97;
+const TK_CALC: Int = 98;
+const TK_HAVE: Int = 99;
+const TK_SHOW: Int = 100;
+const TK_SUFFICES: Int = 101;
+const TK_OBTAIN: Int = 102;
+const TK_BY: Int = 103;
+const TK_INDUCTION: Int = 104;
+const TK_CASES: Int = 105;
+const TK_CONTRADICTION: Int = 106;
+const TK_TRIVIAL: Int = 107;
+const TK_ASSUMPTION: Int = 108;
+const TK_SIMP: Int = 109;
+const TK_RING_TACTIC: Int = 110;
+const TK_FIELD_TACTIC: Int = 111;
+const TK_OMEGA: Int = 112;
+const TK_AUTO: Int = 113;
+const TK_BLAST: Int = 114;
+const TK_SMT: Int = 115;
+const TK_QED: Int = 116;
+const TK_FORALL: Int = 117;
+const TK_EXISTS: Int = 118;
+const TK_IMPLIES: Int = 119;
+
+// --- Operators ---
+const TK_PLUS: Int = 120;
+const TK_MINUS: Int = 121;
+const TK_STAR: Int = 122;
+const TK_SLASH: Int = 123;
+const TK_PERCENT: Int = 124;
+const TK_STAR_STAR: Int = 125;
+
+const TK_EQ_EQ: Int = 126;
+const TK_BANG_EQ: Int = 127;
+const TK_LT: Int = 128;
+const TK_GT: Int = 129;
+const TK_LT_EQ: Int = 130;
+const TK_GT_EQ: Int = 131;
+
+const TK_AMP_AMP: Int = 132;
+const TK_PIPE_PIPE: Int = 133;
+const TK_BANG: Int = 134;
+
+const TK_AMP: Int = 135;
+const TK_PIPE: Int = 136;
+const TK_CARET: Int = 137;
+const TK_LT_LT: Int = 138;
+const TK_GT_GT: Int = 139;
+const TK_TILDE: Int = 140;
+
+const TK_EQ: Int = 141;
+const TK_PLUS_EQ: Int = 142;
+const TK_MINUS_EQ: Int = 143;
+const TK_STAR_EQ: Int = 144;
+const TK_SLASH_EQ: Int = 145;
+const TK_PERCENT_EQ: Int = 146;
+const TK_AMP_EQ: Int = 147;
+const TK_PIPE_EQ: Int = 148;
+const TK_CARET_EQ: Int = 149;
+const TK_LT_LT_EQ: Int = 150;
+const TK_GT_GT_EQ: Int = 151;
+
+const TK_DOT_DOT: Int = 152;
+const TK_DOT_DOT_EQ: Int = 153;
+const TK_DOT_DOT_DOT: Int = 154;
+const TK_PIPE_GT: Int = 155;
+const TK_R_ARROW: Int = 156;
+const TK_FAT_ARROW: Int = 157;
+const TK_QUESTION_DOT: Int = 158;
+const TK_QUESTION_QUESTION: Int = 159;
+const TK_QUESTION: Int = 160;
+
+// --- Delimiters ---
+const TK_LPAREN: Int = 161;
+const TK_RPAREN: Int = 162;
+const TK_LBRACKET: Int = 163;
+const TK_RBRACKET: Int = 164;
+const TK_LBRACE: Int = 165;
+const TK_RBRACE: Int = 166;
+
+// --- Punctuation ---
+const TK_COMMA: Int = 167;
+const TK_SEMI: Int = 168;
+const TK_COLON: Int = 169;
+const TK_COLON_COLON: Int = 170;
+const TK_DOT: Int = 171;
+const TK_HASH: Int = 172;
+const TK_AT: Int = 173;
+const TK_DOLLAR: Int = 174;
+
+// --- Lifetime ---
+const TK_LIFETIME: Int = 175;
+
+// =============================================================================
+// Token Name (for error messages)
+// =============================================================================
+
+fn token_name(kind: Int) -> Text {
+    if kind == TK_EOF { return "end of file"; }
+    if kind == TK_ERROR { return "error"; }
+    if kind == TK_IDENT { return "identifier"; }
+    if kind == TK_INTEGER { return "integer literal"; }
+    if kind == TK_FLOAT { return "float literal"; }
+    if kind == TK_STRING { return "string literal"; }
+    if kind == TK_FSTRING { return "format string"; }
+    if kind == TK_CHAR { return "char literal"; }
+    // Reserved keywords
+    if kind == TK_LET { return "let"; }
+    if kind == TK_FN { return "fn"; }
+    if kind == TK_IS { return "is"; }
+    // Primary keywords
+    if kind == TK_TYPE { return "type"; }
+    if kind == TK_MATCH { return "match"; }
+    if kind == TK_MOUNT { return "mount"; }
+    if kind == TK_WHERE { return "where"; }
+    // Control flow
+    if kind == TK_IF { return "if"; }
+    if kind == TK_ELSE { return "else"; }
+    if kind == TK_WHILE { return "while"; }
+    if kind == TK_FOR { return "for"; }
+    if kind == TK_LOOP { return "loop"; }
+    if kind == TK_BREAK { return "break"; }
+    if kind == TK_CONTINUE { return "continue"; }
+    if kind == TK_RETURN { return "return"; }
+    if kind == TK_YIELD { return "yield"; }
+    // Async
+    if kind == TK_ASYNC { return "async"; }
+    if kind == TK_AWAIT { return "await"; }
+    if kind == TK_SPAWN { return "spawn"; }
+    if kind == TK_SELECT { return "select"; }
+    if kind == TK_NURSERY { return "nursery"; }
+    // Modifiers
+    if kind == TK_MUT { return "mut"; }
+    if kind == TK_CONST { return "const"; }
+    if kind == TK_STATIC { return "static"; }
+    if kind == TK_PURE { return "pure"; }
+    if kind == TK_UNSAFE { return "unsafe"; }
+    if kind == TK_REF { return "ref"; }
+    if kind == TK_MOVE { return "move"; }
+    if kind == TK_CHECKED { return "checked"; }
+    // Type/implementation
+    if kind == TK_IMPLEMENT { return "implement"; }
+    if kind == TK_PROTOCOL { return "protocol"; }
+    if kind == TK_EXTENDS { return "extends"; }
+    if kind == TK_MODULE { return "module"; }
+    // Context
+    if kind == TK_USING { return "using"; }
+    if kind == TK_CONTEXT { return "context"; }
+    if kind == TK_PROVIDE { return "provide"; }
+    // Error handling
+    if kind == TK_DEFER { return "defer"; }
+    if kind == TK_TRY { return "try"; }
+    if kind == TK_THROW { return "throw"; }
+    // Variant constructors
+    if kind == TK_TRUE { return "true"; }
+    if kind == TK_FALSE { return "false"; }
+    if kind == TK_NONE { return "None"; }
+    if kind == TK_SOME { return "Some"; }
+    if kind == TK_OK { return "Ok"; }
+    if kind == TK_ERR { return "Err"; }
+    // Self
+    if kind == TK_SELF_VALUE { return "self"; }
+    if kind == TK_SELF_TYPE { return "Self"; }
+    // Type ops
+    if kind == TK_AS { return "as"; }
+    if kind == TK_IN { return "in"; }
+    // Visibility
+    if kind == TK_PUB { return "pub"; }
+    if kind == TK_PUBLIC { return "public"; }
+    if kind == TK_INTERNAL { return "internal"; }
+    if kind == TK_PROTECTED { return "protected"; }
+    if kind == TK_PRIVATE { return "private"; }
+    // Operators
+    if kind == TK_PLUS { return "+"; }
+    if kind == TK_MINUS { return "-"; }
+    if kind == TK_STAR { return "*"; }
+    if kind == TK_SLASH { return "/"; }
+    if kind == TK_PERCENT { return "%"; }
+    if kind == TK_STAR_STAR { return "**"; }
+    if kind == TK_EQ_EQ { return "=="; }
+    if kind == TK_BANG_EQ { return "!="; }
+    if kind == TK_LT { return "<"; }
+    if kind == TK_GT { return ">"; }
+    if kind == TK_LT_EQ { return "<="; }
+    if kind == TK_GT_EQ { return ">="; }
+    if kind == TK_AMP_AMP { return "&&"; }
+    if kind == TK_PIPE_PIPE { return "||"; }
+    if kind == TK_BANG { return "!"; }
+    if kind == TK_AMP { return "&"; }
+    if kind == TK_PIPE { return "|"; }
+    if kind == TK_CARET { return "^"; }
+    if kind == TK_TILDE { return "~"; }
+    if kind == TK_EQ { return "="; }
+    if kind == TK_R_ARROW { return "->"; }
+    if kind == TK_FAT_ARROW { return "=>"; }
+    if kind == TK_QUESTION { return "?"; }
+    if kind == TK_PIPE_GT { return "|>"; }
+    if kind == TK_DOT_DOT { return ".."; }
+    if kind == TK_DOT_DOT_EQ { return "..="; }
+    // Delimiters
+    if kind == TK_LPAREN { return "("; }
+    if kind == TK_RPAREN { return ")"; }
+    if kind == TK_LBRACKET { return "["; }
+    if kind == TK_RBRACKET { return "]"; }
+    if kind == TK_LBRACE { return "{"; }
+    if kind == TK_RBRACE { return "}"; }
+    // Punctuation
+    if kind == TK_COMMA { return ","; }
+    if kind == TK_SEMI { return ";"; }
+    if kind == TK_COLON { return ":"; }
+    if kind == TK_COLON_COLON { return "::"; }
+    if kind == TK_DOT { return "."; }
+    if kind == TK_HASH { return "#"; }
+    if kind == TK_AT { return "@"; }
+    if kind == TK_DOLLAR { return "$"; }
+    "unknown"
+}
+
+// =============================================================================
+// Precedence table for binary operators
+// =============================================================================
+
+fn operator_precedence(kind: Int) -> Int {
+    // Higher number = higher precedence
+    if kind == TK_PIPE_PIPE { return 1; }
+    if kind == TK_AMP_AMP { return 2; }
+    if kind == TK_PIPE { return 3; }
+    if kind == TK_CARET { return 4; }
+    if kind == TK_AMP { return 5; }
+    if kind == TK_EQ_EQ || kind == TK_BANG_EQ { return 6; }
+    if kind == TK_LT || kind == TK_GT || kind == TK_LT_EQ || kind == TK_GT_EQ { return 7; }
+    if kind == TK_LT_LT || kind == TK_GT_GT { return 8; }
+    if kind == TK_PLUS || kind == TK_MINUS { return 9; }
+    if kind == TK_STAR || kind == TK_SLASH || kind == TK_PERCENT { return 10; }
+    if kind == TK_STAR_STAR { return 11; }
+    if kind == TK_AS { return 12; }
+    0
+}
+
+fn is_binary_op(kind: Int) -> Bool {
+    operator_precedence(kind) > 0
+}
+
+fn is_assignment_op(kind: Int) -> Bool {
+    kind >= TK_EQ && kind <= TK_GT_GT_EQ
+}
+
+fn is_right_assoc(kind: Int) -> Bool {
+    kind == TK_STAR_STAR
+}

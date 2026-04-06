@@ -1,0 +1,42 @@
+// Test multiple contexts with brackets
+// According to grammar: using_clause = "using" (IDENT | "[" IDENT ("," IDENT)* "]")
+
+context Database {
+    fn query(sql: Text) -> Text;
+    fn execute(sql: Text);
+}
+
+context Logger {
+    fn log(message: Text);
+    fn debug(message: Text);
+}
+
+context FileSystem {
+    fn read_file(path: Text) -> Text;
+    fn write_file(path: Text, content: Text);
+}
+
+// Test using multiple contexts with brackets
+fn complex_operation(query: Text) using [Database, Logger, FileSystem] {
+    Logger.log("Starting complex operation");
+    let result = Database.query(query);
+    Logger.debug("Query executed");
+    FileSystem.write_file("output.txt", result);
+}
+
+// Test using two contexts
+fn two_contexts(data: Text) using [Database, Logger] {
+    Logger.log("Processing");
+    Database.execute(data);
+}
+
+// Test using single context (without brackets)
+fn single_context(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+fn main() {
+    single_context("test");
+    two_contexts("INSERT INTO table VALUES (1)");
+    complex_operation("SELECT * FROM users");
+}

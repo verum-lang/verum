@@ -1,0 +1,6 @@
+// Test simple List creation with literal
+fn main() {
+    print("Testing List literal...");
+    let list = [1, 2, 3];
+    print("List literal works!");
+}

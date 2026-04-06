@@ -1,0 +1,984 @@
+// =============================================================================
+// lexer.vr - Lexer for the Verum bootstrap compiler
+// =============================================================================
+// Hand-written scanner that tokenizes Verum source into a stream of Tokens.
+// Handles all keywords, operators, literals, and comments.
+// =============================================================================
+
+mount core.*;
+mount bootstrap.token.*;
+
+// =============================================================================
+// Character Classification Helpers
+// =============================================================================
+
+fn is_ascii_alpha(b: Int) -> Bool {
+    (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+}
+
+fn is_ascii_digit(b: Int) -> Bool {
+    b >= 48 && b <= 57
+}
+
+fn is_hex_digit(b: Int) -> Bool {
+    is_ascii_digit(b) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102)
+}
+
+fn is_octal_digit(b: Int) -> Bool {
+    b >= 48 && b <= 55
+}
+
+fn is_binary_digit(b: Int) -> Bool {
+    b == 48 || b == 49
+}
+
+fn is_ident_start(b: Int) -> Bool {
+    is_ascii_alpha(b) || b == 95 || b > 127
+}
+
+fn is_ident_continue(b: Int) -> Bool {
+    is_ascii_alpha(b) || is_ascii_digit(b) || b == 95 || b > 127
+}
+
+fn is_whitespace(b: Int) -> Bool {
+    b == 32 || b == 9 || b == 10 || b == 13
+}
+
+// =============================================================================
+// Lexer
+// =============================================================================
+
+type Lexer is {
+    source: Text,
+    pos: Int,
+    len: Int,
+    line: Int,
+    col: Int,
+};
+
+implement Lexer {
+    fn new(source: Text) -> Lexer {
+        Lexer {
+            source: source,
+            pos: 0,
+            len: source.len(),
+            line: 1,
+            col: 1,
+        }
+    }
+
+    // =========================================================================
+    // Core scanning primitives
+    // =========================================================================
+
+    fn peek(&self) -> Int {
+        if self.pos >= self.len {
+            return -1;
+        }
+        match self.source.byte_at(self.pos) {
+            Some(b) => b as Int,
+            None => -1,
+        }
+    }
+
+    fn peek_at(&self, offset: Int) -> Int {
+        if offset >= self.len {
+            return -1;
+        }
+        match self.source.byte_at(offset) {
+            Some(b) => b as Int,
+            None => -1,
+        }
+    }
+
+    fn advance(&mut self) -> Int {
+        if self.pos >= self.len {
+            return -1;
+        }
+        let b = match self.source.byte_at(self.pos) {
+            Some(v) => v as Int,
+            None => -1,
+        };
+        self.pos = self.pos + 1;
+        if b == 10 {
+            self.line = self.line + 1;
+            self.col = 1;
+        } else {
+            self.col = self.col + 1;
+        }
+        b
+    }
+
+    fn slice(&self, start: Int, end: Int) -> Text {
+        self.source.slice(start, end)
+    }
+
+    fn make_token(&self, kind: Int, start: Int, start_line: Int, start_col: Int) -> Token {
+        Token.new(kind, start, self.pos, start_line, start_col)
+    }
+
+    fn make_token_val(&self, kind: Int, start: Int, start_line: Int, start_col: Int, val: Text) -> Token {
+        Token.with_value(kind, start, self.pos, start_line, start_col, val)
+    }
+
+    // =========================================================================
+    // Main entry point
+    // =========================================================================
+
+    fn tokenize(&mut self) -> List<Token> {
+        let mut tokens: List<Token> = List.new();
+        loop {
+            let tok = self.next_token();
+            let done = tok.kind == TK_EOF;
+            tokens.push(tok);
+            if done {
+                break;
+            }
+        }
+        tokens
+    }
+
+    fn next_token(&mut self) -> Token {
+        self.skip_whitespace_and_comments();
+
+        if self.pos >= self.len {
+            return Token.new(TK_EOF, self.pos, self.pos, self.line, self.col);
+        }
+
+        let start = self.pos;
+        let start_line = self.line;
+        let start_col = self.col;
+        let b = self.peek();
+
+        // Format string prefix: f"..."
+        if b == 102 {
+            let next = self.peek_at(self.pos + 1);
+            if next == 34 {
+                return self.scan_fstring(start, start_line, start_col);
+            }
+        }
+
+        // Byte literal prefix: b"..." or b'...'
+        if b == 98 {
+            let next = self.peek_at(self.pos + 1);
+            if next == 34 {
+                return self.scan_byte_string(start, start_line, start_col);
+            }
+            if next == 39 {
+                return self.scan_byte_char(start, start_line, start_col);
+            }
+        }
+
+        // Identifier or keyword
+        if is_ident_start(b) {
+            return self.scan_ident_or_keyword(start, start_line, start_col);
+        }
+
+        // Number
+        if is_ascii_digit(b) {
+            return self.scan_number(start, start_line, start_col);
+        }
+
+        // String literal
+        if b == 34 {
+            return self.scan_string(start, start_line, start_col);
+        }
+
+        // Character literal
+        if b == 39 {
+            return self.scan_char_lit(start, start_line, start_col);
+        }
+
+        // Attribute
+        if b == 64 {
+            self.advance();
+            return self.make_token(TK_AT, start, start_line, start_col);
+        }
+
+        // Operators and punctuation
+        self.scan_operator(start, start_line, start_col)
+    }
+
+    // =========================================================================
+    // Whitespace and comments
+    // =========================================================================
+
+    fn skip_whitespace_and_comments(&mut self) {
+        loop {
+            // Skip whitespace
+            while self.pos < self.len && is_whitespace(self.peek()) {
+                self.advance();
+            }
+
+            if self.pos >= self.len {
+                return;
+            }
+
+            let b = self.peek();
+            let next = self.peek_at(self.pos + 1);
+
+            // Line comment: //
+            if b == 47 && next == 47 {
+                while self.pos < self.len && self.peek() != 10 {
+                    self.advance();
+                }
+                continue;
+            }
+
+            // Block comment: /* ... */ (with nesting)
+            if b == 47 && next == 42 {
+                self.advance();
+                self.advance();
+                let mut depth = 1;
+                while self.pos < self.len && depth > 0 {
+                    let c = self.peek();
+                    let c2 = self.peek_at(self.pos + 1);
+                    if c == 47 && c2 == 42 {
+                        self.advance();
+                        self.advance();
+                        depth = depth + 1;
+                    } else if c == 42 && c2 == 47 {
+                        self.advance();
+                        self.advance();
+                        depth = depth - 1;
+                    } else {
+                        self.advance();
+                    }
+                }
+                continue;
+            }
+
+            // Not whitespace or comment — done
+            return;
+        }
+    }
+
+    // =========================================================================
+    // Identifiers and keywords
+    // =========================================================================
+
+    fn scan_ident_or_keyword(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        while self.pos < self.len && is_ident_continue(self.peek()) {
+            self.advance();
+        }
+
+        let text = self.slice(start, self.pos);
+        let kind = keyword_lookup(text);
+
+        if kind == TK_IDENT {
+            self.make_token_val(TK_IDENT, start, start_line, start_col, text)
+        } else {
+            self.make_token(kind, start, start_line, start_col)
+        }
+    }
+
+    // =========================================================================
+    // Number literals
+    // =========================================================================
+
+    fn scan_number(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        let first = self.peek();
+
+        // Check for 0x, 0o, 0b prefixes
+        if first == 48 && self.pos + 1 < self.len {
+            let prefix = self.peek_at(self.pos + 1);
+
+            // Hex: 0x...
+            if prefix == 120 || prefix == 88 {
+                self.advance();
+                self.advance();
+                while self.pos < self.len {
+                    let b = self.peek();
+                    if is_hex_digit(b) || b == 95 {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                let text = self.slice(start, self.pos);
+                return self.make_token_val(TK_INTEGER, start, start_line, start_col, text);
+            }
+
+            // Octal: 0o...
+            if prefix == 111 || prefix == 79 {
+                self.advance();
+                self.advance();
+                while self.pos < self.len {
+                    let b = self.peek();
+                    if is_octal_digit(b) || b == 95 {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                let text = self.slice(start, self.pos);
+                return self.make_token_val(TK_INTEGER, start, start_line, start_col, text);
+            }
+
+            // Binary: 0b...
+            if prefix == 98 || prefix == 66 {
+                self.advance();
+                self.advance();
+                while self.pos < self.len {
+                    let b = self.peek();
+                    if is_binary_digit(b) || b == 95 {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                let text = self.slice(start, self.pos);
+                return self.make_token_val(TK_INTEGER, start, start_line, start_col, text);
+            }
+        }
+
+        // Decimal digits
+        while self.pos < self.len {
+            let b = self.peek();
+            if is_ascii_digit(b) || b == 95 {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let mut is_float = false;
+
+        // Decimal point (but not ..)
+        if self.pos < self.len && self.peek() == 46 {
+            let after_dot = self.peek_at(self.pos + 1);
+            if after_dot != 46 && is_ascii_digit(after_dot) {
+                is_float = true;
+                self.advance();
+                while self.pos < self.len {
+                    let b = self.peek();
+                    if is_ascii_digit(b) || b == 95 {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Exponent: e/E followed by optional +/- and digits
+        if self.pos < self.len {
+            let e = self.peek();
+            if e == 101 || e == 69 {
+                is_float = true;
+                self.advance();
+                let sign = self.peek();
+                if sign == 43 || sign == 45 {
+                    self.advance();
+                }
+                while self.pos < self.len && is_ascii_digit(self.peek()) {
+                    self.advance();
+                }
+            }
+        }
+
+        // Type suffix: u8, u16, u32, u64, i8, i16, i32, i64, f32, f64
+        if self.pos < self.len {
+            let s = self.peek();
+            if s == 117 || s == 105 || s == 102 {
+                let suffix_start = self.pos;
+                self.advance();
+                while self.pos < self.len && is_ascii_digit(self.peek()) {
+                    self.advance();
+                }
+            }
+        }
+
+        let text = self.slice(start, self.pos);
+        let kind = if is_float { TK_FLOAT } else { TK_INTEGER };
+        self.make_token_val(kind, start, start_line, start_col, text)
+    }
+
+    // =========================================================================
+    // String literals
+    // =========================================================================
+
+    fn scan_string(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        self.advance(); // consume opening "
+
+        // Check for raw multiline: """..."""
+        if self.pos + 1 < self.len && self.peek() == 34 && self.peek_at(self.pos + 1) == 34 {
+            self.advance();
+            self.advance();
+            return self.scan_raw_multiline_string(start, start_line, start_col);
+        }
+
+        let mut content = "";
+        while self.pos < self.len {
+            let b = self.peek();
+            if b == 34 {
+                self.advance(); // consume closing "
+                return self.make_token_val(TK_STRING, start, start_line, start_col, content);
+            }
+            if b == 92 {
+                // Escape sequence
+                self.advance();
+                let esc = self.advance();
+                if esc == 110 { content = content + "\n"; }
+                else if esc == 116 { content = content + "\t"; }
+                else if esc == 114 { content = content + "\r"; }
+                else if esc == 92 { content = content + "\\"; }
+                else if esc == 34 { content = content + "\""; }
+                else if esc == 48 { content = content + "\0"; }
+                else {
+                    // Pass through unknown escapes
+                    content = content + "\\";
+                    content = content + self.slice(self.pos - 1, self.pos);
+                }
+            } else if b == 10 {
+                // Newline in string — error but continue
+                content = content + "\n";
+                self.advance();
+            } else {
+                content = content + self.slice(self.pos, self.pos + 1);
+                self.advance();
+            }
+        }
+
+        // Unterminated string
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated string")
+    }
+
+    fn scan_raw_multiline_string(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        // We've consumed the opening """
+        // Scan until closing """
+        let content_start = self.pos;
+        while self.pos < self.len {
+            let b = self.peek();
+            if b == 34 && self.peek_at(self.pos + 1) == 34 && self.peek_at(self.pos + 2) == 34 {
+                let content = self.slice(content_start, self.pos);
+                self.advance();
+                self.advance();
+                self.advance();
+                return self.make_token_val(TK_STRING, start, start_line, start_col, content);
+            }
+            self.advance();
+        }
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated raw string")
+    }
+
+    fn scan_fstring(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        self.advance(); // consume 'f'
+        self.advance(); // consume '"'
+
+        // Scan f-string content (simplified: just grab raw content)
+        let content_start = self.pos;
+        let mut depth = 0;
+        while self.pos < self.len {
+            let b = self.peek();
+            if b == 123 { depth = depth + 1; } // {
+            if b == 125 && depth > 0 { depth = depth - 1; } // }
+            if b == 34 && depth == 0 {
+                let content = self.slice(content_start, self.pos);
+                self.advance(); // consume closing "
+                return self.make_token_val(TK_FSTRING, start, start_line, start_col, content);
+            }
+            if b == 92 {
+                self.advance(); // skip escape
+                self.advance();
+            } else {
+                self.advance();
+            }
+        }
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated format string")
+    }
+
+    fn scan_byte_string(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        self.advance(); // consume 'b'
+        self.advance(); // consume '"'
+        let content_start = self.pos;
+        while self.pos < self.len {
+            let b = self.peek();
+            if b == 34 {
+                let content = self.slice(content_start, self.pos);
+                self.advance();
+                return self.make_token_val(TK_BYTE_STRING, start, start_line, start_col, content);
+            }
+            if b == 92 {
+                self.advance();
+                self.advance();
+            } else {
+                self.advance();
+            }
+        }
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated byte string")
+    }
+
+    // =========================================================================
+    // Character literals
+    // =========================================================================
+
+    fn scan_char_lit(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        self.advance(); // consume opening '
+
+        // Check for lifetime: 'a, 'static, '_
+        if self.pos < self.len && is_ident_start(self.peek()) {
+            let ident_start = self.pos;
+            self.advance();
+            // If followed by more ident chars and no closing ', it's a lifetime
+            if self.pos < self.len && is_ident_continue(self.peek()) {
+                while self.pos < self.len && is_ident_continue(self.peek()) {
+                    self.advance();
+                }
+                let name = self.slice(ident_start, self.pos);
+                return self.make_token_val(TK_LIFETIME, start, start_line, start_col, name);
+            }
+            // Single char followed by '
+            if self.pos < self.len && self.peek() == 39 {
+                let ch = self.slice(ident_start, self.pos);
+                self.advance(); // consume closing '
+                return self.make_token_val(TK_CHAR, start, start_line, start_col, ch);
+            }
+            // Single ident char not followed by ' — it's a lifetime
+            let name = self.slice(ident_start, self.pos);
+            return self.make_token_val(TK_LIFETIME, start, start_line, start_col, name);
+        }
+
+        if self.pos >= self.len {
+            return self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated char");
+        }
+
+        let b = self.peek();
+        if b == 92 {
+            // Escape sequence
+            self.advance();
+            let esc = self.advance();
+            if self.pos < self.len && self.peek() == 39 {
+                self.advance();
+                let raw = self.slice(start + 1, self.pos - 1);
+                return self.make_token_val(TK_CHAR, start, start_line, start_col, raw);
+            }
+            return self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated char");
+        }
+
+        // Regular character
+        self.advance();
+        if self.pos < self.len && self.peek() == 39 {
+            let ch = self.slice(start + 1, self.pos);
+            self.advance();
+            return self.make_token_val(TK_CHAR, start, start_line, start_col, ch);
+        }
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated char literal")
+    }
+
+    fn scan_byte_char(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        self.advance(); // consume 'b'
+        self.advance(); // consume '
+        if self.pos >= self.len {
+            return self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated byte char");
+        }
+        let b = self.peek();
+        if b == 92 {
+            self.advance();
+            self.advance();
+        } else {
+            self.advance();
+        }
+        if self.pos < self.len && self.peek() == 39 {
+            let content = self.slice(start + 2, self.pos);
+            self.advance();
+            return self.make_token_val(TK_BYTE_CHAR, start, start_line, start_col, content);
+        }
+        self.make_token_val(TK_ERROR, start, start_line, start_col, "unterminated byte char")
+    }
+
+    // =========================================================================
+    // Operators and punctuation
+    // =========================================================================
+
+    fn scan_operator(&mut self, start: Int, start_line: Int, start_col: Int) -> Token {
+        let b = self.advance();
+
+        // Two-char lookahead
+        let next = self.peek();
+
+        // +, +=
+        if b == 43 {
+            if next == 61 { self.advance(); return self.make_token(TK_PLUS_EQ, start, start_line, start_col); }
+            return self.make_token(TK_PLUS, start, start_line, start_col);
+        }
+
+        // -, -=, ->
+        if b == 45 {
+            if next == 61 { self.advance(); return self.make_token(TK_MINUS_EQ, start, start_line, start_col); }
+            if next == 62 { self.advance(); return self.make_token(TK_R_ARROW, start, start_line, start_col); }
+            return self.make_token(TK_MINUS, start, start_line, start_col);
+        }
+
+        // *, *=, **
+        if b == 42 {
+            if next == 61 { self.advance(); return self.make_token(TK_STAR_EQ, start, start_line, start_col); }
+            if next == 42 { self.advance(); return self.make_token(TK_STAR_STAR, start, start_line, start_col); }
+            return self.make_token(TK_STAR, start, start_line, start_col);
+        }
+
+        // /, /=
+        if b == 47 {
+            if next == 61 { self.advance(); return self.make_token(TK_SLASH_EQ, start, start_line, start_col); }
+            return self.make_token(TK_SLASH, start, start_line, start_col);
+        }
+
+        // %, %=
+        if b == 37 {
+            if next == 61 { self.advance(); return self.make_token(TK_PERCENT_EQ, start, start_line, start_col); }
+            return self.make_token(TK_PERCENT, start, start_line, start_col);
+        }
+
+        // =, ==, =>
+        if b == 61 {
+            if next == 61 { self.advance(); return self.make_token(TK_EQ_EQ, start, start_line, start_col); }
+            if next == 62 { self.advance(); return self.make_token(TK_FAT_ARROW, start, start_line, start_col); }
+            return self.make_token(TK_EQ, start, start_line, start_col);
+        }
+
+        // !, !=
+        if b == 33 {
+            if next == 61 { self.advance(); return self.make_token(TK_BANG_EQ, start, start_line, start_col); }
+            return self.make_token(TK_BANG, start, start_line, start_col);
+        }
+
+        // <, <=, <<, <<=
+        if b == 60 {
+            if next == 61 { self.advance(); return self.make_token(TK_LT_EQ, start, start_line, start_col); }
+            if next == 60 {
+                self.advance();
+                if self.peek() == 61 { self.advance(); return self.make_token(TK_LT_LT_EQ, start, start_line, start_col); }
+                return self.make_token(TK_LT_LT, start, start_line, start_col);
+            }
+            return self.make_token(TK_LT, start, start_line, start_col);
+        }
+
+        // >, >=, >>, >>=
+        if b == 62 {
+            if next == 61 { self.advance(); return self.make_token(TK_GT_EQ, start, start_line, start_col); }
+            if next == 62 {
+                self.advance();
+                if self.peek() == 61 { self.advance(); return self.make_token(TK_GT_GT_EQ, start, start_line, start_col); }
+                return self.make_token(TK_GT_GT, start, start_line, start_col);
+            }
+            return self.make_token(TK_GT, start, start_line, start_col);
+        }
+
+        // &, &=, &&
+        if b == 38 {
+            if next == 61 { self.advance(); return self.make_token(TK_AMP_EQ, start, start_line, start_col); }
+            if next == 38 { self.advance(); return self.make_token(TK_AMP_AMP, start, start_line, start_col); }
+            return self.make_token(TK_AMP, start, start_line, start_col);
+        }
+
+        // |, |=, ||, |>
+        if b == 124 {
+            if next == 61 { self.advance(); return self.make_token(TK_PIPE_EQ, start, start_line, start_col); }
+            if next == 124 { self.advance(); return self.make_token(TK_PIPE_PIPE, start, start_line, start_col); }
+            if next == 62 { self.advance(); return self.make_token(TK_PIPE_GT, start, start_line, start_col); }
+            return self.make_token(TK_PIPE, start, start_line, start_col);
+        }
+
+        // ^, ^=
+        if b == 94 {
+            if next == 61 { self.advance(); return self.make_token(TK_CARET_EQ, start, start_line, start_col); }
+            return self.make_token(TK_CARET, start, start_line, start_col);
+        }
+
+        // ~
+        if b == 126 {
+            return self.make_token(TK_TILDE, start, start_line, start_col);
+        }
+
+        // ., .., ..=, ...
+        if b == 46 {
+            if next == 46 {
+                self.advance();
+                let third = self.peek();
+                if third == 61 { self.advance(); return self.make_token(TK_DOT_DOT_EQ, start, start_line, start_col); }
+                if third == 46 { self.advance(); return self.make_token(TK_DOT_DOT_DOT, start, start_line, start_col); }
+                return self.make_token(TK_DOT_DOT, start, start_line, start_col);
+            }
+            return self.make_token(TK_DOT, start, start_line, start_col);
+        }
+
+        // ?, ?., ??
+        if b == 63 {
+            if next == 46 { self.advance(); return self.make_token(TK_QUESTION_DOT, start, start_line, start_col); }
+            if next == 63 { self.advance(); return self.make_token(TK_QUESTION_QUESTION, start, start_line, start_col); }
+            return self.make_token(TK_QUESTION, start, start_line, start_col);
+        }
+
+        // Delimiters
+        if b == 40 { return self.make_token(TK_LPAREN, start, start_line, start_col); }
+        if b == 41 { return self.make_token(TK_RPAREN, start, start_line, start_col); }
+        if b == 91 { return self.make_token(TK_LBRACKET, start, start_line, start_col); }
+        if b == 93 { return self.make_token(TK_RBRACKET, start, start_line, start_col); }
+        if b == 123 { return self.make_token(TK_LBRACE, start, start_line, start_col); }
+        if b == 125 { return self.make_token(TK_RBRACE, start, start_line, start_col); }
+
+        // Punctuation
+        if b == 44 { return self.make_token(TK_COMMA, start, start_line, start_col); }
+        if b == 59 { return self.make_token(TK_SEMI, start, start_line, start_col); }
+        if b == 58 {
+            if next == 58 { self.advance(); return self.make_token(TK_COLON_COLON, start, start_line, start_col); }
+            return self.make_token(TK_COLON, start, start_line, start_col);
+        }
+        if b == 35 { return self.make_token(TK_HASH, start, start_line, start_col); }
+        if b == 36 { return self.make_token(TK_DOLLAR, start, start_line, start_col); }
+
+        // Unknown character
+        let ch = self.slice(start, self.pos);
+        self.make_token_val(TK_ERROR, start, start_line, start_col, f"unexpected character: {ch}")
+    }
+}
+
+// =============================================================================
+// Keyword lookup — dispatch by first character for efficiency
+// =============================================================================
+
+fn keyword_lookup(s: Text) -> Int {
+    let len = s.len();
+    if len == 0 { return TK_IDENT; }
+
+    let first = match s.byte_at(0) {
+        Some(b) => b as Int,
+        None => return TK_IDENT,
+    };
+
+    // 'a'
+    if first == 97 {
+        if s == "as" { return TK_AS; }
+        if s == "async" { return TK_ASYNC; }
+        if s == "await" { return TK_AWAIT; }
+        if s == "affine" { return TK_AFFINE; }
+        if s == "auto" { return TK_AUTO; }
+        if s == "axiom" { return TK_AXIOM; }
+        if s == "assumption" { return TK_ASSUMPTION; }
+        return TK_IDENT;
+    }
+
+    // 'b'
+    if first == 98 {
+        if s == "break" { return TK_BREAK; }
+        if s == "by" { return TK_BY; }
+        if s == "blast" { return TK_BLAST; }
+        return TK_IDENT;
+    }
+
+    // 'c'
+    if first == 99 {
+        if s == "const" { return TK_CONST; }
+        if s == "continue" { return TK_CONTINUE; }
+        if s == "context" { return TK_CONTEXT; }
+        if s == "cog" { return TK_COG; }
+        if s == "checked" { return TK_CHECKED; }
+        if s == "cofix" { return TK_COFIX; }
+        if s == "calc" { return TK_CALC; }
+        if s == "cases" { return TK_CASES; }
+        if s == "corollary" { return TK_COROLLARY; }
+        if s == "contradiction" { return TK_CONTRADICTION; }
+        return TK_IDENT;
+    }
+
+    // 'd'
+    if first == 100 {
+        if s == "defer" { return TK_DEFER; }
+        if s == "decreases" { return TK_DECREASES; }
+        return TK_IDENT;
+    }
+
+    // 'e'
+    if first == 101 {
+        if s == "else" { return TK_ELSE; }
+        if s == "extends" { return TK_EXTENDS; }
+        if s == "extern" { return TK_EXTERN; }
+        if s == "errdefer" { return TK_ERRDEFER; }
+        if s == "ensures" { return TK_ENSURES; }
+        if s == "exists" { return TK_EXISTS; }
+        return TK_IDENT;
+    }
+
+    // 'f'
+    if first == 102 {
+        if s == "fn" { return TK_FN; }
+        if s == "for" { return TK_FOR; }
+        if s == "false" { return TK_FALSE; }
+        if s == "ffi" { return TK_FFI; }
+        if s == "finally" { return TK_FINALLY; }
+        if s == "forall" { return TK_FORALL; }
+        if s == "field" { return TK_FIELD_TACTIC; }
+        return TK_IDENT;
+    }
+
+    // 'g'
+    if first == 103 {
+        if s == "gen" { return TK_GEN; }
+        return TK_IDENT;
+    }
+
+    // 'h'
+    if first == 104 {
+        if s == "have" { return TK_HAVE; }
+        return TK_IDENT;
+    }
+
+    // 'i'
+    if first == 105 {
+        if s == "is" { return TK_IS; }
+        if s == "if" { return TK_IF; }
+        if s == "in" { return TK_IN; }
+        if s == "implement" { return TK_IMPLEMENT; }
+        if s == "internal" { return TK_INTERNAL; }
+        if s == "invariant" { return TK_INVARIANT; }
+        if s == "induction" { return TK_INDUCTION; }
+        if s == "implies" { return TK_IMPLIES; }
+        return TK_IDENT;
+    }
+
+    // 'l'
+    if first == 108 {
+        if s == "let" { return TK_LET; }
+        if s == "loop" { return TK_LOOP; }
+        if s == "linear" { return TK_LINEAR; }
+        if s == "lemma" { return TK_LEMMA; }
+        if s == "lift" { return TK_LIFT; }
+        return TK_IDENT;
+    }
+
+    // 'm'
+    if first == 109 {
+        if s == "match" { return TK_MATCH; }
+        if s == "mount" { return TK_MOUNT; }
+        if s == "mut" { return TK_MUT; }
+        if s == "move" { return TK_MOVE; }
+        if s == "module" { return TK_MODULE; }
+        return TK_IDENT;
+    }
+
+    // 'n'
+    if first == 110 {
+        if s == "nursery" { return TK_NURSERY; }
+        return TK_IDENT;
+    }
+
+    // 'o'
+    if first == 111 {
+        if s == "obtain" { return TK_OBTAIN; }
+        if s == "omega" { return TK_OMEGA; }
+        return TK_IDENT;
+    }
+
+    // 'p'
+    if first == 112 {
+        if s == "pub" { return TK_PUB; }
+        if s == "public" { return TK_PUBLIC; }
+        if s == "pure" { return TK_PURE; }
+        if s == "provide" { return TK_PROVIDE; }
+        if s == "protocol" { return TK_PROTOCOL; }
+        if s == "protected" { return TK_PROTECTED; }
+        if s == "private" { return TK_PRIVATE; }
+        if s == "pattern" { return TK_PATTERN; }
+        if s == "proof" { return TK_PROOF; }
+        return TK_IDENT;
+    }
+
+    // 'q'
+    if first == 113 {
+        if s == "quote" { return TK_QUOTE; }
+        if s == "qed" { return TK_QED; }
+        return TK_IDENT;
+    }
+
+    // 'r'
+    if first == 114 {
+        if s == "return" { return TK_RETURN; }
+        if s == "ref" { return TK_REF; }
+        if s == "result" { return TK_RESULT; }
+        if s == "recover" { return TK_RECOVER; }
+        if s == "requires" { return TK_REQUIRES; }
+        if s == "ring" { return TK_RING_TACTIC; }
+        return TK_IDENT;
+    }
+
+    // 's'
+    if first == 115 {
+        if s == "self" { return TK_SELF_VALUE; }
+        if s == "static" { return TK_STATIC; }
+        if s == "spawn" { return TK_SPAWN; }
+        if s == "select" { return TK_SELECT; }
+        if s == "stream" { return TK_STREAM; }
+        if s == "set" { return TK_SET; }
+        if s == "super" { return TK_SUPER; }
+        if s == "stage" { return TK_STAGE; }
+        if s == "show" { return TK_SHOW; }
+        if s == "suffices" { return TK_SUFFICES; }
+        if s == "simp" { return TK_SIMP; }
+        if s == "smt" { return TK_SMT; }
+        return TK_IDENT;
+    }
+
+    // 't'
+    if first == 116 {
+        if s == "type" { return TK_TYPE; }
+        if s == "true" { return TK_TRUE; }
+        if s == "try" { return TK_TRY; }
+        if s == "throw" { return TK_THROW; }
+        if s == "throws" { return TK_THROWS; }
+        if s == "tensor" { return TK_TENSOR; }
+        if s == "typeof" { return TK_TYPEOF; }
+        if s == "theorem" { return TK_THEOREM; }
+        if s == "trivial" { return TK_TRIVIAL; }
+        return TK_IDENT;
+    }
+
+    // 'u'
+    if first == 117 {
+        if s == "using" { return TK_USING; }
+        if s == "unsafe" { return TK_UNSAFE; }
+        if s == "unknown" { return TK_UNKNOWN; }
+        return TK_IDENT;
+    }
+
+    // 'v'
+    if first == 118 {
+        if s == "volatile" { return TK_VOLATILE; }
+        if s == "view" { return TK_VIEW; }
+        return TK_IDENT;
+    }
+
+    // 'w'
+    if first == 119 {
+        if s == "while" { return TK_WHILE; }
+        if s == "where" { return TK_WHERE; }
+        if s == "with" { return TK_WITH; }
+        return TK_IDENT;
+    }
+
+    // 'y'
+    if first == 121 {
+        if s == "yield" { return TK_YIELD; }
+        return TK_IDENT;
+    }
+
+    // Uppercase: Self, None, Some, Ok, Err
+    if first == 83 {
+        if s == "Self" { return TK_SELF_TYPE; }
+        if s == "Some" { return TK_SOME; }
+        return TK_IDENT;
+    }
+    if first == 78 {
+        if s == "None" { return TK_NONE; }
+        return TK_IDENT;
+    }
+    if first == 79 {
+        if s == "Ok" { return TK_OK; }
+        return TK_IDENT;
+    }
+    if first == 69 {
+        if s == "Err" { return TK_ERR; }
+        return TK_IDENT;
+    }
+
+    TK_IDENT
+}

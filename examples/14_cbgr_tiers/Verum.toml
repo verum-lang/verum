@@ -1,0 +1,7 @@
+[package]
+name = "cbgr_tiers"
+version = "0.1.0"
+description = "Three-tier memory safety: &T, &checked T, &unsafe T"
+
+[language]
+profile = "application"

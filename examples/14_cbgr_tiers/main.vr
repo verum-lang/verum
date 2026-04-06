@@ -1,0 +1,99 @@
+// 14 — CBGR Three-Tier References
+// Verum's gradual memory safety model: choose the right tier for the job.
+//
+// Tier 0: &T           ~15ns overhead   CBGR-checked (default, safe)
+// Tier 1: &checked T   0ns overhead     Compiler-proven safe (escape analysis)
+// Tier 2: &unsafe T    0ns overhead     Manual proof required
+//
+// Start with &T everywhere. Profile. Upgrade hot paths to &checked T.
+// Use &unsafe T only for FFI or unsafe primitives.
+
+type Matrix is {
+    rows: Int,
+    cols: Int,
+    data: List<Float>
+};
+
+// --- Tier 0: Default CBGR references (&T) ---
+// Automatic safety. Use-after-free, double-free, dangling pointers
+// are all caught at runtime with ~15ns overhead per access.
+
+fn sum_elements(m: &Matrix) -> Float {
+    let mut total = 0.0
+    for i in 0..m.data.len() {
+        total = total + m.data[i]
+    }
+    total
+}
+
+fn get_element(m: &Matrix, row: Int, col: Int) -> Float {
+    m.data[row * m.cols + col]
+}
+
+// --- Tier 1: Checked references (&checked T) ---
+// Zero runtime overhead. The compiler must prove safety via escape analysis.
+// Use after profiling identifies &T as a bottleneck.
+
+@checked
+fn sum_elements_fast(m: &checked Matrix) -> Float {
+    // Compiler proves: m does not escape, no aliases, bounded lifetime.
+    // Zero overhead — same as raw pointer access.
+    let mut total = 0.0
+    for i in 0..m.data.len() {
+        total = total + m.data[i]
+    }
+    total
+}
+
+// --- Tier 2: Unsafe references (&unsafe T) ---
+// Zero overhead. YOU guarantee safety. For FFI and low-level primitives.
+
+fn raw_pointer_demo(ptr: &unsafe Int) -> Int {
+    // The programmer asserts this is safe.
+    // No CBGR checks, no compiler verification.
+    *ptr
+}
+
+// --- Mutable references ---
+fn increment_all(m: &mut Matrix) {
+    for i in 0..m.data.len() {
+        m.data[i] = m.data[i] + 1.0
+    }
+}
+
+// --- Heap allocation ---
+fn heap_example() {
+    // Heap<T> allocates on the heap (like Box<T> in Rust).
+    let boxed = Heap(42)
+    print(f"Heap value: {boxed}")
+
+    // Shared<T> is reference-counted (like Arc<T>).
+    let shared = Shared(100)
+    print(f"Shared value: {shared}")
+}
+
+fn main() {
+    print("=== CBGR Three-Tier References ===")
+
+    let m = Matrix {
+        rows: 2,
+        cols: 3,
+        data: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    }
+
+    // Tier 0: safe by default
+    let total = sum_elements(&m)
+    print(f"Sum (Tier 0, ~15ns/access): {total}")
+
+    let elem = get_element(&m, 1, 2)
+    print(f"Element [1,2]: {elem}")
+
+    print("")
+    print("Tier 0: &T            ~15ns   Default, always safe")
+    print("Tier 1: &checked T    0ns     Compiler-proven safe")
+    print("Tier 2: &unsafe T     0ns     Manual safety proof")
+    print("")
+    print("Guideline: start with &T, upgrade after profiling.")
+
+    print("\nCBGR demo complete")
+}

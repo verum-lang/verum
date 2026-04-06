@@ -1,0 +1,579 @@
+// PostgreSQL Implementation of PackageRepository
+//
+// This module provides the concrete PostgreSQL implementation of the PackageRepository protocol.
+// It uses the Database context for all data access operations.
+//
+// Design:
+// - Zero-state struct (no fields - uses Database context)
+// - All methods delegate to Database context with SQL queries
+// - Row-to-domain mapping functions for type safety
+// - Parameterized queries to prevent SQL injection
+//
+// Error Handling:
+// - DatabaseError → RegistryError conversion
+// - Proper context in error messages
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount core.collections.Map;
+
+// Import domain types
+mount super.super.super.domain.package.{Package, PackageVersion};
+mount super.super.super.domain.version.SemVer;
+mount super.super.super.domain.errors.RegistryError;
+mount super.super.super.domain.refinements.{
+    PackageName,
+    Username,
+    QueryOffset,
+    QueryLimit,
+    ValidatedPackageName,
+    Description,
+    SpdxLicense,
+    ShortText,
+};
+
+// Import repository protocol
+mount super.super.super.domain.repositories.PackageRepository;
+
+// Import Database context
+mount super.super.super.contexts.database.{Database, DatabaseError};
+
+/// PostgreSQL implementation of PackageRepository
+///
+/// This is a zero-state implementation that uses the Database context
+/// for all operations. Create an instance with PostgresPackageRepository.new().
+pub type PostgresPackageRepository is {
+    // No fields needed - uses Database context
+};
+
+implement PostgresPackageRepository {
+    /// Create a new PostgresPackageRepository instance
+    pub fn new() -> PostgresPackageRepository {
+        PostgresPackageRepository {}
+    }
+}
+
+/// Implement the PackageRepository protocol for PostgresPackageRepository
+implement PackageRepository for PostgresPackageRepository {
+    async fn get_by_id(id: EntityId) -> Result<Maybe<Package>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(id.to_string());
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM packages WHERE id = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match row_to_package(r) {
+                    Result.Ok(pkg) => Result.Ok(Maybe.Some(pkg)),
+                    Result.Err(e) => Result.Err(e),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn get_by_name(name: PackageName) -> Result<Maybe<Package>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(name.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT * FROM packages WHERE name = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(r)) => {
+                match row_to_package(r) {
+                    Result.Ok(pkg) => Result.Ok(Maybe.Some(pkg)),
+                    Result.Err(e) => Result.Err(e),
+                }
+            },
+            Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn save(package: Package) -> Result<(), RegistryError>
+        using [Database]
+    {
+        // Convert versions list to comma-separated string
+        let versions_str = versions_to_string(&package.versions);
+        let keywords_str = keywords_to_string(&package.keywords);
+
+        let params = sql_params_10(
+            package.name.clone(),
+            package.description.clone(),
+            package.owner.clone(),
+            package.created_at.to_string(),
+            package.updated_at.to_string(),
+            versions_str,
+            package.downloads.to_string(),
+            package.repository_url.clone(),
+            package.homepage_url.clone(),
+            package.license.clone()
+        );
+        // Note: keywords require additional parameter
+        let mut full_params = params;
+        full_params.push(keywords_str);
+
+        let result = Database.execute_with(
+            "INSERT INTO packages (name, description, owner, created_at, updated_at, versions, downloads, repository_url, homepage_url, license, keywords)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT (name) DO UPDATE SET
+                description = EXCLUDED.description,
+                updated_at = EXCLUDED.updated_at,
+                versions = EXCLUDED.versions,
+                downloads = EXCLUDED.downloads,
+                repository_url = EXCLUDED.repository_url,
+                homepage_url = EXCLUDED.homepage_url,
+                license = EXCLUDED.license,
+                keywords = EXCLUDED.keywords",
+            full_params
+        ).await;
+
+        match result {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn delete(name: PackageName) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(name.clone());
+        let result = Database.execute_with(
+            "DELETE FROM packages WHERE name = $1",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn exists(name: PackageName) -> Result<Bool, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(name.clone());
+        let row = Database.fetch_optional_with(
+            "SELECT 1 FROM packages WHERE name = $1",
+            params
+        ).await;
+
+        match row {
+            Result.Ok(Maybe.Some(_)) => Result.Ok(true),
+            Result.Ok(Maybe.None) => Result.Ok(false),
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn find_by_owner(owner: Username) -> Result<List<Package>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(owner.clone());
+        let rows = Database.query_with(
+            "SELECT * FROM packages WHERE owner = $1 ORDER BY created_at DESC",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut packages = List.new();
+                for row in rs {
+                    match row_to_package(row) {
+                        Result.Ok(pkg) => packages.push(pkg),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(packages)
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<Package>, RegistryError>
+        using [Database]
+    {
+        let params = sql_params_2(offset.to_string(), limit.to_string());
+        let rows = Database.query_with(
+            "SELECT * FROM packages ORDER BY created_at DESC LIMIT $2 OFFSET $1",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut packages = List.new();
+                for row in rs {
+                    match row_to_package(row) {
+                        Result.Ok(pkg) => packages.push(pkg),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(packages)
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn count() -> Result<Int, RegistryError>
+        using [Database]
+    {
+        let row = Database.fetch_one("SELECT COUNT(*) as count FROM packages").await;
+
+        match row {
+            Result.Ok(r) => {
+                match r.get("count") {
+                    Maybe.Some(count_str) => Result.Ok(parse_int(count_str)),
+                    Maybe.None => Result.Ok(0),
+                }
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn search(query: Text, offset: QueryOffset, limit: QueryLimit) -> Result<List<Package>, RegistryError>
+        using [Database]
+    {
+        // Use full-text search with ILIKE for simplicity
+        let search_pattern = f"%{query}%";
+        let params = sql_params_3(search_pattern, offset.to_string(), limit.to_string());
+
+        let rows = Database.query_with(
+            "SELECT * FROM packages
+             WHERE name ILIKE $1 OR description ILIKE $1 OR keywords ILIKE $1
+             ORDER BY downloads DESC, name ASC
+             LIMIT $3 OFFSET $2",
+            params
+        ).await;
+
+        match rows {
+            Result.Ok(rs) => {
+                let mut packages = List.new();
+                for row in rs {
+                    match row_to_package(row) {
+                        Result.Ok(pkg) => packages.push(pkg),
+                        Result.Err(e) => return Result.Err(e),
+                    }
+                }
+                Result.Ok(packages)
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn increment_downloads(name: PackageName) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let params = sql_params_1(name.clone());
+        let result = Database.execute_with(
+            "UPDATE packages SET downloads = downloads + 1 WHERE name = $1",
+            params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.package_not_found(name))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+
+    async fn update_metadata(package: Package) -> Result<(), RegistryError>
+        using [Database]
+    {
+        let keywords_str = keywords_to_string(&package.keywords);
+        let params = sql_params_5(
+            package.description.clone(),
+            package.repository_url.clone(),
+            package.homepage_url.clone(),
+            package.license.clone(),
+            keywords_str
+        );
+        let mut full_params = params;
+        full_params.push(package.name.clone());
+
+        let result = Database.execute_with(
+            "UPDATE packages
+             SET description = $1, repository_url = $2, homepage_url = $3, license = $4, keywords = $5, updated_at = EXTRACT(EPOCH FROM NOW())
+             WHERE name = $6",
+            full_params
+        ).await;
+
+        match result {
+            Result.Ok(affected) => {
+                if affected == 0 {
+                    Result.Err(RegistryError.package_not_found(package.name))
+                } else {
+                    Result.Ok(())
+                }
+            },
+            Result.Err(db_err) => Result.Err(database_error_to_registry_error(db_err)),
+        }
+    }
+}
+
+// ============================================================================
+// Helper Functions - Row Mapping
+// ============================================================================
+
+/// Convert a database row to a Package domain entity
+fn row_to_package(row: Map<Text, Text>) -> Result<Package, RegistryError> {
+    // Extract and validate required fields
+    let name = match row.get("name") {
+        Maybe.Some(n) => {
+            match ValidatedPackageName.try_from(n.clone()) {
+                Result.Ok(validated) => validated,
+                Result.Err(err) => return Result.Err(RegistryError.validation_error("name", err)),
+            }
+        },
+        Maybe.None => return Result.Err(RegistryError.database_error("Missing 'name' field in package row")),
+    };
+
+    let description = match row.get("description") {
+        Maybe.Some(d) => d.clone(),
+        Maybe.None => "",
+    };
+
+    let owner = match row.get("owner") {
+        Maybe.Some(o) => o.clone(),
+        Maybe.None => return Result.Err(RegistryError.database_error("Missing 'owner' field in package row")),
+    };
+
+    let created_at = match row.get("created_at") {
+        Maybe.Some(t) => parse_int(t),
+        Maybe.None => 0,
+    };
+
+    let updated_at = match row.get("updated_at") {
+        Maybe.Some(t) => parse_int(t),
+        Maybe.None => 0,
+    };
+
+    let versions_str = match row.get("versions") {
+        Maybe.Some(v) => v.clone(),
+        Maybe.None => "",
+    };
+    let versions = parse_versions(versions_str);
+
+    let downloads = match row.get("downloads") {
+        Maybe.Some(d) => parse_int(d),
+        Maybe.None => 0,
+    };
+
+    let repository_url = match row.get("repository_url") {
+        Maybe.Some(u) => u.clone(),
+        Maybe.None => "",
+    };
+
+    let homepage_url = match row.get("homepage_url") {
+        Maybe.Some(u) => u.clone(),
+        Maybe.None => "",
+    };
+
+    let license = match row.get("license") {
+        Maybe.Some(l) => l.clone(),
+        Maybe.None => "MIT",
+    };
+
+    let keywords_str = match row.get("keywords") {
+        Maybe.Some(k) => k.clone(),
+        Maybe.None => "",
+    };
+    let keywords = parse_keywords(keywords_str);
+
+    Result.Ok(Package {
+        name: name,
+        description: description,
+        owner: owner,
+        created_at: created_at,
+        updated_at: updated_at,
+        versions: versions,
+        downloads: downloads,
+        repository_url: repository_url,
+        homepage_url: homepage_url,
+        license: license,
+        keywords: keywords,
+    })
+}
+
+// ============================================================================
+// Helper Functions - Conversion
+// ============================================================================
+
+/// Convert DatabaseError to RegistryError
+fn database_error_to_registry_error(db_err: DatabaseError) -> RegistryError {
+    match db_err {
+        DatabaseError.NotFound => RegistryError.database_error("Record not found"),
+        DatabaseError.ConnectionFailed(msg) => RegistryError.database_error(f"Connection failed: {msg}"),
+        DatabaseError.QueryFailed(msg) => RegistryError.database_error(f"Query failed: {msg}"),
+        DatabaseError.DuplicateKey(msg) => RegistryError.database_error(f"Duplicate key: {msg}"),
+        DatabaseError.TransactionFailed(msg) => RegistryError.database_error(f"Transaction failed: {msg}"),
+    }
+}
+
+/// Convert list of SemVer to comma-separated string
+fn versions_to_string(versions: &List<SemVer>) -> Text {
+    if versions.len() == 0 {
+        return "";
+    }
+
+    let mut result = "";
+    let mut first = true;
+
+    for version in versions.clone() {
+        if !first {
+            result = result + ",";
+        }
+        result = result + version.to_string();
+        first = false;
+    }
+
+    result
+}
+
+/// Parse comma-separated version string to List<SemVer>
+fn parse_versions(versions_str: Text) -> List<SemVer> {
+    let mut versions = List.new();
+
+    if versions_str.len() == 0 {
+        return versions;
+    }
+
+    let parts = versions_str.split(",");
+    for part in parts {
+        // Try to parse as SemVer
+        match SemVer.parse(part) {
+            Result.Ok(v) => versions.push(v),
+            Result.Err(_) => {}, // Skip invalid versions
+        }
+    }
+
+    versions
+}
+
+/// Convert list of keywords to comma-separated string
+fn keywords_to_string(keywords: &List<ShortText>) -> Text {
+    if keywords.len() == 0 {
+        return "";
+    }
+
+    let mut result = "";
+    let mut first = true;
+
+    for keyword in keywords.clone() {
+        if !first {
+            result = result + ",";
+        }
+        result = result + keyword;
+        first = false;
+    }
+
+    result
+}
+
+/// Parse comma-separated keywords string to List<ShortText>
+fn parse_keywords(keywords_str: Text) -> List<ShortText> {
+    let mut keywords = List.new();
+
+    if keywords_str.len() == 0 {
+        return keywords;
+    }
+
+    let parts = keywords_str.split(",");
+    for part in parts {
+        let trimmed = part.trim();
+        if trimmed.len() > 0 && trimmed.len() <= 100 {
+            keywords.push(trimmed);
+        }
+    }
+
+    keywords
+}
+
+/// Parse text to integer
+fn parse_int(s: &Text) -> Int {
+    let mut result = 0;
+    let mut is_negative = false;
+    let mut started = false;
+
+    for ch in s.chars() {
+        let ch_str = ch.to_string();
+
+        if ch_str == "-" && !started {
+            is_negative = true;
+            started = true;
+        } else if ch_str == "0" || ch_str == "1" || ch_str == "2" || ch_str == "3" ||
+                  ch_str == "4" || ch_str == "5" || ch_str == "6" || ch_str == "7" ||
+                  ch_str == "8" || ch_str == "9" {
+            started = true;
+            let digit = match ch_str {
+                "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+                "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+                _ => 0,
+            };
+            result = result * 10 + digit;
+        } else if started {
+            break;
+        }
+    }
+
+    if is_negative { -result } else { result }
+}
+
+// ============================================================================
+// Helper Functions - SQL Parameters
+// ============================================================================
+
+fn sql_params_1(p1: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params
+}
+
+fn sql_params_2(p1: Text, p2: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params
+}
+
+fn sql_params_3(p1: Text, p2: Text, p3: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params
+}
+
+fn sql_params_5(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params.push(p4);
+    params.push(p5);
+    params
+}
+
+fn sql_params_10(p1: Text, p2: Text, p3: Text, p4: Text, p5: Text, p6: Text, p7: Text, p8: Text, p9: Text, p10: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params.push(p4);
+    params.push(p5);
+    params.push(p6);
+    params.push(p7);
+    params.push(p8);
+    params.push(p9);
+    params.push(p10);
+    params
+}

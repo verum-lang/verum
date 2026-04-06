@@ -1,0 +1,20 @@
+// Error case tests for context system
+// These should fail parsing or type checking
+
+// ERROR: Empty context list (should require at least one context)
+// fn badFunc1() using [] {
+//     print("This should fail");
+// }
+
+// ERROR: Mixed syntax (can't have both single and list)
+// fn badFunc2() using Logger [Database] {
+//     print("This should fail");
+// }
+
+// ERROR: Missing context name
+// fn badFunc3() using {
+//     print("This should fail");
+// }
+
+// Note: These are commented out because they should fail to parse
+// Uncomment individually to test error messages

@@ -1,0 +1,201 @@
+// =============================================================================
+// paragraph.vr - Paragraph widget (text display with wrapping)
+// =============================================================================
+module paragraph;
+
+mount super.protocol.{Widget, Styled};
+mount super.block.{Block, Alignment};
+mount super.super.render.buffer.Buffer;
+mount super.super.render.cell.char_display_width;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+/// Text wrap mode.
+public type Wrap is
+    | NoWrap       // Truncate at boundary
+    | WordWrap     // Wrap at word boundaries
+    | CharWrap;    // Wrap at character boundaries
+
+/// A line of styled text — sequence of spans.
+public type Line is {
+    spans: List<Span>,
+};
+
+/// A span — fragment of text with a single style.
+public type Span is {
+    content: Text,
+    style: Style,
+};
+
+implement Span {
+    /// Create an unstyled span.
+    public fn raw(content: Text) -> Span {
+        Span { content: content, style: Style.DEFAULT }
+    }
+
+    /// Create a styled span.
+    public fn styled(content: Text, style: Style) -> Span {
+        Span { content: content, style: style }
+    }
+
+    /// Chain two spans into a Line: span1.then(span2) -> Line.
+    public fn then(self, next: Span) -> Line {
+        let mut spans = List.new();
+        spans.push(self);
+        spans.push(next);
+        Line { spans: spans }
+    }
+
+    /// Get the display width of this span.
+    public fn width(&self) -> Int {
+        let mut w = 0;
+        let bytes = self.content.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] < 0x80 {
+                if bytes[i] >= 0x20 { w = w + 1; }
+                i = i + 1;
+            } else {
+                let char_len = if bytes[i] < 0xE0 { 2 }
+                    else if bytes[i] < 0xF0 { 3 }
+                    else { 4 };
+                let grapheme = self.content.slice(i, (i + char_len).min(bytes.len()));
+                w = w + char_display_width(&grapheme);
+                i = i + char_len;
+            }
+        }
+        w
+    }
+}
+
+implement Line {
+    /// Create a line from a list of spans.
+    public fn from(spans: List<Span>) -> Line {
+        Line { spans: spans }
+    }
+
+    /// Create a line from raw (unstyled) text.
+    public fn raw(text: Text) -> Line {
+        let mut spans = List.new();
+        spans.push(Span.raw(text));
+        Line { spans: spans }
+    }
+
+    /// Create a line from a single styled span.
+    public fn styled(text: Text, style: Style) -> Line {
+        let mut spans = List.new();
+        spans.push(Span.styled(text, style));
+        Line { spans: spans }
+    }
+
+    /// Get the display width of this line.
+    public fn width(&self) -> Int {
+        let mut w = 0;
+        for span in &self.spans {
+            w = w + span.width();
+        }
+        w
+    }
+}
+
+/// Paragraph — displays formatted text with optional wrapping and scrolling.
+public type Paragraph is {
+    text: List<Line>,
+    block: Maybe<Block>,
+    style: Style,
+    wrap: Wrap,
+    scroll: (Int, Int),       // (horizontal_offset, vertical_offset)
+    alignment: Alignment,
+};
+
+implement Paragraph {
+    /// Create a new empty paragraph.
+    public fn new() -> Paragraph {
+        Paragraph {
+            text: List.new(),
+            block: None,
+            style: Style.DEFAULT,
+            wrap: Wrap.NoWrap,
+            scroll: (0, 0),
+            alignment: Alignment.Left,
+        }
+    }
+
+    // Builder API
+    public fn text(self, text: List<Line>) -> Paragraph {
+        Paragraph { text: text, ..self }
+    }
+
+    public fn block(self, block: Block) -> Paragraph {
+        Paragraph { block: Some(block), ..self }
+    }
+
+    public fn wrap(self, wrap: Wrap) -> Paragraph {
+        Paragraph { wrap: wrap, ..self }
+    }
+
+    public fn scroll(self, scroll: (Int, Int)) -> Paragraph {
+        Paragraph { scroll: scroll, ..self }
+    }
+
+    public fn alignment(self, alignment: Alignment) -> Paragraph {
+        Paragraph { alignment: alignment, ..self }
+    }
+}
+
+implement Styled for Paragraph {
+    fn style(self, style: Style) -> Paragraph {
+        Paragraph { style: style, ..self }
+    }
+}
+
+implement Widget for Paragraph {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // Render block and get inner area
+        let text_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if text_area.width < 1 || text_area.height < 1 { return; }
+
+        // Apply background style
+        buf.set_style(text_area, self.style);
+
+        // Render text lines with scroll offset
+        let mut y = text_area.y;
+        let skip_lines = self.scroll.1;
+        let h_offset = self.scroll.0;
+
+        let mut line_idx = 0;
+        for line in &self.text {
+            if line_idx < skip_lines {
+                line_idx = line_idx + 1;
+                continue;
+            }
+            if y >= text_area.bottom() { break; }
+
+            // Calculate line x position based on alignment
+            let line_width = line.width();
+            let start_x = match self.alignment {
+                Left => text_area.x,
+                Center => text_area.x + (text_area.width - line_width).max(0) / 2,
+                Right => text_area.x + (text_area.width - line_width).max(0),
+            };
+
+            let mut x = start_x - h_offset;
+
+            for span in &line.spans {
+                let combined_style = self.style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined_style);
+            }
+
+            y = y + 1;
+            line_idx = line_idx + 1;
+        }
+    }
+}

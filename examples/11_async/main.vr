@@ -1,0 +1,83 @@
+// 11 — Async
+// async/await, spawn, channels, and concurrent patterns.
+// Verum uses green threads with a built-in executor.
+
+// --- Basic async function ---
+async fn fetch_data(id: Int) -> Text {
+    // Simulate work (in real code this would be an I/O call)
+    f"data-{id}"
+}
+
+// --- Async function calling other async functions ---
+async fn process(id: Int) -> Text {
+    let raw = fetch_data(id).await
+    f"processed({raw})"
+}
+
+// --- Spawning concurrent tasks ---
+async fn parallel_fetch(ids: List<Int>) -> List<Text> {
+    let mut handles = []
+    for id in ids {
+        // spawn runs the task concurrently
+        let handle = spawn fetch_data(id)
+        handles.push(handle)
+    }
+
+    // Await all results
+    let mut results = []
+    for h in handles {
+        results.push(h.await)
+    }
+    results
+}
+
+// --- Channels for communication between tasks ---
+async fn producer(ch: Channel<Int>, count: Int) {
+    for i in 0..count {
+        ch.send(i).await
+    }
+}
+
+async fn consumer(ch: Channel<Int>, count: Int) -> Int {
+    let mut sum = 0
+    for _ in 0..count {
+        let value = ch.recv().await
+        sum = sum + value
+    }
+    sum
+}
+
+// --- Select: wait on multiple channels ---
+async fn select_demo() {
+    let ch1 = Channel.new()
+    let ch2 = Channel.new()
+
+    spawn {
+        ch1.send("from channel 1").await
+    }
+    spawn {
+        ch2.send("from channel 2").await
+    }
+
+    // select waits for the first ready channel
+    select {
+        msg = ch1.recv() => print(f"Got: {msg}"),
+        msg = ch2.recv() => print(f"Got: {msg}")
+    }
+}
+
+fn main() {
+    print("=== Async Examples ===")
+
+    // In a full runtime, these would be run inside an executor.
+    // The examples show the syntax and patterns.
+
+    print("Async function: async fn name() -> T { ... }")
+    print("Await:          result = some_async().await")
+    print("Spawn:          let handle = spawn some_async()")
+    print("Channel:        let ch = Channel.new()")
+    print("Send/Recv:      ch.send(x).await / ch.recv().await")
+    print("Select:         select { msg = ch.recv() => ... }")
+
+    print("\nAsync demo complete (syntax reference)")
+}

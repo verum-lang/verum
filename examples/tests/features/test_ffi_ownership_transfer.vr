@@ -1,0 +1,12 @@
+// Test ownership transfer modes
+
+ffi OwnershipTransferTo {
+    @extern("give_ownership")
+    fn give_ownership(ptr: *mut u8) -> ();
+
+    @ownership(transfer_to = "ptr")
+}
+
+fn main() -> Int {
+    0
+}

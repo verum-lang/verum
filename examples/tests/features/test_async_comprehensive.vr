@@ -1,0 +1,378 @@
+// Comprehensive Test Suite for Async/Await Features in Verum
+// Tests all async/await functionality based on grammar/verum.ebnf
+
+// ============================================================================
+// Test 1: Basic async function definition
+// Grammar: async fn identifier(...) -> type_expr
+// ============================================================================
+
+async fn fetch_simple() -> Int {
+    42
+}
+
+async fn fetch_data(id: Int) -> Int {
+    id * 10
+}
+
+async fn compute(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// ============================================================================
+// Test 2: Await expressions
+// Grammar: postfix_expr = primary_expr, { postfix_op }
+//          postfix_op = '.' , 'await'
+// ============================================================================
+
+async fn test_await() -> Int {
+    print("Test 2: Await expressions");
+
+    // Simple await
+    let result1 = fetch_simple().await;
+    print(f"  2a. Simple await: {result1}");
+
+    // Await with arguments
+    let result2 = fetch_data(5).await;
+    print(f"  2b. Await with args: {result2}");
+
+    // Chained operations with await
+    let result3 = compute(10, 20).await;
+    print(f"  2c. Chained await: {result3}");
+
+    result1 + result2 + result3
+}
+
+// ============================================================================
+// Test 3: Spawn expressions
+// Grammar: spawn_expr = 'spawn' , expression
+// ============================================================================
+
+async fn background_task(n: Int) -> Int {
+    n * 3
+}
+
+async fn test_spawn() -> Int {
+    print("Test 3: Spawn expressions");
+
+    // Single spawn
+    let task1 = spawn fetch_data(7);
+    let r1 = task1.await;
+    print(f"  3a. Single spawn: {r1}");
+
+    // Multiple spawns (concurrent execution)
+    let task2 = spawn background_task(10);
+    let task3 = spawn background_task(20);
+    let task4 = spawn background_task(30);
+
+    let r2 = task2.await;
+    let r3 = task3.await;
+    let r4 = task4.await;
+    print(f"  3b. Multiple spawns: {r2}, {r3}, {r4}");
+
+    // Spawn with inline expression
+    let task5 = spawn compute(100, 200);
+    let r5 = task5.await;
+    print(f"  3c. Spawn inline: {r5}");
+
+    r1 + r2 + r3 + r4 + r5
+}
+
+// ============================================================================
+// Test 4: Async closures
+// Grammar: closure_expr = [ 'async' ] , closure_params , [ '->' , type_expr ] , expression
+// ============================================================================
+
+async fn test_async_closures() -> Int {
+    print("Test 4: Async closures");
+
+    // Simple async closure
+    let async_closure1 = async |x: Int| x * 2;
+    let result1 = async_closure1(5).await;
+    print(f"  4a. Simple async closure: {result1}");
+
+    // Async closure with multiple params
+    let async_closure2 = async |x: Int, y: Int| x + y;
+    let result2 = async_closure2(10, 20).await;
+    print(f"  4b. Multi-param async closure: {result2}");
+
+    // Async closure with block body
+    let async_closure3 = async |n: Int| {
+        let doubled = n * 2;
+        let squared = doubled * doubled;
+        squared
+    };
+    let result3 = async_closure3(3).await;
+    print(f"  4c. Async closure with block: {result3}");
+
+    result1 + result2 + result3
+}
+
+// ============================================================================
+// Test 5: Async blocks
+// Grammar: async_expr = 'async' , block_expr
+// ============================================================================
+
+async fn test_async_blocks() -> Int {
+    print("Test 5: Async blocks");
+
+    // Simple async block
+    let future1 = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    let result1 = future1.await;
+    print(f"  5a. Simple async block: {result1}");
+
+    // Async block with operations
+    let future2 = async {
+        let data = fetch_data(3).await;
+        data + 100
+    };
+    let result2 = future2.await;
+    print(f"  5b. Async block with await: {result2}");
+
+    // Nested async blocks
+    let future3 = async {
+        let inner = async {
+            42
+        };
+        let val = inner.await;
+        val * 2
+    };
+    let result3 = future3.await;
+    print(f"  5c. Nested async blocks: {result3}");
+
+    result1 + result2 + result3
+}
+
+// ============================================================================
+// Test 6: Multiple awaits in sequence
+// ============================================================================
+
+async fn step1(x: Int) -> Int {
+    x + 10
+}
+
+async fn step2(x: Int) -> Int {
+    x * 2
+}
+
+async fn step3(x: Int) -> Int {
+    x - 5
+}
+
+async fn test_sequential_awaits() -> Int {
+    print("Test 6: Sequential awaits");
+
+    // Sequential pipeline
+    let val1 = step1(5).await;
+    print(f"  6a. After step1: {val1}");
+
+    let val2 = step2(val1).await;
+    print(f"  6b. After step2: {val2}");
+
+    let val3 = step3(val2).await;
+    print(f"  6c. After step3: {val3}");
+
+    // Multiple awaits in expressions
+    let combined = step1(10).await + step2(20).await;
+    print(f"  6d. Combined awaits: {combined}");
+
+    val3 + combined
+}
+
+// ============================================================================
+// Test 7: Concurrent task spawning
+// ============================================================================
+
+async fn task_a() -> Int {
+    print("    Task A executing");
+    100
+}
+
+async fn task_b() -> Int {
+    print("    Task B executing");
+    200
+}
+
+async fn task_c() -> Int {
+    print("    Task C executing");
+    300
+}
+
+async fn test_concurrent_spawning() -> Int {
+    print("Test 7: Concurrent task spawning");
+
+    // Spawn all tasks concurrently
+    let handle_a = spawn task_a();
+    let handle_b = spawn task_b();
+    let handle_c = spawn task_c();
+
+    // Await in different order than spawned
+    let result_c = handle_c.await;
+    let result_a = handle_a.await;
+    let result_b = handle_b.await;
+
+    let total = result_a + result_b + result_c;
+    print(f"  7. Total from concurrent tasks: {total}");
+
+    total
+}
+
+// ============================================================================
+// Test 8: Complex patterns (mixed sync/async, conditionals, loops)
+// ============================================================================
+
+async fn conditional_fetch(flag: Bool) -> Int {
+    if flag {
+        50
+    } else {
+        25
+    }
+}
+
+async fn test_complex_patterns() -> Int {
+    print("Test 8: Complex async patterns");
+
+    // Await in conditionals
+    let val = fetch_data(3).await;
+    if val > 20 {
+        print(f"  8a. Value {val} is large");
+    } else {
+        print(f"  8a. Value {val} is small");
+    }
+
+    // Spawn with conditional
+    let task = if val > 20 {
+        spawn conditional_fetch(true)
+    } else {
+        spawn conditional_fetch(false)
+    };
+    let result = task.await;
+    print(f"  8b. Conditional result: {result}");
+
+    // Multiple spawns with collection
+    let tasks = [
+        spawn background_task(1),
+        spawn background_task(2),
+        spawn background_task(3)
+    ];
+
+    let sum = tasks[0].await + tasks[1].await + tasks[2].await;
+    print(f"  8c. Sum from task array: {sum}");
+
+    val + result + sum
+}
+
+// ============================================================================
+// Test 9: Error handling with async (if Result types are available)
+// ============================================================================
+
+async fn may_fail(should_succeed: Bool) -> Int {
+    if should_succeed {
+        100
+    } else {
+        0
+    }
+}
+
+async fn test_error_handling() -> Int {
+    print("Test 9: Async error handling");
+
+    let success = may_fail(true).await;
+    print(f"  9a. Success case: {success}");
+
+    let failure = may_fail(false).await;
+    print(f"  9b. Failure case: {failure}");
+
+    success + failure
+}
+
+// ============================================================================
+// Test 10: Nested async calls
+// ============================================================================
+
+async fn level3(x: Int) -> Int {
+    x + 1
+}
+
+async fn level2(x: Int) -> Int {
+    let result = level3(x).await;
+    result * 2
+}
+
+async fn level1(x: Int) -> Int {
+    let result = level2(x).await;
+    result + 10
+}
+
+async fn test_nested_async() -> Int {
+    print("Test 10: Nested async calls");
+
+    let result = level1(5).await;
+    print(f"  10. Nested result: {result}");
+
+    result
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+async fn main() -> Int {
+    print("========================================");
+    print("Verum Async/Await Comprehensive Test Suite");
+    print("========================================");
+    print("");
+
+    // Run all tests
+    let t1 = fetch_simple().await;
+    print(f"Test 1: Basic async function - Result: {t1}");
+    print("");
+
+    let t2 = test_await().await;
+    print(f"Test 2 Total: {t2}");
+    print("");
+
+    let t3 = test_spawn().await;
+    print(f"Test 3 Total: {t3}");
+    print("");
+
+    let t4 = test_async_closures().await;
+    print(f"Test 4 Total: {t4}");
+    print("");
+
+    let t5 = test_async_blocks().await;
+    print(f"Test 5 Total: {t5}");
+    print("");
+
+    let t6 = test_sequential_awaits().await;
+    print(f"Test 6 Total: {t6}");
+    print("");
+
+    let t7 = test_concurrent_spawning().await;
+    print(f"Test 7 Total: {t7}");
+    print("");
+
+    let t8 = test_complex_patterns().await;
+    print(f"Test 8 Total: {t8}");
+    print("");
+
+    let t9 = test_error_handling().await;
+    print(f"Test 9 Total: {t9}");
+    print("");
+
+    let t10 = test_nested_async().await;
+    print(f"Test 10 Total: {t10}");
+    print("");
+
+    print("========================================");
+    print("All tests completed!");
+    print("========================================");
+
+    let grand_total = t1 + t2 + t3 + t4 + t5 + t6 + t7 + t8 + t9 + t10;
+    print(f"Grand Total: {grand_total}");
+
+    0
+}

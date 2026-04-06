@@ -1,0 +1,38 @@
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type LessThan100 is Int{< 100};
+type AtMost100 is Int{<= 100};
+type NonZero is Int{!= 0};
+
+fn get_positive() -> Int{> 0} {
+    5
+}
+
+fn get_non_negative() -> Int{>= 0} {
+    0
+}
+
+fn get_less_than_100() -> Int{< 100} {
+    50
+}
+
+fn get_at_most_100() -> Int{<= 100} {
+    100
+}
+
+fn get_non_zero() -> Int{!= 0} {
+    42
+}
+
+fn main() {
+    let x: Positive = 5;
+    println("Positive type works!");
+
+    let a = get_positive();
+    let b = get_non_negative();
+    let c = get_less_than_100();
+    let d = get_at_most_100();
+    let e = get_non_zero();
+
+    println("All refinement types in return positions work!");
+}

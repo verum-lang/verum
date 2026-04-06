@@ -1,0 +1,76 @@
+// Chat Application - Server and Client in one
+// Usage: verum run -- --server 8080
+//        verum run -- --client localhost 8080 username
+
+type ChatMode is Server | Client;
+
+type Message is {
+    sender: Text,
+    content: Text,
+    timestamp: Int
+};
+
+fn parse_mode(args: List<Text>) -> Maybe<ChatMode> {
+    if args.len() >= 2 {
+        match args[1] {
+            "--server" => Some(Server),
+            "--client" => Some(Client),
+            _ => None
+        }
+    } else {
+        None
+    }
+}
+
+fn print_help() {
+    print("Verum Chat v1.0");
+    print("");
+    print("Usage:");
+    print("  verum run -- --server <port>");
+    print("  verum run -- --client <host> <port> <username>");
+    print("");
+    print("Commands:");
+    print("  /help  - Show this help");
+    print("  /list  - List connected users");
+    print("  /quit  - Exit the chat");
+}
+
+fn run_server(port: Int) {
+    print("Starting chat server on port");
+    print(port.to_string());
+    print("");
+    print("Waiting for connections...");
+    // Server logic would go here
+    // Using async/await for concurrent handling
+}
+
+fn run_client(host: Text, port: Int, username: Text) {
+    print("Connecting to server...");
+    print(host);
+    print(port.to_string());
+    print("");
+    print("Welcome,");
+    print(username);
+    print("Type /help for commands");
+    // Client logic would go here
+}
+
+fn main() {
+    let args = get_args();
+    
+    match parse_mode(args) {
+        Some(Server) => {
+            let port = 8080;
+            run_server(port);
+        },
+        Some(Client) => {
+            let host = "localhost";
+            let port = 8080;
+            let username = "user";
+            run_client(host, port, username);
+        },
+        None => {
+            print_help();
+        }
+    }
+}

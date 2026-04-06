@@ -1,0 +1,8 @@
+async fn fetch_data() -> Text {
+    "data"
+}
+
+async fn main() {
+    let result = fetch_data().await;
+    print(result);
+}

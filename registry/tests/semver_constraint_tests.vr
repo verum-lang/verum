@@ -1,0 +1,246 @@
+// Tests for semantic version constraint parsing and matching
+// Tests all constraint types: exact, caret, tilde, greater/less than, wildcard
+
+mount core.base.{Text, Result, List};
+mount crate.domain.version.{SemVer, VersionConstraint};
+mount crate.domain.semver_constraint.{parse_constraint, satisfies};
+mount crate.domain.errors.RegistryError;
+
+// Test exact version constraint
+@test
+fn test_exact_constraint() {
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_1 = SemVer.new(1, 0, 1);
+
+    let constraint = parse_constraint("1.0.0").unwrap();
+
+    assert(satisfies(v1_0_0, constraint), "1.0.0 should satisfy exact 1.0.0");
+    assert(!satisfies(v1_0_1, constraint), "1.0.1 should NOT satisfy exact 1.0.0");
+}
+
+@test
+fn test_exact_constraint_with_equals() {
+    let v1_2_3 = SemVer.new(1, 2, 3);
+    let v1_2_4 = SemVer.new(1, 2, 4);
+
+    let constraint = parse_constraint("=1.2.3").unwrap();
+
+    assert(satisfies(v1_2_3, constraint), "1.2.3 should satisfy =1.2.3");
+    assert(!satisfies(v1_2_4, constraint), "1.2.4 should NOT satisfy =1.2.3");
+}
+
+// Test caret constraint (compatible changes)
+@test
+fn test_caret_constraint_stable() {
+    let v1_2_3 = SemVer.new(1, 2, 3);
+    let v1_2_4 = SemVer.new(1, 2, 4);
+    let v1_3_0 = SemVer.new(1, 3, 0);
+    let v2_0_0 = SemVer.new(2, 0, 0);
+    let v1_2_2 = SemVer.new(1, 2, 2);
+
+    let constraint = parse_constraint("^1.2.3").unwrap();
+
+    assert(satisfies(v1_2_3, constraint), "1.2.3 should satisfy ^1.2.3");
+    assert(satisfies(v1_2_4, constraint), "1.2.4 should satisfy ^1.2.3");
+    assert(satisfies(v1_3_0, constraint), "1.3.0 should satisfy ^1.2.3");
+    assert(!satisfies(v2_0_0, constraint), "2.0.0 should NOT satisfy ^1.2.3");
+    assert(!satisfies(v1_2_2, constraint), "1.2.2 should NOT satisfy ^1.2.3");
+}
+
+@test
+fn test_caret_constraint_zero_major() {
+    let v0_2_3 = SemVer.new(0, 2, 3);
+    let v0_2_4 = SemVer.new(0, 2, 4);
+    let v0_3_0 = SemVer.new(0, 3, 0);
+    let v1_0_0 = SemVer.new(1, 0, 0);
+
+    let constraint = parse_constraint("^0.2.3").unwrap();
+
+    assert(satisfies(v0_2_3, constraint), "0.2.3 should satisfy ^0.2.3");
+    assert(satisfies(v0_2_4, constraint), "0.2.4 should satisfy ^0.2.3");
+    assert(!satisfies(v0_3_0, constraint), "0.3.0 should NOT satisfy ^0.2.3 (breaking in 0.x)");
+    assert(!satisfies(v1_0_0, constraint), "1.0.0 should NOT satisfy ^0.2.3");
+}
+
+@test
+fn test_caret_constraint_zero_minor() {
+    let v0_0_3 = SemVer.new(0, 0, 3);
+    let v0_0_4 = SemVer.new(0, 0, 4);
+    let v0_1_0 = SemVer.new(0, 1, 0);
+
+    let constraint = parse_constraint("^0.0.3").unwrap();
+
+    assert(satisfies(v0_0_3, constraint), "0.0.3 should satisfy ^0.0.3");
+    assert(!satisfies(v0_0_4, constraint), "0.0.4 should NOT satisfy ^0.0.3 (breaking in 0.0.x)");
+    assert(!satisfies(v0_1_0, constraint), "0.1.0 should NOT satisfy ^0.0.3");
+}
+
+// Test tilde constraint (approximately equivalent)
+@test
+fn test_tilde_constraint() {
+    let v1_2_3 = SemVer.new(1, 2, 3);
+    let v1_2_4 = SemVer.new(1, 2, 4);
+    let v1_3_0 = SemVer.new(1, 3, 0);
+    let v1_2_2 = SemVer.new(1, 2, 2);
+
+    let constraint = parse_constraint("~1.2.3").unwrap();
+
+    assert(satisfies(v1_2_3, constraint), "1.2.3 should satisfy ~1.2.3");
+    assert(satisfies(v1_2_4, constraint), "1.2.4 should satisfy ~1.2.3");
+    assert(!satisfies(v1_3_0, constraint), "1.3.0 should NOT satisfy ~1.2.3");
+    assert(!satisfies(v1_2_2, constraint), "1.2.2 should NOT satisfy ~1.2.3");
+}
+
+@test
+fn test_tilde_constraint_zero_minor() {
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_5 = SemVer.new(1, 0, 5);
+    let v1_1_0 = SemVer.new(1, 1, 0);
+
+    let constraint = parse_constraint("~1.0.0").unwrap();
+
+    assert(satisfies(v1_0_0, constraint), "1.0.0 should satisfy ~1.0.0");
+    assert(satisfies(v1_0_5, constraint), "1.0.5 should satisfy ~1.0.0");
+    assert(!satisfies(v1_1_0, constraint), "1.1.0 should NOT satisfy ~1.0.0");
+}
+
+// Test greater than constraint
+@test
+fn test_greater_than_constraint() {
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_1 = SemVer.new(1, 0, 1);
+    let v2_0_0 = SemVer.new(2, 0, 0);
+
+    let constraint = parse_constraint(">1.0.0").unwrap();
+
+    assert(!satisfies(v1_0_0, constraint), "1.0.0 should NOT satisfy >1.0.0");
+    assert(satisfies(v1_0_1, constraint), "1.0.1 should satisfy >1.0.0");
+    assert(satisfies(v2_0_0, constraint), "2.0.0 should satisfy >1.0.0");
+}
+
+// Test greater than or equal constraint
+@test
+fn test_greater_than_or_equal_constraint() {
+    let v0_9_0 = SemVer.new(0, 9, 0);
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_1 = SemVer.new(1, 0, 1);
+
+    let constraint = parse_constraint(">=1.0.0").unwrap();
+
+    assert(!satisfies(v0_9_0, constraint), "0.9.0 should NOT satisfy >=1.0.0");
+    assert(satisfies(v1_0_0, constraint), "1.0.0 should satisfy >=1.0.0");
+    assert(satisfies(v1_0_1, constraint), "1.0.1 should satisfy >=1.0.0");
+}
+
+// Test less than constraint
+@test
+fn test_less_than_constraint() {
+    let v0_9_0 = SemVer.new(0, 9, 0);
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_1 = SemVer.new(1, 0, 1);
+
+    let constraint = parse_constraint("<1.0.0").unwrap();
+
+    assert(satisfies(v0_9_0, constraint), "0.9.0 should satisfy <1.0.0");
+    assert(!satisfies(v1_0_0, constraint), "1.0.0 should NOT satisfy <1.0.0");
+    assert(!satisfies(v1_0_1, constraint), "1.0.1 should NOT satisfy <1.0.0");
+}
+
+// Test less than or equal constraint
+@test
+fn test_less_than_or_equal_constraint() {
+    let v0_9_0 = SemVer.new(0, 9, 0);
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_0_1 = SemVer.new(1, 0, 1);
+
+    let constraint = parse_constraint("<=1.0.0").unwrap();
+
+    assert(satisfies(v0_9_0, constraint), "0.9.0 should satisfy <=1.0.0");
+    assert(satisfies(v1_0_0, constraint), "1.0.0 should satisfy <=1.0.0");
+    assert(!satisfies(v1_0_1, constraint), "1.0.1 should NOT satisfy <=1.0.0");
+}
+
+// Test wildcard constraints
+@test
+fn test_wildcard_any() {
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v2_5_3 = SemVer.new(2, 5, 3);
+    let v0_0_1 = SemVer.new(0, 0, 1);
+
+    let constraint = parse_constraint("*").unwrap();
+
+    assert(satisfies(v1_0_0, constraint), "1.0.0 should satisfy *");
+    assert(satisfies(v2_5_3, constraint), "2.5.3 should satisfy *");
+    assert(satisfies(v0_0_1, constraint), "0.0.1 should satisfy *");
+}
+
+@test
+fn test_wildcard_major_minor() {
+    let v1_2_0 = SemVer.new(1, 2, 0);
+    let v1_2_5 = SemVer.new(1, 2, 5);
+    let v1_3_0 = SemVer.new(1, 3, 0);
+    let v2_2_0 = SemVer.new(2, 2, 0);
+
+    let constraint = parse_constraint("1.2.*").unwrap();
+
+    assert(satisfies(v1_2_0, constraint), "1.2.0 should satisfy 1.2.*");
+    assert(satisfies(v1_2_5, constraint), "1.2.5 should satisfy 1.2.*");
+    assert(!satisfies(v1_3_0, constraint), "1.3.0 should NOT satisfy 1.2.*");
+    assert(!satisfies(v2_2_0, constraint), "2.2.0 should NOT satisfy 1.2.*");
+}
+
+// Test error cases
+@test
+fn test_invalid_version_string() {
+    let result = parse_constraint("not-a-version");
+    assert(result.is_err(), "Should fail to parse invalid version string");
+}
+
+@test
+fn test_empty_constraint() {
+    let result = parse_constraint("");
+    assert(result.is_err(), "Should fail to parse empty constraint");
+}
+
+@test
+fn test_incomplete_version() {
+    let result = parse_constraint("^1.0");
+    assert(result.is_err(), "Should fail to parse incomplete version (missing patch)");
+}
+
+// Test complex real-world scenarios
+@test
+fn test_npm_style_caret_ranges() {
+    // Mimics npm/cargo style caret dependencies
+    let v1_0_0 = SemVer.new(1, 0, 0);
+    let v1_9_9 = SemVer.new(1, 9, 9);
+    let v2_0_0 = SemVer.new(2, 0, 0);
+
+    let constraint = parse_constraint("^1.0.0").unwrap();
+
+    assert(satisfies(v1_0_0, constraint), "^1.0.0 allows 1.0.0");
+    assert(satisfies(v1_9_9, constraint), "^1.0.0 allows 1.9.9");
+    assert(!satisfies(v2_0_0, constraint), "^1.0.0 does not allow 2.0.0");
+}
+
+@test
+fn test_pre_1_0_compatibility() {
+    // Pre-1.0 versions have different compatibility semantics
+    let v0_1_0 = SemVer.new(0, 1, 0);
+    let v0_1_5 = SemVer.new(0, 1, 5);
+    let v0_2_0 = SemVer.new(0, 2, 0);
+
+    let constraint = parse_constraint("^0.1.0").unwrap();
+
+    assert(satisfies(v0_1_0, constraint), "^0.1.0 allows 0.1.0");
+    assert(satisfies(v0_1_5, constraint), "^0.1.0 allows 0.1.5");
+    assert(!satisfies(v0_2_0, constraint), "^0.1.0 does not allow 0.2.0 (breaking change)");
+}
+
+@test
+fn test_parsing_with_whitespace() {
+    let constraint = parse_constraint("  ^1.0.0  ").unwrap();
+    let v1_0_0 = SemVer.new(1, 0, 0);
+
+    assert(satisfies(v1_0_0, constraint), "Should handle whitespace in constraint");
+}

@@ -1,0 +1,406 @@
+// Verum Registry - Validation Integration Tests
+//
+// Comprehensive validation tests for all input validation rules
+// Tests package names, emails, versions, pagination, and more
+
+mount core.collections.{List};
+mount core.base.{Result, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{assert_ok, assert_err, assert_eq};
+
+// Import validation service
+mount super.super.src.services.validation_service.{
+    validate_package_name,
+    validate_version,
+    validate_email,
+    validate_url,
+    validate_username,
+    validate_password,
+    validate_pagination,
+    validate_not_empty,
+    validate_max_length,
+    validate_length_range,
+};
+
+// Import domain types
+mount super.super.src.domain.errors.{RegistryError};
+
+// ============================================================================
+// Package Name Validation Tests
+// ============================================================================
+
+@test
+fn test_package_name_validation() {
+    // Valid names should pass
+    assert_ok(&validate_package_name("my-package"));
+    assert_ok(&validate_package_name("package123"));
+    assert_ok(&validate_package_name("web-server"));
+    assert_ok(&validate_package_name("http-client-v2"));
+    assert_ok(&validate_package_name("a1"));  // Minimum length (2 chars)
+
+    // Invalid names should fail
+    assert_err(&validate_package_name(""));  // Empty
+    assert_err(&validate_package_name("a"));  // Too short
+    assert_err(&validate_package_name("My_Package"));  // Uppercase
+    assert_err(&validate_package_name("my_package"));  // Underscore
+    assert_err(&validate_package_name("-leading"));  // Starts with hyphen
+    assert_err(&validate_package_name("trailing-"));  // Ends with hyphen
+    assert_err(&validate_package_name("double--hyphen"));  // Consecutive hyphens
+    assert_err(&validate_package_name("a".repeat(65)));  // Too long (> 64)
+}
+
+@test
+fn test_package_name_error_messages() {
+    // Empty name
+    let empty_result = validate_package_name("");
+    match empty_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"name");
+            assert(&message.contains("empty"));
+        },
+        _ => panic("Expected ValidationError for empty name"),
+    }
+
+    // Too short
+    let short_result = validate_package_name("a");
+    match short_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"name");
+            assert(&message.contains("short") || &message.contains("min"));
+        },
+        _ => panic("Expected ValidationError for short name"),
+    }
+
+    // Invalid format (starts with hyphen)
+    let hyphen_result = validate_package_name("-invalid");
+    match hyphen_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"name");
+            assert(&message.contains("hyphen"));
+        },
+        _ => panic("Expected ValidationError for hyphen"),
+    }
+}
+
+// ============================================================================
+// Email Validation Tests
+// ============================================================================
+
+@test
+fn test_email_validation() {
+    // Valid emails should pass
+    assert_ok(&validate_email("user@example.com"));
+    assert_ok(&validate_email("test.user@example.com"));
+    assert_ok(&validate_email("user+tag@example.co.uk"));
+    assert_ok(&validate_email("a@b.c"));  // Minimum valid email
+
+    // Invalid emails should fail
+    assert_err(&validate_email(""));  // Empty
+    assert_err(&validate_email("invalid"));  // No @ or domain
+    assert_err(&validate_email("@example.com"));  // No local part
+    assert_err(&validate_email("user@"));  // No domain
+    assert_err(&validate_email("user@domain"));  // No TLD
+    assert_err(&validate_email("user..name@example.com"));  // Consecutive dots
+    assert_err(&validate_email(".user@example.com"));  // Starts with dot
+    assert_err(&validate_email("user@example.com."));  // Ends with dot
+    assert_err(&validate_email("user@@example.com"));  // Multiple @
+}
+
+@test
+fn test_email_length_validation() {
+    // Local part too long (> 64 chars)
+    let long_local = "a".repeat(65) + "@example.com";
+    assert_err(&validate_email(&long_local));
+
+    // Domain too long (> 253 chars)
+    let long_domain = "user@" + "a".repeat(254) + ".com";
+    assert_err(&validate_email(&long_domain));
+
+    // Total length too long (> 320 chars)
+    let very_long = "a".repeat(300) + "@example.com";
+    assert_err(&validate_email(&very_long));
+
+    // Too short (< 5 chars)
+    assert_err(&validate_email("a@b"));
+}
+
+// ============================================================================
+// Version Validation Tests
+// ============================================================================
+
+@test
+fn test_version_validation() {
+    // Valid semantic versions
+    assert_ok(&validate_version("0.0.0"));
+    assert_ok(&validate_version("1.0.0"));
+    assert_ok(&validate_version("2.3.5"));
+    assert_ok(&validate_version("10.20.30"));
+    assert_ok(&validate_version("999.999.999"));
+
+    // Invalid versions
+    assert_err(&validate_version(""));  // Empty
+    assert_err(&validate_version("1.0"));  // Missing patch
+    assert_err(&validate_version("1"));  // Only major
+    assert_err(&validate_version("1.0.0.0"));  // Too many parts
+    assert_err(&validate_version("1.01.0"));  // Leading zero
+    assert_err(&validate_version("1.0.01"));  // Leading zero
+    assert_err(&validate_version("01.0.0"));  // Leading zero
+    assert_err(&validate_version("v1.0.0"));  // Prefix not allowed
+    assert_err(&validate_version("1.0.0-alpha"));  // Pre-release not supported yet
+}
+
+@test
+fn test_version_component_validation() {
+    // Each component must be non-negative integer
+    assert_err(&validate_version("-1.0.0"));
+    assert_err(&validate_version("1.-1.0"));
+    assert_err(&validate_version("1.0.-1"));
+
+    // Empty components
+    assert_err(&validate_version(".0.0"));
+    assert_err(&validate_version("1..0"));
+    assert_err(&validate_version("1.0."));
+}
+
+// ============================================================================
+// URL Validation Tests
+// ============================================================================
+
+@test
+fn test_url_validation() {
+    // Valid URLs
+    assert_ok(&validate_url("https://github.com/user/repo"));
+    assert_ok(&validate_url("http://example.com"));
+    assert_ok(&validate_url("https://example.com/path/to/page"));
+    assert_ok(&validate_url("http://sub.example.com:8080/path"));
+
+    // Invalid URLs
+    assert_err(&validate_url(""));  // Empty
+    assert_err(&validate_url("github.com/user/repo"));  // No protocol
+    assert_err(&validate_url("ftp://example.com"));  // Wrong protocol
+    assert_err(&validate_url("https://"));  // No content after protocol
+    assert_err(&validate_url("http://"));  // No content after protocol
+}
+
+@test
+fn test_url_length_validation() {
+    // Too short (< 10 chars)
+    assert_err(&validate_url("http://a"));
+
+    // Too long (> 2048 chars)
+    let long_url = "https://example.com/" + "a".repeat(2030);
+    assert_err(&validate_url(&long_url));
+
+    // Just right
+    assert_ok(&validate_url("http://ex.com"));
+}
+
+// ============================================================================
+// Username Validation Tests
+// ============================================================================
+
+@test
+fn test_username_validation() {
+    // Valid usernames
+    assert_ok(&validate_username("alice"));
+    assert_ok(&validate_username("user123"));
+    assert_ok(&validate_username("user-name"));
+    assert_ok(&validate_username("abc"));  // Minimum length (3)
+    assert_ok(&validate_username("a".repeat(32)));  // Maximum length
+
+    // Invalid usernames
+    assert_err(&validate_username(""));  // Empty
+    assert_err(&validate_username("ab"));  // Too short
+    assert_err(&validate_username("a".repeat(33)));  // Too long
+    assert_err(&validate_username("user@name"));  // Special chars
+    assert_err(&validate_username("user name"));  // Spaces
+}
+
+// ============================================================================
+// Password Validation Tests
+// ============================================================================
+
+@test
+fn test_password_validation() {
+    // Valid passwords
+    assert_ok(&validate_password("password123", "password"));
+    assert_ok(&validate_password("securePass!", "password"));
+    assert_ok(&validate_password("a".repeat(128), "password"));  // Max length
+
+    // Invalid passwords
+    assert_err(&validate_password("", "password"));  // Empty
+    assert_err(&validate_password("short", "password"));  // Too short (< 8)
+    assert_err(&validate_password("a".repeat(129), "password"));  // Too long (> 128)
+}
+
+// ============================================================================
+// Pagination Validation Tests
+// ============================================================================
+
+@test
+fn test_pagination_validation() {
+    // Valid pagination
+    assert_ok(&validate_pagination(1, 10));
+    assert_ok(&validate_pagination(1, 1));
+    assert_ok(&validate_pagination(1, 100));
+    assert_ok(&validate_pagination(100, 50));
+
+    // Invalid pagination
+    assert_err(&validate_pagination(0, 10));  // Page < 1
+    assert_err(&validate_pagination(-1, 10));  // Negative page
+    assert_err(&validate_pagination(1, 0));  // Limit < 1
+    assert_err(&validate_pagination(1, -1));  // Negative limit
+    assert_err(&validate_pagination(1, 101));  // Limit > 100
+    assert_err(&validate_pagination(1, 1000));  // Limit too large
+}
+
+@test
+fn test_pagination_error_messages() {
+    // Invalid page number
+    let page_result = validate_pagination(0, 10);
+    match page_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"page");
+            assert(&message.contains("1"));
+        },
+        _ => panic("Expected ValidationError for page"),
+    }
+
+    // Invalid limit
+    let limit_result = validate_pagination(1, 200);
+    match limit_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"limit");
+            assert(&message.contains("100"));
+        },
+        _ => panic("Expected ValidationError for limit"),
+    }
+}
+
+// ============================================================================
+// Generic Field Validation Tests
+// ============================================================================
+
+@test
+fn test_not_empty_validation() {
+    // Valid non-empty values
+    assert_ok(&validate_not_empty("value", "field"));
+    assert_ok(&validate_not_empty("a", "field"));
+
+    // Invalid empty value
+    assert_err(&validate_not_empty("", "field"));
+}
+
+@test
+fn test_max_length_validation() {
+    // Valid lengths
+    assert_ok(&validate_max_length("short", "field", 10));
+    assert_ok(&validate_max_length("exactly10!", "field", 10));
+    assert_ok(&validate_max_length("", "field", 10));  // Empty is ok
+
+    // Invalid - too long
+    assert_err(&validate_max_length("this is too long", "field", 10));
+    assert_err(&validate_max_length("a".repeat(100), "field", 50));
+}
+
+@test
+fn test_length_range_validation() {
+    // Valid ranges
+    assert_ok(&validate_length_range("hello", "field", 3, 10));
+    assert_ok(&validate_length_range("abc", "field", 3, 10));  // Min
+    assert_ok(&validate_length_range("0123456789", "field", 3, 10));  // Max
+
+    // Invalid - too short
+    assert_err(&validate_length_range("ab", "field", 3, 10));
+
+    // Invalid - too long
+    assert_err(&validate_length_range("0123456789X", "field", 3, 10));
+
+    // Invalid - empty
+    assert_err(&validate_length_range("", "field", 3, 10));
+}
+
+// ============================================================================
+// Edge Cases and Boundary Tests
+// ============================================================================
+
+@test
+fn test_validation_boundary_values() {
+    // Package name boundaries
+    assert_ok(&validate_package_name("ab"));  // Exactly 2 (min)
+    assert_ok(&validate_package_name("a".repeat(64)));  // Exactly 64 (max)
+    assert_err(&validate_package_name("a"));  // Just under min
+    assert_err(&validate_package_name("a".repeat(65)));  // Just over max
+
+    // Version boundaries
+    assert_ok(&validate_version("0.0.0"));  // Minimum
+    assert_ok(&validate_version("999.999.999"));  // Large but valid
+
+    // Username boundaries
+    assert_ok(&validate_username("abc"));  // Exactly 3 (min)
+    assert_ok(&validate_username("a".repeat(32)));  // Exactly 32 (max)
+    assert_err(&validate_username("ab"));  // Just under min
+    assert_err(&validate_username("a".repeat(33)));  // Just over max
+}
+
+@test
+fn test_validation_special_characters() {
+    // Package names with special chars
+    assert_err(&validate_package_name("package@1.0"));
+    assert_err(&validate_package_name("my_package"));
+    assert_err(&validate_package_name("package.name"));
+    assert_err(&validate_package_name("package name"));
+
+    // Emails with special chars (some allowed)
+    assert_ok(&validate_email("user.name@example.com"));  // Dot allowed
+    assert_ok(&validate_email("user+tag@example.com"));  // Plus allowed
+    assert_err(&validate_email("user name@example.com"));  // Space not allowed
+}
+
+@test
+fn test_validation_unicode_and_encoding() {
+    // Package names must be ASCII lowercase
+    assert_err(&validate_package_name("пакет"));  // Cyrillic
+    assert_err(&validate_package_name("パッケージ"));  // Japanese
+    assert_err(&validate_package_name("café"));  // Accented chars
+
+    // Emails can have ASCII in local part
+    // Note: Full unicode email support is complex
+    assert_err(&validate_email("user@ドメイン.com"));  // Unicode domain
+}
+
+@test
+fn test_validation_whitespace_handling() {
+    // Leading/trailing whitespace should not be valid
+    assert_err(&validate_package_name(" package"));
+    assert_err(&validate_package_name("package "));
+    assert_err(&validate_package_name(" package "));
+
+    assert_err(&validate_username(" user"));
+    assert_err(&validate_username("user "));
+
+    assert_err(&validate_email(" user@example.com"));
+    assert_err(&validate_email("user@example.com "));
+}
+
+// ============================================================================
+// Composite Validation Tests
+// ============================================================================
+
+@test
+fn test_multiple_validation_failures() {
+    // Package name with multiple issues
+    let bad_name1 = "";  // Empty AND too short
+    assert_err(&validate_package_name(bad_name1));
+
+    let bad_name2 = "-";  // Too short AND starts with hyphen
+    assert_err(&validate_package_name(bad_name2));
+
+    // Email with multiple issues
+    let bad_email1 = "";  // Empty AND too short
+    assert_err(&validate_email(bad_email1));
+
+    let bad_email2 = "..@..";  // Consecutive dots AND no valid domain
+    assert_err(&validate_email(bad_email2));
+}

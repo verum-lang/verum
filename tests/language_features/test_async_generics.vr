@@ -1,0 +1,26 @@
+// Test async with generics
+async fn async_identity<T>(value: T) -> T {
+    value
+}
+
+async fn async_pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+fn main() {
+    print("Test 1: Generic identity with Int");
+    let result1 = async_identity(42).await;
+    print(f"Result: {result1}");
+
+    print("\nTest 2: Generic identity with Text");
+    let result2 = async_identity("hello").await;
+    print(f"Result: {result2}");
+
+    print("\nTest 3: Generic pair");
+    let result3 = async_pair(10, "world").await;
+    print(f"Result: {result3}");
+
+    print("\nTest 4: Nested generic");
+    let nested = async_identity((1, 2, 3)).await;
+    print(f"Nested: {nested}");
+}

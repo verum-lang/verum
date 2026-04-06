@@ -1,0 +1,24 @@
+// Test basic context definition and usage
+// According to grammar: context_decl = "context" IDENT "{" context_item* "}"
+
+context Logger {
+    fn log(message: Text);
+    fn error(message: Text);
+}
+
+// Test using keyword with single context
+fn process_data(data: Text) using Logger {
+    Logger.log("Processing data");
+    Logger.error("Something went wrong");
+}
+
+// Test function without context
+fn simple_function(x: Int) -> Int {
+    x + 1
+}
+
+// Main entry point
+fn main() {
+    let result = simple_function(5);
+    process_data("test input");
+}

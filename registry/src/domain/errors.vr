@@ -1,0 +1,150 @@
+// Error domain types
+// Defines RegistryError variant type for all registry errors
+
+mount core.base.{Text, Int};
+
+// RegistryError represents all possible errors in the registry
+pub type RegistryError is
+    | PackageNotFound { name: Text }
+    | VersionNotFound { package: Text, version: Text }
+    | PackageAlreadyExists { name: Text }
+    | VersionAlreadyExists { package: Text, version: Text }
+    | InvalidPackageName { name: Text, reason: Text }
+    | InvalidVersion { version: Text, reason: Text }
+    | Unauthorized { message: Text }
+    | InvalidToken { message: Text }
+    | DatabaseError { message: Text }
+    | StorageError { message: Text }
+    | ValidationError { field_name: Text, message: Text }
+    | DependencyNotFound { package: Text, dependency: Text }
+    | CircularDependency { packages: Text }
+    | ChecksumMismatch { expected: Text, actual: Text }
+    | NetworkError { message: Text }
+    | InternalError { message: Text };
+
+implement RegistryError {
+    pub fn package_not_found(name: Text) -> RegistryError {
+        RegistryError.PackageNotFound { name: name }
+    }
+
+    pub fn version_not_found(package: Text, version: Text) -> RegistryError {
+        RegistryError.VersionNotFound {
+            package: package,
+            version: version
+        }
+    }
+
+    pub fn package_already_exists(name: Text) -> RegistryError {
+        RegistryError.PackageAlreadyExists { name: name }
+    }
+
+    pub fn unauthorized(message: Text) -> RegistryError {
+        RegistryError.Unauthorized { message: message }
+    }
+
+    pub fn invalid_token(message: Text) -> RegistryError {
+        RegistryError.InvalidToken { message: message }
+    }
+
+    pub fn database_error(message: Text) -> RegistryError {
+        RegistryError.DatabaseError { message: message }
+    }
+
+    pub fn storage_error(message: Text) -> RegistryError {
+        RegistryError.StorageError { message: message }
+    }
+
+    pub fn validation_error(field_name: Text, message: Text) -> RegistryError {
+        RegistryError.ValidationError {
+            field_name: field_name,
+            message: message
+        }
+    }
+
+    pub fn internal_error(message: Text) -> RegistryError {
+        RegistryError.InternalError { message: message }
+    }
+
+    pub fn to_string(self) -> Text {
+        match self {
+            RegistryError.PackageNotFound { name } => {
+                f"Package not found: {name}"
+            },
+            RegistryError.VersionNotFound { package, version } => {
+                f"Version {version} not found for package {package}"
+            },
+            RegistryError.PackageAlreadyExists { name } => {
+                f"Package already exists: {name}"
+            },
+            RegistryError.VersionAlreadyExists { package, version } => {
+                f"Version {version} already exists for package {package}"
+            },
+            RegistryError.InvalidPackageName { name, reason } => {
+                f"Invalid package name '{name}': {reason}"
+            },
+            RegistryError.InvalidVersion { version, reason } => {
+                f"Invalid version '{version}': {reason}"
+            },
+            RegistryError.Unauthorized { message } => {
+                f"Unauthorized: {message}"
+            },
+            RegistryError.InvalidToken { message } => {
+                f"Invalid token: {message}"
+            },
+            RegistryError.DatabaseError { message } => {
+                f"Database error: {message}"
+            },
+            RegistryError.StorageError { message } => {
+                f"Storage error: {message}"
+            },
+            RegistryError.ValidationError { field_name, message } => {
+                f"Validation error on field '{field_name}': {message}"
+            },
+            RegistryError.DependencyNotFound { package, dependency } => {
+                f"Dependency '{dependency}' not found for package '{package}'"
+            },
+            RegistryError.CircularDependency { packages } => {
+                f"Circular dependency detected: {packages}"
+            },
+            RegistryError.ChecksumMismatch { expected, actual } => {
+                f"Checksum mismatch: expected {expected}, got {actual}"
+            },
+            RegistryError.NetworkError { message } => {
+                f"Network error: {message}"
+            },
+            RegistryError.InternalError { message } => {
+                f"Internal error: {message}"
+            }
+        }
+    }
+
+    pub fn is_recoverable(self) -> Bool {
+        match self {
+            RegistryError.NetworkError { message: _ } => true,
+            RegistryError.DatabaseError { message: _ } => true,
+            RegistryError.StorageError { message: _ } => true,
+            _ => false
+        }
+    }
+
+    pub fn error_code(self) -> Int {
+        match self {
+            RegistryError.PackageNotFound { name: _ } => 404,
+            RegistryError.VersionNotFound { package: _, version: _ } => 404,
+            RegistryError.PackageAlreadyExists { name: _ } => 409,
+            RegistryError.VersionAlreadyExists { package: _, version: _ } => 409,
+            RegistryError.InvalidPackageName { name: _, reason: _ } => 400,
+            RegistryError.InvalidVersion { version: _, reason: _ } => 400,
+            RegistryError.Unauthorized { message: _ } => 401,
+            RegistryError.InvalidToken { message: _ } => 401,
+            RegistryError.DatabaseError { message: _ } => 500,
+            RegistryError.StorageError { message: _ } => 500,
+            RegistryError.ValidationError { field_name: _, message: _ } => 400,
+            RegistryError.DependencyNotFound { package: _, dependency: _ } => 404,
+            RegistryError.CircularDependency { packages: _ } => 400,
+            RegistryError.ChecksumMismatch { expected: _, actual: _ } => 400,
+            RegistryError.NetworkError { message: _ } => 503,
+            RegistryError.InternalError { message: _ } => 500
+        }
+    }
+}

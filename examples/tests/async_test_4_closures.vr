@@ -1,0 +1,33 @@
+// Comprehensive Test 4: Async closures
+
+async fn main() -> Int {
+    print("Test 4: Async closures");
+
+    // Test 4a: Simple async closure
+    print("4a: Simple async closure");
+    let async_fn = async || {
+        42
+    };
+    let result = async_fn().await;
+    print(f"  Result: {result}");
+
+    // Test 4b: Async closure with parameters
+    print("4b: Async closure with parameters");
+    let add_async = async |x: Int, y: Int| {
+        x + y
+    };
+    let sum = add_async(10, 20).await;
+    print(f"  Result: {sum}");
+
+    // Test 4c: Async closure capturing environment
+    print("4c: Async closure with capture");
+    let multiplier = 3;
+    let multiply = async |x: Int| {
+        x * multiplier
+    };
+    let product = multiply(7).await;
+    print(f"  Result: {product}");
+
+    print("✓ All async closure tests passed");
+    0
+}

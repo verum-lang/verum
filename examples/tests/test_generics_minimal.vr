@@ -1,0 +1,10 @@
+// Minimal generic function test
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() -> Int {
+    let a = identity(42);
+    a
+}

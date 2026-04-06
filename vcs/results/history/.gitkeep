@@ -1,0 +1,15 @@
+# Historical test results directory
+# This directory stores archived test runs for trend analysis
+
+# Structure:
+# - run-YYYYMMDD-HHMMSS/
+#   - summary.json
+#   - l0-results.json
+#   - l1-results.json
+#   - l2-results.json
+#   - l3-results.json
+#   - l4-results.json
+#   - differential-results.json
+
+# Retention: Last 100 runs are kept
+# Older runs are automatically pruned by continuous-test-runner.sh

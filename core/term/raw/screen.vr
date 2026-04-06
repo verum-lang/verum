@@ -1,0 +1,196 @@
+// =============================================================================
+// raw/screen.vr - Alternate Screen and Size Queries
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.sys, core.io, super (raw/mod.vr)
+// =============================================================================
+//
+// Convenience functions for alternate screen management and terminal size
+// queries. These are standalone functions that work with any file descriptor,
+// independent of PosixTerminal/WindowsTerminal instances.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
+// =============================================================================
+
+module screen;
+
+mount core.sys.{FileDesc, OSError};
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount super.TerminalSize;
+
+// =============================================================================
+// Alternate Screen
+// =============================================================================
+
+/// Enter alternate screen buffer on the given file descriptor.
+/// Writes CSI ? 1049 h to stdout (fd 1).
+public fn enter_alternate_screen() -> IoResult<()> {
+    write_to_stdout("\x1b[?1049h")
+}
+
+/// Leave alternate screen buffer.
+/// Writes CSI ? 1049 l to stdout (fd 1).
+public fn leave_alternate_screen() -> IoResult<()> {
+    write_to_stdout("\x1b[?1049l")
+}
+
+// =============================================================================
+// Terminal Size
+// =============================================================================
+
+/// Get terminal size for the given file descriptor.
+/// Uses ioctl(TIOCGWINSZ) on POSIX, GetConsoleScreenBufferInfo on Windows.
+@cfg(not(target_os = "windows"))
+public fn get_terminal_size(fd: FileDesc) -> IoResult<TerminalSize> {
+    // Reuse termios FFI for ioctl
+    mount super.termios.{ioctl, Winsize, TIOCGWINSZ};
+
+    let mut ws = Winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let result = ioctl(fd.0, TIOCGWINSZ, &mut ws as &unsafe Byte);
+    if result != 0 {
+        return Err(StreamError.from_errno());
+    }
+    Ok(TerminalSize {
+        columns: ws.ws_col as Int,
+        rows: ws.ws_row as Int,
+        pixel_width: if ws.ws_xpixel > 0 { Some(ws.ws_xpixel as Int) } else { None },
+        pixel_height: if ws.ws_ypixel > 0 { Some(ws.ws_ypixel as Int) } else { None },
+    })
+}
+
+/// Get terminal size on Windows via Console API.
+@cfg(target_os = "windows")
+public fn get_terminal_size(fd: FileDesc) -> IoResult<TerminalSize> {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, GetConsoleScreenBufferInfo,
+        STD_OUTPUT_HANDLE, ConsoleScreenBufferInfo, Coord, SmallRect,
+    };
+
+    let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    let mut info = ConsoleScreenBufferInfo {
+        size: Coord { x: 0, y: 0 },
+        cursor_position: Coord { x: 0, y: 0 },
+        attributes: 0,
+        window: SmallRect { left: 0, top: 0, right: 0, bottom: 0 },
+        maximum_window_size: Coord { x: 0, y: 0 },
+    };
+    if !GetConsoleScreenBufferInfo(handle, &mut info) {
+        return Err(StreamError.new(IoErrorKind.Other));
+    }
+    Ok(TerminalSize {
+        columns: (info.window.right - info.window.left + 1) as Int,
+        rows: (info.window.bottom - info.window.top + 1) as Int,
+        pixel_width: None,
+        pixel_height: None,
+    })
+}
+
+/// Get terminal size for stdout (convenience).
+public fn get_stdout_size() -> IoResult<TerminalSize> {
+    get_terminal_size(FileDesc(1))
+}
+
+// =============================================================================
+// Cursor position query (via DSR)
+// =============================================================================
+
+/// Query cursor position via Device Status Report (CSI 6 n).
+/// Terminal responds with CSI row ; col R.
+/// Returns (row, col), 0-indexed.
+///
+/// NOTE: Requires raw mode. This is a blocking operation.
+public fn query_cursor_position(fd: FileDesc) -> IoResult<(Int, Int)> {
+    // Send DSR: ESC [ 6 n
+    write_to_fd(fd, "\x1b[6n")?;
+
+    // Read response: ESC [ rows ; cols R
+    // This is a simplified reader — real implementation needs timeout
+    let mut buf: [Byte; 32] = [0; 32];
+    let mut pos = 0;
+    let mut found = false;
+
+    while pos < 32 && !found {
+        let n = read_from_fd(fd, &mut buf[pos..pos + 1])?;
+        if n == 0 { break; }
+        if buf[pos] == 'R' as Byte {
+            found = true;
+        }
+        pos = pos + 1;
+    }
+
+    if !found {
+        return Err(StreamError.new(IoErrorKind.TimedOut));
+    }
+
+    // Parse: ESC [ rows ; cols R
+    // Find '[' and 'R', extract numbers
+    let mut start = 0;
+    while start < pos && buf[start] != '[' as Byte {
+        start = start + 1;
+    }
+    start = start + 1;  // skip '['
+
+    let mut row = 0;
+    let mut col = 0;
+    let mut parsing_col = false;
+
+    let mut i = start;
+    while i < pos - 1 {  // -1 to skip 'R'
+        if buf[i] == ';' as Byte {
+            parsing_col = true;
+        } else if buf[i] >= '0' as Byte && buf[i] <= '9' as Byte {
+            let digit = (buf[i] - '0' as Byte) as Int;
+            if parsing_col {
+                col = col * 10 + digit;
+            } else {
+                row = row * 10 + digit;
+            }
+        }
+        i = i + 1;
+    }
+
+    // Convert from 1-indexed to 0-indexed
+    Ok((row - 1, col - 1))
+}
+
+// =============================================================================
+// Internal I/O helpers
+// =============================================================================
+
+/// Write a string to stdout (fd 1).
+fn write_to_stdout(s: &Text) -> IoResult<()> {
+    write_to_fd(FileDesc(1), s)
+}
+
+/// Write a string to a file descriptor.
+@cfg(not(target_os = "windows"))
+fn write_to_fd(fd: FileDesc, s: &Text) -> IoResult<()> {
+    mount super.termios.write as raw_write;
+    let bytes = s.as_bytes();
+    let mut written = 0;
+    while written < bytes.len() {
+        let n = raw_write(fd.0, &bytes[written], bytes.len() - written);
+        if n < 0 {
+            return Err(StreamError.from_errno());
+        }
+        written = written + n;
+    }
+    Ok(())
+}
+
+/// Read bytes from a file descriptor.
+@cfg(not(target_os = "windows"))
+fn read_from_fd(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
+    mount super.termios.read as raw_read;
+    let n = raw_read(fd.0, buf as &unsafe mut Byte, buf.len());
+    if n < 0 {
+        Err(StreamError.from_errno())
+    } else {
+        Ok(n)
+    }
+}

@@ -1,0 +1,72 @@
+// Test: Refinement Types
+// Tests refinement types with runtime and compile-time checks
+
+// Basic refinement types
+type Positive is Int where it > 0
+type Negative is Int where it < 0
+type NonZero is Int where it != 0
+
+// Text refinements
+type NonEmpty is Text where it.len() > 0
+type ShortText is Text where it.len() <= 100
+
+// Numeric range refinements
+type Percentage is Int where it >= 0 && it <= 100
+type Age is Int where it >= 0 && it < 150
+
+// Complex refinements
+type EvenNumber is Int where it % 2 == 0
+type SmallPrime is Int where it == 2 || it == 3 || it == 5 || it == 7
+
+// Function using refinement types
+fn divide(numerator: Int, denominator: NonZero) -> Int {
+    numerator / denominator
+}
+
+fn make_percentage(value: Int) -> Maybe<Percentage> {
+    if value >= 0 && value <= 100 {
+        Some(value as Percentage)
+    } else {
+        None
+    }
+}
+
+fn process_positive(n: Positive) -> Int {
+    n * n  // Safe to use, guaranteed positive
+}
+
+fn validate_age(input: Int) -> Maybe<Age> {
+    if input >= 0 && input < 150 {
+        Some(input as Age)
+    } else {
+        None
+    }
+}
+
+fn main() {
+    // Test basic refinements
+    let pos: Positive = 42
+    println(f"Positive: {pos}")
+
+    // Test division with non-zero
+    let result = divide(100, 5)
+    println(f"Division result: {result}")
+
+    // Test percentage
+    match make_percentage(75) {
+        Some(pct) => println(f"Valid percentage: {pct}"),
+        None => println("Invalid percentage")
+    }
+
+    // Test age validation
+    match validate_age(25) {
+        Some(age) => println(f"Valid age: {age}"),
+        None => println("Invalid age")
+    }
+
+    // Test even number
+    let even: EvenNumber = 42
+    println(f"Even number: {even}")
+
+    println("Refinement types test completed")
+}

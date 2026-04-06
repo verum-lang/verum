@@ -1,0 +1,22 @@
+// Test collections
+fn main() {
+    // List (array)
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Numbers: {numbers}")
+    
+    // Access by index
+    let first = numbers[0]
+    print(f"First: {first}")
+    
+    // Map and filter with closures
+    let doubled = numbers.map(|x| x * 2)
+    print(f"Doubled: {doubled}")
+    
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"Evens: {evens}")
+    
+    // Iteration
+    for n in numbers {
+        print(f"  Item: {n}")
+    }
+}

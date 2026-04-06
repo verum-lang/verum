@@ -1,0 +1,1140 @@
+// Comprehensive Control Flow Test Suite
+// Tests all control flow constructs per grammar specification
+
+// ============================================================================
+// 1. IF/ELSE EXPRESSIONS
+// ============================================================================
+
+fn test_if_else_simple() -> Int {
+    let x = 42;
+    if x > 0 {
+        1
+    } else {
+        -1
+    }
+}
+
+fn test_if_else_chain() -> Text {
+    let score = 85;
+    if score >= 90 {
+        "A"
+    } else if score >= 80 {
+        "B"
+    } else if score >= 70 {
+        "C"
+    } else if score >= 60 {
+        "D"
+    } else {
+        "F"
+    }
+}
+
+fn test_if_no_else() -> Int {
+    let x = 10;
+    let mut result = 0;
+    if x > 5 {
+        result = x * 2;
+    };
+    result
+}
+
+fn test_nested_if() -> Int {
+    let x = 15;
+    let y = 20;
+    if x > 10 {
+        if y > 15 {
+            if x + y > 30 {
+                3
+            } else {
+                2
+            }
+        } else {
+            1
+        }
+    } else {
+        0
+    }
+}
+
+// ============================================================================
+// 2. IF LET EXPRESSIONS
+// ============================================================================
+
+type Maybe<T> = variant {
+    Some(T),
+    None
+}
+
+fn test_if_let_some() -> Int {
+    let value = Maybe.Some(42);
+    if let Maybe.Some(x) = value {
+        x * 2
+    } else {
+        0
+    }
+}
+
+fn test_if_let_none() -> Int {
+    let value = Maybe.None;
+    if let Maybe.Some(x) = value {
+        x
+    } else {
+        -1
+    }
+}
+
+fn test_if_let_nested_pattern() -> Int {
+    let nested = Maybe.Some(Maybe.Some(100));
+    if let Maybe.Some(Maybe.Some(x)) = nested {
+        x
+    } else {
+        0
+    }
+}
+
+fn test_if_let_tuple() -> Int {
+    let pair = (Maybe.Some(10), Maybe.Some(20));
+    if let (Maybe.Some(a), Maybe.Some(b)) = pair {
+        a + b
+    } else {
+        0
+    }
+}
+
+// ============================================================================
+// 3. IF LET CHAINS
+// ============================================================================
+
+fn test_if_let_chain_both_some() -> Int {
+    let a = Maybe.Some(10);
+    let b = Maybe.Some(20);
+    if let Maybe.Some(x) = a && let Maybe.Some(y) = b {
+        x + y
+    } else {
+        0
+    }
+}
+
+fn test_if_let_chain_with_condition() -> Int {
+    let a = Maybe.Some(10);
+    let b = Maybe.Some(20);
+    if let Maybe.Some(x) = a && let Maybe.Some(y) = b && x < y {
+        y - x
+    } else {
+        0
+    }
+}
+
+fn test_if_let_chain_triple() -> Int {
+    let a = Maybe.Some(10);
+    let b = Maybe.Some(20);
+    let c = Maybe.Some(30);
+    if let Maybe.Some(x) = a && let Maybe.Some(y) = b && let Maybe.Some(z) = c {
+        x + y + z
+    } else {
+        0
+    }
+}
+
+fn test_if_let_chain_with_boolean() -> Bool {
+    let opt = Maybe.Some(42);
+    let flag = true;
+    if let Maybe.Some(x) = opt && flag && x > 40 {
+        true
+    } else {
+        false
+    }
+}
+
+// ============================================================================
+// 4. MATCH EXPRESSIONS WITH ALL PATTERN TYPES
+// ============================================================================
+
+type Result<T, E> = variant {
+    Ok(T),
+    Err(E)
+}
+
+type Color = variant {
+    Red,
+    Green,
+    Blue,
+    RGB(Int, Int, Int)
+}
+
+fn test_match_literal() -> Text {
+    let x = 42;
+    match x {
+        0 => "zero",
+        1 => "one",
+        42 => "answer",
+        _ => "other"
+    }
+}
+
+fn test_match_variant_unit() -> Int {
+    let color = Color.Red;
+    match color {
+        Color.Red => 1,
+        Color.Green => 2,
+        Color.Blue => 3,
+        Color.RGB(_, _, _) => 4
+    }
+}
+
+fn test_match_variant_with_data() -> Int {
+    let color = Color.RGB(255, 128, 64);
+    match color {
+        Color.Red => 0,
+        Color.Green => 0,
+        Color.Blue => 0,
+        Color.RGB(r, g, b) => r + g + b
+    }
+}
+
+fn test_match_tuple() -> Int {
+    let pair = (10, 20);
+    match pair {
+        (0, 0) => 0,
+        (0, y) => y,
+        (x, 0) => x,
+        (x, y) => x + y
+    }
+}
+
+fn test_match_nested() -> Int {
+    let nested = Maybe.Some(Result.Ok(42));
+    match nested {
+        Maybe.Some(Result.Ok(x)) => x,
+        Maybe.Some(Result.Err(_)) => -1,
+        Maybe.None => 0
+    }
+}
+
+fn test_match_or_pattern() -> Bool {
+    let x = 5;
+    match x {
+        1 | 2 | 3 => true,
+        4 | 5 | 6 => true,
+        _ => false
+    }
+}
+
+fn test_match_wildcard() -> Int {
+    let x = 999;
+    match x {
+        1 => 1,
+        2 => 2,
+        _ => 0
+    }
+}
+
+fn test_match_binding() -> Int {
+    let opt = Maybe.Some(100);
+    match opt {
+        Maybe.Some(value) => value * 2,
+        Maybe.None => 0
+    }
+}
+
+// ============================================================================
+// 5. MATCH WITH GUARDS (IF AND WHERE)
+// ============================================================================
+
+fn test_match_guard_if() -> Text {
+    let x = 42;
+    match x {
+        n if n < 0 => "negative",
+        n if n == 0 => "zero",
+        n if n < 100 => "small positive",
+        _ => "large positive"
+    }
+}
+
+fn test_match_guard_complex() -> Int {
+    let pair = (10, 20);
+    match pair {
+        (x, y) if x == y => 0,
+        (x, y) if x > y => 1,
+        (x, y) if x < y => -1,
+        _ => 999
+    }
+}
+
+fn test_match_guard_with_variant() -> Text {
+    let opt = Maybe.Some(15);
+    match opt {
+        Maybe.Some(x) if x < 10 => "small",
+        Maybe.Some(x) if x < 20 => "medium",
+        Maybe.Some(x) if x < 100 => "large",
+        Maybe.Some(_) => "huge",
+        Maybe.None => "none"
+    }
+}
+
+fn test_match_guard_multiple_conditions() -> Bool {
+    let x = 25;
+    match x {
+        n if n > 10 && n < 30 && n % 5 == 0 => true,
+        _ => false
+    }
+}
+
+// ============================================================================
+// 6. UFCS MATCH (value.match { ... })
+// ============================================================================
+
+fn test_ufcs_match_simple() -> Int {
+    Maybe.Some(42).match {
+        Maybe.Some(x) => x * 2,
+        Maybe.None => 0
+    }
+}
+
+fn test_ufcs_match_chain() -> Int {
+    Maybe.Some(10).match {
+        Maybe.Some(x) => x,
+        Maybe.None => 0
+    } + Maybe.Some(20).match {
+        Maybe.Some(y) => y,
+        Maybe.None => 0
+    }
+}
+
+fn test_ufcs_match_nested() -> Int {
+    Maybe.Some(Maybe.Some(100)).match {
+        Maybe.Some(inner) => inner.match {
+            Maybe.Some(x) => x,
+            Maybe.None => 0
+        },
+        Maybe.None => 0
+    }
+}
+
+fn test_ufcs_match_with_guard() -> Text {
+    15.match {
+        x if x < 10 => "small",
+        x if x < 20 => "medium",
+        _ => "large"
+    }
+}
+
+// ============================================================================
+// 7. INFINITE LOOP
+// ============================================================================
+
+fn test_loop_with_break() -> Int {
+    let mut counter = 0;
+    loop {
+        counter = counter + 1;
+        if counter >= 10 {
+            break;
+        };
+    };
+    counter
+}
+
+fn test_loop_break_with_value() -> Int {
+    let mut counter = 0;
+    loop {
+        counter = counter + 1;
+        if counter >= 5 {
+            break counter * 10;
+        };
+    }
+}
+
+fn test_nested_loop() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    loop {
+        if i >= 3 {
+            break;
+        };
+        let mut j = 0;
+        loop {
+            if j >= 3 {
+                break;
+            };
+            sum = sum + 1;
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+    sum
+}
+
+fn test_loop_with_continue() -> Int {
+    let mut counter = 0;
+    let mut sum = 0;
+    loop {
+        counter = counter + 1;
+        if counter > 10 {
+            break;
+        };
+        if counter % 2 == 0 {
+            continue;
+        };
+        sum = sum + counter;
+    };
+    sum
+}
+
+// ============================================================================
+// 8. WHILE LOOPS
+// ============================================================================
+
+fn test_while_simple() -> Int {
+    let mut count = 0;
+    while count < 10 {
+        count = count + 1;
+    };
+    count
+}
+
+fn test_while_with_break() -> Int {
+    let mut count = 0;
+    while true {
+        count = count + 1;
+        if count >= 5 {
+            break;
+        };
+    };
+    count
+}
+
+fn test_while_with_continue() -> Int {
+    let mut count = 0;
+    let mut sum = 0;
+    while count < 10 {
+        count = count + 1;
+        if count % 2 == 0 {
+            continue;
+        };
+        sum = sum + count;
+    };
+    sum
+}
+
+fn test_while_complex_condition() -> Int {
+    let mut x = 0;
+    let mut y = 10;
+    while x < 5 && y > 5 {
+        x = x + 1;
+        y = y - 1;
+    };
+    x + y
+}
+
+// ============================================================================
+// 9. WHILE LET LOOPS
+// ============================================================================
+
+type List<T> = variant {
+    Cons(T, List<T>),
+    Nil
+}
+
+fn test_while_let_option() -> Int {
+    let mut current = Maybe.Some(5);
+    let mut count = 0;
+    while let Maybe.Some(x) = current {
+        count = count + 1;
+        if x <= 1 {
+            current = Maybe.None;
+        } else {
+            current = Maybe.Some(x - 1);
+        };
+    };
+    count
+}
+
+fn test_while_let_list() -> Int {
+    let list = List.Cons(1, List.Cons(2, List.Cons(3, List.Nil)));
+    let mut current = list;
+    let mut sum = 0;
+    while let List.Cons(x, rest) = current {
+        sum = sum + x;
+        current = rest;
+    };
+    sum
+}
+
+// ============================================================================
+// 10. FOR LOOPS
+// ============================================================================
+
+fn test_for_basic() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    };
+    sum
+}
+
+fn test_for_with_break() -> Int {
+    let items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum = 0;
+    for item in items {
+        if item > 5 {
+            break;
+        };
+        sum = sum + item;
+    };
+    sum
+}
+
+fn test_for_with_continue() -> Int {
+    let items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum = 0;
+    for item in items {
+        if item % 2 == 0 {
+            continue;
+        };
+        sum = sum + item;
+    };
+    sum
+}
+
+// ============================================================================
+// 11. FOR WITH RANGE
+// ============================================================================
+
+fn test_for_range_inclusive() -> Int {
+    let mut sum = 0;
+    for i in 0..10 {
+        sum = sum + i;
+    };
+    sum
+}
+
+fn test_for_range_exclusive() -> Int {
+    let mut product = 1;
+    for i in 1..5 {
+        product = product * i;
+    };
+    product
+}
+
+fn test_for_range_with_step() -> Int {
+    let mut sum = 0;
+    for i in 0..20 {
+        if i % 2 == 0 {
+            sum = sum + i;
+        };
+    };
+    sum
+}
+
+fn test_for_range_countdown() -> Int {
+    let mut result = 0;
+    for i in 0..10 {
+        result = 10 - i;
+    };
+    result
+}
+
+// ============================================================================
+// 12. BREAK WITH VALUE
+// ============================================================================
+
+fn test_break_value_simple() -> Int {
+    loop {
+        break 42;
+    }
+}
+
+fn test_break_value_computed() -> Int {
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count >= 10 {
+            break count * count;
+        };
+    }
+}
+
+fn test_break_value_from_match() -> Int {
+    let mut attempts = 0;
+    loop {
+        attempts = attempts + 1;
+        let result = if attempts >= 5 {
+            Maybe.Some(attempts * 10)
+        } else {
+            Maybe.None
+        };
+        match result {
+            Maybe.Some(value) => break value,
+            Maybe.None => continue
+        };
+    }
+}
+
+fn test_break_nested_value() -> Int {
+    let mut outer = 0;
+    loop {
+        outer = outer + 1;
+        if outer > 3 {
+            break {
+                let mut inner_sum = 0;
+                for i in 0..outer {
+                    inner_sum = inner_sum + i;
+                };
+                inner_sum
+            };
+        };
+    }
+}
+
+// ============================================================================
+// 13. CONTINUE
+// ============================================================================
+
+fn test_continue_skip_even() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    loop {
+        if i >= 10 {
+            break;
+        };
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;
+        };
+        sum = sum + i;
+    };
+    sum
+}
+
+fn test_continue_nested() -> Int {
+    let mut sum = 0;
+    for i in 0..5 {
+        if i == 2 {
+            continue;
+        };
+        for j in 0..5 {
+            if j == 3 {
+                continue;
+            };
+            sum = sum + 1;
+        };
+    };
+    sum
+}
+
+fn test_continue_with_condition() -> Int {
+    let mut result = 0;
+    for i in 0..20 {
+        if i < 5 {
+            continue;
+        };
+        if i > 15 {
+            continue;
+        };
+        result = result + i;
+    };
+    result
+}
+
+// ============================================================================
+// 14. RETURN EXPRESSIONS
+// ============================================================================
+
+fn test_early_return() -> Int {
+    let x = 10;
+    if x < 0 {
+        return 0;
+    };
+    if x > 100 {
+        return 100;
+    };
+    x * 2
+}
+
+fn test_return_from_loop() -> Int {
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count > 10 {
+            return count;
+        };
+    }
+}
+
+fn test_return_from_match() -> Int {
+    let opt = Maybe.Some(42);
+    match opt {
+        Maybe.Some(x) => {
+            if x > 100 {
+                return 999;
+            };
+            x
+        },
+        Maybe.None => return 0
+    }
+}
+
+fn test_nested_return() -> Int {
+    for i in 0..10 {
+        for j in 0..10 {
+            if i * j > 50 {
+                return i * j;
+            };
+        };
+    };
+    0
+}
+
+fn test_return_complex_value() -> (Int, Int, Bool) {
+    let x = 42;
+    if x > 50 {
+        return (0, 0, false);
+    };
+    (x, x * 2, true)
+}
+
+// ============================================================================
+// 15. TRY/RECOVER/FINALLY
+// ============================================================================
+
+type Error = variant {
+    NotFound,
+    InvalidInput,
+    Timeout
+}
+
+fn test_try_no_error() -> Result<Int, Error> {
+    try {
+        let x = 42;
+        Result.Ok(x * 2)
+    }
+}
+
+fn test_try_with_recover() -> Int {
+    try {
+        let result = Result.Err(Error.NotFound);
+        match result {
+            Result.Ok(x) => x,
+            Result.Err(e) => throw e
+        }
+    } recover {
+        Error.NotFound => 0,
+        Error.InvalidInput => -1,
+        Error.Timeout => -2
+    }
+}
+
+fn test_try_with_finally() -> Int {
+    let mut cleanup_called = false;
+    let result = try {
+        Result.Ok(42)
+    } finally {
+        cleanup_called = true;
+    };
+    match result {
+        Result.Ok(x) => x,
+        Result.Err(_) => 0
+    }
+}
+
+fn test_try_recover_finally() -> Int {
+    let mut cleanup_called = false;
+    try {
+        Result.Err(Error.InvalidInput)
+    } recover {
+        Error.NotFound => 0,
+        Error.InvalidInput => 1,
+        Error.Timeout => 2
+    } finally {
+        cleanup_called = true;
+    }
+}
+
+fn test_nested_try() -> Result<Int, Error> {
+    try {
+        let outer = try {
+            Result.Ok(10)
+        };
+        let inner = try {
+            Result.Ok(20)
+        };
+        match outer {
+            Result.Ok(x) => match inner {
+                Result.Ok(y) => Result.Ok(x + y),
+                Result.Err(e) => Result.Err(e)
+            },
+            Result.Err(e) => Result.Err(e)
+        }
+    }
+}
+
+// ============================================================================
+// 16. LOOP ANNOTATIONS (INVARIANT, DECREASES)
+// ============================================================================
+
+fn test_loop_invariant() -> Int {
+    let mut i = 0;
+    let mut sum = 0;
+    loop
+        invariant sum >= 0
+        invariant i >= 0
+    {
+        if i >= 10 {
+            break;
+        };
+        sum = sum + i;
+        i = i + 1;
+    };
+    sum
+}
+
+fn test_loop_decreases() -> Int {
+    let mut n = 10;
+    let mut result = 0;
+    loop
+        decreases n
+    {
+        if n <= 0 {
+            break;
+        };
+        result = result + n;
+        n = n - 1;
+    };
+    result
+}
+
+fn test_loop_invariant_and_decreases() -> Int {
+    let mut n = 10;
+    let mut sum = 0;
+    loop
+        invariant sum >= 0
+        invariant n >= 0
+        decreases n
+    {
+        if n <= 0 {
+            break;
+        };
+        sum = sum + n;
+        n = n - 1;
+    };
+    sum
+}
+
+fn test_while_invariant() -> Int {
+    let mut i = 0;
+    let mut product = 1;
+    while i < 5
+        invariant product > 0
+        invariant i >= 0
+    {
+        i = i + 1;
+        product = product * i;
+    };
+    product
+}
+
+fn test_for_invariant() -> Int {
+    let mut sum = 0;
+    for i in 0..10
+        invariant sum >= 0
+    {
+        sum = sum + i;
+    };
+    sum
+}
+
+// ============================================================================
+// COMPREHENSIVE INTEGRATION TESTS
+// ============================================================================
+
+fn test_complex_control_flow_1() -> Int {
+    let mut result = 0;
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        };
+        match i {
+            1 => result = result + 1,
+            3 => result = result + 3,
+            5 => {
+                for j in 0..i {
+                    result = result + 1;
+                };
+            },
+            7 => {
+                if let Maybe.Some(x) = Maybe.Some(i * 2) {
+                    result = result + x;
+                };
+            },
+            9 => {
+                let val = loop {
+                    break i * i;
+                };
+                result = result + val;
+            },
+            _ => continue
+        };
+    };
+    result
+}
+
+fn test_complex_control_flow_2() -> Result<Int, Error> {
+    try {
+        let mut sum = 0;
+        for i in 0..20 {
+            if let Maybe.Some(x) = compute_value(i) {
+                match validate_value(x) {
+                    Result.Ok(validated) => {
+                        sum = sum + validated;
+                    },
+                    Result.Err(e) => throw e
+                };
+            };
+        };
+        Result.Ok(sum)
+    } recover {
+        Error.NotFound => Result.Ok(0),
+        Error.InvalidInput => Result.Ok(-1),
+        Error.Timeout => Result.Err(Error.Timeout)
+    }
+}
+
+fn compute_value(n: Int) -> Maybe<Int> {
+    if n % 3 == 0 {
+        Maybe.Some(n * 2)
+    } else {
+        Maybe.None
+    }
+}
+
+fn validate_value(x: Int) -> Result<Int, Error> {
+    if x < 0 {
+        Result.Err(Error.InvalidInput)
+    } else if x > 1000 {
+        Result.Err(Error.Timeout)
+    } else {
+        Result.Ok(x)
+    }
+}
+
+fn test_complex_control_flow_3() -> Int {
+    let data = [
+        Maybe.Some(1),
+        Maybe.None,
+        Maybe.Some(3),
+        Maybe.Some(4),
+        Maybe.None,
+        Maybe.Some(6)
+    ];
+
+    let mut result = 0;
+    for item in data {
+        match item {
+            Maybe.Some(x) if x % 2 == 0 => {
+                result = result + x;
+            },
+            Maybe.Some(x) if x % 2 == 1 => {
+                if x > 2 {
+                    result = result + (x * 2);
+                };
+            },
+            Maybe.None => {
+                continue;
+            },
+            _ => {}
+        };
+    };
+    result
+}
+
+fn test_complex_match_patterns() -> Int {
+    let data = (Maybe.Some(10), Result.Ok(20), Color.RGB(255, 255, 255));
+
+    match data {
+        (Maybe.Some(x), Result.Ok(y), Color.RGB(r, g, b)) if x + y > 20 => {
+            x + y + (r / 100)
+        },
+        (Maybe.Some(x), Result.Ok(y), _) => x + y,
+        (Maybe.Some(x), Result.Err(_), _) => x,
+        (Maybe.None, Result.Ok(y), _) => y,
+        _ => 0
+    }
+}
+
+fn test_loop_label_simulation() -> Int {
+    let mut outer_sum = 0;
+    let mut found = false;
+    for i in 0..10 {
+        if found {
+            break;
+        };
+        for j in 0..10 {
+            if i * j > 50 {
+                outer_sum = i * j;
+                found = true;
+                break;
+            };
+        };
+    };
+    outer_sum
+}
+
+fn test_match_exhaustiveness() -> Text {
+    let color = Color.Blue;
+    match color {
+        Color.Red => "red",
+        Color.Green => "green",
+        Color.Blue => "blue",
+        Color.RGB(_, _, _) => "rgb"
+    }
+}
+
+fn test_if_let_chain_complex() -> Int {
+    let opt1 = Maybe.Some(10);
+    let opt2 = Maybe.Some(20);
+    let opt3 = Maybe.Some(30);
+    let flag = true;
+
+    if let Maybe.Some(a) = opt1
+       && let Maybe.Some(b) = opt2
+       && let Maybe.Some(c) = opt3
+       && flag
+       && a + b + c > 50 {
+        a + b + c
+    } else {
+        0
+    }
+}
+
+fn test_while_let_complex() -> Int {
+    let mut current = Maybe.Some((5, Maybe.Some(10)));
+    let mut sum = 0;
+
+    while let Maybe.Some((x, inner)) = current {
+        sum = sum + x;
+        match inner {
+            Maybe.Some(y) => {
+                sum = sum + y;
+                if x > 1 {
+                    current = Maybe.Some((x - 1, Maybe.Some(y - 1)));
+                } else {
+                    current = Maybe.None;
+                };
+            },
+            Maybe.None => {
+                current = Maybe.None;
+            }
+        };
+    };
+    sum
+}
+
+// ============================================================================
+// MAIN TEST RUNNER
+// ============================================================================
+
+fn main() {
+    // If/Else tests
+    assert(test_if_else_simple() == 1);
+    assert(test_if_else_chain() == "B");
+    assert(test_if_no_else() == 20);
+    assert(test_nested_if() == 3);
+
+    // If let tests
+    assert(test_if_let_some() == 84);
+    assert(test_if_let_none() == -1);
+    assert(test_if_let_nested_pattern() == 100);
+    assert(test_if_let_tuple() == 30);
+
+    // If let chain tests
+    assert(test_if_let_chain_both_some() == 30);
+    assert(test_if_let_chain_with_condition() == 10);
+    assert(test_if_let_chain_triple() == 60);
+    assert(test_if_let_chain_with_boolean() == true);
+
+    // Match tests
+    assert(test_match_literal() == "answer");
+    assert(test_match_variant_unit() == 1);
+    assert(test_match_variant_with_data() == 447);
+    assert(test_match_tuple() == 30);
+    assert(test_match_nested() == 42);
+    assert(test_match_or_pattern() == true);
+    assert(test_match_wildcard() == 0);
+    assert(test_match_binding() == 200);
+
+    // Match guard tests
+    assert(test_match_guard_if() == "small positive");
+    assert(test_match_guard_complex() == -1);
+    assert(test_match_guard_with_variant() == "medium");
+    assert(test_match_guard_multiple_conditions() == true);
+
+    // UFCS match tests
+    assert(test_ufcs_match_simple() == 84);
+    assert(test_ufcs_match_chain() == 30);
+    assert(test_ufcs_match_nested() == 100);
+    assert(test_ufcs_match_with_guard() == "medium");
+
+    // Loop tests
+    assert(test_loop_with_break() == 10);
+    assert(test_loop_break_with_value() == 50);
+    assert(test_nested_loop() == 9);
+    assert(test_loop_with_continue() == 25);
+
+    // While tests
+    assert(test_while_simple() == 10);
+    assert(test_while_with_break() == 5);
+    assert(test_while_with_continue() == 25);
+    assert(test_while_complex_condition() == 10);
+
+    // While let tests
+    assert(test_while_let_option() == 5);
+    assert(test_while_let_list() == 6);
+
+    // For tests
+    assert(test_for_basic() == 15);
+    assert(test_for_with_break() == 15);
+    assert(test_for_with_continue() == 25);
+
+    // For range tests
+    assert(test_for_range_inclusive() == 45);
+    assert(test_for_range_exclusive() == 24);
+    assert(test_for_range_with_step() == 90);
+
+    // Break value tests
+    assert(test_break_value_simple() == 42);
+    assert(test_break_value_computed() == 100);
+    assert(test_break_value_from_match() == 50);
+    assert(test_break_nested_value() == 6);
+
+    // Continue tests
+    assert(test_continue_skip_even() == 25);
+    assert(test_continue_nested() == 16);
+    assert(test_continue_with_condition() == 110);
+
+    // Return tests
+    assert(test_early_return() == 20);
+    assert(test_return_from_loop() == 11);
+    assert(test_return_from_match() == 42);
+    assert(test_nested_return() == 54);
+    let (a, b, c) = test_return_complex_value();
+    assert(a == 42 && b == 84 && c == true);
+
+    // Loop annotation tests
+    assert(test_loop_invariant() == 45);
+    assert(test_loop_decreases() == 55);
+    assert(test_loop_invariant_and_decreases() == 55);
+    assert(test_while_invariant() == 120);
+    assert(test_for_invariant() == 45);
+
+    // Complex integration tests
+    assert(test_complex_control_flow_1() == 107);
+    assert(test_complex_control_flow_3() == 22);
+    assert(test_complex_match_patterns() == 32);
+    assert(test_loop_label_simulation() == 54);
+    assert(test_match_exhaustiveness() == "blue");
+    assert(test_if_let_chain_complex() == 60);
+    assert(test_while_let_complex() == 30);
+
+    println("All control flow tests passed!");
+}

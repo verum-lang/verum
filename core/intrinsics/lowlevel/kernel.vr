@@ -1,0 +1,138 @@
+// =============================================================================
+// core/intrinsics/lowlevel/kernel.vr - Kernel Entry Point Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: LLVM AOT compilation, platform linker
+//
+// Platform-specific entry point assembly for kernel/bare-metal development.
+// All functions in this module are @llvm_only and only valid in @naked functions.
+//
+// # Safety
+//
+// These intrinsics are extremely low-level and must only be used in
+// freestanding/kernel environments with careful attention to ABI requirements.
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.lowlevel.kernel;
+
+// =============================================================================
+// LINUX x86_64 ENTRY POINT
+// =============================================================================
+
+/// Linux x86_64 _start entry point inline assembly.
+///
+/// Emits assembly for:
+/// 1. Zero frame pointer (xor %rbp, %rbp)
+/// 2. Get argc/argv from stack
+/// 3. Align stack to 16 bytes
+/// 4. Call verum_entry(argc, argv)
+/// 5. Exit with return value
+///
+/// Only valid in @naked @cfg(target_os = "linux", target_arch = "x86_64") functions.
+@intrinsic("linux_x86_64_start")
+@llvm_only(reason = "inline assembly entry point")
+@vbc_direct_lowering
+public fn linux_x86_64_start();
+
+// =============================================================================
+// LINUX aarch64 ENTRY POINT
+// =============================================================================
+
+/// Linux aarch64 _start entry point inline assembly.
+///
+/// Emits assembly for:
+/// 1. Zero frame pointer
+/// 2. Get argc/argv from stack (sp)
+/// 3. Call verum_entry(argc, argv)
+/// 4. Exit syscall with return value
+///
+/// Only valid in @naked @cfg(target_os = "linux", target_arch = "aarch64") functions.
+@intrinsic("linux_aarch64_start")
+@llvm_only(reason = "inline assembly entry point")
+@vbc_direct_lowering
+public fn linux_aarch64_start();
+
+// =============================================================================
+// BARE METAL ENTRY POINTS
+// =============================================================================
+
+/// x86_64 bare metal entry point (no OS).
+///
+/// Sets up minimal environment:
+/// 1. Load GDT if needed
+/// 2. Set up stack
+/// 3. Jump to kernel_main
+///
+/// Only valid in @naked functions with linker script support.
+@intrinsic("baremetal_x86_64_start")
+@llvm_only(reason = "inline assembly entry point")
+@vbc_direct_lowering
+public fn baremetal_x86_64_start();
+
+/// aarch64 bare metal entry point (no OS).
+///
+/// Sets up minimal environment:
+/// 1. Disable interrupts
+/// 2. Set up stack pointer
+/// 3. Zero BSS
+/// 4. Jump to kernel_main
+///
+/// Only valid in @naked functions with linker script support.
+@intrinsic("baremetal_aarch64_start")
+@llvm_only(reason = "inline assembly entry point")
+@vbc_direct_lowering
+public fn baremetal_aarch64_start();
+
+// =============================================================================
+// INTERRUPT HANDLERS (x86_64)
+// =============================================================================
+
+/// x86_64 interrupt handler prologue.
+///
+/// Saves all registers and sets up stack frame for interrupt handling.
+/// Must be paired with interrupt_epilogue.
+@intrinsic("x86_64_interrupt_prologue")
+@llvm_only(reason = "inline assembly")
+@vbc_direct_lowering
+public fn x86_64_interrupt_prologue();
+
+/// x86_64 interrupt handler epilogue.
+///
+/// Restores all registers and returns from interrupt (iretq).
+/// Must be paired with interrupt_prologue.
+@intrinsic("x86_64_interrupt_epilogue")
+@llvm_only(reason = "inline assembly")
+@vbc_direct_lowering
+public fn x86_64_interrupt_epilogue();
+
+/// x86_64 interrupt handler with error code prologue.
+///
+/// Like interrupt_prologue but handles the error code pushed by CPU.
+@intrinsic("x86_64_interrupt_error_prologue")
+@llvm_only(reason = "inline assembly")
+@vbc_direct_lowering
+public fn x86_64_interrupt_error_prologue();
+
+// =============================================================================
+// INTERRUPT HANDLERS (aarch64)
+// =============================================================================
+
+/// aarch64 exception handler prologue.
+///
+/// Saves all registers and sets up stack frame for exception handling.
+/// Must be paired with exception_epilogue.
+@intrinsic("aarch64_exception_prologue")
+@llvm_only(reason = "inline assembly")
+@vbc_direct_lowering
+public fn aarch64_exception_prologue();
+
+/// aarch64 exception handler epilogue.
+///
+/// Restores all registers and returns from exception (eret).
+/// Must be paired with exception_prologue.
+@intrinsic("aarch64_exception_epilogue")
+@llvm_only(reason = "inline assembly")
+@vbc_direct_lowering
+public fn aarch64_exception_epilogue();

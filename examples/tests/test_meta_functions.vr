@@ -1,0 +1,62 @@
+// Test meta functions - compile-time function execution
+// According to grammar: meta_def = visibility , 'meta' , identifier , meta_args , '{' , meta_rules , '}' ;
+
+// Simple meta function
+meta fn compile_time_square(n: Int) -> Int {
+    n * n
+}
+
+// Meta function with multiple parameters
+meta fn compile_time_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Meta function with conditional logic
+meta fn compile_time_max(a: Int, b: Int) -> Int {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+// Meta function that calls another meta function
+meta fn compile_time_power_of_two(n: Int) -> Int {
+    compile_time_square(n)
+}
+
+// Meta function with loop
+meta fn compile_time_factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 1;
+    loop {
+        if i > n {
+            break;
+        }
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() {
+    // Test simple meta function
+    let square = compile_time_square(5);
+    let _ = println(f"Square of 5: {square}");
+
+    // Test meta function with multiple params
+    let sum = compile_time_add(10, 20);
+    let _ = println(f"10 + 20: {sum}");
+
+    // Test meta function with conditional
+    let max_val = compile_time_max(15, 25);
+    let _ = println(f"Max of 15 and 25: {max_val}");
+
+    // Test meta function calling another meta function
+    let power = compile_time_power_of_two(4);
+    let _ = println(f"Power of two (4): {power}");
+
+    // Test meta function with loop
+    let fact = compile_time_factorial(5);
+    let _ = println(f"Factorial of 5: {fact}");
+}

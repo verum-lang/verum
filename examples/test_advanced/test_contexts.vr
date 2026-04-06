@@ -1,0 +1,39 @@
+// Test: Context System (Dependency Injection)
+// Tests the context system for runtime dependency injection
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+// Function using a single context
+fn process_data(x: Int) using Logger {
+    Logger.log("Processing data...")
+    x * 2
+}
+
+// Function using multiple contexts
+fn save_result(value: Int) using [Logger, Database] {
+    Logger.log(f"Saving value: {value}")
+    let sql = f"INSERT INTO results VALUES ({value})"
+    let result = Database.query(sql)
+    Logger.log(f"Database response: {result}")
+}
+
+// Nested context usage
+fn complex_operation(x: Int, y: Int) using [Logger, Database] {
+    Logger.log("Starting complex operation")
+    let processed = process_data(x)  // Should inherit Logger context
+    let sum = processed + y
+    save_result(sum)
+    sum
+}
+
+fn main() {
+    // Note: This requires context providers to be implemented
+    // For now, this tests parsing and type checking
+    println("Context system test compiled successfully")
+}

@@ -1,0 +1,49 @@
+// @test: ir-pattern
+// @tier: 2, 3
+// @level: L1
+// @tags: optimization, tail-call, recursion
+// @timeout: 5000
+// @expect-ir: "musttail call" OR "tail call"
+// @description: Verify tail calls are optimized to prevent stack overflow
+
+// Tail-recursive factorial - should NOT grow stack
+fn factorial_tail(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        factorial_tail(n - 1, acc * n)  // Must be tail call
+    }
+}
+
+// Tail-recursive fibonacci
+fn fib_tail(n: Int, a: Int, b: Int) -> Int {
+    if n == 0 {
+        a
+    } else if n == 1 {
+        b
+    } else {
+        fib_tail(n - 1, b, a + b)  // Must be tail call
+    }
+}
+
+// Tail-recursive sum
+fn sum_tail(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        sum_tail(n - 1, acc + n)  // Must be tail call
+    }
+}
+
+fn main() -> Int {
+    let fact = factorial_tail(10, 1);  // 3628800
+    let fib = fib_tail(20, 0, 1);      // 6765
+    let sum = sum_tail(100, 0);        // 5050
+
+    // Verify results
+    assert_eq(fact, 3628800);
+    assert_eq(fib, 6765);
+    assert_eq(sum, 5050);
+
+    0
+}

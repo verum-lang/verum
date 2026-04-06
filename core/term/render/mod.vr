@@ -1,0 +1,26 @@
+// =============================================================================
+// render/mod.vr - Layer 3: Rendering Engine
+// =============================================================================
+// Double-buffered, diff-based terminal rendering.
+// =============================================================================
+module render;
+
+mount core.io.{Write, IoResult, StreamError, IoErrorKind};
+
+// Sub-modules
+public module cell;
+public module buffer;
+public module diff;
+public module frame;
+public module backend;
+public module viewport;
+public module graphics;
+
+// Re-exports
+public mount .cell.{Cell, char_display_width};
+public mount .buffer.Buffer;
+public mount .diff.{flush_diff, write_style_diff, write_color, write_modifiers};
+public mount .frame.Frame;
+public mount .backend.{Terminal};
+public mount .viewport.Viewport;
+public mount .graphics.{GraphicsRenderer, ImageFormat, KittyGraphics, SixelGraphics, ItermGraphics, BrailleGraphics, create_graphics_renderer};

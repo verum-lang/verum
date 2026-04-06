@@ -1,0 +1,24 @@
+// Test 7: Async with Result type
+// Tests async functions returning Result
+
+async fn may_fail(should_fail: Bool) -> Result<Int, Text> {
+    if should_fail {
+        Err("Failed")
+    } else {
+        Ok(42)
+    }
+}
+
+fn main() {
+    let result1 = may_fail(false).await;
+    match result1 {
+        Ok(v) => print(v),
+        Err(e) => print(e)
+    };
+
+    let result2 = may_fail(true).await;
+    match result2 {
+        Ok(v) => print(v),
+        Err(e) => print(e)
+    };
+}

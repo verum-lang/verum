@@ -1,0 +1,218 @@
+// Basic Language Features Test
+// Tests features that work in the current interpreter
+
+// ========================================
+// 1. TYPE DEFINITIONS
+// ========================================
+
+// Simple variant type
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// Result type
+type CalcResult is Result<Float, Text>;
+
+// Operator variant
+type Op is | Add | Sub | Mul | Div;
+
+// ========================================
+// 2. BASIC FUNCTIONS
+// ========================================
+
+fn add(a: Float, b: Float) -> Float {
+    a + b
+}
+
+fn sub(a: Float, b: Float) -> Float {
+    a - b
+}
+
+fn mul(a: Float, b: Float) -> Float {
+    a * b
+}
+
+fn safe_div(a: Float, b: Float) -> CalcResult {
+    if b == 0.0 {
+        Err("Division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// ========================================
+// 3. PATTERN MATCHING
+// ========================================
+
+fn calculate(a: Float, op: Op, b: Float) -> CalcResult {
+    match op {
+        Add => Ok(a + b),
+        Sub => Ok(a - b),
+        Mul => Ok(a * b),
+        Div => {
+            if b == 0.0 {
+                Err("Division by zero")
+            } else {
+                Ok(a / b)
+            }
+        }
+    }
+}
+
+fn print_result(result: CalcResult) {
+    match result {
+        Ok(value) => {
+            let _ = print(f"Result: {value}");
+        }
+        Err(msg) => {
+            let _ = print(f"Error: {msg}");
+        }
+    }
+}
+
+// ========================================
+// 4. OPTION/MAYBE HANDLING
+// ========================================
+
+fn maybe_add(a: Maybe<Float>, b: Maybe<Float>) -> Maybe<Float> {
+    match a {
+        Some(x) => {
+            match b {
+                Some(y) => Some(x + y),
+                None => None
+            }
+        }
+        None => None
+    }
+}
+
+fn print_maybe(opt: Maybe<Float>) {
+    match opt {
+        Some(v) => {
+            let _ = print(f"Some({v})");
+        }
+        None => {
+            let _ = print("None");
+        }
+    }
+}
+
+// ========================================
+// 5. CONTROL FLOW
+// ========================================
+
+fn test_if_else() {
+    let x = 10.0;
+    let result = if x > 5.0 {
+        "big"
+    } else {
+        "small"
+    };
+    let _ = print(f"Value is: {result}");
+}
+
+fn test_nested_if() {
+    let score = 85.0;
+    let grade = if score >= 90.0 {
+        "A"
+    } else if score >= 80.0 {
+        "B"
+    } else if score >= 70.0 {
+        "C"
+    } else {
+        "F"
+    };
+    let _ = print(f"Grade: {grade}");
+}
+
+// ========================================
+// 6. RECURSIVE FUNCTIONS
+// ========================================
+
+fn factorial(n: Float) -> Float {
+    if n <= 1.0 {
+        1.0
+    } else {
+        n * factorial(n - 1.0)
+    }
+}
+
+fn fibonacci(n: Float) -> Float {
+    if n <= 1.0 {
+        n
+    } else {
+        fibonacci(n - 1.0) + fibonacci(n - 2.0)
+    }
+}
+
+// ========================================
+// 7. CLOSURES (SIMPLE)
+// ========================================
+
+fn apply_twice(f: fn(Float) -> Float, x: Float) -> Float {
+    f(f(x))
+}
+
+// ========================================
+// MAIN
+// ========================================
+
+fn main() {
+    let _ = print("=== Verum Language Features Test ===");
+    let _ = print("");
+
+    // Test arithmetic
+    let _ = print("--- Arithmetic ---");
+    let _ = print(f"5 + 3 = {add(5.0, 3.0)}");
+    let _ = print(f"10 - 4 = {sub(10.0, 4.0)}");
+    let _ = print(f"6 * 7 = {mul(6.0, 7.0)}");
+    let _ = print("");
+
+    // Test safe division
+    let _ = print("--- Safe Division ---");
+    print_result(safe_div(20.0, 4.0));
+    print_result(safe_div(10.0, 0.0));
+    let _ = print("");
+
+    // Test pattern matching
+    let _ = print("--- Pattern Matching ---");
+    print_result(calculate(10.0, Add, 5.0));
+    print_result(calculate(20.0, Sub, 8.0));
+    print_result(calculate(6.0, Mul, 7.0));
+    print_result(calculate(100.0, Div, 4.0));
+    print_result(calculate(10.0, Div, 0.0));
+    let _ = print("");
+
+    // Test Maybe
+    let _ = print("--- Maybe Type ---");
+    let a: Maybe<Float> = Some(10.0);
+    let b: Maybe<Float> = Some(5.0);
+    let c: Maybe<Float> = None;
+
+    let _ = print("maybe_add(Some(10), Some(5)) = ");
+    print_maybe(maybe_add(a, b));
+
+    let _ = print("maybe_add(Some(10), None) = ");
+    print_maybe(maybe_add(a, c));
+    let _ = print("");
+
+    // Test control flow
+    let _ = print("--- Control Flow ---");
+    test_if_else();
+    test_nested_if();
+    let _ = print("");
+
+    // Test recursion
+    let _ = print("--- Recursion ---");
+    let _ = print(f"factorial(5) = {factorial(5.0)}");
+    let _ = print(f"fibonacci(10) = {fibonacci(10.0)}");
+    let _ = print("");
+
+    // Test higher-order functions
+    let _ = print("--- Higher-Order Functions ---");
+    let double = |x: Float| x * 2.0;
+    let _ = print(f"apply_twice(double, 3) = {apply_twice(double, 3.0)}");
+    let _ = print("");
+
+    let _ = print("=== All Tests Complete ===");
+}

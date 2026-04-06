@@ -1,0 +1,25 @@
+// Test mixed types in f-strings
+
+fn main() {
+    let _ = print("=== Mixed F-String ===");
+
+    let a = 10.0;
+    let _ = print(f"a = {a}");
+
+    let b = 3.0;
+    let _ = print(f"b = {b}");
+
+    let sum = a + b;
+    let _ = print(f"sum = {sum}");
+
+    let diff = a - b;
+    let _ = print(f"diff = {diff}");
+
+    let prod = a * b;
+    let _ = print(f"prod = {prod}");
+
+    let quot = a / b;
+    let _ = print(f"quot = {quot}");
+
+    let _ = print("=== Done ===");
+}

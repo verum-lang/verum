@@ -1,0 +1,20 @@
+// Module exports for Verum Registry contexts
+module database;
+module storage;
+module cache;
+module search;
+module logger;
+module auth;
+module metrics;
+module queue;
+module http_client;
+
+pub import .database.{Database, DatabaseError, PackageSearchResult};
+pub import .storage.{Storage, StorageError};
+pub import .cache.{Cache, CacheError};
+pub import .search.{Search, SearchError, SearchQuery, SearchResult, SearchResponse};
+pub import .logger.{Logger, LogLevel};
+pub import .auth.{Auth, AuthError, AuthUser};
+pub import .metrics.{Metrics, MetricsError, SystemMetrics};
+pub import .queue.{Queue, QueueError};
+pub import .http_client.{HttpClient, HttpResponse, HttpError};

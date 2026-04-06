@@ -1,0 +1,119 @@
+// Test: Pattern Matching with Guards
+// Tests pattern guards and complex matching scenarios
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        x where x < 0 => "negative",
+        0 => "zero",
+        x where x > 100 => "large",
+        x where x % 2 == 0 => "even",
+        _ => "odd"
+    }
+}
+
+fn describe_value(n: Int) -> Text {
+    match n {
+        x where x < -100 => "very negative",
+        x where x < 0 => "negative",
+        0 => "exactly zero",
+        x where x > 0 && x <= 10 => "small positive",
+        x where x > 10 && x <= 100 => "medium positive",
+        _ => "large positive"
+    }
+}
+
+// Pattern guards with Maybe
+fn check_even_positive(n: Maybe<Int>) -> Text {
+    match n {
+        Some(x) where x > 0 && x % 2 == 0 => "even positive",
+        Some(x) where x > 0 => "odd positive",
+        Some(x) where x < 0 => "negative",
+        Some(0) => "zero",
+        None => "no value"
+    }
+}
+
+// Pattern guards with tuples
+fn classify_pair(pair: (Int, Int)) -> Text {
+    match pair {
+        (x, y) where x == y => "equal",
+        (x, y) where x > y => "first greater",
+        (x, y) where x < y => "second greater",
+        _ => "unknown"
+    }
+}
+
+// Pattern guards with records
+type Point is { x: Int, y: Int }
+
+fn classify_point(p: Point) -> Text {
+    match p {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y: 0 } where x > 0 => "positive x-axis",
+        Point { x, y: 0 } where x < 0 => "negative x-axis",
+        Point { x: 0, y } where y > 0 => "positive y-axis",
+        Point { x: 0, y } where y < 0 => "negative y-axis",
+        Point { x, y } where x > 0 && y > 0 => "quadrant I",
+        Point { x, y } where x < 0 && y > 0 => "quadrant II",
+        Point { x, y } where x < 0 && y < 0 => "quadrant III",
+        Point { x, y } where x > 0 && y < 0 => "quadrant IV",
+        _ => "unknown"
+    }
+}
+
+// Nested pattern matching with guards
+type Result is variant {
+    Ok(Int),
+    Error(Text)
+}
+
+fn process_result(r: Result) -> Text {
+    match r {
+        Ok(x) where x > 0 => f"Success with positive: {x}",
+        Ok(x) where x < 0 => f"Success with negative: {x}",
+        Ok(0) => "Success with zero",
+        Error(msg) where msg.len() > 10 => f"Long error: {msg.substring(0, 10)}...",
+        Error(msg) => f"Error: {msg}"
+    }
+}
+
+fn main() {
+    // Test number classification
+    println(classify_number(-5))    // negative
+    println(classify_number(0))     // zero
+    println(classify_number(200))   // large
+    println(classify_number(42))    // even
+    println(classify_number(13))    // odd
+
+    // Test value description
+    println(describe_value(-150))   // very negative
+    println(describe_value(5))      // small positive
+    println(describe_value(50))     // medium positive
+    println(describe_value(500))    // large positive
+
+    // Test Maybe with guards
+    println(check_even_positive(Some(10)))  // even positive
+    println(check_even_positive(Some(7)))   // odd positive
+    println(check_even_positive(Some(-5)))  // negative
+    println(check_even_positive(None))      // no value
+
+    // Test pair classification
+    println(classify_pair((5, 5)))   // equal
+    println(classify_pair((10, 5)))  // first greater
+    println(classify_pair((3, 8)))   // second greater
+
+    // Test point classification
+    let p1 = Point { x: 0, y: 0 }
+    let p2 = Point { x: 5, y: 0 }
+    let p3 = Point { x: 3, y: 4 }
+    println(classify_point(p1))  // origin
+    println(classify_point(p2))  // positive x-axis
+    println(classify_point(p3))  // quadrant I
+
+    // Test result processing
+    println(process_result(Ok(42)))
+    println(process_result(Ok(-10)))
+    println(process_result(Error("Short")))
+
+    println("Pattern guards test completed")
+}

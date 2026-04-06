@@ -1,0 +1,13 @@
+// Test 2: Pattern guard with if
+
+fn test() -> Text {
+    let x = 5;
+    match x {
+        n if n > 0 => "PASS",
+        _ => "FAIL"
+    }
+}
+
+fn main() {
+    println(test());
+}

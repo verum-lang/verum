@@ -1,0 +1,61 @@
+// DTO (Data Transfer Object) Module
+//
+// Types for API request/response serialization.
+// These are DISTINCT from domain types and optimized for API contracts.
+//
+// Architecture:
+// - domain/ - Canonical business entities (source of truth)
+// - dto/    - API-facing types for request/response
+// - handlers/ - HTTP handlers using DTOs
+// - converters/ - Functions to convert domain <-> DTO
+
+module package_dto;
+module user_dto;
+module search_dto;
+module common;
+
+// Re-export package DTOs
+pub import .package_dto.{
+    PackageSummaryDto,
+    PackageDto,
+    PackageVersionDto,
+    DependencyDto,
+    GetPackageRequestDto,
+    PublishRequestDto,
+    PublishResponseDto,
+    YankRequestDto,
+    YankResponseDto,
+    PackageListResponseDto,
+};
+
+// Re-export user DTOs
+pub import .user_dto.{
+    UserDto,
+    UserProfileDto,
+    TokenDto,
+    TokenWithValueDto,
+    LoginRequestDto,
+    LoginResponseDto,
+    RegisterRequestDto,
+    RegisterResponseDto,
+    CreateTokenRequestDto,
+};
+
+// Re-export search DTOs
+pub import .search_dto.{
+    SearchResultDto,
+    SearchFiltersDto,
+    SortOrderDto,
+    SearchRequestDto,
+    SearchResponseDto,
+};
+
+// Re-export common DTOs
+pub import .common.{
+    PaginationDto,
+    ErrorResponseDto,
+    HealthStatusDto,
+    ComponentHealthDto,
+    HealthResponseDto,
+    MetricsResponseDto,
+};

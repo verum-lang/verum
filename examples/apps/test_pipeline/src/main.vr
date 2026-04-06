@@ -1,0 +1,21 @@
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn add_one(x: Int) -> Int {
+    x + 1
+}
+
+fn main() {
+    print("=== Pipeline Operator Test ===");
+
+    // Test 1: Simple pipeline
+    let result = 5 |> double;
+    print(f"5 |> double = {result}");
+
+    // Test 2: Chained pipeline
+    let chained = 5 |> double |> add_one;
+    print(f"5 |> double |> add_one = {chained}");
+
+    print("=== Test Complete ===");
+}

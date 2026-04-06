@@ -1,0 +1,245 @@
+// stdlib_io/main.vr
+// I/O operations demonstrating file operations, console I/O, and context system
+
+// Context system for I/O capabilities
+using [FileSystem, Console]
+
+fn main() {
+    print("=== I/O Operations Example ===")
+    print("")
+
+    test_console_io()
+    test_file_operations()
+    test_file_reading_patterns()
+    test_error_handling_io()
+
+    print("")
+    print("=== All I/O Tests Completed ===")
+}
+
+fn test_console_io() {
+    print("--- Console I/O ---")
+
+    // Basic printing
+    print("Hello, Verum!")
+
+    // Formatted printing with f-strings
+    let name = "Alice"
+    let age = 30
+    print(f"User: {name}, Age: {age}")
+
+    // Print with different types
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Numbers: {numbers}")
+
+    let score = 95.5
+    print(f"Score: {score}%")
+
+    // Multi-line output
+    print("Line 1")
+    print("Line 2")
+    print("Line 3")
+
+    print("")
+}
+
+fn test_file_operations() using [FileSystem] {
+    print("--- File Operations ---")
+
+    let filename = "test_output.txt"
+
+    // Write to file
+    let content = "Hello from Verum!\nThis is line 2.\nThis is line 3."
+    let write_result = write_file(filename, content)
+
+    match write_result {
+        Result.Ok(_) => print(f"Successfully wrote to {filename}"),
+        Result.Err(msg) => print(f"Error writing file: {msg}"),
+    }
+
+    // Read from file
+    let read_result = read_file(filename)
+
+    match read_result {
+        Result.Ok(data) => {
+            print(f"Successfully read from {filename}")
+            print(f"Content length: {data.len()} bytes")
+            print(f"Content: {data}")
+        },
+        Result.Err(msg) => print(f"Error reading file: {msg}"),
+    }
+
+    // Append to file
+    let append_content = "\nAppended line 4."
+    let append_result = append_file(filename, append_content)
+
+    match append_result {
+        Result.Ok(_) => print(f"Successfully appended to {filename}"),
+        Result.Err(msg) => print(f"Error appending: {msg}"),
+    }
+
+    // Check if file exists
+    let exists = file_exists(filename)
+    print(f"File exists: {exists}")
+
+    // Delete file
+    let delete_result = delete_file(filename)
+    match delete_result {
+        Result.Ok(_) => print(f"Successfully deleted {filename}"),
+        Result.Err(msg) => print(f"Error deleting: {msg}"),
+    }
+
+    print("")
+}
+
+fn test_file_reading_patterns() using [FileSystem] {
+    print("--- File Reading Patterns ---")
+
+    // Create a CSV-like file
+    let csv_filename = "data.csv"
+    let csv_content = "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago"
+
+    write_file(csv_filename, csv_content)
+
+    // Read and parse line by line
+    let read_result = read_file(csv_filename)
+
+    match read_result {
+        Result.Ok(content) => {
+            let lines = content.split("\n")
+            print(f"Total lines: {lines.len()}")
+
+            // Parse header
+            let header = lines.get(0).unwrap_or("")
+            print(f"Header: {header}")
+
+            // Parse data rows
+            print("Data rows:")
+            for i in 1..lines.len() {
+                let line = lines.get(i).unwrap_or("")
+                let fields = line.split(",")
+
+                if fields.len() >= 3 {
+                    let name = fields.get(0).unwrap_or("")
+                    let age = fields.get(1).unwrap_or("")
+                    let city = fields.get(2).unwrap_or("")
+                    print(f"  {name}: {age} years old, lives in {city}")
+                }
+            }
+        },
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    // Clean up
+    delete_file(csv_filename)
+
+    print("")
+}
+
+fn test_error_handling_io() using [FileSystem] {
+    print("--- Error Handling in I/O ---")
+
+    // Try to read non-existent file
+    let missing_file = "does_not_exist.txt"
+    let result = read_file(missing_file)
+
+    match result {
+        Result.Ok(content) => print(f"Unexpected success: {content}"),
+        Result.Err(msg) => print(f"Expected error: {msg}"),
+    }
+
+    // Try to write to invalid path
+    let invalid_path = "/root/forbidden/test.txt"
+    let write_result = write_file(invalid_path, "test")
+
+    match write_result {
+        Result.Ok(_) => print("Unexpected write success"),
+        Result.Err(msg) => print(f"Expected error: {msg}"),
+    }
+
+    // Demonstrate error recovery with defaults
+    let safe_content = read_file_or_default("missing.txt", "default content")
+    print(f"Content with default: {safe_content}")
+
+    print("")
+}
+
+// File operation functions using FileSystem context
+
+fn write_file(path: Text, content: Text) -> Result<(), Text> using [FileSystem] {
+    // In real implementation, this would use the FileSystem context
+    // to perform actual file operations
+    FileSystem.write(path, content)
+}
+
+fn read_file(path: Text) -> Result<Text, Text> using [FileSystem] {
+    FileSystem.read(path)
+}
+
+fn append_file(path: Text, content: Text) -> Result<(), Text> using [FileSystem] {
+    FileSystem.append(path, content)
+}
+
+fn file_exists(path: Text) -> Bool using [FileSystem] {
+    FileSystem.exists(path)
+}
+
+fn delete_file(path: Text) -> Result<(), Text> using [FileSystem] {
+    FileSystem.delete(path)
+}
+
+// Helper function with error recovery
+fn read_file_or_default(path: Text, default: Text) -> Text using [FileSystem] {
+    let result = read_file(path)
+    match result {
+        Result.Ok(content) => content,
+        Result.Err(_) => default,
+    }
+}
+
+// Demonstrate directory operations
+fn test_directory_operations() using [FileSystem] {
+    print("--- Directory Operations ---")
+
+    let dir_name = "test_dir"
+
+    // Create directory
+    let create_result = create_directory(dir_name)
+    match create_result {
+        Result.Ok(_) => print(f"Created directory: {dir_name}"),
+        Result.Err(msg) => print(f"Error creating directory: {msg}"),
+    }
+
+    // List directory contents
+    let list_result = list_directory(dir_name)
+    match list_result {
+        Result.Ok(entries) => {
+            print(f"Directory contents ({entries.len()} items):")
+            for entry in entries {
+                print(f"  - {entry}")
+            }
+        },
+        Result.Err(msg) => print(f"Error listing directory: {msg}"),
+    }
+
+    // Remove directory
+    let remove_result = remove_directory(dir_name)
+    match remove_result {
+        Result.Ok(_) => print(f"Removed directory: {dir_name}"),
+        Result.Err(msg) => print(f"Error removing directory: {msg}"),
+    }
+
+    print("")
+}
+
+fn create_directory(path: Text) -> Result<(), Text> using [FileSystem] {
+    FileSystem.create_dir(path)
+}
+
+fn list_directory(path: Text) -> Result<List<Text>, Text> using [FileSystem] {
+    FileSystem.list_dir(path)
+}
+
+fn remove_directory(path: Text) -> Result<(), Text> using [FileSystem] {
+    FileSystem.remove_dir(path)
+}

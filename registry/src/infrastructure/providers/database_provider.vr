@@ -1,0 +1,286 @@
+// PostgreSQL Connection Pool Provider
+//
+// Implements the Database context protocol with a connection pool backed by
+// PostgreSQL. Uses parameterized queries throughout to prevent SQL injection.
+
+mount core.base.{Result, Text, Int, Float, Bool, Maybe};
+mount core.collections.{List, Map};
+mount core.sync.Mutex;
+mount core.time.unix_timestamp;
+
+mount crate.contexts.database.{Database, DatabaseError, QueryResult, PackageSearchResult, Transaction};
+
+// ============================================================================
+// Connection Pool
+// ============================================================================
+
+type PooledConnection is {
+    handle: Int,
+    in_use: Bool,
+    created_at: Int,
+};
+
+type ConnectionPool is {
+    connections: Mutex<List<PooledConnection>>,
+    url: Text,
+    max_size: Int,
+    active_count: Mutex<Int>,
+};
+
+implement ConnectionPool {
+    pub fn new(url: Text, max_size: Int) -> ConnectionPool {
+        ConnectionPool {
+            connections: Mutex.new(List.new()),
+            url: url,
+            max_size: max_size,
+            active_count: Mutex.new(0),
+        }
+    }
+
+    /// Acquire a connection from the pool, creating one if needed.
+    async fn acquire(self) -> Result<PooledConnection, DatabaseError> {
+        let mut conns = self.connections.lock();
+        for i in 0..conns.len() {
+            match conns.get(i) {
+                Maybe.Some(conn) => {
+                    if !conn.in_use {
+                        let acquired = PooledConnection {
+                            handle: conn.handle,
+                            in_use: true,
+                            created_at: conn.created_at,
+                        };
+                        conns.set(i, acquired.clone());
+                        return Result.Ok(acquired);
+                    }
+                },
+                Maybe.None => {},
+            }
+        }
+
+        // No idle connection available; create one if under limit
+        let mut count = self.active_count.lock();
+        if *count >= self.max_size {
+            return Result.Err(DatabaseError.ConnectionFailed("pool exhausted"));
+        }
+        *count = *count + 1;
+
+        let conn = PooledConnection {
+            handle: *count,
+            in_use: true,
+            created_at: unix_timestamp(),
+        };
+        conns.push(conn.clone());
+        Result.Ok(conn)
+    }
+
+    /// Release a connection back to the pool.
+    fn release(self, handle: Int) {
+        let mut conns = self.connections.lock();
+        for i in 0..conns.len() {
+            match conns.get(i) {
+                Maybe.Some(conn) => {
+                    if conn.handle == handle {
+                        conns.set(i, PooledConnection {
+                            handle: conn.handle,
+                            in_use: false,
+                            created_at: conn.created_at,
+                        });
+                        return;
+                    }
+                },
+                Maybe.None => {},
+            }
+        }
+    }
+}
+
+// ============================================================================
+// PostgresDatabaseProvider
+// ============================================================================
+
+pub type PostgresDatabaseProvider is {
+    pool: ConnectionPool,
+};
+
+implement PostgresDatabaseProvider {
+    pub fn new(url: Text, max_connections: Int) -> PostgresDatabaseProvider {
+        PostgresDatabaseProvider {
+            pool: ConnectionPool.new(url, max_connections),
+        }
+    }
+
+    /// Establish the initial connection and verify the database is reachable.
+    pub async fn connect(self) -> Result<(), Text> {
+        match self.pool.acquire().await {
+            Result.Ok(conn) => {
+                self.pool.release(conn.handle);
+                Result.Ok(())
+            },
+            Result.Err(e) => Result.Err("failed to connect to database"),
+        }
+    }
+}
+
+implement Database for PostgresDatabaseProvider {
+    async fn query_with(self, sql: Text, params: List<Text>) -> Result<List<Map<Text, Text>>, DatabaseError> {
+        let conn = self.pool.acquire().await?;
+        // Execute parameterized query via connection handle
+        let result = @ffi_pg_query(conn.handle, sql, params);
+        self.pool.release(conn.handle);
+        result
+    }
+
+    async fn execute_with(self, sql: Text, params: List<Text>) -> Result<Int, DatabaseError> {
+        let conn = self.pool.acquire().await?;
+        let result = @ffi_pg_execute(conn.handle, sql, params);
+        self.pool.release(conn.handle);
+        result
+    }
+
+    async fn fetch_one_with(self, sql: Text, params: List<Text>) -> Result<Map<Text, Text>, DatabaseError> {
+        let rows = self.query_with(sql, params).await?;
+        match rows.first() {
+            Maybe.Some(row) => Result.Ok(row.clone()),
+            Maybe.None => Result.Err(DatabaseError.NotFound),
+        }
+    }
+
+    async fn fetch_optional_with(self, sql: Text, params: List<Text>) -> Result<Maybe<Map<Text, Text>>, DatabaseError> {
+        let rows = self.query_with(sql, params).await?;
+        match rows.first() {
+            Maybe.Some(row) => Result.Ok(Maybe.Some(row.clone())),
+            Maybe.None => Result.Ok(Maybe.None),
+        }
+    }
+
+    async fn query(self, sql: Text) -> Result<List<Map<Text, Text>>, DatabaseError> {
+        self.query_with(sql, List.new()).await
+    }
+
+    async fn execute(self, sql: Text) -> Result<Int, DatabaseError> {
+        self.execute_with(sql, List.new()).await
+    }
+
+    async fn fetch_one(self, sql: Text) -> Result<Map<Text, Text>, DatabaseError> {
+        self.fetch_one_with(sql, List.new()).await
+    }
+
+    async fn fetch_optional(self, sql: Text) -> Result<Maybe<Map<Text, Text>>, DatabaseError> {
+        self.fetch_optional_with(sql, List.new()).await
+    }
+
+    async fn begin_transaction(self) -> Result<Transaction, DatabaseError> {
+        let conn = self.pool.acquire().await?;
+        self.execute("BEGIN").await?;
+        Result.Ok(PgTransaction { conn_handle: conn.handle, pool: self.pool })
+    }
+
+    async fn get_trending(self, days: Int, limit: Int) -> Result<List<PackageSearchResult>, DatabaseError> {
+        let params = List.from([days.to_string(), limit.to_string()]);
+        let rows = self.query_with(
+            "SELECT name, version, description, downloads, score FROM packages ORDER BY downloads DESC LIMIT $2",
+            params,
+        ).await?;
+        Result.Ok(rows_to_search_results(rows))
+    }
+
+    async fn list_categories(self) -> Result<List<Text>, DatabaseError> {
+        let rows = self.query("SELECT DISTINCT category FROM packages ORDER BY category").await?;
+        let mut categories = List.new();
+        for row in rows {
+            match row.get("category") {
+                Maybe.Some(cat) => categories.push(cat.clone()),
+                Maybe.None => {},
+            }
+        }
+        Result.Ok(categories)
+    }
+
+    async fn find_by_category(self, category: Text, offset: Int, limit: Int) -> Result<List<PackageSearchResult>, DatabaseError> {
+        let params = List.from([category, offset.to_string(), limit.to_string()]);
+        let rows = self.query_with(
+            "SELECT name, version, description, downloads, score FROM packages WHERE category = $1 OFFSET $2 LIMIT $3",
+            params,
+        ).await?;
+        Result.Ok(rows_to_search_results(rows))
+    }
+
+    async fn count_by_category(self, category: Text) -> Result<Int, DatabaseError> {
+        let params = List.from([category]);
+        let row = self.fetch_one_with("SELECT COUNT(*) as cnt FROM packages WHERE category = $1", params).await?;
+        match row.get("cnt") {
+            Maybe.Some(cnt) => Result.Ok(cnt.parse_int().unwrap_or(0)),
+            Maybe.None => Result.Ok(0),
+        }
+    }
+
+    async fn ping(self) -> Result<(), DatabaseError> {
+        self.execute("SELECT 1").await?;
+        Result.Ok(())
+    }
+
+    async fn is_ready(self) -> Result<Bool, DatabaseError> {
+        match self.ping().await {
+            Result.Ok(()) => Result.Ok(true),
+            Result.Err(_) => Result.Ok(false),
+        }
+    }
+
+    async fn check_pool(self) -> Result<(), DatabaseError> {
+        self.ping().await
+    }
+
+    async fn test_query(self) -> Result<(), DatabaseError> {
+        self.execute("SELECT 1").await?;
+        Result.Ok(())
+    }
+}
+
+// ============================================================================
+// Transaction Implementation
+// ============================================================================
+
+type PgTransaction is {
+    conn_handle: Int,
+    pool: ConnectionPool,
+};
+
+implement Transaction for PgTransaction {
+    async fn query(self, sql: Text) -> Result<List<Map<Text, Text>>, DatabaseError> {
+        @ffi_pg_query(self.conn_handle, sql, List.new())
+    }
+
+    async fn execute(self, sql: Text) -> Result<Int, DatabaseError> {
+        @ffi_pg_execute(self.conn_handle, sql, List.new())
+    }
+
+    async fn commit(self) -> Result<(), DatabaseError> {
+        self.execute("COMMIT").await?;
+        self.pool.release(self.conn_handle);
+        Result.Ok(())
+    }
+
+    async fn rollback(self) -> Result<(), DatabaseError> {
+        self.execute("ROLLBACK").await?;
+        self.pool.release(self.conn_handle);
+        Result.Ok(())
+    }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn rows_to_search_results(rows: List<Map<Text, Text>>) -> List<PackageSearchResult> {
+    let mut results = List.new();
+    for row in rows {
+        results.push(PackageSearchResult {
+            name: row.get("name").unwrap_or(""),
+            version: row.get("version").unwrap_or(""),
+            description: row.get("description").unwrap_or(""),
+            downloads: row.get("downloads").unwrap_or("0").parse_int().unwrap_or(0),
+            score: row.get("score").unwrap_or("0.0").parse_float().unwrap_or(0.0),
+        });
+    }
+    results
+}

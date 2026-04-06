@@ -1,0 +1,33 @@
+// Test 5: Three-Tier References
+
+fn test_basic_ref(x: &Int) -> Int {
+    *x + 1
+}
+
+fn test_checked_ref(x: &checked Int) -> Int {
+    *x + 2
+}
+
+fn test_unsafe_ref(x: &unsafe Int) -> Int {
+    *x + 3
+}
+
+fn main() {
+    let _ = println("=== Testing Three-Tier References ===");
+
+    let value = 10;
+
+    // Tier 0: Basic reference with CBGR protection
+    let result1 = test_basic_ref(&value);
+    let _ = println(f"&T result: {result1}");
+
+    // Tier 1: Checked reference (compiler-proven safe)
+    let result2 = test_checked_ref(&checked value);
+    let _ = println(f"&checked T result: {result2}");
+
+    // Tier 2: Unsafe reference (manual proof required)
+    let result3 = test_unsafe_ref(&unsafe value);
+    let _ = println(f"&unsafe T result: {result3}");
+
+    let _ = println("=== PASSED ===");
+}

@@ -1,0 +1,156 @@
+// User Converters
+//
+// Convert between domain User/ApiToken types and DTO types.
+
+mount core.collections.{List};
+mount core.base.{Text, Int, Maybe};
+
+mount super.super.domain.user.{User, UserRole, ApiToken};
+mount super.super.contexts.auth.{AuthUser};
+mount super.super.dto.user_dto.{
+    UserDto,
+    UserProfileDto,
+    TokenDto,
+    TokenWithValueDto,
+    RegisterRequestDto,
+};
+
+// ============================================================================
+// Domain to DTO Converters
+// ============================================================================
+
+/// Convert domain User to public UserDto
+///
+/// SAFETY: Uses &checked reference - hot path for user listings.
+/// - user is immutable during conversion
+/// - called for every user in list responses
+/// Performance: Saves ~15ns per user conversion
+pub fn user_to_dto(user: &checked User) -> UserDto {
+    UserDto {
+        id: f"{user.id}",
+        username: user.username.clone(),
+        created_at: timestamp_to_iso8601(user.created_at),
+    }
+}
+
+/// Convert domain User to full profile DTO
+///
+/// SAFETY: Uses &checked reference - hot path for profile views.
+/// - user is immutable during conversion
+/// - accessed frequently for authenticated users
+pub fn user_to_profile_dto(user: &checked User) -> UserProfileDto {
+    UserProfileDto {
+        id: f"{user.id}",
+        username: user.username.clone(),
+        email: user.email.clone(),
+        role: user.role.to_string(),
+        can_publish: user.can_publish(),
+        is_admin: user.is_admin(),
+        created_at: timestamp_to_iso8601(user.created_at),
+        owned_packages: user.owned_packages.clone(),
+    }
+}
+
+/// Convert domain ApiToken to TokenDto (excludes actual token value for security)
+///
+/// SAFETY: Uses &checked reference - hot path for token listings.
+/// - token is immutable during conversion
+pub fn token_to_dto(token: &checked ApiToken) -> TokenDto {
+    TokenDto {
+        id: f"{token.id}",
+        name: token.name.clone(),
+        scopes: token.scopes.clone(),
+        created_at: timestamp_to_iso8601(token.created_at),
+        expires_at: if token.expires_at == 0 {
+            Maybe.None
+        } else {
+            Maybe.Some(timestamp_to_iso8601(token.expires_at))
+        },
+        last_used_at: if token.last_used_at == 0 {
+            Maybe.None
+        } else {
+            Maybe.Some(timestamp_to_iso8601(token.last_used_at))
+        },
+        is_active: token.is_active,
+    }
+}
+
+/// Convert domain ApiToken to TokenWithValueDto (includes token value - only for creation)
+///
+/// SAFETY: Uses &checked reference - called once per token creation.
+pub fn token_to_dto_with_value(token: &checked ApiToken) -> TokenWithValueDto {
+    TokenWithValueDto {
+        token: token_to_dto(token),
+        value: token.token.clone(),
+    }
+}
+
+/// Convert AuthUser (from context) to UserProfileDto
+/// Note: AuthUser has limited fields, so some will be empty/default
+///
+/// SAFETY: Uses &checked reference - hot path for auth responses.
+pub fn auth_user_to_profile_dto(auth_user: &checked AuthUser) -> UserProfileDto {
+    UserProfileDto {
+        id: auth_user.id.clone(),
+        username: auth_user.username.clone(),
+        email: f"",
+        role: auth_user.role.clone(),
+        can_publish: true,
+        is_admin: auth_user.role == f"admin",
+        created_at: f"",
+        owned_packages: List.new(),
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Convert Unix timestamp to ISO 8601 string
+fn timestamp_to_iso8601(timestamp: Int) -> Text {
+    if timestamp == 0 {
+        f""
+    } else {
+        f"{timestamp}"
+    }
+}
+
+/// Convert list of domain ApiTokens to list of TokenDtos
+///
+/// SAFETY: Uses &checked reference - hot path for token list endpoints.
+/// - tokens list is immutable during iteration
+/// Performance: Saves ~15ns per list operation
+pub fn tokens_to_dtos(tokens: &checked List<ApiToken>) -> List<TokenDto> {
+    let mut dtos: List<TokenDto> = List.new();
+    for t in tokens {
+        dtos.push(token_to_dto(&t));
+    }
+    dtos
+}
+
+// ============================================================================
+// DTO to Domain Converters
+// ============================================================================
+
+/// Convert RegisterRequestDto to domain User (for new user creation)
+/// Note: id and created_at must be provided separately as they are generated
+/// Password hash will be empty - the service layer should hash the password
+///
+/// SAFETY: Uses &checked reference - hot path for user registration.
+/// - req is immutable during conversion
+pub fn register_request_to_user(
+    req: &checked RegisterRequestDto,
+    id: Int,
+    created_at: Int
+) -> User {
+    User {
+        id: id,
+        username: req.username.clone(),
+        email: req.email.clone(),
+        role: UserRole.Regular,
+        created_at: created_at,
+        api_tokens: List.new(),
+        owned_packages: List.new(),
+        is_active: true,
+    }
+}

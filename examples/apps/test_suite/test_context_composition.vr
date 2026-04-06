@@ -1,0 +1,291 @@
+// Test Case 5: Context Composition and Nested Function Calls
+// Tests functions with contexts calling other functions with contexts
+
+context Logger {
+    fn log(msg: Text)
+    fn info(msg: Text)
+}
+
+context Database {
+    fn query(sql: Text) -> Int
+}
+
+context Metrics {
+    fn increment(name: Text)
+}
+
+context Cache {
+    fn get(key: Text) -> Text
+    fn set(key: Text, value: Text)
+}
+
+context Validator {
+    fn validate(data: Text) -> Bool
+}
+
+// ===== Level 1 Functions (leaf functions) =====
+
+fn log_info(msg: Text) using Logger {
+    Logger.info(msg);
+}
+
+fn log_debug(msg: Text) using Logger {
+    Logger.log(f"[DEBUG] {msg}");
+}
+
+fn query_database(sql: Text) -> Int using Database {
+    Database.query(sql)
+}
+
+fn track_metric(name: Text) using Metrics {
+    Metrics.increment(name);
+}
+
+// ===== Level 2 Functions (call Level 1) =====
+
+fn logged_query(table: Text) -> Int using [Logger, Database] {
+    log_info(f"Querying table: {table}");
+    let result = query_database(f"SELECT COUNT(*) FROM {table}");
+    log_info(f"Query returned: {result}");
+    result
+}
+
+fn tracked_log(msg: Text) using [Logger, Metrics] {
+    log_info(msg);
+    track_metric("logs.sent");
+}
+
+// ===== Level 3 Functions (call Level 2) =====
+
+fn orchestrated_query(table: Text) -> Int using [Logger, Database, Metrics] {
+    tracked_log(f"Starting query for {table}");
+    let count = logged_query(table);
+    track_metric("queries.executed");
+    count
+}
+
+// ===== Complex Composition =====
+
+fn validate_data(data: Text) -> Bool using Validator {
+    Validator.validate(data)
+}
+
+fn cached_query(key: Text) -> Int using [Cache, Database, Logger] {
+    log_debug(f"Checking cache for: {key}");
+
+    let cached = Cache.get(key);
+    if cached != "" {
+        log_info("Cache hit!");
+        1
+    } else {
+        log_info("Cache miss, querying database");
+        let result = query_database(f"SELECT * WHERE key = '{key}'");
+        Cache.set(key, f"{result}");
+        result
+    }
+}
+
+fn validated_cached_query(key: Text, data: Text) -> Int
+    using [Validator, Cache, Database, Logger, Metrics]
+{
+    tracked_log(f"Validating and querying: {key}");
+
+    if validate_data(data) {
+        log_info("Data is valid");
+        track_metric("validations.passed");
+
+        let result = cached_query(key);
+        track_metric("queries.total");
+        result
+    } else {
+        log_info("Data is invalid");
+        track_metric("validations.failed");
+        0
+    }
+}
+
+// ===== Recursive Context Usage =====
+
+fn recursive_log(count: Int, msg: Text) using Logger {
+    if count > 0 {
+        Logger.log(f"[{count}] {msg}");
+        recursive_log(count - 1, msg);
+    }
+}
+
+fn recursive_with_metrics(count: Int) using [Logger, Metrics] {
+    if count > 0 {
+        log_info(f"Recursive call: {count}");
+        track_metric("recursive.calls");
+        recursive_with_metrics(count - 1);
+    }
+}
+
+// ===== Mutual Recursion with Contexts =====
+
+fn mutual_a(n: Int) using Logger {
+    if n > 0 {
+        Logger.log(f"mutual_a({n})");
+        mutual_b(n - 1);
+    }
+}
+
+fn mutual_b(n: Int) using Logger {
+    if n > 0 {
+        Logger.log(f"mutual_b({n})");
+        mutual_a(n - 1);
+    }
+}
+
+// ===== Higher-Order Functions with Contexts =====
+
+fn apply_with_logging(f: fn(Int) -> Int, x: Int) -> Int using Logger {
+    Logger.log(f"Applying function to {x}");
+    let result = f(x);
+    Logger.log(f"Result: {result}");
+    result
+}
+
+fn map_with_tracking(items: List<Int>, f: fn(Int) -> Int) -> List<Int>
+    using [Logger, Metrics]
+{
+    log_info(f"Mapping over {items.length()} items");
+    track_metric("map.operations");
+
+    // Simplified map implementation
+    let result = items.map(f);
+    log_info("Mapping complete");
+    result
+}
+
+// ===== Pipeline Pattern with Contexts =====
+
+fn fetch_raw_data(id: Int) -> Text using Database {
+    let count = query_database(f"SELECT * FROM raw WHERE id = {id}");
+    f"data_{count}"
+}
+
+fn validate_and_log(data: Text) -> Text using [Validator, Logger] {
+    if validate_data(data) {
+        log_info(f"Valid data: {data}");
+        data
+    } else {
+        log_info(f"Invalid data: {data}");
+        "invalid"
+    }
+}
+
+fn cache_and_track(data: Text) using [Cache, Metrics] {
+    Cache.set("last_data", data);
+    track_metric("data.cached");
+}
+
+fn full_pipeline(id: Int) using [Database, Validator, Logger, Cache, Metrics] {
+    log_info(f"Starting pipeline for ID: {id}");
+
+    let raw = fetch_raw_data(id);
+    let validated = validate_and_log(raw);
+    cache_and_track(validated);
+
+    log_info("Pipeline complete");
+}
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║      Test Case 5: Context Composition & Nesting           ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    // Provide all contexts
+    print("📦 Providing contexts...");
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[LOG] {msg}"); },
+        info: fn(msg: Text) { print(f"[INFO] {msg}"); }
+    };
+
+    provide Database = Database {
+        query: fn(sql: Text) -> Int {
+            print(f"[DB] {sql}");
+            100
+        }
+    };
+
+    provide Metrics = Metrics {
+        increment: fn(name: Text) { print(f"[METRIC] {name} += 1"); }
+    };
+
+    provide Cache = Cache {
+        get: fn(key: Text) -> Text {
+            print(f"[CACHE GET] {key}");
+            ""
+        },
+        set: fn(key: Text, value: Text) {
+            print(f"[CACHE SET] {key} = {value}");
+        }
+    };
+
+    provide Validator = Validator {
+        validate: fn(data: Text) -> Bool {
+            print(f"[VALIDATE] {data}");
+            true
+        }
+    };
+    print("");
+
+    // Test: Basic composition
+    print("Test 5a: Basic composition (Level 2 calls Level 1)");
+    print("─────────────────────────────────────────");
+    let result1 = logged_query("users");
+    print(f"Result: {result1}");
+    print("");
+
+    // Test: Deeper composition
+    print("Test 5b: Deeper composition (Level 3 calls Level 2)");
+    print("─────────────────────────────────────────");
+    let result2 = orchestrated_query("orders");
+    print(f"Result: {result2}");
+    print("");
+
+    // Test: Complex composition
+    print("Test 5c: Complex composition with validation");
+    print("─────────────────────────────────────────");
+    let result3 = validated_cached_query("user_1", "test_data");
+    print(f"Result: {result3}");
+    print("");
+
+    // Test: Recursive context usage
+    print("Test 5d: Recursive function with context");
+    print("─────────────────────────────────────────");
+    recursive_log(3, "Recursion test");
+    print("");
+
+    // Test: Recursive with multiple contexts
+    print("Test 5e: Recursive with multiple contexts");
+    print("─────────────────────────────────────────");
+    recursive_with_metrics(3);
+    print("");
+
+    // Test: Mutual recursion
+    print("Test 5f: Mutual recursion with contexts");
+    print("─────────────────────────────────────────");
+    mutual_a(3);
+    print("");
+
+    // Test: Higher-order functions
+    print("Test 5g: Higher-order functions with contexts");
+    print("─────────────────────────────────────────");
+    let hof_result = apply_with_logging(fn(x: Int) -> Int { x * 2 }, 21);
+    print(f"HOF Result: {hof_result}");
+    print("");
+
+    // Test: Pipeline pattern
+    print("Test 5h: Pipeline pattern with contexts");
+    print("─────────────────────────────────────────");
+    full_pipeline(42);
+    print("");
+
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║          Context Composition Tests Complete                ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

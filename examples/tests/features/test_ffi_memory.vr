@@ -1,0 +1,135 @@
+// Test: FFI Memory Effects and Safety Specifications
+// Tests memory_effects, thread_safety, and ownership specifications
+// According to grammar: ffi_memory_effects, ffi_thread_safety, ffi_ownership_spec
+
+// FFI with memory allocation effects
+ffi Memory {
+    // malloc allocates memory
+    @extern("malloc")
+    fn malloc(size: Int) -> *mut Int;
+
+    // free deallocates memory
+    @extern("free")
+    fn free(ptr: *mut Int);
+
+    // Memory allocation effect
+    memory_effects = Allocates;
+    thread_safe = true;
+}
+
+// FFI with read/write effects
+ffi FileIO {
+    @extern("fopen")
+    fn fopen(filename: *const Text, mode: *const Text) -> *mut Int;
+
+    @extern("fclose")
+    fn fclose(file: *mut Int) -> Int;
+
+    @extern("fread")
+    fn fread(buffer: *mut Int, size: Int, count: Int, file: *mut Int) -> Int;
+
+    @extern("fwrite")
+    fn fwrite(buffer: *const Int, size: Int, count: Int, file: *mut Int) -> Int;
+
+    // File operations read and write
+    memory_effects = Reads(buffer) + Writes(buffer);
+    thread_safe = false;
+}
+
+// FFI with ownership transfer
+ffi ResourceManagement {
+    @extern("create_resource")
+    fn create_resource() -> *mut Int;
+
+    @extern("destroy_resource")
+    fn destroy_resource(resource: *mut Int);
+
+    // Ownership is transferred to caller
+    @ownership(transfer_from = "create_resource")
+
+    // Ownership is transferred from caller
+    @ownership(transfer_to = "destroy_resource")
+}
+
+// FFI with borrow semantics
+ffi StringOps {
+    @extern("strlen")
+    fn strlen(s: *const Text) -> Int;
+
+    @extern("strcmp")
+    fn strcmp(s1: *const Text, s2: *const Text) -> Int;
+
+    // Borrows strings, doesn't take ownership
+    @ownership(borrow)
+
+    memory_effects = Reads(s);
+    thread_safe = true;
+}
+
+// FFI with shared access
+ffi SharedData {
+    @extern("get_shared_value")
+    fn get_shared_value() -> Int;
+
+    @extern("set_shared_value")
+    fn set_shared_value(value: Int);
+
+    @ownership(shared)
+
+    memory_effects = Reads(shared_state) + Writes(shared_state);
+    thread_safe = false;
+}
+
+// FFI with deallocation effects
+ffi CustomAllocator {
+    @extern("custom_alloc")
+    fn custom_alloc(size: Int) -> *mut Int;
+
+    @extern("custom_free")
+    fn custom_free(ptr: *mut Int);
+
+    memory_effects = Allocates + Deallocates(ptr);
+    thread_safe = true;
+}
+
+// Test memory allocation
+fn test_memory_allocation() -> Int {
+    unsafe {
+        // Allocate memory
+        let ptr = Memory.malloc(100);
+
+        // Free memory
+        Memory.free(ptr);
+
+        0
+    }
+}
+
+// Test ownership transfer
+fn test_ownership() -> Int {
+    unsafe {
+        // Create resource - ownership transferred to us
+        let resource = ResourceManagement.create_resource();
+
+        // Destroy resource - ownership transferred to function
+        ResourceManagement.destroy_resource(resource);
+
+        0
+    }
+}
+
+fn main() {
+    let _ = print("=== FFI Memory Effects Tests ===");
+
+    // Test 1: Memory allocation
+    let _ = print("\nTest 1: Memory allocation");
+    let result1 = test_memory_allocation();
+    let _ = print(f"Memory test result: {result1}");
+
+    // Test 2: Ownership transfer
+    let _ = print("\nTest 2: Ownership transfer");
+    let result2 = test_ownership();
+    let _ = print(f"Ownership test result: {result2}");
+
+    let _ = print("\n=== All FFI memory tests completed ===");
+}

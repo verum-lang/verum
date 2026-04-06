@@ -1,0 +1,51 @@
+// Test Sigma type refinements (dependent types)
+// Syntax: type Name is variable: BaseType where predicate;
+// This form explicitly names the variable being refined (like dependent pairs)
+
+type Positive is x: Int where x > 0;
+type Negative is y: Int where y < 0;
+type ValidEmail is email: Text where email.contains('@');
+type BoundedInt is n: Int where n >= 0 && n <= 100;
+type NonEmptyText is s: Text where len(s) > 0;
+
+// Test functions using sigma types
+fn add_positive(a: Positive, b: Positive) -> Int {
+    a + b
+}
+
+fn format_email(email: ValidEmail) -> Text {
+    f"<{email}>"
+}
+
+fn scale_bounded(n: BoundedInt) -> Int {
+    n * 2
+}
+
+fn main() {
+    let _ = print("=== Sigma Type Refinement Tests ===");
+
+    // Test 1: Positive integers (sigma style)
+    let _ = print("\nTest 1: Positive integers");
+    let x: Positive = 10;
+    let y: Positive = 20;
+    let sum = add_positive(x, y);
+    let _ = print(f"x = {x}, y = {y}, sum = {sum}");
+
+    // Test 2: Bounded integers
+    let _ = print("\nTest 2: Bounded integers");
+    let bound1: BoundedInt = 50;
+    let bound2: BoundedInt = 100;
+    let scaled1 = scale_bounded(bound1);
+    let scaled2 = scale_bounded(bound2);
+    let _ = print(f"Bounded {bound1} scaled to: {scaled1}");
+    let _ = print(f"Bounded {bound2} scaled to: {scaled2}");
+
+    // Test 3: Non-empty text
+    let _ = print("\nTest 3: Non-empty text");
+    let text1: NonEmptyText = "Verum";
+    let text2: NonEmptyText = "Language";
+    let _ = print(f"Text 1: {text1}");
+    let _ = print(f"Text 2: {text2}");
+
+    let _ = print("\n=== All sigma type tests passed ===");
+}

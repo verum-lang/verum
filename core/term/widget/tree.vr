@@ -1,0 +1,366 @@
+// =============================================================================
+// tree.vr - Tree view widget with expand/collapse
+// =============================================================================
+module tree;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.block.Block;
+mount super.paragraph.{Line, Span};
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+
+// =============================================================================
+// TreeItem — a node in a tree structure
+// =============================================================================
+
+/// TreeItem holds a display line, optional children, and arbitrary user data.
+public type TreeItem<T> is {
+    text: Line,
+    children: List<TreeItem<T>>,
+    data: T,
+};
+
+implement<T> TreeItem<T> {
+    /// Create a leaf node with no children.
+    public fn leaf(text: Line, data: T) -> TreeItem<T> {
+        TreeItem { text: text, children: List.new(), data: data }
+    }
+
+    /// Create a node with children.
+    public fn node(text: Line, children: List<TreeItem<T>>, data: T) -> TreeItem<T> {
+        TreeItem { text: text, children: children, data: data }
+    }
+
+    /// Whether this node has children.
+    public fn has_children(&self) -> Bool {
+        self.children.len() > 0
+    }
+}
+
+// =============================================================================
+// TreeState — tracks selection, expanded nodes, and scroll offset
+// =============================================================================
+
+/// TreeState maintains the interactive state of a Tree widget.
+/// Paths are represented as List<Int> — index at each level.
+public type TreeState is {
+    selected: Maybe<List<Int>>,   // Path to selected node
+    expanded: List<List<Int>>,    // Paths of expanded nodes
+    offset: Int,                  // Vertical scroll offset
+};
+
+implement TreeState {
+    public fn new() -> TreeState {
+        TreeState { selected: None, expanded: List.new(), offset: 0 }
+    }
+
+    /// Check whether a given path is expanded.
+    public fn is_expanded(&self, path: &List<Int>) -> Bool {
+        for p in &self.expanded {
+            if paths_equal(p, path) { return true; }
+        }
+        false
+    }
+
+    /// Toggle expansion of a node at the given path.
+    public fn toggle(&mut self, path: List<Int>) {
+        // Check if already expanded
+        let mut found_idx: Maybe<Int> = None;
+        let mut i = 0;
+        for p in &self.expanded {
+            if paths_equal(p, &path) {
+                found_idx = Some(i);
+                break;
+            }
+            i = i + 1;
+        }
+
+        match found_idx {
+            Some(idx) => {
+                self.expanded.remove(idx);
+            }
+            None => {
+                self.expanded.push(path);
+            }
+        }
+    }
+
+    /// Select the next visible node (move down).
+    public fn select_next<T>(&mut self, items: &List<TreeItem<T>>) {
+        let visible = flatten_visible(items, &self.expanded);
+        if visible.len() == 0 { return; }
+
+        match self.selected {
+            Some(current) => {
+                // Find current in visible list, move to next
+                let mut idx = 0;
+                for entry in &visible {
+                    if paths_equal(&entry.0, &current) {
+                        break;
+                    }
+                    idx = idx + 1;
+                }
+                if idx < visible.len() - 1 {
+                    self.selected = Some(visible[idx + 1].0.clone());
+                }
+            }
+            None => {
+                self.selected = Some(visible[0].0.clone());
+            }
+        }
+    }
+
+    /// Select the previous visible node (move up).
+    public fn select_previous<T>(&mut self, items: &List<TreeItem<T>>) {
+        let visible = flatten_visible(items, &self.expanded);
+        if visible.len() == 0 { return; }
+
+        match self.selected {
+            Some(current) => {
+                let mut idx = 0;
+                for entry in &visible {
+                    if paths_equal(&entry.0, &current) {
+                        break;
+                    }
+                    idx = idx + 1;
+                }
+                if idx > 0 {
+                    self.selected = Some(visible[idx - 1].0.clone());
+                }
+            }
+            None => {
+                self.selected = Some(visible[visible.len() - 1].0.clone());
+            }
+        }
+    }
+
+    /// Toggle expansion of the currently selected node.
+    public fn toggle_selected(&mut self) {
+        match &self.selected {
+            Some(path) => {
+                self.toggle(path.clone());
+            }
+            None => {}
+        }
+    }
+}
+
+/// Compare two paths for equality.
+fn paths_equal(a: &List<Int>, b: &List<Int>) -> Bool {
+    if a.len() != b.len() { return false; }
+    for i in 0..a.len() {
+        if a[i] != b[i] { return false; }
+    }
+    true
+}
+
+// =============================================================================
+// Flattened visible item — helper for rendering
+// =============================================================================
+
+/// A visible row: (path, depth, line, has_children, is_last_sibling).
+type VisibleRow is (List<Int>, Int, Line, Bool, Bool);
+
+/// Flatten tree items into a visible list respecting expanded state.
+fn flatten_visible<T>(
+    items: &List<TreeItem<T>>,
+    expanded: &List<List<Int>>,
+) -> List<VisibleRow> {
+    let mut result = List.new();
+    flatten_recurse(items, expanded, &mut result, List.new(), 0);
+    result
+}
+
+@allow(unbounded_recursion)
+fn flatten_recurse<T>(
+    items: &List<TreeItem<T>>,
+    expanded: &List<List<Int>>,
+    out: &mut List<VisibleRow>,
+    prefix_path: List<Int>,
+    depth: Int,
+) {
+    let count = items.len();
+    for i in 0..count {
+        let item = &items[i];
+        let mut path = prefix_path.clone();
+        path.push(i);
+        let is_last = i == count - 1;
+
+        out.push((path.clone(), depth, item.text.clone(), item.has_children(), is_last));
+
+        // If this node has children and is expanded, recurse
+        if item.has_children() && is_path_expanded(&path, expanded) {
+            flatten_recurse(&item.children, expanded, out, path, depth + 1);
+        }
+    }
+}
+
+fn is_path_expanded(path: &List<Int>, expanded: &List<List<Int>>) -> Bool {
+    for p in expanded {
+        if paths_equal(p, path) { return true; }
+    }
+    false
+}
+
+// =============================================================================
+// Tree widget
+// =============================================================================
+
+/// Tree — a collapsible tree-view widget.
+public type Tree<T> is {
+    items: List<TreeItem<T>>,
+    block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    highlight_symbol: Text,
+};
+
+implement<T> Tree<T> {
+    /// Create a new tree from root items.
+    public fn new(items: List<TreeItem<T>>) -> Tree<T> {
+        Tree {
+            items: items,
+            block: None,
+            style: Style.DEFAULT,
+            highlight_style: Style.DEFAULT,
+            highlight_symbol: ">> ",
+        }
+    }
+
+    /// Set the block wrapper.
+    public fn block(self, block: Block) -> Tree<T> {
+        Tree { block: Some(block), ..self }
+    }
+
+    /// Set the highlight style for the selected row.
+    public fn highlight_style(self, style: Style) -> Tree<T> {
+        Tree { highlight_style: style, ..self }
+    }
+
+    /// Set the highlight symbol.
+    public fn highlight_symbol(self, symbol: Text) -> Tree<T> {
+        Tree { highlight_symbol: symbol, ..self }
+    }
+}
+
+implement<T> Styled for Tree<T> {
+    fn style(self, style: Style) -> Tree<T> {
+        Tree { style: style, ..self }
+    }
+}
+
+implement<T> StatefulWidget for Tree<T> {
+    type State = TreeState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut TreeState) {
+        let tree_area = match self.block {
+            Some(block) => {
+                let inner = block.inner(area);
+                block.render(area, buf);
+                inner
+            }
+            None => area,
+        };
+
+        if tree_area.width < 1 || tree_area.height < 1 { return; }
+
+        buf.set_style(tree_area, self.style);
+
+        // Flatten visible items
+        let visible = flatten_visible(&self.items, &state.expanded);
+        if visible.len() == 0 { return; }
+
+        // Adjust scroll offset so selected item stays visible
+        match &state.selected {
+            Some(sel_path) => {
+                let mut sel_idx = 0;
+                for entry in &visible {
+                    if paths_equal(&entry.0, sel_path) { break; }
+                    sel_idx = sel_idx + 1;
+                }
+                if sel_idx < state.offset {
+                    state.offset = sel_idx;
+                }
+                if sel_idx >= state.offset + tree_area.height {
+                    state.offset = sel_idx - tree_area.height + 1;
+                }
+            }
+            None => {}
+        }
+
+        let symbol_width = self.highlight_symbol.len();
+
+        // Render visible rows
+        for row_i in 0..tree_area.height {
+            let vis_idx = state.offset + row_i;
+            if vis_idx >= visible.len() { break; }
+
+            let entry = &visible[vis_idx];
+            let path = &entry.0;
+            let depth = entry.1;
+            let line = &entry.2;
+            let has_children = entry.3;
+            let is_last = entry.4;
+
+            let y = tree_area.y + row_i;
+
+            let is_selected = match &state.selected {
+                Some(sp) => paths_equal(sp, path),
+                None => false,
+            };
+
+            let mut x = tree_area.x;
+
+            // Draw selection symbol
+            if is_selected {
+                buf.set_string(x, y, &self.highlight_symbol, self.highlight_style);
+            }
+            x = x + symbol_width;
+
+            // Draw tree connectors for each depth level
+            for d in 0..depth {
+                if x + 2 > tree_area.right() { break; }
+                if d == depth - 1 {
+                    // Direct parent connector
+                    if is_last {
+                        buf.set_string(x, y, "└─", self.style);
+                    } else {
+                        buf.set_string(x, y, "├─", self.style);
+                    }
+                } else {
+                    // Ancestor connector — pipe or space
+                    buf.set_string(x, y, "│ ", self.style);
+                }
+                x = x + 2;
+            }
+
+            // Draw expand/collapse indicator
+            if has_children {
+                let indicator = if is_path_expanded(path, &state.expanded) {
+                    "▾ "
+                } else {
+                    "▸ "
+                };
+                if x + 2 <= tree_area.right() {
+                    buf.set_string(x, y, indicator, self.style);
+                    x = x + 2;
+                }
+            }
+
+            // Draw the line content
+            let row_style = if is_selected { self.highlight_style } else { self.style };
+            for span in &line.spans {
+                let combined = row_style.patch(span.style);
+                x = buf.set_string(x, y, &span.content, combined);
+            }
+
+            // Fill remaining width if selected
+            if is_selected {
+                for fill_x in x..tree_area.right() {
+                    buf.get_mut(fill_x, y).style = self.highlight_style;
+                }
+            }
+        }
+    }
+}

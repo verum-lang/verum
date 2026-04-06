@@ -1,0 +1,699 @@
+module sys.windows.thread;
+
+// =============================================================================
+// sys/windows/thread.vr - Windows Thread Creation and Synchronization
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/kernel32, sys/windows/tls
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides thread management using Windows API.
+// Uses CreateThread/WaitForSingleObject for thread operations and
+// kernel synchronization objects for primitives.
+//
+// Features:
+// - Thread creation with automatic TLS initialization
+// - Mutex (CRITICAL_SECTION equivalent via Mutant)
+// - Condition variable (via Event objects)
+// - Spin lock (atomic-based for low-contention scenarios)
+// - Once (one-time initialization)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+mount sys.common.OSError;
+mount core.intrinsics.{
+    spin_hint,
+    atomic_load_u32, atomic_store_u32, atomic_cas_u32,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+mount super.kernel32.{
+    Handle,
+    SecurityAttributes,
+    CreateThread,
+    ExitThread,
+    TerminateThread,
+    WaitForSingleObject,
+    WaitForSingleObjectEx,
+    CloseHandle,
+    GetLastError,
+    GetCurrentThreadId,
+    SuspendThread,
+    ResumeThread,
+    Sleep,
+    SleepEx,
+    CreateEventW,
+    SetEvent,
+    ResetEvent,
+    CreateMutexW,
+    ReleaseMutex,
+    CreateSemaphoreW,
+    ReleaseSemaphore,
+    INFINITE,
+    WAIT_OBJECT_0,
+    WAIT_ABANDONED,
+    WAIT_TIMEOUT,
+    WAIT_FAILED,
+    CREATE_SUSPENDED,
+};
+mount super.tls.{create_thread_tls, cleanup_thread_tls};
+
+// =============================================================================
+// Error Type
+// =============================================================================
+
+/// Thread operation error
+public type ThreadError is
+    | CreateFailed { code: UInt32 }
+    | JoinFailed { code: UInt32 }
+    | SuspendFailed { code: UInt32 }
+    | ResumeFailed { code: UInt32 }
+    | MutexInitFailed { code: UInt32 }
+    | MutexLockFailed { code: UInt32 }
+    | CondInitFailed { code: UInt32 }
+    | CondWaitFailed { code: UInt32 }
+    | TlsInitFailed
+    | AlreadyJoined
+    | AlreadyDetached
+    ;
+
+implement ThreadError {
+    public fn message(&self) -> Text {
+        match self {
+            CreateFailed { code } => f"Failed to create thread (code={code})",
+            JoinFailed { code } => f"Failed to join thread (code={code})",
+            SuspendFailed { code } => f"Failed to suspend thread (code={code})",
+            ResumeFailed { code } => f"Failed to resume thread (code={code})",
+            MutexInitFailed { code } => f"Failed to initialize mutex (code={code})",
+            MutexLockFailed { code } => f"Failed to lock mutex (code={code})",
+            CondInitFailed { code } => f"Failed to initialize condvar (code={code})",
+            CondWaitFailed { code } => f"Failed to wait on condvar (code={code})",
+            TlsInitFailed => "Failed to initialize TLS for new thread",
+            AlreadyJoined => "Thread has already been joined",
+            AlreadyDetached => "Thread has already been detached",
+        }
+    }
+}
+
+// =============================================================================
+// Thread Type
+// =============================================================================
+
+/// Thread handle
+public type Thread is {
+    /// Windows thread handle
+    handle: Handle,
+    /// Thread ID
+    tid: UInt32,
+    /// Whether thread has been joined/detached
+    finished: Bool,
+};
+
+/// Thread function type
+public type ThreadFn is fn(&unsafe Byte) -> &unsafe Byte;
+
+/// Thread function type alias
+public type ThreadFunc is ThreadFn;
+
+/// Thread identifier type
+public type ThreadId is (UInt32);
+
+/// Thread handle type
+public type ThreadHandle is (Handle);
+
+/// Default thread stack size (1MB)
+public const DEFAULT_THREAD_STACK_SIZE: USize = 1048576;
+
+/// Thread entry wrapper data
+type ThreadEntryData is {
+    func: ThreadFn,
+    arg: &unsafe Byte,
+};
+
+/// Internal thread entry point that initializes TLS
+fn thread_entry(data: &unsafe Byte) -> UInt32 {
+    let entry_data = data as &ThreadEntryData;
+
+    // Initialize TLS for this thread
+    match create_thread_tls() {
+        Ok(_) => {}
+        Err(_) => {
+            // TLS init failed - cannot proceed safely
+            return 1;
+        }
+    }
+
+    // Call the actual thread function
+    let result = (entry_data.func)(entry_data.arg);
+
+    // Cleanup TLS before thread exit
+    let _ = cleanup_thread_tls();
+
+    // Return success (actual return value is via TLS or shared state)
+    0
+}
+
+implement Thread {
+    /// Spawn a new thread.
+    ///
+    /// The thread function will be called with TLS already initialized.
+    public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+        // Allocate entry data
+        // Note: In a real implementation, this would use proper allocation
+        let entry_data = ThreadEntryData {
+            func: func,
+            arg: arg,
+        };
+
+        let security_attrs = SecurityAttributes.default();
+        let mut tid: UInt32 = 0;
+
+        let handle = CreateThread(
+            &security_attrs,
+            0,  // Default stack size
+            thread_entry as &unsafe Byte,
+            &entry_data as &unsafe Byte,
+            0,  // Run immediately
+            &mut tid,
+        );
+
+        if !handle.is_valid() {
+            return Err(CreateFailed { code: GetLastError() });
+        }
+
+        Ok(Thread {
+            handle: handle,
+            tid: tid,
+            finished: false,
+        })
+    }
+
+    /// Spawn a suspended thread.
+    public fn spawn_suspended(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+        let entry_data = ThreadEntryData {
+            func: func,
+            arg: arg,
+        };
+
+        let security_attrs = SecurityAttributes.default();
+        let mut tid: UInt32 = 0;
+
+        let handle = CreateThread(
+            &security_attrs,
+            0,
+            thread_entry as &unsafe Byte,
+            &entry_data as &unsafe Byte,
+            CREATE_SUSPENDED,
+            &mut tid,
+        );
+
+        if !handle.is_valid() {
+            return Err(CreateFailed { code: GetLastError() });
+        }
+
+        Ok(Thread {
+            handle: handle,
+            tid: tid,
+            finished: false,
+        })
+    }
+
+    /// Wait for thread to finish.
+    public fn join(&mut self) -> Result<(), ThreadError> {
+        if self.finished {
+            return Err(AlreadyJoined);
+        }
+
+        let result = WaitForSingleObject(self.handle, INFINITE);
+
+        if result == WAIT_FAILED {
+            return Err(JoinFailed { code: GetLastError() });
+        }
+
+        CloseHandle(self.handle);
+        self.finished = true;
+        Ok(())
+    }
+
+    /// Wait for thread with timeout (milliseconds).
+    ///
+    /// Returns Ok(true) if thread finished, Ok(false) if timed out.
+    public fn join_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+        if self.finished {
+            return Ok(true);
+        }
+
+        let result = WaitForSingleObject(self.handle, timeout_ms);
+
+        match result {
+            0 => {  // WAIT_OBJECT_0
+                CloseHandle(self.handle);
+                self.finished = true;
+                Ok(true)
+            }
+            258 => {  // WAIT_TIMEOUT
+                Ok(false)
+            }
+            _ => Err(JoinFailed { code: GetLastError() }),
+        }
+    }
+
+    /// Detach thread (will be cleaned up automatically when done).
+    public fn detach(&mut self) -> Result<(), ThreadError> {
+        if self.finished {
+            return Err(AlreadyDetached);
+        }
+
+        CloseHandle(self.handle);
+        self.finished = true;
+        Ok(())
+    }
+
+    /// Get the thread ID.
+    public fn id(&self) -> UInt32 {
+        self.tid
+    }
+
+    /// Check if thread has been joined or detached.
+    public fn is_finished(&self) -> Bool {
+        self.finished
+    }
+
+    /// Suspend the thread.
+    public fn suspend(&self) -> Result<UInt32, ThreadError> {
+        let count = SuspendThread(self.handle);
+        if count == 0xFFFFFFFF {
+            Err(SuspendFailed { code: GetLastError() })
+        } else {
+            Ok(count)
+        }
+    }
+
+    /// Resume the thread.
+    public fn resume(&self) -> Result<UInt32, ThreadError> {
+        let count = ResumeThread(self.handle);
+        if count == 0xFFFFFFFF {
+            Err(ResumeFailed { code: GetLastError() })
+        } else {
+            Ok(count)
+        }
+    }
+}
+
+/// Get the current thread ID.
+public fn current_tid() -> UInt32 {
+    GetCurrentThreadId()
+}
+
+/// Get the current thread ID (alias).
+public fn current_thread_id() -> UInt32 {
+    GetCurrentThreadId()
+}
+
+/// Convenience function to spawn a thread.
+public fn spawn(func: ThreadFn, arg: &unsafe Byte) -> Result<Thread, ThreadError> {
+    Thread.spawn(func, arg)
+}
+
+/// Yield execution to another thread.
+public fn yield_now() {
+    Sleep(0);
+}
+
+// =============================================================================
+// Mutex
+// =============================================================================
+
+/// Mutex (mutual exclusion lock) using Windows Mutant object
+public type Mutex is {
+    handle: Handle,
+    initialized: Bool,
+};
+
+implement Mutex {
+    /// Create a new mutex.
+    public fn new() -> Result<Mutex, ThreadError> {
+        let handle = CreateMutexW(
+            &SecurityAttributes.default(),
+            false,  // Not initially owned
+            0 as &UInt16,  // No name (anonymous)
+        );
+
+        if !handle.is_valid() {
+            return Err(MutexInitFailed { code: GetLastError() });
+        }
+
+        Ok(Mutex {
+            handle: handle,
+            initialized: true,
+        })
+    }
+
+    /// Lock the mutex (blocking).
+    public fn lock(&mut self) -> Result<(), ThreadError> {
+        let result = WaitForSingleObject(self.handle, INFINITE);
+
+        match result {
+            0 => Ok(()),       // WAIT_OBJECT_0
+            128 => Ok(()),     // WAIT_ABANDONED - previous owner died, but we got it
+            _ => Err(MutexLockFailed { code: GetLastError() }),
+        }
+    }
+
+    /// Try to lock the mutex (non-blocking).
+    ///
+    /// Returns true if lock acquired, false if already locked.
+    public fn try_lock(&mut self) -> Bool {
+        let result = WaitForSingleObject(self.handle, 0);
+        result == WAIT_OBJECT_0 || result == WAIT_ABANDONED
+    }
+
+    /// Unlock the mutex.
+    public fn unlock(&mut self) {
+        ReleaseMutex(self.handle);
+    }
+
+    /// Execute a function while holding the lock.
+    public fn with_lock<T>(&mut self, f: fn() -> T) -> Result<T, ThreadError> {
+        self.lock()?;
+        let result = f();
+        self.unlock();
+        Ok(result)
+    }
+}
+
+implement Drop for Mutex {
+    fn drop(&mut self) {
+        if self.initialized {
+            CloseHandle(self.handle);
+            self.initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// Condition Variable
+// =============================================================================
+
+/// Condition variable for thread synchronization using Events
+public type Condvar is {
+    event: Handle,
+    initialized: Bool,
+    waiters: Int,
+};
+
+implement Condvar {
+    /// Create a new condition variable.
+    public fn new() -> Result<Condvar, ThreadError> {
+        let event = CreateEventW(
+            &SecurityAttributes.default(),
+            false,  // Auto-reset event
+            false,  // Initially non-signaled
+            0 as &UInt16,  // No name
+        );
+
+        if !event.is_valid() {
+            return Err(CondInitFailed { code: GetLastError() });
+        }
+
+        Ok(Condvar {
+            event: event,
+            initialized: true,
+            waiters: 0,
+        })
+    }
+
+    /// Wait on the condition variable.
+    ///
+    /// The mutex must be locked before calling. It will be unlocked
+    /// while waiting and re-locked before returning.
+    public fn wait(&mut self, mutex: &mut Mutex) -> Result<(), ThreadError> {
+        self.waiters += 1;
+        mutex.unlock();
+
+        let result = WaitForSingleObject(self.event, INFINITE);
+
+        mutex.lock()?;
+        self.waiters -= 1;
+
+        if result == WAIT_FAILED {
+            Err(CondWaitFailed { code: GetLastError() })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Wait on the condition variable with timeout.
+    ///
+    /// Returns Ok(true) if signaled, Ok(false) if timed out.
+    public fn wait_timeout(&mut self, mutex: &mut Mutex, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+        self.waiters += 1;
+        mutex.unlock();
+
+        let result = WaitForSingleObject(self.event, timeout_ms);
+
+        mutex.lock()?;
+        self.waiters -= 1;
+
+        match result {
+            0 => Ok(true),      // WAIT_OBJECT_0
+            258 => Ok(false),   // WAIT_TIMEOUT
+            _ => Err(CondWaitFailed { code: GetLastError() }),
+        }
+    }
+
+    /// Signal one waiting thread.
+    public fn signal(&mut self) {
+        if self.waiters > 0 {
+            SetEvent(self.event);
+        }
+    }
+
+    /// Signal all waiting threads.
+    ///
+    /// Note: With auto-reset event, this will wake one thread at a time.
+    /// For true broadcast, use a manual-reset event with PulseEvent.
+    public fn broadcast(&mut self) {
+        // Wake all waiters by signaling multiple times
+        for _ in 0..self.waiters {
+            SetEvent(self.event);
+        }
+    }
+}
+
+implement Drop for Condvar {
+    fn drop(&mut self) {
+        if self.initialized {
+            CloseHandle(self.event);
+            self.initialized = false;
+        }
+    }
+}
+
+// =============================================================================
+// SpinLock
+// =============================================================================
+
+/// Spin lock for very short critical sections
+public type SpinLock is {
+    locked: UInt32,  // 0 = unlocked, 1 = locked
+};
+
+implement SpinLock {
+    /// Create a new spin lock.
+    public fn new() -> SpinLock {
+        SpinLock { locked: 0 }
+    }
+
+    /// Acquire the spin lock (busy-wait).
+    @inline
+    public fn lock(&mut self) {
+        loop {
+            // Try to acquire lock with atomic compare-and-swap
+            let (_, success) = atomic_cas_u32(&mut self.locked, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+            if success {
+                break;
+            }
+            // Spin hint for CPU
+            spin_hint();
+        }
+    }
+
+    /// Try to acquire the spin lock (non-blocking).
+    @inline
+    public fn try_lock(&mut self) -> Bool {
+        let (_, success) = atomic_cas_u32(&mut self.locked, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        success
+    }
+
+    /// Release the spin lock.
+    @inline
+    public fn unlock(&mut self) {
+        atomic_store_u32(&mut self.locked, 0, ORDERING_RELEASE);
+    }
+
+    /// Check if lock is held (for debugging only).
+    public fn is_locked(&self) -> Bool {
+        atomic_load_u32(&self.locked, ORDERING_RELAXED) != 0
+    }
+}
+
+// =============================================================================
+// Once (one-time initialization)
+// =============================================================================
+
+/// One-time initialization primitive
+public type Once is {
+    state: UInt32,  // 0 = not run, 1 = running, 2 = complete
+    event: Handle,  // Event for waiting threads
+    initialized: Bool,
+};
+
+public const ONCE_INIT: UInt32 = 0;
+public const ONCE_RUNNING: UInt32 = 1;
+public const ONCE_COMPLETE: UInt32 = 2;
+
+implement Once {
+    /// Create a new Once.
+    public fn new() -> Once {
+        Once {
+            state: ONCE_INIT,
+            event: Handle.NULL,
+            initialized: false,
+        }
+    }
+
+    /// Run the initialization function exactly once.
+    public fn call_once(&mut self, init_fn: fn()) {
+        // Fast path: already initialized
+        if atomic_load_u32(&self.state, ORDERING_ACQUIRE) == ONCE_COMPLETE {
+            return;
+        }
+
+        // Slow path: need to initialize or wait
+        // Try to become the initializer
+        let (_, success) = atomic_cas_u32(&mut self.state, ONCE_INIT, ONCE_RUNNING, ORDERING_ACQUIRE, ORDERING_RELAXED);
+        if success {
+            // We are the initializer
+            init_fn();
+            atomic_store_u32(&mut self.state, ONCE_COMPLETE, ORDERING_RELEASE);
+
+            // Wake any waiting threads
+            if self.initialized && self.event.is_valid() {
+                SetEvent(self.event);
+                CloseHandle(self.event);
+                self.initialized = false;
+            }
+        } else {
+            // Another thread is initializing or already done
+            // Wait for completion
+            while atomic_load_u32(&self.state, ORDERING_ACQUIRE) != ONCE_COMPLETE {
+                // Create event if needed for waiting
+                if !self.initialized {
+                    self.event = CreateEventW(
+                        &SecurityAttributes.default(),
+                        true,   // Manual-reset
+                        false,  // Initially non-signaled
+                        0 as &UInt16,
+                    );
+                    self.initialized = self.event.is_valid();
+                }
+
+                if self.initialized {
+                    WaitForSingleObject(self.event, 10);  // Short wait with retry
+                } else {
+                    Sleep(0);  // Yield
+                }
+            }
+        }
+    }
+
+    /// Check if initialization is complete.
+    public fn is_complete(&self) -> Bool {
+        atomic_load_u32(&self.state, ORDERING_ACQUIRE) == ONCE_COMPLETE
+    }
+}
+
+// =============================================================================
+// Win32Semaphore - Windows OS native semaphore
+// =============================================================================
+
+/// Windows native counting semaphore.
+/// Note: For cross-platform semaphore, use core.sync.Semaphore instead.
+public type Win32Semaphore is {
+    handle: Handle,
+    initialized: Bool,
+};
+
+implement Win32Semaphore {
+    /// Create a new semaphore with initial and maximum count.
+    public fn new(initial: Int32, maximum: Int32) -> Result<Win32Semaphore, ThreadError> {
+        let handle = CreateSemaphoreW(
+            &SecurityAttributes.default(),
+            initial,
+            maximum,
+            0 as &UInt16,  // No name
+        );
+
+        if !handle.is_valid() {
+            return Err(MutexInitFailed { code: GetLastError() });
+        }
+
+        Ok(Win32Semaphore {
+            handle: handle,
+            initialized: true,
+        })
+    }
+
+    /// Wait (acquire) the semaphore.
+    public fn wait(&mut self) -> Result<(), ThreadError> {
+        let result = WaitForSingleObject(self.handle, INFINITE);
+        if result == WAIT_FAILED {
+            Err(MutexLockFailed { code: GetLastError() })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Try to wait with timeout.
+    ///
+    /// Returns Ok(true) if acquired, Ok(false) if timed out.
+    public fn wait_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, ThreadError> {
+        let result = WaitForSingleObject(self.handle, timeout_ms);
+        match result {
+            0 => Ok(true),      // WAIT_OBJECT_0
+            258 => Ok(false),   // WAIT_TIMEOUT
+            _ => Err(MutexLockFailed { code: GetLastError() }),
+        }
+    }
+
+    /// Signal (release) the semaphore.
+    public fn signal(&mut self) -> Result<Int32, ThreadError> {
+        let mut previous: Int32 = 0;
+        if ReleaseSemaphore(self.handle, 1, &mut previous) {
+            Ok(previous)
+        } else {
+            Err(MutexLockFailed { code: GetLastError() })
+        }
+    }
+
+    /// Signal with count.
+    public fn signal_many(&mut self, count: Int32) -> Result<Int32, ThreadError> {
+        let mut previous: Int32 = 0;
+        if ReleaseSemaphore(self.handle, count, &mut previous) {
+            Ok(previous)
+        } else {
+            Err(MutexLockFailed { code: GetLastError() })
+        }
+    }
+}
+
+implement Drop for Win32Semaphore {
+    fn drop(&mut self) {
+        if self.initialized {
+            CloseHandle(self.handle);
+            self.initialized = false;
+        }
+    }
+}

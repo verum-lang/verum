@@ -1,0 +1,96 @@
+module sys.file_ops;
+
+// =============================================================================
+// sys/file_ops.vr - File Operations (replaces C verum_file_* functions)
+// =============================================================================
+// Layer: 1 (I/O)
+// Dependencies: sys/raw
+// =============================================================================
+//
+// Pure Verum implementation of file operations. Compiled through
+// VBC → LLVM pipeline. No C runtime dependency.
+//
+// =============================================================================
+
+module file_ops;
+
+mount core.*;
+mount super.raw.*;
+
+// Open mode flags (matching POSIX O_* values)
+public type OpenMode is {
+    flags: Int,
+};
+
+implement OpenMode {
+    /// Read-only
+    public fn read() -> OpenMode { OpenMode { flags: 0 } }
+    /// Write-only (create + truncate)
+    public fn write() -> OpenMode { OpenMode { flags: 0x301 } }
+    /// Read + write
+    public fn read_write() -> OpenMode { OpenMode { flags: 2 } }
+    /// Append
+    public fn append() -> OpenMode { OpenMode { flags: 0x409 } }
+    /// Create + write
+    public fn create() -> OpenMode { OpenMode { flags: 0x241 } }
+}
+
+/// Read an entire file to Text.
+public fn read_file(path: Text) -> Maybe<Text> {
+    let content = __file_read_to_string_raw(path);
+    if content.len() == 0 {
+        // Check if file exists by trying to open
+        let fd = __file_open_raw(path, 0, 0);
+        if fd < 0 {
+            return None;
+        }
+        __file_close_raw(fd);
+        // File exists but is empty
+        return Some("");
+    }
+    Some(content)
+}
+
+/// Write Text to file (create/truncate).
+public fn write_file(path: Text, content: Text) -> Bool {
+    let result = __file_write_string_raw(path, content);
+    result >= 0
+}
+
+/// Append Text to file.
+public fn append_file(path: Text, content: Text) -> Bool {
+    let fd = __file_open_raw(path, 0x409, 0o644);
+    if fd < 0 {
+        return false;
+    }
+    // Write content using raw write
+    let written = __file_write_string_raw(path, content);
+    __file_close_raw(fd);
+    written >= 0
+}
+
+/// Delete a file.
+public fn delete_file(path: Text) -> Bool {
+    __file_delete_raw(path) >= 0
+}
+
+/// Check if a file exists.
+public fn file_exists(path: Text) -> Bool {
+    let fd = __file_open_raw(path, 0, 0);
+    if fd < 0 {
+        return false;
+    }
+    __file_close_raw(fd);
+    true
+}
+
+/// Get file size in bytes.
+public fn file_size(path: Text) -> Int {
+    let fd = __file_open_raw(path, 0, 0);
+    if fd < 0 {
+        return -1;
+    }
+    let size = __file_size_raw(fd);
+    __file_close_raw(fd);
+    size
+}

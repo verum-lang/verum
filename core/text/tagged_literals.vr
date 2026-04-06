@@ -1,0 +1,59 @@
+// =============================================================================
+// text/tagged_literals.vr - Tagged Literal Validators
+// =============================================================================
+// Layer: 2 (Standard)
+// Dependencies: core
+// =============================================================================
+//
+// Compile-time and runtime validators for tagged string literals:
+//   json#"{"key": "value"}"    → validates JSON syntax
+//   sql#"SELECT * FROM users"  → validates SQL syntax
+//   regex#"[a-z]+"             → validates regex pattern
+//   uri#"https://example.com"  → validates URI format
+//
+// =============================================================================
+
+module tagged_literals;
+
+mount core.*;
+
+// =============================================================================
+// JSON Validation
+// =============================================================================
+
+/// Validate JSON string at runtime (basic structural check).
+public fn validate_json(s: Text) -> Bool {
+    if s.len() == 0 { return false; }
+    let first = s.byte_at(0);
+    let last = s.byte_at(s.len() - 1);
+    // Must start with { or [ and end with matching bracket
+    (first == 123 && last == 125) ||  // { }
+    (first == 91 && last == 93) ||    // [ ]
+    (first == 34 && last == 34)       // " " (string literal)
+}
+
+// =============================================================================
+// URI Validation
+// =============================================================================
+
+/// Validate URI format (basic scheme://authority check).
+public fn validate_uri(s: Text) -> Bool {
+    s.contains("://")
+}
+
+// =============================================================================
+// SQL Validation
+// =============================================================================
+
+/// Validate SQL statement (basic keyword check).
+public fn validate_sql(s: Text) -> Bool {
+    let upper = s.to_upper();
+    upper.starts_with("SELECT") ||
+    upper.starts_with("INSERT") ||
+    upper.starts_with("UPDATE") ||
+    upper.starts_with("DELETE") ||
+    upper.starts_with("CREATE") ||
+    upper.starts_with("DROP") ||
+    upper.starts_with("ALTER") ||
+    upper.starts_with("WITH")
+}

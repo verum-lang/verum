@@ -1,0 +1,18 @@
+// Test negative literal as return value
+
+fn test_neg() -> Int {
+    -1
+}
+
+fn test_neg_after_while(n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        i = i + 1;
+    }
+    -1
+}
+
+fn main() {
+    print(f"test_neg() = {test_neg()}");
+    print(f"test_neg_after_while(3) = {test_neg_after_while(3)}");
+}

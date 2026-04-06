@@ -1,0 +1,12 @@
+// Test returning function from function
+fn add_n(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() {
+    let _ = print("Test: Return function from function...");
+    let add5 = add_n(5);
+    let _ = print("Got add5 function");
+    let result = add5(10);
+    let _ = print(f"add5(10) = {result}");
+}

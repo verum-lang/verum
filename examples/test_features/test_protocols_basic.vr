@@ -1,0 +1,16 @@
+type Printable is protocol {
+    fn to_string(self) -> Text;
+}
+
+type Point is { x: Int, y: Int }
+
+implement Printable for Point {
+    fn to_string(self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+fn main() {
+    let p = Point { x: 10, y: 20 }
+    println(p.to_string())
+}

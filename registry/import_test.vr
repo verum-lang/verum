@@ -1,0 +1,9 @@
+// Test imports
+link std.collections.{List, Map};
+link core.base.{Result, Maybe, Text, Int, Bool};
+
+fn main() {
+    print("Testing imports...");
+    let x: Int = 42;
+    print(f"Value: {x}");
+}

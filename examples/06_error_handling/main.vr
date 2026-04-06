@@ -1,0 +1,76 @@
+// 06 — Error Handling
+// Maybe<T> (option), Result<T, E>, pattern matching on errors, and the ? operator.
+
+// --- Maybe<T> ---
+// Verum uses Maybe (not Option). Variants: Some(value) | None.
+
+fn find_index(items: List<Text>, target: Text) -> Maybe<Int> {
+    for i in 0..items.len() {
+        if items[i] == target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+// --- Result<T, E> ---
+// Variants: Ok(value) | Err(error).
+
+type ParseError is {
+    message: Text
+};
+
+fn parse_positive(input: Text) -> Result<Int, ParseError> {
+    let n = input.parse_int()
+    match n {
+        Some(value) => {
+            if value > 0 {
+                Ok(value)
+            } else {
+                Err(ParseError { message: f"expected positive, got {value}" })
+            }
+        },
+        None => Err(ParseError { message: f"'{input}' is not a number" })
+    }
+}
+
+// --- The ? operator ---
+// Propagates Err(...) or None early, unwraps Ok/Some on success.
+
+fn double_positive(input: Text) -> Result<Int, ParseError> {
+    let value = parse_positive(input)?
+    Ok(value * 2)
+}
+
+// --- Chaining operations ---
+
+fn process_inputs(inputs: List<Text>) -> List<Text> {
+    let mut results = []
+    for input in inputs {
+        let msg = match double_positive(input) {
+            Ok(v)  => f"{input} -> {v}",
+            Err(e) => f"{input} -> ERROR: {e.message}"
+        }
+        results.push(msg)
+    }
+    results
+}
+
+fn main() {
+    // Maybe examples
+    let fruits = ["apple", "banana", "cherry"]
+    match find_index(fruits, "banana") {
+        Some(i) => print(f"Found banana at index {i}"),
+        None    => print("banana not found")
+    }
+    match find_index(fruits, "grape") {
+        Some(i) => print(f"Found grape at index {i}"),
+        None    => print("grape not found")
+    }
+
+    // Result examples
+    let results = process_inputs(["42", "-3", "hello", "7"])
+    for r in results {
+        print(f"  {r}")
+    }
+}

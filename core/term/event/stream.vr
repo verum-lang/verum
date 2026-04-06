@@ -1,0 +1,196 @@
+// =============================================================================
+// event/stream.vr - Event Stream (sync poll + blocking read)
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: types.vr, parser.vr, source.vr, core.term.raw
+// =============================================================================
+//
+// EventStream provides a high-level interface for reading terminal events.
+// - poll(timeout): non-blocking poll with timeout, returns Maybe<Event>
+// - read(): blocking read, returns IoResult<Event>
+//
+// AsyncEventStream wraps EventStream for async iteration via async for.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.3
+// =============================================================================
+
+module stream;
+
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount core.time.Duration;
+mount super.types.Event;
+mount super.parser.InputParser;
+mount super.source.{poll_read, blocking_read};
+mount super.super.raw.{RawTerminal, TerminalSize};
+mount core.async.select.yield_now;
+mount core.sys.FileDesc;
+
+// =============================================================================
+// EventStream — synchronous event stream
+// =============================================================================
+
+/// Synchronous terminal event stream.
+/// Wraps an InputParser and reads from a terminal file descriptor.
+///
+/// Usage:
+///   let mut stream = EventStream.new(FileDesc(0));
+///   loop {
+///       match stream.poll(Duration.from_millis(100)) {
+///           Some(Event.Key(ke)) if ke.is_ctrl_c() => break,
+///           Some(event) => handle(event),
+///           None => { /* timeout, do other work */ }
+///       }
+///   }
+public type EventStream is {
+    parser: InputParser,
+    fd: FileDesc,
+    read_buf: [Byte; 1024],
+};
+
+implement EventStream {
+    /// Create a new EventStream reading from the given file descriptor.
+    /// Typically FileDesc(0) for stdin.
+    public fn new(fd: FileDesc) -> EventStream {
+        EventStream {
+            parser: InputParser.new(),
+            fd: fd,
+            read_buf: [0; 1024],
+        }
+    }
+
+    /// Create an EventStream for stdin.
+    public fn stdin() -> EventStream {
+        EventStream.new(FileDesc(0))
+    }
+
+    /// Non-blocking poll with timeout.
+    /// Returns the next event if one is available within the timeout,
+    /// or None if the timeout expires.
+    public fn poll(&mut self, timeout: Duration) -> Maybe<Event> {
+        // First check already-parsed events
+        if let Some(event) = self.parser.next_event() {
+            return Some(event);
+        }
+
+        // Read from terminal with timeout
+        let n = poll_read(self.fd, &mut self.read_buf, timeout);
+        if n > 0 {
+            self.parser.feed(&self.read_buf[0..n]);
+            self.parser.next_event()
+        } else {
+            None
+        }
+    }
+
+    /// Blocking read for the next event.
+    /// Blocks until at least one event is available.
+    public fn read(&mut self) -> IoResult<Event> {
+        loop {
+            // Check already-parsed events first
+            if let Some(event) = self.parser.next_event() {
+                return Ok(event);
+            }
+
+            // Blocking read from the terminal
+            let n = blocking_read(self.fd, &mut self.read_buf)?;
+            if n == 0 {
+                return Err(StreamError.new(IoErrorKind.UnexpectedEof));
+            }
+            self.parser.feed(&self.read_buf[0..n]);
+        }
+    }
+
+    /// Try to read an event without blocking.
+    /// Returns Some(event) if data is immediately available, None otherwise.
+    public fn try_read(&mut self) -> Maybe<Event> {
+        self.poll(Duration.from_millis(0))
+    }
+
+    /// Drain all pending events (already parsed but not yet consumed).
+    public fn drain_pending(&mut self) -> List<Event> {
+        let mut events = List.new();
+        while let Some(event) = self.parser.next_event() {
+            events.push(event);
+        }
+        events
+    }
+
+    /// Reset the parser state (discard any partial sequences).
+    public fn reset(&mut self) {
+        self.parser.reset();
+    }
+}
+
+// =============================================================================
+// AsyncEventStream — async wrapper for use with select/async for
+// =============================================================================
+
+/// Async event stream for use with Verum async/await and select.
+///
+/// Usage:
+///   let mut stream = AsyncEventStream.new(FileDesc(0));
+///   async for event in &mut stream {
+///       match event {
+///           Event.Key(ke) => handle_key(ke),
+///           Event.Mouse(me) => handle_mouse(me),
+///           _ => {}
+///       }
+///   }
+public type AsyncEventStream is {
+    inner: EventStream,
+};
+
+implement AsyncEventStream {
+    /// Create a new async event stream.
+    public fn new(fd: FileDesc) -> AsyncEventStream {
+        AsyncEventStream {
+            inner: EventStream.new(fd),
+        }
+    }
+
+    /// Create an async event stream for stdin.
+    public fn stdin() -> AsyncEventStream {
+        AsyncEventStream.new(FileDesc(0))
+    }
+}
+
+implement AsyncIterator for AsyncEventStream {
+    type Item = Event;
+
+    async fn next(&mut self) -> Maybe<Event> {
+        loop {
+            // Check pending events
+            if let Some(event) = self.inner.parser.next_event() {
+                return Some(event);
+            }
+
+            // Async read from the terminal
+            let n = async_read(self.inner.fd, &mut self.inner.read_buf).await;
+            match n {
+                Ok(0) => return None,
+                Ok(bytes_read) => {
+                    self.inner.parser.feed(&self.inner.read_buf[0..bytes_read]);
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+}
+
+/// Async read from a file descriptor.
+/// Integrates with the Verum async runtime for non-blocking I/O.
+/// On platforms with io_uring/kqueue/IOCP, this yields the task
+/// until data is available. Falls back to blocking_read on spawn.
+async fn async_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
+    // Attempt non-blocking read first
+    let result = poll_read(fd, buf, Duration.from_millis(0));
+    if result > 0 {
+        return Ok(result);
+    }
+
+    // Yield to async runtime, then retry with blocking read.
+    // The runtime's I/O driver (kqueue/epoll/io_uring) will wake us
+    // when the fd has data available.
+    yield_now().await;
+    blocking_read(fd, buf)
+}

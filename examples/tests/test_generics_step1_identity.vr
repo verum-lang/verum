@@ -1,0 +1,19 @@
+// Step 1: Test basic generic function - identity
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() -> Int {
+    println("Testing identity function...");
+    let a = identity(42);
+    let b = identity(true);
+    println("Int result:");
+    println(a);
+    println("Bool result:");
+    println(b);
+    assert(a == 42, "Int identity failed");
+    assert(b == true, "Bool identity failed");
+    println("PASSED: identity function");
+    0
+}

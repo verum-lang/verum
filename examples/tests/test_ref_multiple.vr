@@ -1,0 +1,12 @@
+// Test multiple predicates
+fn test_bounded() -> Int{>= 0, <= 100} {
+    50
+}
+
+fn test_combo() -> Int{> 0 && < 100} {
+    42
+}
+
+fn main() -> Int {
+    test_bounded() + test_combo()
+}

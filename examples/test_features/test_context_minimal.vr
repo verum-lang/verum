@@ -1,0 +1,9 @@
+// Minimal context test - no f-strings
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn main() {
+    println("Testing minimal context")
+}

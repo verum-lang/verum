@@ -1,0 +1,5 @@
+// Simple Tensor Test 1
+fn main() -> Int {
+    let vec1 = tensor<3>Float { 1.0, 2.0, 3.0 };
+    0
+}

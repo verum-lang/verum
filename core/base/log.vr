@@ -1,0 +1,310 @@
+// =============================================================================
+// log.vr - Logging protocol and convenience functions
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: protocols.vr, result.vr, maybe.vr
+// =============================================================================
+//
+// Provides the standard logging protocol for Verum applications.
+//
+// Logging uses the context system so that log output can be directed to
+// different backends (console, file, network) without changing application code.
+//
+// # Usage
+//
+// ```verum
+// fn process_request(req: &Request) using [Logger] {
+//     info("processing request");
+//     // ... work ...
+//     debug("request complete");
+// }
+//
+// // Provide a logger via context
+// provide ConsoleLogger.new() as Logger {
+//     process_request(&req);
+// }
+// ```
+//
+// =============================================================================
+
+module core.base.log;
+
+mount core.base.protocols.{
+    Debug, Display, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Hasher,
+    Formatter, FormatError, Default,
+};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Log Level
+// =============================================================================
+
+/// The severity level of a log message.
+///
+/// Levels are ordered from most verbose (Trace) to least verbose (Error).
+/// A logger configured at a given level will emit messages at that level
+/// and all less verbose levels.
+public type LogLevel is Trace | Debug | Info | Warn | Error;
+
+implement LogLevel {
+    /// Returns the numeric severity (0=Trace, 4=Error).
+    public fn severity(&self) -> Int {
+        match self {
+            Trace => 0,
+            Debug => 1,
+            Info => 2,
+            Warn => 3,
+            Error => 4,
+        }
+    }
+
+    /// Returns the level name as text.
+    public fn name(&self) -> Text {
+        match self {
+            Trace => "TRACE",
+            Debug => "DEBUG",
+            Info => "INFO",
+            Warn => "WARN",
+            Error => "ERROR",
+        }
+    }
+}
+
+implement Display for LogLevel {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.name())
+    }
+}
+
+implement Debug for LogLevel {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("LogLevel.")?;
+        f.write_str(&self.name())
+    }
+}
+
+implement Clone for LogLevel {
+    fn clone(&self) -> LogLevel {
+        match self {
+            Trace => Trace,
+            Debug => Debug,
+            Info => Info,
+            Warn => Warn,
+            Error => Error,
+        }
+    }
+}
+
+implement Copy for LogLevel {}
+
+implement PartialEq for LogLevel {
+    fn eq(&self, other: &LogLevel) -> Bool {
+        self.severity() == other.severity()
+    }
+}
+
+implement Eq for LogLevel {}
+
+implement PartialOrd for LogLevel {
+    fn partial_cmp(&self, other: &LogLevel) -> Maybe<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+implement Ord for LogLevel {
+    fn cmp(&self, other: &LogLevel) -> Ordering {
+        let a = self.severity();
+        let b = other.severity();
+        if a < b { Less }
+        else if a > b { Greater }
+        else { Equal }
+    }
+}
+
+implement Hash for LogLevel {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.severity());
+    }
+}
+
+implement Default for LogLevel {
+    fn default() -> LogLevel {
+        Info
+    }
+}
+
+// =============================================================================
+// Logger Protocol
+// =============================================================================
+
+/// Protocol for log output backends.
+///
+/// Loggers receive log messages and decide how to output them (console, file,
+/// network, etc.). The Logger protocol is used as a context dependency,
+/// enabling dependency injection of logging throughout an application.
+///
+/// # Examples
+///
+/// ```verum
+/// type ConsoleLogger is {
+///     min_level: LogLevel,
+/// };
+///
+/// implement Logger for ConsoleLogger {
+///     fn log(&self, level: LogLevel, message: &Text) {
+///         if self.is_enabled(level) {
+///             print(f"[{level.name()}] {message}");
+///         }
+///     }
+///
+///     fn is_enabled(&self, level: LogLevel) -> Bool {
+///         level.severity() >= self.min_level.severity()
+///     }
+/// }
+/// ```
+public type Logger is protocol {
+    /// Log a message at the given level.
+    fn log(&self, level: LogLevel, message: &Text);
+
+    /// Check if the given log level is enabled.
+    ///
+    /// Callers may use this to avoid expensive message formatting
+    /// when the level is disabled.
+    fn is_enabled(&self, level: LogLevel) -> Bool;
+};
+
+// =============================================================================
+// Log Record
+// =============================================================================
+
+/// A structured log record with metadata.
+///
+/// Used by advanced loggers that need access to source location,
+/// timestamps, or structured fields.
+public type LogRecord is {
+    /// The severity level.
+    level: LogLevel,
+    /// The log message.
+    message: Text,
+    /// The module path where the log was emitted.
+    module_path: Maybe<Text>,
+    /// The source file where the log was emitted.
+    file: Maybe<Text>,
+    /// The line number where the log was emitted.
+    line: Maybe<Int>,
+};
+
+implement LogRecord {
+    /// Create a new log record.
+    public fn new(level: LogLevel, message: Text) -> LogRecord {
+        LogRecord {
+            level: level,
+            message: message,
+            module_path: None,
+            file: None,
+            line: None,
+        }
+    }
+
+    /// Set the module path.
+    public fn with_module_path(self, path: Text) -> LogRecord {
+        LogRecord {
+            level: self.level,
+            message: self.message,
+            module_path: Some(path),
+            file: self.file,
+            line: self.line,
+        }
+    }
+
+    /// Set the source file.
+    public fn with_file(self, file: Text) -> LogRecord {
+        LogRecord {
+            level: self.level,
+            message: self.message,
+            module_path: self.module_path,
+            file: Some(file),
+            line: self.line,
+        }
+    }
+
+    /// Set the source line number.
+    public fn with_line(self, line: Int) -> LogRecord {
+        LogRecord {
+            level: self.level,
+            message: self.message,
+            module_path: self.module_path,
+            file: self.file,
+            line: Some(line),
+        }
+    }
+}
+
+implement Clone for LogRecord {
+    fn clone(&self) -> LogRecord {
+        LogRecord {
+            level: self.level.clone(),
+            message: self.message.clone(),
+            module_path: self.module_path.clone(),
+            file: self.file.clone(),
+            line: self.line.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Log a message at Trace level.
+public fn trace(msg: &Text) using [Logger] {
+    Logger.log(Trace, msg);
+}
+
+/// Log a message at Debug level.
+public fn debug(msg: &Text) using [Logger] {
+    Logger.log(Debug, msg);
+}
+
+/// Log a message at Info level.
+public fn info(msg: &Text) using [Logger] {
+    Logger.log(Info, msg);
+}
+
+/// Log a message at Warn level.
+public fn warn(msg: &Text) using [Logger] {
+    Logger.log(Warn, msg);
+}
+
+/// Log a message at Error level.
+public fn error(msg: &Text) using [Logger] {
+    Logger.log(Error, msg);
+}
+
+// =============================================================================
+// NullLogger - No-op logger for testing
+// =============================================================================
+
+/// A logger that discards all messages.
+///
+/// Useful for testing or when logging is not needed.
+public type NullLogger is {};
+
+implement NullLogger {
+    /// Create a new null logger.
+    public fn new() -> NullLogger {
+        NullLogger {}
+    }
+}
+
+implement Logger for NullLogger {
+    fn log(&self, level: LogLevel, message: &Text) {
+        // Discard all messages
+    }
+
+    fn is_enabled(&self, level: LogLevel) -> Bool {
+        false
+    }
+}

@@ -1,0 +1,191 @@
+// refinement_types.vr
+// Demonstrates refinement types and compile-time validation
+
+link core.base.predicates.*;
+
+// Basic refinement types
+type Positive is Int{> 0};
+type NonZero is Int{!= 0};
+type Percentage is Float where |x| x >= 0.0 && x <= 100.0;
+
+// Email validation with named predicate
+predicate valid_email(s: Text) -> Bool {
+    s.contains("@") && s.contains(".") && s.len() >= 5
+}
+
+type Email is Text where valid_email;
+
+// Age with range constraint
+type Age is Int where |x| x >= 0 && x <= 150;
+
+// Password with complexity requirements
+predicate strong_password(s: Text) -> Bool {
+    s.len() >= 8 &&
+    s.chars().any(|c| c.is_digit()) &&
+    s.chars().any(|c| c.is_uppercase()) &&
+    s.chars().any(|c| c.is_lowercase())
+}
+
+type Password is Text where strong_password;
+
+// Non-empty collections
+type NonEmptyList<T> is List<T> where non_empty;
+type NonEmptyText is Text where |s| s.len() > 0;
+
+// Sorted list
+type SortedList<T: Ord> is List<T> where sorted;
+
+// User type with refinements
+type User is {
+    name: NonEmptyText,
+    age: Age,
+    email: Email,
+    password: Password
+};
+
+// Function with refinement types - division is safe!
+fn safe_divide(a: Int, b: NonZero) -> Float {
+    a / b  // Division by zero is impossible
+}
+
+// Function with positive constraints
+fn discount_price(price: Positive, discount: Percentage) -> Float {
+    price * (1.0 - discount / 100.0)
+}
+
+// Runtime validation
+fn create_user(
+    name: Text,
+    age: Int,
+    email: Text,
+    password: Text
+) -> Result<User, Text> {
+    // Validate each field
+    let name = NonEmptyText.try_from(name)
+        .map_err(|_| "Name cannot be empty")?;
+
+    let age = Age.try_from(age)
+        .map_err(|_| "Age must be between 0 and 150")?;
+
+    let email = Email.try_from(email)
+        .map_err(|_| "Invalid email format")?;
+
+    let password = Password.try_from(password)
+        .map_err(|_| "Password must be at least 8 characters with uppercase, lowercase, and digit")?;
+
+    Ok(User { name, age, email, password })
+}
+
+// Refinement with verification
+@verify(runtime)
+fn factorial(n: Positive) -> Positive {
+    if n == 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// Financial calculations with refinements
+type Money is Float where non_negative;
+type Price is Float where positive;
+type Quantity is Int where positive;
+
+type OrderItem is {
+    name: NonEmptyText,
+    price: Price,
+    quantity: Quantity
+};
+
+fn calculate_total(items: NonEmptyList<OrderItem>) -> Money {
+    items
+        .map(|item| item.price * item.quantity)
+        .fold(0.0, |acc, x| acc + x)
+}
+
+// Smart constructor pattern
+fn new_order_item(
+    name: Text,
+    price: Float,
+    quantity: Int
+) -> Result<OrderItem, Text> {
+    Ok(OrderItem {
+        name: NonEmptyText.try_from(name)?,
+        price: Price.try_from(price)?,
+        quantity: Quantity.try_from(quantity)?
+    })
+}
+
+fn main() {
+    print("=== Refinement Types Demo ===\n")
+
+    // Safe division
+    print("Safe division:")
+    print(f"10 / 2 = {safe_divide(10, 2)}")
+    print(f"7 / 3 = {safe_divide(7, 3)}")
+
+    // This would be a compile error:
+    // safe_divide(10, 0)  // Error: 0 is not NonZero
+
+    // Discount calculation
+    print("\nDiscount calculation:")
+    let price = 100.0
+    let discount = 20.0
+    match Positive.try_from(price) {
+        Ok(p) => match Percentage.try_from(discount) {
+            Ok(d) => print(f"Price ${p} with {d}% discount = ${discount_price(p, d)}"),
+            Err(e) => print(f"Invalid discount: {e}")
+        },
+        Err(e) => print(f"Invalid price: {e}")
+    }
+
+    // User creation with validation
+    print("\n=== User Registration ===")
+
+    // Valid user
+    match create_user("Alice", 30, "alice@example.com", "SecurePass123") {
+        Ok(user) => print(f"✓ Created user: {user.name} ({user.email})"),
+        Err(e) => print(f"✗ Error: {e}")
+    }
+
+    // Invalid cases
+    let test_cases = [
+        ("", 30, "alice@example.com", "SecurePass123"),  // Empty name
+        ("Bob", -5, "bob@example.com", "SecurePass123"),  // Negative age
+        ("Charlie", 200, "charlie@example.com", "SecurePass123"),  // Age too high
+        ("Dave", 25, "invalid-email", "SecurePass123"),  // Invalid email
+        ("Eve", 28, "eve@example.com", "weak"),  // Weak password
+    ]
+
+    for (name, age, email, password) in test_cases {
+        match create_user(name, age, email, password) {
+            Ok(user) => print(f"✓ Created user: {user.name}"),
+            Err(e) => print(f"✗ Error: {e}")
+        }
+    }
+
+    // Factorial with refinements
+    print("\n=== Factorial (verified) ===")
+    for i in 1..6 {
+        match Positive.try_from(i) {
+            Ok(n) => print(f"factorial({i}) = {factorial(n)}"),
+            Err(_) => print(f"Cannot calculate factorial of {i}")
+        }
+    }
+
+    // Order calculation
+    print("\n=== Order Total ===")
+    let items = [
+        new_order_item("Widget", 10.99, 2).unwrap(),
+        new_order_item("Gadget", 25.50, 1).unwrap(),
+        new_order_item("Doohickey", 5.99, 3).unwrap()
+    ]
+
+    match NonEmptyList.try_from(items) {
+        Ok(order_items) => {
+            let total = calculate_total(order_items)
+            print(f"Order total: ${total}")
+        },
+        Err(_) => print("Cannot create order with no items")
+    }
+}

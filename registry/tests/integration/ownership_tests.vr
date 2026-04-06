@@ -1,0 +1,681 @@
+// Verum Registry - Package Ownership Integration Tests
+//
+// Comprehensive integration tests for package ownership management
+// Tests adding/removing owners, ownership transfer, and access control
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import test utilities
+mount super.super.test_utils.{
+    setup_test_db,
+    cleanup_test_db,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+    publish_test_package,
+};
+
+// Import domain types
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.src.dto.user_dto.{RegisterRequestDto, LoginRequestDto};
+mount super.super.src.dto.package_dto.{
+    PublishRequestDto,
+    UpdatePackageMetadataDto,
+};
+mount super.super.src.dto.ownership_dto.{
+    AddOwnerRequestDto,
+    RemoveOwnerRequestDto,
+    TransferOwnershipRequestDto,
+    ListOwnersResponseDto,
+};
+
+// Import handlers
+mount super.super.src.handlers.users.{register_user, login_user};
+mount super.super.src.handlers.packages.{
+    publish_package,
+    update_package_metadata,
+};
+mount super.super.src.handlers.owners.{
+    add_package_owner,
+    remove_package_owner,
+    transfer_ownership,
+    list_package_owners,
+};
+
+// ============================================================================
+// Add Package Owner Tests
+// ============================================================================
+
+@test
+fn test_add_package_owner() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    // Alice publishes package
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("shared-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Add Bob as owner
+    let add_req = AddOwnerRequestDto {
+        package_name: "shared-pkg",
+        username: "bob",
+    };
+
+    let add_result = add_package_owner(add_req, alice_token.clone()).await;
+    assert_ok(&add_result);
+
+    // Verify Bob can now update the package
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let update_req = UpdatePackageMetadataDto {
+        description: "Bob's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    };
+
+    let update_result = update_package_metadata("shared-pkg", update_req, bob_token).await;
+    assert_ok(&update_result);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_add_package_owner_requires_existing_owner() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    // Alice publishes package
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("alice-pkg", "1.0.0", alice_token).await;
+
+    // Bob (non-owner) tries to add himself as owner (should fail)
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let add_req = AddOwnerRequestDto {
+        package_name: "alice-pkg",
+        username: "bob",
+    };
+
+    let add_result = add_package_owner(add_req, bob_token).await;
+    assert_err(&add_result);
+
+    match add_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            // Expected - only existing owners can add new owners
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_add_package_owner_nonexistent_user() {
+    setup_test_db();
+
+    // Register user
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("alice-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Try to add non-existent user as owner
+    let add_req = AddOwnerRequestDto {
+        package_name: "alice-pkg",
+        username: "nonexistent",
+    };
+
+    let add_result = add_package_owner(add_req, alice_token).await;
+    assert_err(&add_result);
+
+    match add_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert_eq(&field_name, &"username");
+            assert(&message.contains("not found") || &message.contains("does not exist"));
+        },
+        _ => panic("Expected ValidationError for non-existent user"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_add_package_owner_already_owner() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("shared-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Add Bob as owner
+    add_package_owner(AddOwnerRequestDto {
+        package_name: "shared-pkg",
+        username: "bob",
+    }, alice_token.clone()).await;
+
+    // Try to add Bob again (should fail or be idempotent)
+    let add_again = add_package_owner(AddOwnerRequestDto {
+        package_name: "shared-pkg",
+        username: "bob",
+    }, alice_token).await;
+
+    // Either error or idempotent success
+    // Implementation choice: error is safer
+    assert_err(&add_again);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Remove Package Owner Tests
+// ============================================================================
+
+@test
+fn test_remove_package_owner() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes and adds Bob as owner
+    publish_test_package("shared-pkg", "1.0.0", alice_token.clone()).await;
+
+    add_package_owner(AddOwnerRequestDto {
+        package_name: "shared-pkg",
+        username: "bob",
+    }, alice_token.clone()).await;
+
+    // Verify Bob can update
+    let update1 = update_package_metadata("shared-pkg", UpdatePackageMetadataDto {
+        description: "Bob's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, bob_token.clone()).await;
+    assert_ok(&update1);
+
+    // Remove Bob as owner
+    let remove_req = RemoveOwnerRequestDto {
+        package_name: "shared-pkg",
+        username: "bob",
+    };
+
+    let remove_result = remove_package_owner(remove_req, alice_token).await;
+    assert_ok(&remove_result);
+
+    // Verify Bob can no longer update
+    let update2 = update_package_metadata("shared-pkg", UpdatePackageMetadataDto {
+        description: "Bob's unauthorized update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, bob_token).await;
+    assert_err(&update2);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_cannot_remove_last_owner() {
+    setup_test_db();
+
+    // Register user
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    publish_test_package("alice-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Try to remove Alice (the only owner)
+    let remove_req = RemoveOwnerRequestDto {
+        package_name: "alice-pkg",
+        username: "alice",
+    };
+
+    let remove_result = remove_package_owner(remove_req, alice_token).await;
+    assert_err(&remove_result);
+
+    match remove_result {
+        Result.Err(RegistryError.ValidationError { field_name, message }) => {
+            assert(&message.contains("last owner") || &message.contains("at least one owner"));
+        },
+        _ => panic("Expected ValidationError for removing last owner"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_remove_package_owner_requires_permission() {
+    setup_test_db();
+
+    // Register three users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "charlie",
+        email: "charlie@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let charlie_token = login_user(LoginRequestDto {
+        username: "charlie",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes and adds Bob
+    publish_test_package("alice-pkg", "1.0.0", alice_token.clone()).await;
+
+    add_package_owner(AddOwnerRequestDto {
+        package_name: "alice-pkg",
+        username: "bob",
+    }, alice_token).await;
+
+    // Charlie (non-owner) tries to remove Bob (should fail)
+    let remove_req = RemoveOwnerRequestDto {
+        package_name: "alice-pkg",
+        username: "bob",
+    };
+
+    let remove_result = remove_package_owner(remove_req, charlie_token).await;
+    assert_err(&remove_result);
+
+    match remove_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            // Expected - only owners can remove other owners
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Transfer Ownership Tests
+// ============================================================================
+
+@test
+fn test_transfer_ownership() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes package
+    publish_test_package("transfer-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Transfer to Bob
+    let transfer_req = TransferOwnershipRequestDto {
+        package_name: "transfer-pkg",
+        new_owner: "bob",
+        remove_old_owner: true,
+    };
+
+    let transfer_result = transfer_ownership(transfer_req, alice_token.clone()).await;
+    assert_ok(&transfer_result);
+
+    // Verify Alice can no longer update (if remove_old_owner was true)
+    let alice_update = update_package_metadata("transfer-pkg", UpdatePackageMetadataDto {
+        description: "Alice's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, alice_token).await;
+    assert_err(&alice_update);
+
+    // Verify Bob can now update
+    let bob_update = update_package_metadata("transfer-pkg", UpdatePackageMetadataDto {
+        description: "Bob's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, bob_token).await;
+    assert_ok(&bob_update);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_transfer_ownership_keep_old_owner() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes package
+    publish_test_package("shared-transfer-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Transfer to Bob but keep Alice as co-owner
+    let transfer_req = TransferOwnershipRequestDto {
+        package_name: "shared-transfer-pkg",
+        new_owner: "bob",
+        remove_old_owner: false,
+    };
+
+    let transfer_result = transfer_ownership(transfer_req, alice_token.clone()).await;
+    assert_ok(&transfer_result);
+
+    // Verify both Alice and Bob can update
+    let alice_update = update_package_metadata("shared-transfer-pkg", UpdatePackageMetadataDto {
+        description: "Alice's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, alice_token).await;
+    assert_ok(&alice_update);
+
+    let bob_update = update_package_metadata("shared-transfer-pkg", UpdatePackageMetadataDto {
+        description: "Bob's update",
+        homepage: "",
+        repository: "",
+        keywords: List.new(),
+        categories: List.new(),
+    }, bob_token).await;
+    assert_ok(&bob_update);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_transfer_ownership_requires_permission() {
+    setup_test_db();
+
+    // Register two users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let bob_token = login_user(LoginRequestDto {
+        username: "bob",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes package
+    publish_test_package("alice-pkg", "1.0.0", alice_token).await;
+
+    // Bob tries to transfer Alice's package to himself (should fail)
+    let transfer_req = TransferOwnershipRequestDto {
+        package_name: "alice-pkg",
+        new_owner: "bob",
+        remove_old_owner: true,
+    };
+
+    let transfer_result = transfer_ownership(transfer_req, bob_token).await;
+    assert_err(&transfer_result);
+
+    match transfer_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            // Expected - only owners can transfer ownership
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// List Owners Tests
+// ============================================================================
+
+@test
+fn test_list_package_owners() {
+    setup_test_db();
+
+    // Register three users
+    register_user(RegisterRequestDto {
+        username: "alice",
+        email: "alice@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "bob",
+        email: "bob@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    register_user(RegisterRequestDto {
+        username: "charlie",
+        email: "charlie@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    }).await;
+
+    let alice_token = login_user(LoginRequestDto {
+        username: "alice",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Alice publishes package
+    publish_test_package("multi-owner-pkg", "1.0.0", alice_token.clone()).await;
+
+    // Initially, only Alice is owner
+    let owners1 = list_package_owners("multi-owner-pkg").await;
+    assert_ok(&owners1);
+    assert_eq(&owners1.unwrap().owners.len(), &1);
+
+    // Add Bob and Charlie as owners
+    add_package_owner(AddOwnerRequestDto {
+        package_name: "multi-owner-pkg",
+        username: "bob",
+    }, alice_token.clone()).await;
+
+    add_package_owner(AddOwnerRequestDto {
+        package_name: "multi-owner-pkg",
+        username: "charlie",
+    }, alice_token).await;
+
+    // Now should have 3 owners
+    let owners2 = list_package_owners("multi-owner-pkg").await;
+    assert_ok(&owners2);
+    assert_eq(&owners2.unwrap().owners.len(), &3);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_list_owners_nonexistent_package() {
+    setup_test_db();
+
+    // Try to list owners for non-existent package
+    let result = list_package_owners("nonexistent-pkg").await;
+    assert_err(&result);
+
+    match result {
+        Result.Err(RegistryError.PackageNotFound { name }) => {
+            assert_eq(&name, &"nonexistent-pkg");
+        },
+        _ => panic("Expected PackageNotFound error"),
+    }
+
+    cleanup_test_db();
+}

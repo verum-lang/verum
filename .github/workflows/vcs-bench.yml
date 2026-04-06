@@ -1,0 +1,1115 @@
+# Verum Compliance Suite - Benchmark Suite
+#
+# Tracks performance over time and detects regressions.
+# Compares against baselines and gates merges on significant regressions.
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# Reference: CLAUDE.md - Performance Targets
+
+name: VCS Benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'vcs/runner/vbench/**'
+      - 'vcs/config/thresholds.toml'
+      - '.github/workflows/vcs-bench.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'vcs/runner/vbench/**'
+  schedule:
+    # Run comprehensive benchmarks weekly on Saturday at 4:00 AM UTC
+    # Reference: VCS Spec Section 23 - Weekly performance benchmarks
+    - cron: '0 4 * * 6'
+    # Also run nightly quick benchmarks (subset)
+    - cron: '0 4 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: 'Baseline commit/tag to compare against'
+        required: false
+        default: 'main'
+        type: string
+      benchmark_filter:
+        description: 'Filter benchmarks by name pattern'
+        required: false
+        type: string
+      iterations:
+        description: 'Number of benchmark iterations'
+        required: false
+        default: '100'
+        type: string
+      warm_up:
+        description: 'Warm-up iterations'
+        required: false
+        default: '10'
+        type: string
+      regression_threshold:
+        description: 'Regression threshold percentage'
+        required: false
+        default: '10'
+        type: string
+      save_baseline:
+        description: 'Save results as new baseline'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Optimize for consistent benchmark results
+  RUSTFLAGS: "-C target-cpu=native"
+  # Disable incremental compilation for accurate benchmarks
+  CARGO_INCREMENTAL: 0
+
+# Only run one benchmark at a time to avoid resource contention
+concurrency:
+  group: vcs-bench
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Setup and Configuration
+  # ==========================================================================
+  setup:
+    name: Setup Benchmarks
+    runs-on: ubuntu-latest
+    outputs:
+      baseline: ${{ steps.config.outputs.baseline }}
+      baseline_sha: ${{ steps.baseline.outputs.baseline_sha }}
+      iterations: ${{ steps.config.outputs.iterations }}
+      warm_up: ${{ steps.config.outputs.warm_up }}
+      regression_threshold: ${{ steps.config.outputs.regression_threshold }}
+      filter: ${{ steps.config.outputs.filter }}
+      save_baseline: ${{ steps.config.outputs.save_baseline }}
+      run_extended: ${{ steps.config.outputs.run_extended }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Configuration
+        id: config
+        run: |
+          # Baseline reference
+          BASELINE="${{ github.event.inputs.baseline || 'main' }}"
+          echo "baseline=$BASELINE" >> $GITHUB_OUTPUT
+
+          # Iterations - extended for weekly (Saturday), quick for weekday nightly
+          DAY_OF_WEEK=$(date +%u)
+          if [ "${{ github.event_name }}" == "schedule" ] && [ "$DAY_OF_WEEK" == "6" ]; then
+            # Saturday: full weekly benchmark run
+            echo "iterations=500" >> $GITHUB_OUTPUT
+            echo "warm_up=50" >> $GITHUB_OUTPUT
+            echo "run_extended=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "schedule" ]; then
+            # Weekday nightly: quick benchmark run
+            echo "iterations=100" >> $GITHUB_OUTPUT
+            echo "warm_up=10" >> $GITHUB_OUTPUT
+            echo "run_extended=false" >> $GITHUB_OUTPUT
+          else
+            echo "iterations=${{ github.event.inputs.iterations || '100' }}" >> $GITHUB_OUTPUT
+            echo "warm_up=${{ github.event.inputs.warm_up || '10' }}" >> $GITHUB_OUTPUT
+            echo "run_extended=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Regression threshold
+          echo "regression_threshold=${{ github.event.inputs.regression_threshold || '10' }}" >> $GITHUB_OUTPUT
+
+          # Filter
+          echo "filter=${{ github.event.inputs.benchmark_filter || '' }}" >> $GITHUB_OUTPUT
+
+          # Save baseline - always on main push
+          if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "save_baseline=true" >> $GITHUB_OUTPUT
+          else
+            echo "save_baseline=${{ github.event.inputs.save_baseline || 'false' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Resolve Baseline SHA
+        id: baseline
+        run: |
+          BASELINE="${{ github.event.inputs.baseline || 'main' }}"
+          BASELINE_SHA=$(git rev-parse "$BASELINE" 2>/dev/null || echo "")
+          if [ -z "$BASELINE_SHA" ]; then
+            echo "::warning::Could not resolve baseline '$BASELINE', using main"
+            BASELINE_SHA=$(git rev-parse main)
+          fi
+          echo "baseline_sha=$BASELINE_SHA" >> $GITHUB_OUTPUT
+
+      - name: Load Performance Thresholds
+        id: thresholds
+        run: |
+          if [ -f "vcs/config/thresholds.toml" ]; then
+            sudo apt-get update && sudo apt-get install -y python3-pip
+            pip3 install toml
+            python3 -c "
+            import toml
+            import json
+            with open('vcs/config/thresholds.toml') as f:
+                data = toml.load(f)
+            print(json.dumps(data))
+            " > thresholds.json
+            echo "thresholds=$(cat thresholds.json | jq -c .)" >> $GITHUB_OUTPUT
+          else
+            echo 'thresholds={}' >> $GITHUB_OUTPUT
+          fi
+
+  # ==========================================================================
+  # Download Baseline Results
+  # ==========================================================================
+  fetch-baseline:
+    name: Fetch Baseline Results
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      has_baseline: ${{ steps.check.outputs.has_baseline }}
+
+    steps:
+      - name: Download baseline artifact
+        id: download
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-bench.yml
+          branch: main
+          name: vcs-bench-baseline
+          path: baseline/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Check for baseline
+        id: check
+        run: |
+          if [ -f "baseline/baseline.json" ]; then
+            echo "has_baseline=true" >> $GITHUB_OUTPUT
+            echo "Found baseline from previous run"
+          else
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            echo "No baseline found - this will establish one"
+          fi
+
+      - name: Upload baseline for later jobs
+        if: steps.check.outputs.has_baseline == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-reference
+          path: baseline/
+          retention-days: 1
+
+  # ==========================================================================
+  # CBGR Performance Benchmarks - Target: < 15ns check overhead
+  # ==========================================================================
+  bench-cbgr:
+    name: CBGR Benchmarks (${{ matrix.os }})
+    needs: [setup, fetch-baseline]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-bench-v1"
+          shared-key: ${{ matrix.os }}-cbgr
+
+      - name: Download baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline-reference
+          path: baseline/
+        continue-on-error: true
+
+      - name: Build benchmark runner
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Run CBGR Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --category cbgr \
+            --iterations ${{ needs.setup.outputs.iterations }} \
+            --warm-up ${{ needs.setup.outputs.warm_up }} \
+            ${{ needs.setup.outputs.filter != '' && format('--filter {0}', needs.setup.outputs.filter) || '' }} \
+            --format json \
+            --output reports/cbgr-${{ matrix.platform }}.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/cbgr-${{ matrix.platform }}.log
+
+          if [ -f "reports/cbgr-${{ matrix.platform }}.json" ]; then
+            TIER0_CHECK=$(jq -r '.results["cbgr/tier0_check"].mean_ns // 0' reports/cbgr-${{ matrix.platform }}.json)
+            TIER1_CHECK=$(jq -r '.results["cbgr/tier1_check"].mean_ns // 0' reports/cbgr-${{ matrix.platform }}.json)
+            THIN_REF_SIZE=$(jq -r '.results["cbgr/thin_ref_size"].value // 0' reports/cbgr-${{ matrix.platform }}.json)
+
+            echo "tier0_check=$TIER0_CHECK" >> $GITHUB_OUTPUT
+            echo "tier1_check=$TIER1_CHECK" >> $GITHUB_OUTPUT
+            echo "thin_ref_size=$THIN_REF_SIZE" >> $GITHUB_OUTPUT
+
+            echo "## CBGR Performance (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$TIER0_CHECK <= 15" | bc -l) )); then
+              echo "| Tier 0 Check | ${TIER0_CHECK}ns | <15ns | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Tier 0 Check | ${TIER0_CHECK}ns | <15ns | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if (( $(echo "$TIER1_CHECK <= 1" | bc -l) )); then
+              echo "| Tier 1 Check | ${TIER1_CHECK}ns | ~0ns | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Tier 1 Check | ${TIER1_CHECK}ns | ~0ns | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| ThinRef Size | ${THIN_REF_SIZE} bytes | 16 bytes | $([ \"$THIN_REF_SIZE\" == \"16\" ] && echo \"PASS\" || echo \"WARN\") |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Compare with Baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        id: compare
+        run: |
+          cd vcs
+          if [ -f "../baseline/cbgr-${{ matrix.platform }}.json" ] && [ -f "reports/cbgr-${{ matrix.platform }}.json" ]; then
+            ./runner/vbench/target/release/vbench compare \
+              --baseline ../baseline/cbgr-${{ matrix.platform }}.json \
+              --current reports/cbgr-${{ matrix.platform }}.json \
+              --threshold ${{ needs.setup.outputs.regression_threshold }} \
+              --format json \
+              --output reports/cbgr-comparison-${{ matrix.platform }}.json \
+              2>&1 | tee reports/cbgr-comparison-${{ matrix.platform }}.log
+
+            if [ -f "reports/cbgr-comparison-${{ matrix.platform }}.json" ]; then
+              REGRESSIONS=$(jq -r '.regressions | length' reports/cbgr-comparison-${{ matrix.platform }}.json)
+              IMPROVEMENTS=$(jq -r '.improvements | length' reports/cbgr-comparison-${{ matrix.platform }}.json)
+
+              echo "regressions=$REGRESSIONS" >> $GITHUB_OUTPUT
+              echo "improvements=$IMPROVEMENTS" >> $GITHUB_OUTPUT
+
+              if [ "$REGRESSIONS" -gt 0 ]; then
+                echo "::warning::Found $REGRESSIONS performance regression(s) in CBGR benchmarks"
+              fi
+            fi
+          fi
+
+      - name: Upload CBGR Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-cbgr-${{ matrix.platform }}
+          path: vcs/reports/cbgr-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Compilation Performance Benchmarks - Target: > 50K LOC/sec
+  # ==========================================================================
+  bench-compilation:
+    name: Compilation Benchmarks (${{ matrix.os }})
+    needs: [setup, fetch-baseline]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-bench-v1"
+          shared-key: ${{ matrix.os }}-compilation
+
+      - name: Build benchmark runner
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Download baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline-reference
+          path: baseline/
+        continue-on-error: true
+
+      - name: Run Compilation Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --category compilation \
+            --iterations ${{ needs.setup.outputs.iterations }} \
+            --warm-up ${{ needs.setup.outputs.warm_up }} \
+            --format json \
+            --output reports/compilation-${{ matrix.platform }}.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/compilation-${{ matrix.platform }}.log
+
+          if [ -f "reports/compilation-${{ matrix.platform }}.json" ]; then
+            THROUGHPUT=$(jq -r '.results["compilation/throughput"].loc_per_sec // 0' reports/compilation-${{ matrix.platform }}.json)
+            LEXER_THROUGHPUT=$(jq -r '.results["compilation/lexer"].mb_per_sec // 0' reports/compilation-${{ matrix.platform }}.json)
+            PARSER_THROUGHPUT=$(jq -r '.results["compilation/parser"].loc_per_sec // 0' reports/compilation-${{ matrix.platform }}.json)
+
+            echo "throughput=$THROUGHPUT" >> $GITHUB_OUTPUT
+
+            echo "## Compilation Performance (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$THROUGHPUT >= 50000" | bc -l) )); then
+              echo "| Overall Throughput | ${THROUGHPUT} LOC/s | >50K LOC/s | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Overall Throughput | ${THROUGHPUT} LOC/s | >50K LOC/s | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| Lexer Throughput | ${LEXER_THROUGHPUT} MB/s | >100 MB/s | - |" >> $GITHUB_STEP_SUMMARY
+            echo "| Parser Throughput | ${PARSER_THROUGHPUT} LOC/s | >100K LOC/s | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Compare with Baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        id: compare
+        run: |
+          cd vcs
+          if [ -f "../baseline/compilation-${{ matrix.platform }}.json" ] && [ -f "reports/compilation-${{ matrix.platform }}.json" ]; then
+            ./runner/vbench/target/release/vbench compare \
+              --baseline ../baseline/compilation-${{ matrix.platform }}.json \
+              --current reports/compilation-${{ matrix.platform }}.json \
+              --threshold ${{ needs.setup.outputs.regression_threshold }} \
+              --format json \
+              --output reports/compilation-comparison-${{ matrix.platform }}.json
+
+            if [ -f "reports/compilation-comparison-${{ matrix.platform }}.json" ]; then
+              REGRESSIONS=$(jq -r '.regressions | length' reports/compilation-comparison-${{ matrix.platform }}.json)
+              echo "regressions=$REGRESSIONS" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Upload Compilation Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-compilation-${{ matrix.platform }}
+          path: vcs/reports/compilation-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Type Inference Benchmarks - Target: < 100ms for 10K LOC
+  # ==========================================================================
+  bench-type-inference:
+    name: Type Inference Benchmarks (${{ matrix.os }})
+    needs: [setup, fetch-baseline]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-bench-v1"
+          shared-key: ${{ matrix.os }}-types
+
+      - name: Build benchmark runner
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Download baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline-reference
+          path: baseline/
+        continue-on-error: true
+
+      - name: Run Type Inference Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --category type_inference \
+            --iterations ${{ needs.setup.outputs.iterations }} \
+            --warm-up ${{ needs.setup.outputs.warm_up }} \
+            --format json \
+            --output reports/types-${{ matrix.platform }}.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/types-${{ matrix.platform }}.log
+
+          if [ -f "reports/types-${{ matrix.platform }}.json" ]; then
+            LOC_10K=$(jq -r '.results["type_inference/10k_loc"].mean_ms // 0' reports/types-${{ matrix.platform }}.json)
+
+            echo "loc_10k=$LOC_10K" >> $GITHUB_OUTPUT
+
+            echo "## Type Inference Performance (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$LOC_10K <= 100" | bc -l) )); then
+              echo "| 10K LOC Inference | ${LOC_10K}ms | <100ms | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| 10K LOC Inference | ${LOC_10K}ms | <100ms | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Compare with Baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        id: compare
+        run: |
+          cd vcs
+          if [ -f "../baseline/types-${{ matrix.platform }}.json" ] && [ -f "reports/types-${{ matrix.platform }}.json" ]; then
+            ./runner/vbench/target/release/vbench compare \
+              --baseline ../baseline/types-${{ matrix.platform }}.json \
+              --current reports/types-${{ matrix.platform }}.json \
+              --threshold ${{ needs.setup.outputs.regression_threshold }} \
+              --format json \
+              --output reports/types-comparison-${{ matrix.platform }}.json
+
+            if [ -f "reports/types-comparison-${{ matrix.platform }}.json" ]; then
+              REGRESSIONS=$(jq -r '.regressions | length' reports/types-comparison-${{ matrix.platform }}.json)
+              echo "regressions=$REGRESSIONS" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Upload Type Inference Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-types-${{ matrix.platform }}
+          path: vcs/reports/types-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Runtime Performance Benchmarks - Target: 0.85-0.95x native C
+  # ==========================================================================
+  bench-runtime:
+    name: Runtime Benchmarks (${{ matrix.os }})
+    needs: [setup, fetch-baseline]
+    if: needs.setup.outputs.run_extended == 'true' || github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14 jq bc gcc
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-bench-v1"
+          shared-key: ${{ matrix.os }}-runtime
+
+      - name: Build benchmark runner
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Download baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline-reference
+          path: baseline/
+        continue-on-error: true
+
+      - name: Run Runtime Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --category runtime \
+            --iterations ${{ needs.setup.outputs.iterations }} \
+            --warm-up ${{ needs.setup.outputs.warm_up }} \
+            --format json \
+            --output reports/runtime-${{ matrix.platform }}.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/runtime-${{ matrix.platform }}.log
+
+          if [ -f "reports/runtime-${{ matrix.platform }}.json" ]; then
+            VS_C=$(jq -r '.results["runtime/vs_native_c"].ratio // 0' reports/runtime-${{ matrix.platform }}.json)
+            ASYNC_SPAWN=$(jq -r '.results["runtime/async_spawn"].mean_us // 0' reports/runtime-${{ matrix.platform }}.json)
+
+            echo "vs_c=$VS_C" >> $GITHUB_OUTPUT
+
+            echo "## Runtime Performance (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$VS_C >= 0.85 && $VS_C <= 1.0" | bc -l) )); then
+              echo "| vs Native C | ${VS_C}x | 0.85-0.95x | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| vs Native C | ${VS_C}x | 0.85-0.95x | WARN |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| Async Spawn | ${ASYNC_SPAWN}us | <5us | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Compare with Baseline
+        if: needs.fetch-baseline.outputs.has_baseline == 'true'
+        id: compare
+        run: |
+          cd vcs
+          if [ -f "../baseline/runtime-${{ matrix.platform }}.json" ] && [ -f "reports/runtime-${{ matrix.platform }}.json" ]; then
+            ./runner/vbench/target/release/vbench compare \
+              --baseline ../baseline/runtime-${{ matrix.platform }}.json \
+              --current reports/runtime-${{ matrix.platform }}.json \
+              --threshold ${{ needs.setup.outputs.regression_threshold }} \
+              --format json \
+              --output reports/runtime-comparison-${{ matrix.platform }}.json
+
+            if [ -f "reports/runtime-comparison-${{ matrix.platform }}.json" ]; then
+              REGRESSIONS=$(jq -r '.regressions | length' reports/runtime-comparison-${{ matrix.platform }}.json)
+              echo "regressions=$REGRESSIONS" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Upload Runtime Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-runtime-${{ matrix.platform }}
+          path: vcs/reports/runtime-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Memory Overhead Benchmarks - Target: < 5% overhead
+  # ==========================================================================
+  bench-memory:
+    name: Memory Benchmarks (${{ matrix.os }})
+    needs: [setup, fetch-baseline]
+    if: needs.setup.outputs.run_extended == 'true' || github.event_name == 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-14
+            platform: macos-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev bc jq valgrind
+
+      - name: Install dependencies (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install llvm@21 z3 jq
+          echo "LLVM_SYS_210_PREFIX=$(brew --prefix llvm@21)" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-bench-v1"
+          shared-key: ${{ matrix.os }}-memory
+
+      - name: Build benchmark runner
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Run Memory Benchmarks
+        id: bench
+        run: |
+          cd vcs
+          mkdir -p reports
+
+          ./runner/vbench/target/release/vbench run \
+            --category memory \
+            --iterations 50 \
+            --warm-up 5 \
+            --format json \
+            --output reports/memory-${{ matrix.platform }}.json \
+            --config config/thresholds.toml \
+            2>&1 | tee reports/memory-${{ matrix.platform }}.log
+
+          if [ -f "reports/memory-${{ matrix.platform }}.json" ]; then
+            OVERHEAD=$(jq -r '.results["memory/overhead_percent"].value // 0' reports/memory-${{ matrix.platform }}.json)
+            echo "overhead=$OVERHEAD" >> $GITHUB_OUTPUT
+
+            echo "## Memory Performance (${{ matrix.platform }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value | Target | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            if (( $(echo "$OVERHEAD <= 5" | bc -l) )); then
+              echo "| Memory Overhead | ${OVERHEAD}% | <5% | PASS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Memory Overhead | ${OVERHEAD}% | <5% | FAIL |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Memory Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-memory-${{ matrix.platform }}
+          path: vcs/reports/memory-*
+          retention-days: 90
+
+  # ==========================================================================
+  # Aggregate and Report
+  # ==========================================================================
+  bench-report:
+    name: Benchmark Report
+    needs: [setup, fetch-baseline, bench-cbgr, bench-compilation, bench-type-inference]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      has_regressions: ${{ steps.analyze.outputs.has_regressions }}
+      regression_count: ${{ steps.analyze.outputs.regression_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: all-results/
+          merge-multiple: false
+
+      - name: Analyze Results and Generate Report
+        id: analyze
+        run: |
+          echo "# VCS Performance Benchmark Report" > bench-report.md
+          echo "" >> bench-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> bench-report.md
+          echo "**Commit:** ${{ github.sha }}" >> bench-report.md
+          echo "**Baseline:** ${{ needs.setup.outputs.baseline }}" >> bench-report.md
+          echo "**Iterations:** ${{ needs.setup.outputs.iterations }}" >> bench-report.md
+          echo "**Warm-up:** ${{ needs.setup.outputs.warm_up }}" >> bench-report.md
+          echo "**Regression Threshold:** ${{ needs.setup.outputs.regression_threshold }}%" >> bench-report.md
+          echo "**Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> bench-report.md
+          echo "" >> bench-report.md
+
+          echo "## Performance Targets (from CLAUDE.md)" >> bench-report.md
+          echo "" >> bench-report.md
+          echo "| Metric | Target |" >> bench-report.md
+          echo "|--------|--------|" >> bench-report.md
+          echo "| CBGR check | < 15ns |" >> bench-report.md
+          echo "| Type inference | < 100ms / 10K LOC |" >> bench-report.md
+          echo "| Compilation | > 50K LOC/sec |" >> bench-report.md
+          echo "| Runtime | 0.85-0.95x native C |" >> bench-report.md
+          echo "| Memory overhead | < 5% |" >> bench-report.md
+          echo "" >> bench-report.md
+
+          TOTAL_REGRESSIONS=0
+          TOTAL_IMPROVEMENTS=0
+
+          # Process each category
+          for dir in all-results/*/; do
+            if [ -d "$dir" ]; then
+              CATEGORY=$(basename "$dir" | sed 's/bench-//')
+              echo "" >> bench-report.md
+              echo "## ${CATEGORY^}" >> bench-report.md
+              echo "" >> bench-report.md
+
+              RESULT_FILE=$(find "$dir" -name "*.json" ! -name "*comparison*" | head -1)
+              COMPARE_FILE=$(find "$dir" -name "*comparison*.json" | head -1)
+
+              if [ -f "$RESULT_FILE" ]; then
+                echo "### Results" >> bench-report.md
+                echo "" >> bench-report.md
+                echo "| Benchmark | Mean | Std Dev | Min | Max |" >> bench-report.md
+                echo "|-----------|------|---------|-----|-----|" >> bench-report.md
+
+                jq -r '.results | to_entries[] | "| \(.key) | \(.value.mean // "N/A") | \(.value.std_dev // "N/A") | \(.value.min // "N/A") | \(.value.max // "N/A") |"' "$RESULT_FILE" >> bench-report.md 2>/dev/null || true
+              fi
+
+              if [ -f "$COMPARE_FILE" ]; then
+                echo "" >> bench-report.md
+                echo "### Comparison with Baseline" >> bench-report.md
+                echo "" >> bench-report.md
+
+                REG=$(jq -r '.regressions | length' "$COMPARE_FILE" 2>/dev/null || echo "0")
+                IMP=$(jq -r '.improvements | length' "$COMPARE_FILE" 2>/dev/null || echo "0")
+
+                TOTAL_REGRESSIONS=$((TOTAL_REGRESSIONS + REG))
+                TOTAL_IMPROVEMENTS=$((TOTAL_IMPROVEMENTS + IMP))
+
+                if [ "$REG" -gt 0 ]; then
+                  echo "**Regressions:** $REG" >> bench-report.md
+                  echo "" >> bench-report.md
+                  jq -r '.regressions[] | "- \(.name): \(.change_percent)% slower"' "$COMPARE_FILE" >> bench-report.md 2>/dev/null || true
+                  echo "" >> bench-report.md
+                fi
+
+                if [ "$IMP" -gt 0 ]; then
+                  echo "**Improvements:** $IMP" >> bench-report.md
+                  echo "" >> bench-report.md
+                  jq -r '.improvements[] | "- \(.name): \(.change_percent)% faster"' "$COMPARE_FILE" >> bench-report.md 2>/dev/null || true
+                  echo "" >> bench-report.md
+                fi
+
+                if [ "$REG" -eq 0 ] && [ "$IMP" -eq 0 ]; then
+                  echo "No significant changes detected." >> bench-report.md
+                fi
+              fi
+            fi
+          done
+
+          echo "" >> bench-report.md
+          echo "## Summary" >> bench-report.md
+          echo "" >> bench-report.md
+          echo "- **Total Regressions:** $TOTAL_REGRESSIONS" >> bench-report.md
+          echo "- **Total Improvements:** $TOTAL_IMPROVEMENTS" >> bench-report.md
+          echo "" >> bench-report.md
+
+          if [ $TOTAL_REGRESSIONS -gt 0 ]; then
+            echo "**Status: PERFORMANCE REGRESSIONS DETECTED**" >> bench-report.md
+            echo "has_regressions=true" >> $GITHUB_OUTPUT
+            echo "regression_count=$TOTAL_REGRESSIONS" >> $GITHUB_OUTPUT
+          else
+            echo "**Status: PASSED - No significant regressions**" >> bench-report.md
+            echo "has_regressions=false" >> $GITHUB_OUTPUT
+            echo "regression_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Benchmark Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-bench-report
+          path: bench-report.md
+          retention-days: 90
+
+      - name: Post Summary
+        run: cat bench-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Prepare Baseline Artifact
+        if: needs.setup.outputs.save_baseline == 'true'
+        run: |
+          mkdir -p baseline-new
+          for dir in all-results/*/; do
+            for file in "$dir"*.json; do
+              if [ -f "$file" ] && [[ "$file" != *"comparison"* ]]; then
+                cp "$file" baseline-new/
+              fi
+            done
+          done
+          echo '{"commit":"${{ github.sha }}","date":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"}' > baseline-new/baseline.json
+
+      - name: Save New Baseline
+        if: needs.setup.outputs.save_baseline == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-bench-baseline
+          path: baseline-new/
+          retention-days: 365
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let report = '';
+            if (fs.existsSync('bench-report.md')) {
+              report = fs.readFileSync('bench-report.md', 'utf8');
+            } else {
+              report = 'Benchmark report generation failed.';
+            }
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.data.find(c =>
+              c.body.includes('VCS Performance Benchmark Report') &&
+              c.user.type === 'Bot'
+            );
+
+            const body = `## VCS Performance Benchmarks\n\n${report}`;
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  # ==========================================================================
+  # Performance Gate - Block merge on regression
+  # ==========================================================================
+  performance-gate:
+    name: Performance Gate
+    needs: [bench-report]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for Regressions
+        run: |
+          if [ "${{ needs.bench-report.outputs.has_regressions }}" == "true" ]; then
+            echo "::error::Performance regression detected (${{ needs.bench-report.outputs.regression_count }} regression(s) above threshold)"
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Performance Gate: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Found ${{ needs.bench-report.outputs.regression_count }} performance regression(s) exceeding the ${{ needs.setup.outputs.regression_threshold }}% threshold." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please optimize the code or justify the regression before merging." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "## Performance Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No significant performance regressions detected." >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Store Historical Data for Trend Analysis
+  # ==========================================================================
+  store-history:
+    name: Store Historical Data
+    needs: [bench-report]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: results/
+          merge-multiple: false
+
+      - name: Download existing history
+        uses: actions/cache@v4
+        with:
+          path: history/
+          key: bench-history-${{ github.sha }}
+          restore-keys: |
+            bench-history-
+
+      - name: Append to History
+        run: |
+          mkdir -p history
+
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          ENTRY="{\"timestamp\":\"$TIMESTAMP\",\"commit\":\"${{ github.sha }}\",\"results\":{}}"
+
+          for dir in results/*/; do
+            for file in "$dir"*.json; do
+              if [ -f "$file" ] && [[ "$file" != *"comparison"* ]]; then
+                CATEGORY=$(basename "$file" .json)
+                RESULTS=$(jq '.results' "$file" 2>/dev/null || echo "{}")
+                ENTRY=$(echo "$ENTRY" | jq --argjson results "$RESULTS" --arg cat "$CATEGORY" '.results[$cat] = $results')
+              fi
+            done
+          done
+
+          if [ -f "history/benchmark-history.json" ]; then
+            jq --argjson new_entry "$ENTRY" '. + [$new_entry] | .[-90:]' history/benchmark-history.json > history/benchmark-history.json.tmp
+            mv history/benchmark-history.json.tmp history/benchmark-history.json
+          else
+            echo "[$ENTRY]" > history/benchmark-history.json
+          fi
+
+      - name: Save History Cache
+        uses: actions/cache/save@v4
+        with:
+          path: history/
+          key: bench-history-${{ github.sha }}
+
+      - name: Upload History Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-bench-history
+          path: history/
+          retention-days: 365
+
+  # ==========================================================================
+  # Notification on Regression
+  # ==========================================================================
+  notify-regression:
+    name: Notify on Regression
+    needs: [bench-report]
+    if: needs.bench-report.outputs.has_regressions == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,workflow
+          text: 'VCS Performance regression detected - ${{ needs.bench-report.outputs.regression_count }} regression(s)'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Performance Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Performance Regression - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Performance Regression Detected
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Commit:** ${context.sha}
+            **Regressions Found:** ${{ needs.bench-report.outputs.regression_count }}
+
+            Please investigate the benchmark results and address the performance regression.
+
+            ### Next Steps
+            1. Review the benchmark report artifact
+            2. Identify the cause of the regression
+            3. Either fix the regression or document why it's acceptable
+            `;
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'performance-regression'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['performance-regression', 'ci', 'needs-investigation']
+              });
+            }

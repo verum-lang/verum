@@ -1,0 +1,488 @@
+// =============================================================================
+// simple.vr - High-Level Math API for Rapid Prototyping
+// =============================================================================
+// Layer: API (Progressive Disclosure Level 1)
+//
+// This module provides a simplified interface for Verum's scientific computing
+// stack. It's designed for:
+// - Quick prototyping and experimentation
+// - Educational use and beginners
+// - Scripts where brevity matters more than type precision
+//
+// # Design Philosophy
+//
+// - Minimal generics: Most functions work with Float by default
+// - Sensible defaults: Contexts are auto-provided when possible
+// - Convenience over control: Trade some performance for ease of use
+// - Familiar syntax: Similar to NumPy/PyTorch simple APIs
+//
+// # Usage
+//
+// ```verum
+// mount core.math.simple.*;
+//
+// fn main() {
+//     let x = randn(&[1024, 512]);    // Random tensor
+//     let y = zeros(&[512, 256]);     // Zero tensor
+//     let z = matmul(&x, &y);         // Matrix multiply
+//     print(f"Result shape: {z.shape()}");
+// }
+// ```
+//
+// Spec: docs/architecture/math-spec.md Section 6 - Progressive API Disclosure
+// =============================================================================
+
+module core.math.simple;
+
+mount super.tensor.{
+    DynTensor, DType, Device, Layout,
+    zeros as tensor_zeros,
+    ones as tensor_ones,
+    full as tensor_full,
+    randn as tensor_randn,
+    rand as tensor_rand,
+    arange as tensor_arange,
+    linspace as tensor_linspace,
+    eye as tensor_eye,
+    from_list as tensor_from_list,
+    matmul as tensor_matmul,
+    transpose as tensor_transpose,
+    reshape as tensor_reshape,
+    squeeze as tensor_squeeze,
+    unsqueeze as tensor_unsqueeze,
+    sum as tensor_sum,
+    mean as tensor_mean,
+    max as tensor_max,
+    min as tensor_min,
+    add, sub, mul, div, neg,
+    exp, log, sqrt, sin, cos, tanh,
+    softmax as tensor_softmax,
+    cat as tensor_cat,
+    stack as tensor_stack,
+};
+mount super.nn.{
+    Linear, LayerNorm, RMSNorm, Dropout,
+    relu, gelu, silu, sigmoid,
+    cross_entropy_loss, mse_loss,
+    AdamW, SGD,
+};
+mount super.autodiff.{grad, value_and_grad, with_no_grad};
+mount super.gpu.{default_device, has_gpu};
+mount super.random.RandomKey;
+
+// =============================================================================
+// Convenience Type Alias
+// =============================================================================
+
+// Default tensor type for simple API
+// Uses Float (F64) for maximum precision in prototyping
+public type Tensor is DynTensor<Float>;
+
+// Alias for 32-bit tensor (ML training)
+public type Tensor32 is DynTensor<Float32>;
+
+// =============================================================================
+// Tensor Creation (No Generics Required)
+// =============================================================================
+
+// Create a tensor filled with zeros
+//
+// # Example
+// ```verum
+// let x = zeros(&[3, 4]);  // 3x4 Float tensor
+// ```
+public fn zeros(shape: &[USize]) -> Tensor {
+    tensor_zeros(shape)
+}
+
+// Create a tensor filled with ones
+public fn ones(shape: &[USize]) -> Tensor {
+    tensor_ones(shape)
+}
+
+// Create a tensor filled with a constant value
+public fn full(shape: &[USize], value: Float) -> Tensor {
+    tensor_full(shape, value)
+}
+
+// Create a tensor with random normal values (mean=0, std=1)
+//
+// Uses default RandomSource context (seeded from thread-local RNG)
+public fn randn(shape: &[USize]) -> Tensor using [RandomSource] {
+    tensor_randn(shape)
+}
+
+// Create a tensor with uniform random values in [0, 1)
+public fn rand(shape: &[USize]) -> Tensor using [RandomSource] {
+    tensor_rand(shape)
+}
+
+// Create a 1D tensor with values from start to end (exclusive)
+//
+// # Example
+// ```verum
+// let x = arange(0, 10, 1);  // [0, 1, 2, ..., 9]
+// ```
+public fn arange(start: Float, end: Float, step: Float) -> Tensor {
+    tensor_arange(start, end, step)
+}
+
+// Create a 1D tensor with n linearly spaced values
+//
+// # Example
+// ```verum
+// let x = linspace(0.0, 1.0, 11);  // [0.0, 0.1, ..., 1.0]
+// ```
+public fn linspace(start: Float, end: Float, n: USize) -> Tensor {
+    tensor_linspace(start, end, n)
+}
+
+// Create an identity matrix
+public fn eye(n: USize) -> Tensor {
+    tensor_eye(n)
+}
+
+// Create a tensor from a list of values
+//
+// # Example
+// ```verum
+// let x = tensor(&[1.0, 2.0, 3.0]);
+// ```
+public fn tensor(values: &[Float]) -> Tensor {
+    let shape = [values.len()];
+    tensor_from_list(values, &shape)
+}
+
+// =============================================================================
+// Shape Operations (Simplified Syntax)
+// =============================================================================
+
+// Matrix multiplication
+//
+// # Example
+// ```verum
+// let c = matmul(&a, &b);  // [M, K] @ [K, N] -> [M, N]
+// ```
+public fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
+    tensor_matmul(a, b)
+}
+
+// Transpose the last two dimensions
+public fn transpose(a: &Tensor) -> Tensor {
+    tensor_transpose(a)
+}
+
+// Reshape tensor to new shape (-1 for inferred dimension)
+//
+// # Example
+// ```verum
+// let y = reshape(&x, &[2, -1]);  // Auto-infer second dim
+// ```
+public fn reshape(a: &Tensor, shape: &[ISize]) -> Tensor {
+    // Convert shape with possible -1 to actual sizes
+    let numel = a.numel();
+    let mut new_shape = List.new();
+    let mut infer_idx: Maybe<USize> = Maybe.None;
+    let mut known_product: USize = 1;
+
+    for (i, s) in shape.iter().enumerate() {
+        if *s == -1 {
+            infer_idx = Maybe.Some(i);
+            new_shape.push(0);  // Placeholder
+        } else {
+            let dim = *s as USize;
+            known_product *= dim;
+            new_shape.push(dim);
+        }
+    }
+
+    // Infer -1 dimension
+    if let Maybe.Some(idx) = infer_idx {
+        new_shape[idx] = numel / known_product;
+    }
+
+    tensor_reshape(a, &new_shape)
+}
+
+// Remove dimensions of size 1
+public fn squeeze(a: &Tensor) -> Tensor {
+    tensor_squeeze(a)
+}
+
+// Add a dimension of size 1 at the specified position
+public fn unsqueeze(a: &Tensor, dim: ISize) -> Tensor {
+    tensor_unsqueeze(a, dim)
+}
+
+// Concatenate tensors along a dimension
+public fn cat(tensors: &[&Tensor], dim: ISize) -> Tensor {
+    tensor_cat(tensors, dim)
+}
+
+// Stack tensors along a new dimension
+public fn stack(tensors: &[&Tensor], dim: ISize) -> Tensor {
+    super.tensor.stack(tensors, dim)
+}
+
+// =============================================================================
+// Reduction Operations
+// =============================================================================
+
+// Sum all elements or along a dimension
+//
+// # Example
+// ```verum
+// let total = sum(&x);           // Sum all elements
+// let row_sums = sum_dim(&x, 1); // Sum along axis 1
+// ```
+public fn sum(a: &Tensor) -> Float {
+    tensor_sum(a).item()
+}
+
+// Sum along a specific dimension
+public fn sum_dim(a: &Tensor, dim: ISize) -> Tensor {
+    tensor_sum(a).sum_axis(dim)
+}
+
+// Mean of all elements
+public fn mean(a: &Tensor) -> Float {
+    tensor_mean(a).item()
+}
+
+// Mean along a specific dimension
+public fn mean_dim(a: &Tensor, dim: ISize) -> Tensor {
+    tensor_mean(a).mean_axis(dim)
+}
+
+// Maximum value
+public fn max(a: &Tensor) -> Float {
+    tensor_max(a).item()
+}
+
+// Minimum value
+public fn min(a: &Tensor) -> Float {
+    tensor_min(a).item()
+}
+
+// =============================================================================
+// Activation Functions (No Module Required)
+// =============================================================================
+
+// Softmax along the last dimension
+//
+// # Example
+// ```verum
+// let probs = softmax(&logits);
+// ```
+public fn softmax(a: &Tensor) -> Tensor {
+    tensor_softmax(a, -1)
+}
+
+// Softmax along a specific dimension
+public fn softmax_dim(a: &Tensor, dim: ISize) -> Tensor {
+    tensor_softmax(a, dim)
+}
+
+// =============================================================================
+// Simple Training Loop
+// =============================================================================
+
+// Quick training for simple models
+//
+// # Example
+// ```verum
+// let model = Sequential([
+//     Linear.new(784, 256, true),
+//     fn(x) { relu(&x) },
+//     Linear.new(256, 10, true),
+// ]);
+// train(&mut model, &train_loader, 10);
+// ```
+public fn train<M: Module<Tensor, Tensor>>(
+    model: &mut M,
+    data: &DataLoader,
+    epochs: USize,
+) using [GradientTape, RandomSource, ComputeDevice]
+{
+    let mut optimizer = AdamW.default();
+
+    for epoch in 0..epochs {
+        let mut total_loss = 0.0;
+        let mut batch_count = 0;
+
+        for batch in data.iter() {
+            // Forward and backward
+            let grad_fn = value_and_grad(
+                |m| cross_entropy_loss(&m.forward(&batch.input), &batch.target),
+            );
+            let result = grad_fn(model);
+            let loss = result.0;
+            let grads = result.1;
+
+            // Update parameters
+            optimizer.step(model, &grads);
+
+            total_loss += loss.item();
+            batch_count += 1;
+        }
+
+        print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss / batch_count as Float:.4}");
+    }
+}
+
+// Evaluate model accuracy
+public fn evaluate<M: Module<Tensor, Tensor>>(
+    model: &M,
+    data: &DataLoader,
+) -> Float
+{
+    let mut correct = 0;
+    let mut total = 0;
+
+    with_no_grad(|| {
+        for batch in data.iter() {
+            let output = model.forward(&batch.input);
+            let predicted = super.tensor.argmax_axis(&output, -1);
+            correct += predicted.eq(&batch.target).sum().item() as USize;
+            total += batch.target.numel();
+        }
+    });
+
+    correct as Float / total as Float
+}
+
+// =============================================================================
+// Quick Layer Creation
+// =============================================================================
+
+// Create a linear layer with bias
+//
+// # Example
+// ```verum
+// let layer = linear(784, 256);
+// let output = layer.forward(&input);
+// ```
+public fn linear(in_features: USize, out_features: USize) -> Linear
+    using [RandomSource]
+{
+    Linear.new(in_features, out_features, true)
+}
+
+// Create a linear layer without bias
+public fn linear_no_bias(in_features: USize, out_features: USize) -> Linear
+    using [RandomSource]
+{
+    Linear.new(in_features, out_features, false)
+}
+
+// Create a layer normalization module
+public fn layer_norm(normalized_shape: &[USize]) -> LayerNorm {
+    LayerNorm.new(normalized_shape)
+}
+
+// Create an RMS normalization module
+public fn rms_norm(dim: USize) -> RMSNorm {
+    RMSNorm.new(dim)
+}
+
+// Create a dropout layer
+public fn dropout(p: Float) -> Dropout {
+    Dropout.new(p)
+}
+
+// =============================================================================
+// Device Helpers
+// =============================================================================
+
+// Check if GPU is available
+public fn gpu_available() -> Bool {
+    has_gpu()
+}
+
+// Get the best available device (GPU if available, else CPU)
+public fn device() -> Device {
+    default_device()
+}
+
+// Move tensor to the best available device
+public fn to_device(a: &Tensor) -> Tensor {
+    a.to(default_device())
+}
+
+// =============================================================================
+// Convenience Protocols
+// =============================================================================
+
+// Batch type for data loading
+public type Batch is { input: Tensor, target: Tensor };
+
+// Protocol for data loaders in simple training
+public type DataLoader is protocol {
+    fn iter(&self) -> some I: Iterator<Item = Batch>;
+    fn len(&self) -> USize;
+};
+
+// Protocol for simple modules
+public type Module<In, Out> is protocol {
+    fn forward(&self, input: In) -> Out;
+};
+
+// =============================================================================
+// Sequential Container (For Simple Models)
+// =============================================================================
+
+// Sequential model container
+//
+// # Example
+// ```verum
+// let model = Sequential.from(&[
+//     linear(784, 256),
+//     fn(x) { relu(&x) },
+//     linear(256, 10),
+// ]);
+// ```
+public type Sequential is {
+    layers: List<Heap<Module<Tensor, Tensor>>>,
+};
+
+implement Sequential {
+    // Create sequential from list of layers
+    public fn from<M: Module<Tensor, Tensor>>(layers: &[M]) -> Self {
+        let mut layer_list = List.new();
+        for lyr in layers {
+            layer_list.push(Heap.new(lyr));
+        }
+        Sequential { layers: layer_list }
+    }
+}
+
+implement Module<Tensor, Tensor> for Sequential {
+    fn forward(&self, mut x: Tensor) -> Tensor {
+        for lyr in &self.layers {
+            x = lyr.forward(x);
+        }
+        x
+    }
+}
+
+// =============================================================================
+// Print Helpers
+// =============================================================================
+
+// Print tensor information
+//
+// # Example
+// ```verum
+// let x = randn(&[3, 4]);
+// info(&x);  // Tensor[3, 4] dtype=F64 device=CPU mean=0.12 std=0.98
+// ```
+public fn info(a: &Tensor) {
+    let shape_str = a.shape().iter()
+        .map(|d| d.to_string())
+        .join(", ");
+
+    let mean_val = mean(a);
+    let std_val = sqrt(mean(&sub(&mul(a, a), &full(a.shape(), mean_val * mean_val))));
+
+    print(f"Tensor[{shape_str}] dtype={a.dtype()} device={a.device()} mean={mean_val:.4} std={std_val:.4}");
+}

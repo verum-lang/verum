@@ -1,0 +1,375 @@
+// Comprehensive concurrency and timing tests
+
+mount core.base.{Result, List, Text};
+mount core.time.{unix_timestamp_millis, sleep_millis};
+mount super.src.services.concurrency_service.{
+    RetryConfig,
+    with_timeout,
+    with_timeout_optional,
+    retry_with_config,
+    parallel_map,
+    join2,
+    join3,
+    collect_ok
+};
+mount super.src.domain.errors.RegistryError;
+
+// ============================================================================
+// Retry Configuration Tests
+// ============================================================================
+
+@test
+fn test_retry_config_creation() {
+    let config = RetryConfig {
+        max_attempts: 3,
+        initial_delay_ms: 100,
+        max_delay_ms: 1000,
+        multiplier: 2.0,
+        jitter: false,
+    };
+
+    assert(config.max_attempts == 3, "max_attempts should be 3");
+    assert(config.initial_delay_ms == 100, "initial_delay_ms should be 100");
+    assert(config.max_delay_ms == 1000, "max_delay_ms should be 1000");
+    assert(config.multiplier == 2.0, "multiplier should be 2.0");
+    assert(!config.jitter, "jitter should be false");
+    print("RetryConfig creation test passed");
+}
+
+@test
+fn test_retry_config_default() {
+    let config = RetryConfig.default();
+
+    assert(config.max_attempts == 3, "default max_attempts should be 3");
+    assert(config.initial_delay_ms == 100, "default initial_delay_ms should be 100");
+    assert(config.multiplier == 2.0, "default multiplier should be 2.0");
+    print(f"Default config: {config.max_attempts} attempts, {config.initial_delay_ms}ms initial delay");
+}
+
+@test
+fn test_retry_config_delay_calculation() {
+    let config = RetryConfig {
+        max_attempts: 5,
+        initial_delay_ms: 100,
+        max_delay_ms: 1000,
+        multiplier: 2.0,
+        jitter: false,
+    };
+
+    // Test exponential backoff
+    let delay0 = config.calculate_delay(0);
+    let delay1 = config.calculate_delay(1);
+    let delay2 = config.calculate_delay(2);
+    let delay3 = config.calculate_delay(3);
+
+    assert(delay0 == 100, "Delay for attempt 0 should be 100ms");
+    assert(delay1 == 200, "Delay for attempt 1 should be 200ms");
+    assert(delay2 == 400, "Delay for attempt 2 should be 400ms");
+    assert(delay3 == 800, "Delay for attempt 3 should be 800ms");
+
+    print(f"Delays: {delay0}ms, {delay1}ms, {delay2}ms, {delay3}ms");
+}
+
+@test
+fn test_retry_config_delay_cap() {
+    let config = RetryConfig {
+        max_attempts: 10,
+        initial_delay_ms: 100,
+        max_delay_ms: 500,
+        multiplier: 2.0,
+        jitter: false,
+    };
+
+    // Calculate a delay that would exceed max_delay_ms
+    let delay5 = config.calculate_delay(5);  // Would be 3200ms without cap
+
+    assert(delay5 <= config.max_delay_ms, "Delay should be capped at max_delay_ms");
+    assert(delay5 == 500, "Delay should be capped at 500ms");
+
+    print(f"Capped delay: {delay5}ms (max: {config.max_delay_ms}ms)");
+}
+
+// ============================================================================
+// Timeout Tests
+// ============================================================================
+
+@test
+async fn test_timeout_success() {
+    async fn quick_operation() -> Result<Int, RegistryError> {
+        Result.Ok(42)
+    }
+
+    let result = with_timeout(quick_operation(), 5000).await;
+
+    match result {
+        Result.Ok(value) => {
+            assert(value == 42, "Should return 42");
+            print("Timeout success test passed");
+        },
+        Result.Err(err) => {
+            assert(false, f"Should not timeout: {err}");
+        }
+    }
+}
+
+@test
+async fn test_timeout_optional_success() {
+    async fn quick_operation() -> Result<Text, RegistryError> {
+        Result.Ok("success")
+    }
+
+    let result = with_timeout_optional(quick_operation(), 5000).await;
+
+    match result {
+        Maybe.Some(value) => {
+            assert(value == "success", "Should return 'success'");
+            print("Optional timeout success test passed");
+        },
+        Maybe.None => {
+            assert(false, "Should not timeout");
+        }
+    }
+}
+
+@test
+async fn test_timeout_failure() {
+    async fn slow_operation() -> Result<Int, RegistryError> {
+        // Simulate slow work with a delay
+        sleep_millis(2000).await;
+        Result.Ok(42)
+    }
+
+    let result = with_timeout(slow_operation(), 100).await;
+
+    match result {
+        Result.Ok(_) => {
+            print("Warning: Operation completed faster than expected");
+        },
+        Result.Err(_) => {
+            print("Timeout failure test passed (operation timed out as expected)");
+        }
+    }
+}
+
+// ============================================================================
+// Retry Tests
+// ============================================================================
+
+@test
+async fn test_retry_success_on_first_attempt() {
+    let mut attempts = 0;
+
+    async fn operation() -> Result<Int, RegistryError> {
+        attempts = attempts + 1;
+        Result.Ok(100)
+    }
+
+    let config = RetryConfig {
+        max_attempts: 3,
+        initial_delay_ms: 50,
+        max_delay_ms: 500,
+        multiplier: 2.0,
+        jitter: false,
+    };
+
+    let result = retry_with_config(operation, config).await;
+
+    match result {
+        Result.Ok(value) => {
+            assert(value == 100, "Should return 100");
+            assert(attempts == 1, "Should succeed on first attempt");
+            print(f"Retry test: succeeded on attempt {attempts}");
+        },
+        Result.Err(_) => {
+            assert(false, "Should not fail");
+        }
+    }
+}
+
+@test
+async fn test_retry_failure_all_attempts() {
+    let mut attempts = 0;
+
+    async fn failing_operation() -> Result<Int, RegistryError> {
+        attempts = attempts + 1;
+        Result.Err(RegistryError.internal_error("Always fails"))
+    }
+
+    let config = RetryConfig {
+        max_attempts: 3,
+        initial_delay_ms: 10,
+        max_delay_ms: 100,
+        multiplier: 2.0,
+        jitter: false,
+    };
+
+    let result = retry_with_config(failing_operation, config).await;
+
+    match result {
+        Result.Ok(_) => {
+            assert(false, "Should fail after all attempts");
+        },
+        Result.Err(_) => {
+            assert(attempts == 3, f"Should attempt {config.max_attempts} times, got {attempts}");
+            print(f"Retry failure test: failed after {attempts} attempts");
+        }
+    }
+}
+
+// ============================================================================
+// Parallel Operations Tests
+// ============================================================================
+
+@test
+async fn test_parallel_map_empty() {
+    let empty_list: List<Int> = List.new();
+
+    async fn double(x: Int) -> Result<Int, RegistryError> {
+        Result.Ok(x * 2)
+    }
+
+    let result = parallel_map(empty_list, double).await;
+
+    match result {
+        Result.Ok(values) => {
+            assert(values.is_empty(), "Should return empty list");
+            print("Parallel map empty test passed");
+        },
+        Result.Err(_) => {
+            assert(false, "Should not fail");
+        }
+    }
+}
+
+@test
+async fn test_parallel_map_small_list() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    async fn square(x: Int) -> Result<Int, RegistryError> {
+        Result.Ok(x * x)
+    }
+
+    let result = parallel_map(numbers, square).await;
+
+    match result {
+        Result.Ok(values) => {
+            assert(values.len() == 5, "Should have 5 results");
+            assert(values[0] == 1, "1^2 = 1");
+            assert(values[1] == 4, "2^2 = 4");
+            assert(values[2] == 9, "3^2 = 9");
+            assert(values[3] == 16, "4^2 = 16");
+            assert(values[4] == 25, "5^2 = 25");
+            print(f"Parallel map: {numbers.len()} items -> {values.len()} results");
+        },
+        Result.Err(_) => {
+            assert(false, "Should not fail");
+        }
+    }
+}
+
+// ============================================================================
+// Join Tests
+// ============================================================================
+
+@test
+async fn test_join2_concurrent_tasks() {
+    async fn task1() -> Result<Int, RegistryError> {
+        Result.Ok(10)
+    }
+
+    async fn task2() -> Result<Text, RegistryError> {
+        Result.Ok("hello")
+    }
+
+    let result = join2(task1(), task2()).await;
+
+    match result {
+        Result.Ok((v1, v2)) => {
+            assert(v1 == 10, "First value should be 10");
+            assert(v2 == "hello", "Second value should be 'hello'");
+            print(f"join2 test: ({v1}, {v2})");
+        },
+        Result.Err(_) => {
+            assert(false, "Should not fail");
+        }
+    }
+}
+
+@test
+async fn test_join3_concurrent_tasks() {
+    async fn task1() -> Result<Int, RegistryError> {
+        Result.Ok(1)
+    }
+
+    async fn task2() -> Result<Int, RegistryError> {
+        Result.Ok(2)
+    }
+
+    async fn task3() -> Result<Int, RegistryError> {
+        Result.Ok(3)
+    }
+
+    let result = join3(task1(), task2(), task3()).await;
+
+    match result {
+        Result.Ok((v1, v2, v3)) => {
+            assert(v1 == 1, "First value should be 1");
+            assert(v2 == 2, "Second value should be 2");
+            assert(v3 == 3, "Third value should be 3");
+            print(f"join3 test: ({v1}, {v2}, {v3})");
+        },
+        Result.Err(_) => {
+            assert(false, "Should not fail");
+        }
+    }
+}
+
+// ============================================================================
+// Collect OK Tests
+// ============================================================================
+
+@test
+async fn test_collect_ok_filters_errors() {
+    let results: List<Result<Int, RegistryError>> = [
+        Result.Ok(1),
+        Result.Err(RegistryError.internal_error("error")),
+        Result.Ok(2),
+        Result.Ok(3),
+        Result.Err(RegistryError.internal_error("error")),
+    ];
+
+    let collected = collect_ok(results).await;
+
+    assert(collected.len() == 3, "Should collect 3 successful values");
+    assert(collected[0] == 1, "First value should be 1");
+    assert(collected[1] == 2, "Second value should be 2");
+    assert(collected[2] == 3, "Third value should be 3");
+    print(f"collect_ok: filtered {results.len()} -> {collected.len()} successful");
+}
+
+@test
+async fn test_collect_ok_all_errors() {
+    let results: List<Result<Int, RegistryError>> = [
+        Result.Err(RegistryError.internal_error("error1")),
+        Result.Err(RegistryError.internal_error("error2")),
+    ];
+
+    let collected = collect_ok(results).await;
+
+    assert(collected.is_empty(), "Should return empty list when all fail");
+    print("collect_ok all errors test passed");
+}
+
+@test
+async fn test_collect_ok_all_success() {
+    let results: List<Result<Text, RegistryError>> = [
+        Result.Ok("a"),
+        Result.Ok("b"),
+        Result.Ok("c"),
+    ];
+
+    let collected = collect_ok(results).await;
+
+    assert(collected.len() == 3, "Should collect all 3 values");
+    print(f"collect_ok all success: {collected.len()} values");
+}

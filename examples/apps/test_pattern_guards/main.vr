@@ -1,0 +1,52 @@
+// Pattern Guards Test
+
+type Result<T> is Ok(T) | Err(Text);
+
+fn classify(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x < 10 => "small positive",
+        x if x < 100 => "medium",
+        _ => "large"
+    }
+}
+
+fn safe_divide(a: Float, b: Float) -> Result<Float> {
+    match b {
+        0.0 => Err("division by zero"),
+        _ => Ok(a / b)
+    }
+}
+
+fn describe_result(r: Result<Float>) -> Text {
+    match r {
+        Ok(x) if x > 100.0 => "large success",
+        Ok(x) if x > 0.0 => "positive success",
+        Ok(x) if x < 0.0 => "negative success",
+        Ok(_) => "zero success",
+        Err(msg) => f"error: {msg}"
+    }
+}
+
+fn main() {
+    print("=== Pattern Guards Test ===");
+
+    // Number classification
+    print(f"classify(-5) = {classify(-5)}");
+    print(f"classify(0) = {classify(0)}");
+    print(f"classify(7) = {classify(7)}");
+    print(f"classify(50) = {classify(50)}");
+    print(f"classify(200) = {classify(200)}");
+
+    // Result with guards
+    let r1 = safe_divide(100.0, 2.0);
+    let r2 = safe_divide(10.0, 0.0);
+    let r3 = safe_divide(-50.0, 5.0);
+
+    print(f"safe_divide(100, 2) -> {describe_result(r1)}");
+    print(f"safe_divide(10, 0) -> {describe_result(r2)}");
+    print(f"safe_divide(-50, 5) -> {describe_result(r3)}");
+
+    print("=== Done ===");
+}

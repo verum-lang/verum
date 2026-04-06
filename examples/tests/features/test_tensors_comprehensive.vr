@@ -1,0 +1,144 @@
+// Comprehensive Tensor Literals Test
+// Grammar Section 2.12: tensor_literal_expr = 'tensor' , '<' , shape_params , '>' , type_expr , '{' , tensor_elements , '}'
+// Grammar: shape_params = expression_list
+// Grammar: tensor_elements = expression_list | nested_array_elements | expression
+// Grammar: nested_array_elements = '{' , expression_list , '}' , { ',' , '{' , expression_list , '}' }
+
+fn main() -> Int {
+    print("=== Comprehensive Tensor Literals Test ===");
+
+    // ========================================
+    // Section 1: 1D Tensors (Vectors)
+    // ========================================
+    print("\n--- Section 1: 1D Tensors ---");
+
+    // Test 1.1: Simple scalar fill
+    print("1.1: Scalar fill - tensor<3>Float { 1.0 }");
+    let vec1 = tensor<3>Float { 1.0 };
+
+    // Test 1.2: Array literal syntax
+    print("1.2: Array literal - tensor<5>Int { [10, 20, 30, 40, 50] }");
+    let vec2 = tensor<5>Int { [10, 20, 30, 40, 50] };
+
+    // Test 1.3: Single element tensor
+    print("1.3: Single element - tensor<1>Float { 42.0 }");
+    let vec3 = tensor<1>Float { 42.0 };
+
+    // Test 1.4: Boolean tensor
+    print("1.4: Boolean tensor - tensor<4>Bool { true }");
+    let vec4 = tensor<4>Bool { true };
+
+    // Test 1.5: Larger tensor
+    print("1.5: Larger tensor - tensor<8>Int { 0 }");
+    let vec5 = tensor<8>Int { 0 };
+
+    // ========================================
+    // Section 2: 2D Tensors (Matrices)
+    // ========================================
+    print("\n--- Section 2: 2D Tensors (Matrices) ---");
+
+    // Test 2.1: 2x3 matrix with array
+    print("2.1: 2x3 matrix - tensor<2, 3>Float");
+    let mat1 = tensor<2, 3>Float { 0.0 };
+
+    // Test 2.2: 3x3 matrix
+    print("2.2: 3x3 matrix - tensor<3, 3>Int");
+    let mat2 = tensor<3, 3>Int { 0 };
+
+    // Test 2.3: 4x2 matrix
+    print("2.3: 4x2 matrix - tensor<4, 2>Float");
+    let mat3 = tensor<4, 2>Float { 0.0 };
+
+    // Test 2.4: 1x1 matrix (edge case)
+    print("2.4: 1x1 matrix - edge case");
+    let mat4 = tensor<1, 1>Float { 42.0 };
+
+    // Test 2.5: 2x5 wide matrix
+    print("2.5: 2x5 wide matrix - tensor<2, 5>Int");
+    let mat5 = tensor<2, 5>Int { 0 };
+
+    // ========================================
+    // Section 3: 3D Tensors (Cubes)
+    // ========================================
+    print("\n--- Section 3: 3D Tensors ---");
+
+    // Test 3.1: 2x2x2 cube
+    print("3.1: 2x2x2 cube - tensor<2, 2, 2>Int");
+    let cube1 = tensor<2, 2, 2>Int { 0 };
+
+    // Test 3.2: 3x3x3 cube
+    print("3.2: 3x3x3 cube - tensor<3, 3, 3>Float");
+    let cube2 = tensor<3, 3, 3>Float { 0.0 };
+
+    // Test 3.3: Non-cubic 3D tensor (2x3x4)
+    print("3.3: 2x3x4 non-cubic 3D tensor");
+    let tensor3d = tensor<2, 3, 4>Int { 0 };
+
+    // Test 3.4: 1x1x1 minimal 3D tensor
+    print("3.4: 1x1x1 minimal 3D tensor");
+    let cube3 = tensor<1, 1, 1>Float { 1.0 };
+
+    // ========================================
+    // Section 4: 4D and Higher Tensors
+    // ========================================
+    print("\n--- Section 4: 4D and Higher Tensors ---");
+
+    // Test 4.1: 2x2x2x2 4D tensor
+    print("4.1: 2x2x2x2 4D tensor");
+    let tensor4d = tensor<2, 2, 2, 2>Int { 0 };
+
+    // Test 4.2: 5D tensor (minimal)
+    print("4.2: 2x1x1x1x2 5D tensor");
+    let tensor5d = tensor<2, 1, 1, 1, 2>Int { 0 };
+
+    // ========================================
+    // Section 5: Different Data Types
+    // ========================================
+    print("\n--- Section 5: Different Data Types ---");
+
+    // Test 5.1: Float tensor
+    print("5.1: Float tensor - tensor<3>Float");
+    let float_tensor = tensor<3>Float { 1.5 };
+
+    // Test 5.2: Int tensor
+    print("5.2: Int tensor - tensor<3>Int");
+    let int_tensor = tensor<3>Int { 10 };
+
+    // Test 5.3: Bool tensor
+    print("5.3: Bool tensor - tensor<3>Bool");
+    let bool_tensor = tensor<3>Bool { true };
+
+    // ========================================
+    // Section 6: Edge Cases
+    // ========================================
+    print("\n--- Section 6: Edge Cases ---");
+
+    // Test 6.1: Large 1D tensor
+    print("6.1: Large 1D tensor (100 elements)");
+    let large_vec = tensor<100>Int { 0 };
+
+    // Test 6.2: Asymmetric dimensions
+    print("6.2: Asymmetric 1x10 matrix");
+    let asymmetric = tensor<1, 10>Float { 0.0 };
+
+    // Test 6.3: Very nested structure
+    print("6.3: Deeply nested 1x1x1x1 tensor");
+    let deep_nest = tensor<1, 1, 1, 1>Int { 42 };
+
+    // ========================================
+    // Section 7: Tensor Operations (if implemented)
+    // ========================================
+    print("\n--- Section 7: Tensor Operations ---");
+    print("Note: Tensor operations are not yet implemented");
+
+    // Future operations to test:
+    // - Indexing: vec1[0]
+    // - Arithmetic: vec1 + vec2
+    // - Matrix operations: mat1 * mat2
+    // - Transpose: mat1.transpose()
+    // - Reduction: vec1.sum()
+    // - Reshape: vec1.reshape()
+
+    print("\n=== All Tensor Tests Completed ===");
+    0
+}

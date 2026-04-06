@@ -1,0 +1,172 @@
+// test_stdlib.vr
+// Comprehensive test of Verum standard library features
+
+// Test Maybe (Option) type
+fn test_maybe() {
+    print("=== Testing Maybe<T> ===")
+
+    // Create Some value
+    let x: Maybe<Int> = Maybe.Some(42)
+    match x {
+        Maybe.Some(val) => print(f"Got value: {val}"),
+        Maybe.None => print("No value"),
+    }
+
+    // Create None
+    let y: Maybe<Int> = Maybe.None
+    let default_val = y.unwrap_or(100)
+    print(f"Default value: {default_val}")
+
+    // Map operation
+    let doubled = x.map(|n| n * 2)
+    match doubled {
+        Maybe.Some(val) => print(f"Doubled: {val}"),
+        Maybe.None => print("None"),
+    }
+}
+
+// Test Result type
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Result.Err("division by zero")
+    } else {
+        Result.Ok(a / b)
+    }
+}
+
+fn test_result() {
+    print("=== Testing Result<T, E> ===")
+
+    let success = divide(10, 2)
+    match success {
+        Result.Ok(val) => print(f"10 / 2 = {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    let failure = divide(10, 0)
+    match failure {
+        Result.Ok(val) => print(f"Result: {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+
+    // Map operation
+    let mapped = success.map(|x| x * 3)
+    match mapped {
+        Result.Ok(val) => print(f"Mapped: {val}"),
+        Result.Err(msg) => print(f"Error: {msg}"),
+    }
+}
+
+// Test List operations
+fn test_list() {
+    print("=== Testing List<T> ===")
+
+    let numbers = [1, 2, 3, 4, 5]
+    print(f"Original: {numbers}")
+
+    // Map
+    let squared = numbers.map(|x| x * x)
+    print(f"Squared: {squared}")
+
+    // Filter
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"Evens: {evens}")
+
+    // Reduce/fold
+    let sum = numbers.fold(0, |acc, x| acc + x)
+    print(f"Sum: {sum}")
+}
+
+// Test primitive types
+fn test_primitives() {
+    print("=== Testing Primitives ===")
+
+    let b: Bool = true
+    let i: Int = 42
+    let f: Float = 3.14159
+    let t: Text = "Hello, Verum"
+
+    print(f"Bool: {b}")
+    print(f"Int: {i}")
+    print(f"Float: {f}")
+    print(f"Text: {t}")
+
+    // Arithmetic
+    let x = 10
+    let y = 3
+    print(f"{x} + {y} = {x + y}")
+    print(f"{x} - {y} = {x - y}")
+    print(f"{x} * {y} = {x * y}")
+    print(f"{x} / {y} = {x / y}")
+    print(f"{x} % {y} = {x % y}")
+}
+
+// Test control flow
+fn test_control_flow() {
+    print("=== Testing Control Flow ===")
+
+    // If-else
+    let age = 25
+    if age >= 18 {
+        print("Adult")
+    } else {
+        print("Minor")
+    }
+
+    // Match
+    let status = match age {
+        0..18 => "Minor",
+        18..65 => "Adult",
+        _ => "Senior",
+    }
+    print(f"Status: {status}")
+
+    // While loop
+    let mut count = 0
+    while count < 3 {
+        print(f"Count: {count}")
+        count = count + 1
+    }
+
+    // For loop
+    for i in 0..3 {
+        print(f"Index: {i}")
+    }
+}
+
+// Test functions
+fn add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn multiply(x: Int, y: Int) -> Int = x * y;
+
+fn test_functions() {
+    print("=== Testing Functions ===")
+
+    let sum = add(5, 3)
+    print(f"add(5, 3) = {sum}")
+
+    let product = multiply(4, 7)
+    print(f"multiply(4, 7) = {product}")
+
+    // Closure
+    let double = |x| x * 2
+    print(f"double(21) = {double(21)}")
+}
+
+// Main test runner
+fn main() {
+    print("Verum Standard Library Test Suite")
+    print("==================================")
+
+    test_maybe()
+    test_result()
+    test_list()
+    test_primitives()
+    test_control_flow()
+    test_functions()
+
+    print("==================================")
+    print("All tests completed!")
+}

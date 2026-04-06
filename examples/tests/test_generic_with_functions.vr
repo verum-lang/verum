@@ -1,0 +1,31 @@
+type Box<T> is { value: T };
+
+fn wrap_once<T>(x: T) -> Box<T> {
+    Box { value: x }
+}
+
+fn wrap_twice<T>(x: T) -> Box<Box<T>> {
+    Box { value: Box { value: x } }
+}
+
+fn unwrap_twice<T>(nested: Box<Box<T>>) -> T {
+    nested.value.value
+}
+
+fn main() {
+    // Test wrapping with generic functions
+    let once = wrap_once(42);
+    let _ = println(f"Wrapped once: {once.value}");
+
+    let twice = wrap_twice(100);
+    let _ = println(f"Wrapped twice: {twice.value.value}");
+
+    // Test unwrapping
+    let nested: Box<Box<Int>> = Box { value: Box { value: 200 } };
+    let unwrapped = unwrap_twice(nested);
+    let _ = println(f"Unwrapped: {unwrapped}");
+
+    // Test with different types
+    let text_box = wrap_twice("hello");
+    let _ = println(f"Text box: {text_box.value.value}");
+}

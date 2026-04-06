@@ -1,0 +1,67 @@
+// Generic Type Parameters Test
+// This file demonstrates that generic syntax is fully supported in Verum
+
+// 1. Generic function declarations
+fn identity<T>(x: T) -> T { x }
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+fn map<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> {
+    // Implementation would go here
+    list
+}
+
+// 2. Generic type definitions
+type Pair<A, B> is { first: A, second: B }
+
+type Triple<X, Y, Z> is {
+    x: X,
+    y: Y,
+    z: Z
+}
+
+type Maybe<T> is
+    | Some { value: T }
+    | None
+
+// 3. Generic type applications (using generic types)
+fn get_first<A, B>(pair: Pair<A, B>) -> A {
+    pair.first
+}
+
+type IntList is List<Int>
+type TextMap is Map<Text, Int>
+type NestedMap is Map<Text, List<Int>>
+
+// 4. Function with multiple type parameters
+fn zip<A, B>(list_a: List<A>, list_b: List<B>) -> List<Pair<A, B>> {
+    // Implementation
+    list_a
+}
+
+// 5. Generic type with bounds (protocols)
+fn sort<T>(list: List<T>) where type T: Ord -> List<T> {
+    list
+}
+
+fn print_all<T>(items: List<T>) where type T: Display {
+    // Implementation
+}
+
+// 6. Nested generics
+fn flatten<T>(nested: List<List<T>>) -> List<T> {
+    // Implementation
+    nested
+}
+
+type DoubleNested<A> is List<List<A>>
+
+// 7. Generic with multiple constraints
+fn compare_and_print<T>(a: T, b: T) -> Bool
+    where type T: Ord + Display
+{
+    // Implementation
+    true
+}

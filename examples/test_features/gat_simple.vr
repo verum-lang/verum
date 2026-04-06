@@ -1,0 +1,38 @@
+// Test GAT (Generic Associated Types) with Self.Item and I.Item syntax
+
+// Protocol with associated type
+type Iterator is protocol {
+    type Item;
+    fn next(self: &mut Self) -> Maybe<Self.Item>;
+}
+
+// Concrete type implementing Iterator
+type IntIterator is {
+    values: List<Int>,
+    pos: Int
+};
+
+implement Iterator for IntIterator {
+    type Item is Int;
+
+    fn next(self: &mut Self) -> Maybe<Int> {
+        if self.pos < self.values.len() {
+            let val = self.values[self.pos];
+            self.pos = self.pos + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+// Function using associated type syntax
+fn get_first<I: Iterator>(iter: &mut I) -> Maybe<I.Item> {
+    iter.next()
+}
+
+fn main() {
+    let iter = IntIterator { values: [1, 2, 3].to_list(), pos: 0 };
+    let first = get_first(&mut iter);
+    print(first);
+}

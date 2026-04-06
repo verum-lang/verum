@@ -1,0 +1,11 @@
+// Test negation only
+
+fn main() {
+    let _ = print("=== Negation Test ===");
+
+    let a = 10.0;
+    let neg = -a;
+    let _ = print(f"negation = {neg}");
+
+    let _ = print("=== Done ===");
+}

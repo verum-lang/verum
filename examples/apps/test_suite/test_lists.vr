@@ -1,0 +1,28 @@
+// Test array operations
+
+fn main() {
+    let _ = print("Testing arrays...");
+
+    // Create array literal
+    let numbers = [1, 2, 3, 4, 5];
+    let _ = print("Array created: [1, 2, 3, 4, 5]");
+
+    // Manual sum with for loop
+    let mut total = 0;
+    for x in numbers {
+        total = total + x;
+    }
+    let _ = print(f"sum = {total}");
+
+    // For loop iteration
+    let _ = print("Iterating [10, 20, 30]:");
+    for n in [10, 20, 30] {
+        let _ = print(f"  {n}");
+    }
+
+    // Nested arrays
+    let matrix = [[1, 2], [3, 4]];
+    let _ = print("Matrix created: [[1, 2], [3, 4]]");
+
+    let _ = print("Done!");
+}

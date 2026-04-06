@@ -1,0 +1,7 @@
+// Test: Simple sigma type
+type PositiveInt is x: Int where x > 0;
+
+fn main() {
+    let p: PositiveInt = 42;
+    p
+}

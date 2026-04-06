@@ -1,0 +1,94 @@
+// Test error handling with Result type and ? operator
+// Tests Result, Maybe, error propagation, and error recovery
+
+type DivisionError is
+    | DivideByZero
+    | InvalidInput;
+
+// Function returning Result
+fn safe_divide(a: Int, b: Int) -> Result<Int, DivisionError> {
+    if b == 0 {
+        Err(DivideByZero)
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Function using ? operator for error propagation
+fn divide_chain(a: Int, b: Int, c: Int) -> Result<Int, DivisionError> {
+    let result1 = safe_divide(a, b)?
+    let result2 = safe_divide(result1, c)?
+    Ok(result2)
+}
+
+// Function with Maybe type
+fn find_item(items: List<Int>, target: Int) -> Maybe<Int> {
+    for i in 0..items.len() {
+        if items[i] == target {
+            return Some(i)
+        }
+    }
+    None
+}
+
+// Unwrapping Maybe with ? operator
+fn get_item_index(items: List<Int>, target: Int) -> Result<Int, Text> {
+    let index = find_item(items, target)?
+    Ok(index)
+}
+
+fn main() {
+    print("=== Error Handling Tests ===")
+
+    // Test 1: Successful Result
+    print("\nTest 1: Successful division")
+    match safe_divide(10, 2) {
+        Ok(result) => print(f"10 / 2 = {result}"),
+        Err(DivideByZero) => print("Error: Division by zero"),
+        Err(InvalidInput) => print("Error: Invalid input")
+    }
+
+    // Test 2: Error Result
+    print("\nTest 2: Division by zero")
+    match safe_divide(10, 0) {
+        Ok(result) => print(f"Result: {result}"),
+        Err(DivideByZero) => print("Caught: Division by zero"),
+        Err(InvalidInput) => print("Caught: Invalid input")
+    }
+
+    // Test 3: Error propagation with ?
+    print("\nTest 3: Error propagation")
+    match divide_chain(100, 10, 2) {
+        Ok(result) => print(f"100 / 10 / 2 = {result}"),
+        Err(e) => print(f"Error in chain: {e}")
+    }
+
+    match divide_chain(100, 0, 2) {
+        Ok(result) => print(f"Result: {result}"),
+        Err(e) => print(f"Caught error: {e}")
+    }
+
+    // Test 4: Maybe type
+    print("\nTest 4: Maybe type")
+    let numbers = [1, 2, 3, 4, 5]
+    match find_item(numbers, 3) {
+        Some(idx) => print(f"Found at index: {idx}"),
+        None => print("Not found")
+    }
+
+    match find_item(numbers, 10) {
+        Some(idx) => print(f"Found at index: {idx}"),
+        None => print("Not found (expected)")
+    }
+
+    // Test 5: Result.unwrap_or alternative
+    print("\nTest 5: Default values")
+    let result = safe_divide(10, 2)
+    let value = match result {
+        Ok(v) => v,
+        Err(_) => 0
+    }
+    print(f"Value with default: {value}")
+
+    print("\nError handling tests complete")
+}

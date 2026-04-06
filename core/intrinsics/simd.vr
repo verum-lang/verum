@@ -1,0 +1,68 @@
+// =============================================================================
+// core/intrinsics/simd.vr - SIMD Lane Operation Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides architecture-independent SIMD abstractions that map
+// to the best available instructions on each platform.
+//
+// All operations are zero-allocation and VBC-compatible.
+//
+// # Operations
+//
+// - Lane access: simd_extract, simd_insert
+// - Shuffling: simd_shuffle
+// - Reductions: simd_reduce_add, simd_reduce_mul, simd_reduce_min, simd_reduce_max
+// - Bitwise reductions: simd_reduce_and, simd_reduce_or, simd_reduce_xor
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.simd;
+
+// =============================================================================
+// SECTION 1: Lane Access
+// =============================================================================
+
+/// Extract element from SIMD vector
+public fn simd_extract<V, T>(vec: V, idx: UInt32) -> T { @intrinsic("simd_extract", vec, idx) }
+
+/// Insert element into SIMD vector
+public fn simd_insert<V, T>(vec: V, idx: UInt32, val: T) -> V { @intrinsic("simd_insert", vec, idx, val) }
+
+// =============================================================================
+// SECTION 2: Shuffling
+// =============================================================================
+
+/// Shuffle elements between two SIMD vectors
+public fn simd_shuffle<V, M>(a: V, b: V, mask: M) -> V { @intrinsic("simd_shuffle", a, b, mask) }
+
+// =============================================================================
+// SECTION 3: Arithmetic Reductions
+// =============================================================================
+
+/// Reduce SIMD vector by addition
+public fn simd_reduce_add<V, T>(vec: V) -> T { @intrinsic("simd_reduce_add", vec) }
+
+/// Reduce SIMD vector by multiplication
+public fn simd_reduce_mul<V, T>(vec: V) -> T { @intrinsic("simd_reduce_mul", vec) }
+
+/// Reduce SIMD vector by minimum
+public fn simd_reduce_min<V, T>(vec: V) -> T { @intrinsic("simd_reduce_min", vec) }
+
+/// Reduce SIMD vector by maximum
+public fn simd_reduce_max<V, T>(vec: V) -> T { @intrinsic("simd_reduce_max", vec) }
+
+// =============================================================================
+// SECTION 4: Bitwise Reductions
+// =============================================================================
+
+/// Reduce SIMD vector by AND
+public fn simd_reduce_and<V, T>(vec: V) -> T { @intrinsic("simd_reduce_and", vec) }
+
+/// Reduce SIMD vector by OR
+public fn simd_reduce_or<V, T>(vec: V) -> T { @intrinsic("simd_reduce_or", vec) }
+
+/// Reduce SIMD vector by XOR
+public fn simd_reduce_xor<V, T>(vec: V) -> T { @intrinsic("simd_reduce_xor", vec) }

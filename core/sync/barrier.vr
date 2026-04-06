@@ -1,0 +1,436 @@
+// =============================================================================
+// barrier.vr - Thread synchronization barrier
+// =============================================================================
+// Layer: 2.5 (Sync)
+// Dependencies: core, sync/atomic, sync/mutex, sync/condvar
+// =============================================================================
+//
+// A barrier enables multiple threads to synchronize at a specific point.
+// All threads must reach the barrier before any of them can proceed.
+//
+// # Example
+// ```verum
+// let barrier = Shared.new(Barrier.new(3));
+//
+// for i in 0..3 {
+//     let b = barrier.clone();
+//     spawn {
+//         // Phase 1 work
+//         do_phase1_work(i);
+//
+//         // Wait for all threads
+//         let res = b.wait();
+//         if result.is_leader() {
+//             print("All threads completed phase 1");
+//         }
+//
+//         // Phase 2 work
+//         do_phase2_work(i);
+//     };
+// }
+// ```
+//
+// =============================================================================
+
+module core.sync.barrier;
+mount core.*;
+mount .atomic.*;
+mount .mutex.*;
+mount .condvar.*;
+
+// =============================================================================
+// Barrier
+// =============================================================================
+
+/// A synchronization primitive that blocks until N threads have reached it.
+///
+/// A barrier can be reused after all threads have synchronized - it
+/// automatically resets for the next generation.
+///
+/// # Thread Safety
+/// - Barrier is Sync && can be shared between threads
+/// - Thread-safe for concurrent use
+///
+/// # Performance
+/// - wait: O(1) amortized (last thread wakes all)
+/// - Memory: O(1) constant overhead
+public type Barrier is {
+    /// Number of threads required to pass
+    num_threads: Int,
+    /// State protected by mutex
+    state: Mutex<BarrierState>,
+    /// Condition variable for waiting
+    condvar: Condvar,
+};
+
+/// Internal state of the barrier.
+type BarrierState is {
+    /// Number of threads currently waiting
+    count: Int,
+    /// Generation counter (increments each time barrier is passed)
+    generation: Int,
+};
+
+/// Result returned from `Barrier.wait()`.
+///
+/// Exactly one thread per barrier synchronization is designated as the
+/// "leader". This is useful for performing one-time actions after all
+/// threads have synchronized.
+public type BarrierWaitResult is {
+    /// True if this thread is the leader
+    is_leader: Bool,
+};
+
+implement Barrier {
+    /// Create a new barrier for `n` threads.
+    ///
+    /// # Panics
+    /// Panics if `n` is 0.
+    ///
+    /// # Example
+    /// ```verum
+    /// let barrier = Barrier.new(4);  // Requires 4 threads
+    /// ```
+    public fn new(n: Int) -> Barrier {
+        assert(n > 0, "Barrier requires at least 1 thread");
+
+        Barrier {
+            num_threads: n,
+            state: Mutex.new(BarrierState {
+                count: 0,
+                generation: 0,
+            }),
+            condvar: Condvar.new(),
+        }
+    }
+
+    /// Block until all threads have reached this barrier.
+    ///
+    /// Returns a `BarrierWaitResult` indicating whether this thread is
+    /// the leader (exactly one thread per synchronization is the leader).
+    ///
+    /// # Example
+    /// ```verum
+    /// let res = barrier.wait();
+    /// if result.is_leader() {
+    ///     // Only one thread executes this
+    ///     print("Barrier passed!");
+    /// }
+    /// ```
+    public fn wait(&self) -> BarrierWaitResult {
+        let mut guard = self.state.lock().unwrap();
+        let my_generation = guard.generation;
+
+        guard.count = guard.count + 1;
+
+        if guard.count == self.num_threads {
+            // We are the last thread - we're the leader
+            // Reset for next generation
+            guard.count = 0;
+            guard.generation = guard.generation + 1;
+
+            // Wake all waiting threads
+            self.condvar.notify_all();
+
+            return BarrierWaitResult { is_leader: true };
+        }
+
+        // Wait for other threads
+        while guard.generation == my_generation {
+            guard = self.condvar.wait(guard).unwrap();
+        }
+
+        BarrierWaitResult { is_leader: false }
+    }
+
+    /// Get the number of threads this barrier is configured for.
+    public fn num_threads(&self) -> Int {
+        self.num_threads
+    }
+
+    /// Get the number of threads currently waiting.
+    ///
+    /// Note: This is approximate due to concurrent modifications.
+    public fn waiting_count(&self) -> Int {
+        self.state.lock().unwrap().count
+    }
+
+    /// Get the current generation number.
+    ///
+    /// The generation increments each time all threads pass the barrier.
+    public fn generation(&self) -> Int {
+        self.state.lock().unwrap().generation
+    }
+}
+
+implement BarrierWaitResult {
+    /// Returns true if this thread is the leader.
+    ///
+    /// Exactly one thread per barrier synchronization is the leader.
+    /// This is useful for performing actions that should only happen once.
+    public fn is_leader(&self) -> Bool {
+        self.is_leader
+    }
+}
+
+implement Default for BarrierWaitResult {
+    fn default() -> BarrierWaitResult {
+        BarrierWaitResult { is_leader: false }
+    }
+}
+
+implement Debug for Barrier {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Barrier { num_threads: ")?;
+        self.num_threads.fmt_debug(f)?;
+        f.write_str(", waiting: ")?;
+        self.waiting_count().fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement Debug for BarrierWaitResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BarrierWaitResult { is_leader: ")?;
+        self.is_leader.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+// =============================================================================
+// Phaser - Multi-phase barrier with dynamic registration
+// =============================================================================
+
+/// A flexible barrier supporting multiple phases && dynamic participants.
+///
+/// Unlike Barrier, Phaser allows:
+/// - Threads to join/leave dynamically
+/// - Multiple phases with callbacks between them
+/// - Hierarchical organization for scalability
+///
+/// # Example
+/// ```verum
+/// let phaser = Phaser.new(0);  // Start with 0 parties
+///
+/// for i in 0..4 {
+///     phaser.register();  // Dynamically add party
+///     spawn {
+///         // Work
+///         phaser.arrive_and_await();
+///         // More work
+///         phaser.arrive_and_deregister();
+///     };
+/// }
+/// ```
+public type Phaser is {
+    /// State packed into atomic for lock-free operations
+    state: AtomicInt,
+    /// Condition variable for waiting
+    condvar: Condvar,
+    /// Mutex for complex state changes
+    lock: Mutex<()>,
+};
+
+// State encoding:
+// Bits 0-15: parties (number of registered threads)
+// Bits 16-31: arrived (number that have arrived this phase)
+// Bits 32-62: phase number
+// Bit 63: terminated flag
+
+const PARTIES_MASK: Int = 0xFFFF;
+const ARRIVED_SHIFT: Int = 16;
+const ARRIVED_MASK: Int = 0xFFFF0000;
+const PHASE_SHIFT: Int = 32;
+const TERMINATED_BIT: Int = 1 << 63;
+
+implement Phaser {
+    /// Create a new phaser with initial parties.
+    public fn new(parties: Int) -> Phaser {
+        assert(parties >= 0 && parties <= 0xFFFF, "Invalid party count");
+
+        Phaser {
+            state: AtomicInt.new(parties),
+            condvar: Condvar.new(),
+            lock: Mutex.new(()),
+        }
+    }
+
+    /// Register a new party (thread).
+    ///
+    /// Returns the current phase number.
+    public fn register(&self) -> Int {
+        let _guard = self.lock.lock().unwrap();
+
+        let old_state = self.state.fetch_add(1, MemoryOrdering.SeqCst);
+        (old_state >> PHASE_SHIFT) as Int
+    }
+
+    /// Arrive at the barrier && wait for others.
+    ///
+    /// Returns the phase number that was completed.
+    public fn arrive_and_await(&self) -> Int {
+        // Increment arrived count
+        let old_state = self.state.fetch_add(1 << ARRIVED_SHIFT, MemoryOrdering.SeqCst);
+        let parties = (old_state & PARTIES_MASK) as Int;
+        let arrived = ((old_state & ARRIVED_MASK) >> ARRIVED_SHIFT) as Int + 1;
+        let phase = (old_state >> PHASE_SHIFT) as Int;
+
+        if arrived == parties {
+            // We're the last - advance phase
+            let new_state = ((phase + 1) << PHASE_SHIFT) | parties;
+            self.state.store(new_state, MemoryOrdering.SeqCst);
+            self.condvar.notify_all();
+            return phase;
+        }
+
+        // Wait for phase to advance
+        let mut guard = self.lock.lock().unwrap();
+        while self.get_phase() == phase {
+            guard = self.condvar.wait(guard).unwrap();
+        }
+
+        phase
+    }
+
+    /// Arrive && deregister from the phaser.
+    ///
+    /// The calling thread will no longer participate in future phases.
+    public fn arrive_and_deregister(&self) -> Int {
+        let _guard = self.lock.lock().unwrap();
+
+        // Decrement parties && increment arrived
+        let adjustment = (1 << ARRIVED_SHIFT) - 1;  // +1 arrived, -1 parties
+        let old_state = self.state.fetch_add(adjustment, MemoryOrdering.SeqCst);
+
+        let parties = ((old_state & PARTIES_MASK) - 1) as Int;
+        let arrived = ((old_state & ARRIVED_MASK) >> ARRIVED_SHIFT) as Int + 1;
+        let phase = (old_state >> PHASE_SHIFT) as Int;
+
+        if arrived == parties + 1 {  // +1 because we decremented parties
+            // Last one - advance phase
+            let new_state = ((phase + 1) << PHASE_SHIFT) | parties;
+            self.state.store(new_state, MemoryOrdering.SeqCst);
+            self.condvar.notify_all();
+        }
+
+        phase
+    }
+
+    /// Get the current phase number.
+    public fn get_phase(&self) -> Int {
+        (self.state.load(MemoryOrdering.SeqCst) >> PHASE_SHIFT) as Int
+    }
+
+    /// Get the number of registered parties.
+    public fn get_registered_parties(&self) -> Int {
+        (self.state.load(MemoryOrdering.SeqCst) & PARTIES_MASK) as Int
+    }
+
+    /// Get the number of arrived parties in current phase.
+    public fn get_arrived_parties(&self) -> Int {
+        ((self.state.load(MemoryOrdering.SeqCst) & ARRIVED_MASK) >> ARRIVED_SHIFT) as Int
+    }
+
+    /// Check if the phaser is terminated.
+    public fn is_terminated(&self) -> Bool {
+        (self.state.load(MemoryOrdering.SeqCst) & TERMINATED_BIT) != 0
+    }
+
+    /// Terminate the phaser.
+    public fn terminate(&self) {
+        self.state.fetch_or(TERMINATED_BIT, MemoryOrdering.SeqCst);
+        self.condvar.notify_all();
+    }
+}
+
+// =============================================================================
+// Latch - Single-use barrier
+// =============================================================================
+
+/// A single-use synchronization barrier.
+///
+/// Threads block on `await()` until `count_down()` has been called N times.
+/// Unlike Barrier, a Latch can only be used once.
+///
+/// # Example
+/// ```verum
+/// let latch = CountDownLatch.new(3);
+///
+/// for i in 0..3 {
+///     spawn {
+///         do_work(i);
+///         latch.count_down();
+///     };
+/// }
+///
+/// // Block until all 3 tasks complete
+/// latch.await();
+/// print("All tasks done!");
+/// ```
+public type CountDownLatch is {
+    count: AtomicInt,
+    condvar: Condvar,
+    lock: Mutex<()>,
+};
+
+implement CountDownLatch {
+    /// Create a latch with the specified count.
+    public fn new(count: Int) -> CountDownLatch {
+        assert(count >= 0, "Latch count must be non-negative");
+
+        CountDownLatch {
+            count: AtomicInt.new(count),
+            condvar: Condvar.new(),
+            lock: Mutex.new(()),
+        }
+    }
+
+    /// Decrement the count by 1.
+    ///
+    /// If the count reaches zero, all waiting threads are released.
+    public fn count_down(&self) {
+        let prev = self.count.fetch_sub(1, MemoryOrdering.SeqCst);
+        if prev == 1 {
+            // Count reached zero - notify all waiters
+            self.condvar.notify_all();
+        }
+    }
+
+    /// Block until the count reaches zero.
+    public fn await(&self) {
+        if self.count.load(MemoryOrdering.SeqCst) == 0 {
+            return;
+        }
+
+        let mut guard = self.lock.lock().unwrap();
+        while self.count.load(MemoryOrdering.SeqCst) > 0 {
+            guard = self.condvar.wait(guard).unwrap();
+        }
+    }
+
+    /// Block until count reaches zero || timeout expires.
+    ///
+    /// Returns true if count reached zero, false if timed out.
+    public fn await_timeout(&self, timeout_ns: Int) -> Bool {
+        if self.count.load(MemoryOrdering.SeqCst) == 0 {
+            return true;
+        }
+
+        let guard = self.lock.lock().unwrap();
+        let (_, timed_out) = self.condvar.wait_timeout(guard, timeout_ns).unwrap();
+        !timed_out && self.count.load(MemoryOrdering.SeqCst) == 0
+    }
+
+    /// Get the current count.
+    public fn get_count(&self) -> Int {
+        self.count.load(MemoryOrdering.Relaxed)
+    }
+}
+
+implement Debug for CountDownLatch {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("CountDownLatch { count: ")?;
+        self.count.load(MemoryOrdering.Relaxed).fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}

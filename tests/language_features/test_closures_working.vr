@@ -1,0 +1,162 @@
+// Test: Closures - Closures and lambda expressions (working version)
+// Priority: Critical
+
+// Types must be at top level for pattern matching in closures
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Calculator is {
+    operation: fn(Int, Int) -> Int
+};
+
+async fn main() {
+    // 1. Basic closure without parameters
+    let greet = || {
+        print(f"Hello, world!");
+    };
+    greet();
+
+    // 2. Basic closure with single parameter
+    let double = |x: Int| -> Int {
+        x * 2
+    };
+    let result = double(21);
+    print(f"Double: {result}");
+
+    // 3. Closure with multiple parameters
+    let add = |a: Int, b: Int| -> Int {
+        a + b
+    };
+    print(f"Sum: {add(10, 20)}");
+
+    // 4. Closure with inferred types
+    let square = |x| x * x;
+    print(f"Square: {square(5)}");
+
+    // 5. Closure capturing environment
+    let base = 10;
+    let add_base = |x: Int| -> Int {
+        x + base
+    };
+    print(f"With base: {add_base(5)}");
+
+    // 6. Closure with block body
+    let complex = |x: Int| -> Int {
+        let temp = x * 2;
+        let result = temp + 10;
+        result
+    };
+    print(f"Complex: {complex(5)}");
+
+    // 7. Closure with pattern matching
+    let unwrap_or = |m: Maybe<Int>, default: Int| -> Int {
+        match m {
+            Maybe.Some(v) => v,
+            Maybe.None => default,
+        }
+    };
+    print(f"Unwrap: {unwrap_or(Maybe.Some(42), 0)}");
+    print(f"Unwrap: {unwrap_or(Maybe.None, 99)}");
+
+    // 8. Closure with conditional
+    let abs = |x: Int| -> Int {
+        if x < 0 {
+            -x
+        } else {
+            x
+        }
+    };
+    print(f"Abs: {abs(-5)}");
+    print(f"Abs: {abs(5)}");
+
+    // 9. Async closure
+    let async_double = async |x: Int| -> Int {
+        x * 2
+    };
+    let async_result = async_double(21).await;
+    print(f"Async double: {async_result}");
+
+    // 10. Closure with multiple captures
+    let x = 10;
+    let y = 20;
+    let combined = |z: Int| -> Int {
+        x + y + z
+    };
+    print(f"Combined: {combined(5)}");
+
+    // 11. Closure composition
+    let f = |x: Int| -> Int { x + 1 };
+    let g = |x: Int| -> Int { x * 2 };
+    let composed = |x: Int| -> Int { g(f(x)) };
+    print(f"Composed: {composed(5)}");
+
+    // 12. Closure returning tuple
+    let split = |n: Int| -> (Int, Int) {
+        (n / 2, n % 2)
+    };
+    let (div, rem) = split(7);
+    print(f"Split: {div}, {rem}");
+
+    // 13. Closure chain
+    let process = |x: Int| -> Int {
+        let step1 = |n| n + 10;
+        let step2 = |n| n * 2;
+        let step3 = |n| n - 5;
+        step3(step2(step1(x)))
+    };
+    print(f"Processed: {process(5)}");
+
+    // 14. Closure with loop
+    let sum_up_to = |n: Int| -> Int {
+        let mut total = 0;
+        let mut i = 1;
+        while i <= n {
+            total = total + i;
+            i = i + 1;
+        }
+        total
+    };
+    print(f"Sum 1-10: {sum_up_to(10)}");
+
+    // 15. Closure as struct field
+    let calc = Calculator {
+        operation: |a, b| a + b
+    };
+    print(f"Calculator: {(calc.operation)(10, 20)}");
+
+    // 16. Closure with Result type
+    let safe_divide = |a: Int, b: Int| -> Result<Int, Text> {
+        if b == 0 {
+            Result.Err("Division by zero")
+        } else {
+            Result.Ok(a / b)
+        }
+    };
+
+    match safe_divide(10, 2) {
+        Result.Ok(v) => print(f"Division: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    match safe_divide(10, 0) {
+        Result.Ok(v) => print(f"Division: {v}"),
+        Result.Err(e) => print(f"Error: {e}"),
+    }
+
+    // 17. Closure with for loop
+    let sum_array = |arr: [Int; 5]| -> Int {
+        let mut total = 0;
+        for x in arr {
+            total = total + x;
+        }
+        total
+    };
+    print(f"Array sum: {sum_array([1, 2, 3, 4, 5])}");
+
+    print(f"All closure tests complete!");
+}

@@ -1,0 +1,117 @@
+// =============================================================================
+// raw/escape.vr - ANSI Escape Sequence Writer
+// =============================================================================
+// Layer: 0 (Terminal I/O)
+// Dependencies: core.io
+// =============================================================================
+//
+// Protocol and types for writing ANSI escape sequences (CSI, OSC, DCS).
+// Used by all higher layers for cursor movement, clearing, colors, etc.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.3
+// =============================================================================
+
+module escape;
+
+mount core.io.{Write, IoResult};
+
+// =============================================================================
+// Clear Mode
+// =============================================================================
+
+/// What to clear when issuing an erase command.
+public type ClearMode is
+    | All              // Entire screen (CSI 2 J)
+    | Purge            // Screen + scrollback (CSI 3 J)
+    | AfterCursor      // From cursor to end of screen (CSI 0 J)
+    | BeforeCursor     // From start of screen to cursor (CSI 1 J)
+    | CurrentLine      // Current line (CSI 2 K)
+    | UntilNewLine;    // From cursor to end of line (CSI 0 K)
+
+// =============================================================================
+// EscapeWriter Protocol
+// =============================================================================
+
+/// Protocol for writing ANSI escape sequences.
+/// Reuses core.io.Write for buffered output.
+public type EscapeWriter is protocol extends Write {
+    /// Write a CSI sequence: ESC [ <params> <final_byte>
+    /// Params are semicolon-separated integers.
+    fn write_csi(&mut self, params: &[Int], final_byte: Byte) -> IoResult<()>;
+
+    /// Write an OSC sequence: ESC ] <code> ; <data> ST
+    fn write_osc(&mut self, code: Int, data: &Text) -> IoResult<()>;
+
+    /// Write a DCS sequence: ESC P <data> ST
+    fn write_dcs(&mut self, data: &Text) -> IoResult<()>;
+
+    /// Move cursor to absolute position (0-indexed).
+    fn move_to(&mut self, col: Int, row: Int) -> IoResult<()>;
+
+    /// Clear screen or part of screen.
+    fn clear(&mut self, mode: ClearMode) -> IoResult<()>;
+
+    /// Begin synchronized output (Mode 2026).
+    /// Terminal batches all output until end_sync, eliminating flicker.
+    fn begin_sync(&mut self) -> IoResult<()>;
+
+    /// End synchronized output (Mode 2026).
+    fn end_sync(&mut self) -> IoResult<()>;
+};
+
+// =============================================================================
+// Convenience escape sequence constants
+// =============================================================================
+
+/// Common escape sequence byte constants.
+public const ESC: Byte = 0x1B;
+public const CSI_START: Text = "\x1b[";
+public const OSC_START: Text = "\x1b]";
+public const DCS_START: Text = "\x1bP";
+public const ST: Text = "\x1b\\";       // String Terminator
+public const BEL: Byte = 0x07;
+
+// =============================================================================
+// Escape sequence builder helpers
+// =============================================================================
+
+/// Build a CSI sequence as a Text string.
+/// Example: build_csi(&[1, 2], 'H' as Byte) => "\x1b[1;2H"
+public fn build_csi(params: &[Int], final_byte: Byte) -> Text {
+    let mut result = "\x1b[";
+    for i in 0..params.len() {
+        if i > 0 {
+            result = result + ";";
+        }
+        result = result + params[i].to_text();
+    }
+    result = result + (final_byte as Char).to_text();
+    result
+}
+
+/// Build an OSC sequence as a Text string.
+/// Example: build_osc(0, "title") => "\x1b]0;title\x1b\\"
+public fn build_osc(code: Int, data: &Text) -> Text {
+    f"\x1b]{code};{data}\x1b\\"
+}
+
+/// Cursor movement helpers — return CSI sequences as Text.
+public fn cursor_up(n: Int) -> Text { f"\x1b[{n}A" }
+public fn cursor_down(n: Int) -> Text { f"\x1b[{n}B" }
+public fn cursor_forward(n: Int) -> Text { f"\x1b[{n}C" }
+public fn cursor_back(n: Int) -> Text { f"\x1b[{n}D" }
+public fn cursor_position(row: Int, col: Int) -> Text { f"\x1b[{row + 1};{col + 1}H" }
+public fn save_cursor() -> Text { "\x1b[s" }
+public fn restore_cursor() -> Text { "\x1b[u" }
+
+/// Scroll helpers.
+public fn scroll_up(n: Int) -> Text { f"\x1b[{n}S" }
+public fn scroll_down(n: Int) -> Text { f"\x1b[{n}T" }
+
+/// Set scrolling region (top and bottom are 0-indexed).
+public fn set_scroll_region(top: Int, bottom: Int) -> Text {
+    f"\x1b[{top + 1};{bottom + 1}r"
+}
+
+/// Reset scrolling region to full screen.
+public fn reset_scroll_region() -> Text { "\x1b[r" }

@@ -1,0 +1,40 @@
+// @test: ir-verify
+// @tier: 1, 2, 3
+// @level: L0
+// @tags: arithmetic, ir-correctness
+// @timeout: 5000
+// @description: Verify basic arithmetic generates correct LLVM IR
+
+// This test verifies that basic arithmetic operations produce
+// semantically correct LLVM IR that passes LLVM's verifier.
+
+fn add_integers(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn subtract_integers(a: Int, b: Int) -> Int {
+    a - b
+}
+
+fn multiply_integers(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn divide_integers(a: Int, b: Int) -> Int {
+    a / b
+}
+
+fn modulo_integers(a: Int, b: Int) -> Int {
+    a % b
+}
+
+fn main() -> Int {
+    let sum = add_integers(10, 20);
+    let diff = subtract_integers(100, 50);
+    let prod = multiply_integers(6, 7);
+    let quot = divide_integers(100, 5);
+    let rem = modulo_integers(17, 5);
+
+    // Expected: 30 + 50 + 42 + 20 + 2 = 144
+    sum + diff + prod + quot + rem
+}

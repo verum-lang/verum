@@ -1,0 +1,27 @@
+// Test 1: Inline refinements with curly braces
+// Syntax: Type{predicate}
+
+fn test_positive_int() -> Int{> 0} {
+    42
+}
+
+fn test_negative_range() -> Int{< 0} {
+    -10
+}
+
+fn test_bounded_int() -> Int{>= 0, <= 100} {
+    50
+}
+
+fn test_non_zero() -> Int{!= 0} {
+    1
+}
+
+fn main() {
+    let pos = test_positive_int();
+    let neg = test_negative_range();
+    let bounded = test_bounded_int();
+    let nz = test_non_zero();
+
+    pos + bounded + nz + neg
+}

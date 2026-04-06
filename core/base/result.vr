@@ -1,0 +1,1686 @@
+// =============================================================================
+// result.vr - Success/failure result type
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: maybe.vr, ordering.vr
+// =============================================================================
+
+// Import intrinsics as functions
+
+module core.base.result;
+mount core.intrinsics.{sleep_ms, random_float};
+
+// Import types from other core modules
+mount core.maybe.{Maybe, Some, None};
+mount core.ordering.{Ordering, Less, Equal, Greater};
+mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
+mount core.protocols.{
+    Eq, Ord, PartialEq, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
+    Formatter, FormatError,
+};
+mount core.iterator.Iterator;
+
+/// Result of an operation: either Ok(value) or Err(error).
+/// The fundamental way to handle recoverable errors in Verum.
+public type Result<T, E> is Ok(T) | Err(E);
+
+implement<T, E> Result<T, E> {
+    // =========================================================================
+    // Predicates
+    // =========================================================================
+
+    /// Returns true if this is Ok.
+    public fn is_ok(&self) -> Bool {
+        match self {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    /// Returns true if this is Err.
+    public fn is_err(&self) -> Bool {
+        match self {
+            Ok(_) => false,
+            Err(_) => true,
+        }
+    }
+
+    /// Returns true if Ok && the value satisfies the predicate.
+    public fn is_ok_and<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        match self {
+            Ok(ref v) => f(v),
+            Err(_) => false,
+        }
+    }
+
+    /// Returns true if Err && the error satisfies the predicate.
+    public fn is_err_and<F: fn(&E) -> Bool>(&self, f: F) -> Bool {
+        match self {
+            Ok(_) => false,
+            Err(ref e) => f(e),
+        }
+    }
+
+    // =========================================================================
+    // Conversion to Maybe
+    // =========================================================================
+
+    /// Convert to Maybe<T>, discarding the error.
+    public fn ok(self) -> Maybe<T> {
+        match self {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
+    }
+
+    /// Convert to Maybe<E>, discarding the success value.
+    public fn err(self) -> Maybe<E> {
+        match self {
+            Ok(_) => None,
+            Err(e) => Some(e),
+        }
+    }
+
+    // =========================================================================
+    // Unwrapping
+    // =========================================================================
+
+    /// Unwrap the Ok value, panicking if Err.
+    public fn unwrap(self) -> T
+    where E: Debug {
+        match self {
+            Ok(v) => v,
+            Err(e) => panic(f"called unwrap() on Err: {e:?}"),
+        }
+    }
+
+    /// Unwrap the Err value, panicking if Ok.
+    public fn unwrap_err(self) -> E
+    where T: Debug {
+        match self {
+            Ok(v) => panic(f"called unwrap_err() on Ok: {v:?}"),
+            Err(e) => e,
+        }
+    }
+
+    /// Unwrap with a custom panic message.
+    public fn expect(self, msg: &Text) -> T
+    where E: Debug {
+        match self {
+            Ok(v) => v,
+            Err(e) => panic(f"{msg}: {e:?}"),
+        }
+    }
+
+    /// Unwrap error with a custom panic message.
+    public fn expect_err(self, msg: &Text) -> E
+    where T: Debug {
+        match self {
+            Ok(v) => panic(f"{msg}: {v:?}"),
+            Err(e) => e,
+        }
+    }
+
+    /// Return Ok value || a default.
+    public fn unwrap_or(self, default: T) -> T {
+        match self {
+            Ok(v) => v,
+            Err(_) => default,
+        }
+    }
+
+    /// Return Ok value || compute default from error.
+    public fn unwrap_or_else<F: fn(E) -> T>(self, f: F) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => f(e),
+        }
+    }
+
+    /// Return Ok value || the type's default.
+    public fn unwrap_or_default(self) -> T
+    where T: Default {
+        match self {
+            Ok(v) => v,
+            Err(_) => T.default(),
+        }
+    }
+
+    // =========================================================================
+    // Transformations
+    // =========================================================================
+
+    /// Transform the Ok value.
+    public fn map<U, F: fn(T) -> U>(self, f: F) -> Result<U, E> {
+        match self {
+            Ok(v) => Ok(f(v)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Transform the Err value.
+    public fn map_err<F, O: fn(E) -> F>(self, f: O) -> Result<T, F> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(f(e)),
+        }
+    }
+
+    /// Transform with a function, providing default if Err.
+    public fn map_or<U, F: fn(T) -> U>(self, default: U, f: F) -> U {
+        match self {
+            Ok(v) => f(v),
+            Err(_) => default,
+        }
+    }
+
+    /// Transform with a function, computing default from error.
+    public fn map_or_else<U, D: fn(E) -> U, F: fn(T) -> U>(self, default: D, f: F) -> U {
+        match self {
+            Ok(v) => f(v),
+            Err(e) => default(e),
+        }
+    }
+
+    /// Chain with a function that returns Result (flatMap/bind).
+    public fn and_then<U, F: fn(T) -> Result<U, E>>(self, f: F) -> Result<U, E> {
+        match self {
+            Ok(v) => f(v),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Chain with error recovery.
+    public fn or_else<F, O: fn(E) -> Result<T, F>>(self, f: O) -> Result<T, F> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => f(e),
+        }
+    }
+
+    // =========================================================================
+    // Combinators
+    // =========================================================================
+
+    /// Returns Err if self is Err, otherwise returns other.
+    public fn and<U>(self, other: Result<U, E>) -> Result<U, E> {
+        match self {
+            Ok(_) => other,
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns self if Ok, otherwise returns other.
+    public fn or<F>(self, other: Result<T, F>) -> Result<T, F> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(_) => other,
+        }
+    }
+
+    // =========================================================================
+    // References
+    // =========================================================================
+
+    /// Get reference to the result.
+    public fn as_ref(&self) -> Result<&T, &E> {
+        match self {
+            Ok(ref v) => Ok(v),
+            Err(ref e) => Err(e),
+        }
+    }
+
+    /// Get mutable reference.
+    public fn as_mut(&mut self) -> Result<&mut T, &mut E> {
+        match self {
+            Ok(ref mut v) => Ok(v),
+            Err(ref mut e) => Err(e),
+        }
+    }
+
+    // =========================================================================
+    // Inspection
+    // =========================================================================
+
+    /// Call a function with the Ok value without consuming.
+    public fn inspect<F: fn(&T)>(self, f: F) -> Self {
+        if let Ok(ref v) = self {
+            f(v);
+        }
+        self
+    }
+
+    /// Call a function with the Err value without consuming.
+    public fn inspect_err<F: fn(&E)>(self, f: F) -> Self {
+        if let Err(ref e) = self {
+            f(e);
+        }
+        self
+    }
+
+    // =========================================================================
+    // Flattening
+    // =========================================================================
+
+    /// Flatten nested Result<Result<U, E>, E> to Result<U, E>.
+    public fn flatten<U>(self) -> Result<U, E> {
+        match self {
+            Ok(inner) => inner,
+            Err(e) => Err(e),
+        }
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    /// Create an iterator that yields 0 || 1 elements.
+    public fn iter(&self) -> ResultIter<&T> {
+        ResultIter { inner: self.as_ref().ok() }
+    }
+
+    /// Create a mutable iterator.
+    public fn iter_mut(&mut self) -> ResultIter<&mut T> {
+        ResultIter { inner: self.as_mut().ok() }
+    }
+}
+
+// =============================================================================
+// Iterator for Result
+// =============================================================================
+
+/// Iterator over Result that yields 0 || 1 Ok values.
+type ResultIter<T> is { inner: Maybe<T> };
+
+implement<T> Iterator for ResultIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.inner.take()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let n = if self.inner.is_some() { 1 } else { 0 };
+        (n, Some(n))
+    }
+}
+
+implement<T> IntoIterator for ResultIter<T> {
+    type Item = T;
+    type IntoIter = ResultIter<T>;
+
+    fn into_iter(self) -> ResultIter<T> { self }
+}
+
+implement<T, E> IntoIterator for Result<T, E> {
+    type Item = T;
+    type IntoIter = ResultIter<T>;
+
+    fn into_iter(self) -> ResultIter<T> {
+        ResultIter { inner: self.ok() }
+    }
+}
+
+// =============================================================================
+// Protocol implementations
+// =============================================================================
+
+implement<T: Eq, E: Eq> Eq for Result<T, E> {
+    fn eq(&self, other: &Result<T, E>) -> Bool {
+        match (self, other) {
+            (Ok(a), Ok(b)) => a == b,
+            (Err(a), Err(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement<T: Ord, E: Ord> Ord for Result<T, E> {
+    fn cmp(&self, other: &Result<T, E>) -> Ordering {
+        match (self, other) {
+            (Ok(a), Ok(b)) => a.cmp(b),
+            (Err(a), Err(b)) => a.cmp(b),
+            (Ok(_), Err(_)) => Greater,
+            (Err(_), Ok(_)) => Less,
+        }
+    }
+}
+
+implement<T: Clone, E: Clone> Clone for Result<T, E> {
+    fn clone(&self) -> Result<T, E> {
+        match self {
+            Ok(v) => Ok(v.clone()),
+            Err(e) => Err(e.clone()),
+        }
+    }
+}
+
+implement<T: Copy, E: Copy> Copy for Result<T, E> {}
+
+implement<T: Hash, E: Hash> Hash for Result<T, E> {
+    fn hash(&self, hasher: &mut Hasher) {
+        match self {
+            Ok(v) => {
+                hasher.write(&[0]);
+                v.hash(hasher);
+            }
+            Err(e) => {
+                hasher.write(&[1]);
+                e.hash(hasher);
+            }
+        }
+    }
+}
+
+implement<T: Debug, E: Debug> Debug for Result<T, E> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Ok(v) => {
+                f.write_str("Ok(")?;
+                v.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Err(e) => {
+                f.write_str("Err(")?;
+                e.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+implement<T: Display, E: Display> Display for Result<T, E> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Ok(v) => {
+                f.write_str("Ok(")?;
+                v.fmt(f)?;
+                f.write_str(")")
+            }
+            Err(e) => {
+                f.write_str("Err(")?;
+                e.fmt(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+// =============================================================================
+// From implementations
+// =============================================================================
+
+implement<T, E> From<T> for Result<T, E> {
+    fn from(value: T) -> Result<T, E> {
+        Ok(value)
+    }
+}
+
+// =============================================================================
+// Default implementation
+// =============================================================================
+
+implement<T: Default, E> Default for Result<T, E> {
+    fn default() -> Result<T, E> {
+        Ok(T.default())
+    }
+}
+
+// =============================================================================
+// Standard error type
+// =============================================================================
+
+/// A simple text-based error type.
+public type Error is {
+    message: Text,
+};
+
+implement Error {
+    /// Create a new error with the given message.
+    public fn new(message: Text) -> Error {
+        Error { message: message }
+    }
+}
+
+implement Debug for Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Error { message: ")?;
+        self.message.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+implement Describable for Error {
+    fn description(&self) -> Text {
+        self.message.clone()
+    }
+}
+
+implement Eq for Error {
+    fn eq(&self, other: &Error) -> Bool {
+        self.message == other.message
+    }
+}
+
+implement Clone for Error {
+    fn clone(&self) -> Error {
+        Error { message: self.message.clone() }
+    }
+}
+
+// =============================================================================
+// Try Protocol Implementation - Enables ? operator
+// =============================================================================
+
+implement<T, E> Try for Result<T, E> {
+    type Output = T;
+    type Residual = Result<Never, E>;
+
+    fn from_output(output: T) -> Result<T, E> {
+        Ok(output)
+    }
+
+    fn branch(self) -> ControlFlow<Result<Never, E>, T> {
+        match self {
+            Ok(v) => Continue(v),
+            Err(e) => Break(Err(e)),
+        }
+    }
+}
+
+// Same error type - trivial conversion
+implement<T, E> FromResidual<Result<Never, E>> for Result<T, E> {
+    fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
+        match residual {
+            Err(e) => Err(e),
+            Ok(_) => unreachable(),
+        }
+    }
+}
+
+// Different error types - requires From conversion
+implement<T, E, F> FromResidual<Result<Never, F>> for Result<T, E>
+where E: From<F> {
+    fn from_residual(residual: Result<Never, F>) -> Result<T, E> {
+        match residual {
+            Err(f) => Err(E.from(f)),
+            Ok(_) => unreachable(),
+        }
+    }
+}
+
+// Allow ? on Maybe when returning Result (converts None to error)
+implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E> {
+    fn from_residual(_residual: Maybe<Never>) -> Result<T, E> {
+        Err(E.default())
+    }
+}
+
+// =============================================================================
+// Advanced Combinators - Section 16 Error Handling Evolution
+// Spec: docs/improvements.md Section 16 - Error Handling Evolution
+// =============================================================================
+
+implement<T, E> Result<T, E> {
+    // =========================================================================
+    // Retry Combinators
+    // =========================================================================
+
+    /// Retry an operation with exponential backoff.
+    ///
+    /// Retries the operation up to `max_attempts` times with exponential
+    /// backoff between retries. Initial delay is `initial_delay_ms`,
+    /// doubling each retry up to `max_delay_ms`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let result = Result.retry(3, 100, 5000, || fetch_data());
+    /// ```
+    fn retry<F: fn() -> Result<T, E>>(
+        max_attempts: Int,
+        initial_delay_ms: Int,
+        max_delay_ms: Int,
+        operation: F
+    ) -> Result<T, E>
+    where E: Clone {
+        Result.retry_with_strategy(
+            operation,
+            RetryOptions {
+                max_attempts: max_attempts,
+                strategy: RetryBackoff.Exponential {
+                    initial_ms: initial_delay_ms,
+                    max_ms: max_delay_ms,
+                    multiplier: 2.0,
+                },
+                should_retry: |_| true,
+            }
+        )
+    }
+
+    /// Retry with a custom retry configuration.
+    ///
+    /// # Example
+    /// ```verum
+    /// let config = RetryOptions {
+    ///     max_attempts: 5,
+    ///     strategy: RetryBackoff.Linear { delay_ms: 500 },
+    ///     should_retry: |e| e.is_retryable(),
+    /// };
+    /// let result = Result.retry_with_strategy(|| risky_op(), config);
+    /// ```
+    fn retry_with_strategy<F: fn() -> Result<T, E>>(
+        operation: F,
+        config: RetryOptions<E>
+    ) -> Result<T, E>
+    where E: Clone {
+        let mut attempt = 0;
+        let mut last_error: Maybe<E> = None;
+
+        while attempt < config.max_attempts {
+            match operation() {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    if attempt + 1 >= config.max_attempts {
+                        return Err(e);
+                    }
+                    if !(config.should_retry)(&e) {
+                        return Err(e);
+                    }
+                    last_error = Some(e.clone());
+                    let delay = config.strategy.delay_for_attempt(attempt);
+                    sleep_ms(delay);
+                    attempt = attempt + 1;
+                }
+            }
+        }
+
+        // Should not reach here, but handle edge case
+        match last_error {
+            Some(e) => Err(e),
+            None => panic("retry: no attempts made"),
+        }
+    }
+
+    /// Retry with linear backoff.
+    ///
+    /// Retries with constant delay between attempts.
+    fn retry_linear<F: fn() -> Result<T, E>>(
+        max_attempts: Int,
+        delay_ms: Int,
+        operation: F
+    ) -> Result<T, E>
+    where E: Clone {
+        Result.retry_with_strategy(
+            operation,
+            RetryOptions {
+                max_attempts: max_attempts,
+                strategy: RetryBackoff.Linear { delay_ms: delay_ms },
+                should_retry: |_| true,
+            }
+        )
+    }
+
+    /// Retry with no delay between attempts.
+    fn retry_immediate<F: fn() -> Result<T, E>>(
+        max_attempts: Int,
+        operation: F
+    ) -> Result<T, E>
+    where E: Clone {
+        Result.retry_with_strategy(
+            operation,
+            RetryOptions {
+                max_attempts: max_attempts,
+                strategy: RetryBackoff.None,
+                should_retry: |_| true,
+            }
+        )
+    }
+
+    /// Retry with jittered exponential backoff.
+    ///
+    /// Adds random jitter to prevent thundering herd problem.
+    fn retry_jittered<F: fn() -> Result<T, E>>(
+        max_attempts: Int,
+        initial_delay_ms: Int,
+        max_delay_ms: Int,
+        operation: F
+    ) -> Result<T, E>
+    where E: Clone {
+        Result.retry_with_strategy(
+            operation,
+            RetryOptions {
+                max_attempts: max_attempts,
+                strategy: RetryBackoff.ExponentialJitter {
+                    initial_ms: initial_delay_ms,
+                    max_ms: max_delay_ms,
+                    multiplier: 2.0,
+                    jitter_factor: 0.1,
+                },
+                should_retry: |_| true,
+            }
+        )
+    }
+
+    // =========================================================================
+    // Tap Combinators (Side Effects)
+    // =========================================================================
+
+    /// Execute side effect on Ok value, returning self unchanged.
+    ///
+    /// Alias for `inspect` - provided for consistency with other languages.
+    ///
+    /// # Example
+    /// ```verum
+    /// let result = fetch_user(id)
+    ///     .tap(|user| log(f"Fetched user: {user.name}"))
+    ///     .map(|user| user.profile);
+    /// ```
+    public fn tap<F: fn(&T)>(self, f: F) -> Self {
+        self.inspect(f)
+    }
+
+    /// Execute side effect on Err value, returning self unchanged.
+    ///
+    /// Alias for `inspect_err` - provided for consistency.
+    public fn tap_err<F: fn(&E)>(self, f: F) -> Self {
+        self.inspect_err(f)
+    }
+
+    /// Execute side effect regardless of Ok or Err.
+    ///
+    /// # Example
+    /// ```verum
+    /// fetch_data()
+    ///     .tap_both(
+    ///         |data| log(f"Got data: {data}"),
+    ///         |err| log(f"Error: {err}")
+    ///     )
+    /// ```
+    public fn tap_both<F: fn(&T), G: fn(&E)>(self, on_ok: F, on_err: G) -> Self {
+        match &self {
+            Ok(ref v) => on_ok(v),
+            Err(ref e) => on_err(e),
+        }
+        self
+    }
+
+    // =========================================================================
+    // Recovery Combinators
+    // =========================================================================
+
+    /// Recover from error with a default value.
+    ///
+    /// Converts `Err(e)` to `Ok(default)`.
+    ///
+    /// # Example
+    /// ```verum
+    /// let config = load_config()
+    ///     .recover(default_config());
+    /// ```
+    public fn recover(self, default: T) -> Result<T, E> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(_) => Ok(default),
+        }
+    }
+
+    /// Recover from error using a function.
+    ///
+    /// # Example
+    /// ```verum
+    /// let result = fetch_remote()
+    ///     .recover_with(|e| load_cached());
+    /// ```
+    public fn recover_with<F: fn(E) -> T>(self, f: F) -> Result<T, E> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Ok(f(e)),
+        }
+    }
+
+    // =========================================================================
+    // Containment Checks
+    // =========================================================================
+
+    /// Check if Result is Ok and contains the given value.
+    public fn contains<U: PartialEq<T>>(&self, value: &U) -> Bool {
+        match self {
+            Ok(ref v) => *value == *v,
+            Err(_) => false,
+        }
+    }
+
+    /// Check if Result is Err and contains the given error.
+    public fn contains_err<F: PartialEq<E>>(&self, error: &F) -> Bool {
+        match self {
+            Ok(_) => false,
+            Err(ref e) => *error == *e,
+        }
+    }
+
+    // =========================================================================
+    // Flip/Swap
+    // =========================================================================
+
+    /// Swap Ok and Err.
+    ///
+    /// # Example
+    /// ```verum
+    /// let flipped: Result<E, T> = result.flip();
+    /// ```
+    public fn flip(self) -> Result<E, T> {
+        match self {
+            Ok(v) => Err(v),
+            Err(e) => Ok(e),
+        }
+    }
+
+    // =========================================================================
+    // Context/Wrapping
+    // =========================================================================
+
+    /// Add context to an error.
+    ///
+    /// Wraps the error with additional context information.
+    ///
+    /// # Example
+    /// ```verum
+    /// let result = parse_config(path)
+    ///     .context(f"Failed to parse config at {path}");
+    /// ```
+    public fn context(self, ctx: Text) -> Result<T, ContextError<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(ContextError { context: ctx, source: e }),
+        }
+    }
+
+    /// Add lazy context to an error.
+    public fn with_context<F: fn() -> Text>(self, ctx_fn: F) -> Result<T, ContextError<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(ContextError { context: ctx_fn(), source: e }),
+        }
+    }
+
+    // =========================================================================
+    // Fold (Eliminate Result)
+    // =========================================================================
+
+    /// Fold Result into a single value.
+    ///
+    /// # Example
+    /// ```verum
+    /// let message = result.fold(
+    ///     |v| f"Success: {v}",
+    ///     |e| f"Error: {e}"
+    /// );
+    /// ```
+    public fn fold<U, F: fn(T) -> U, G: fn(E) -> U>(self, on_ok: F, on_err: G) -> U {
+        match self {
+            Ok(v) => on_ok(v),
+            Err(e) => on_err(e),
+        }
+    }
+
+    // =========================================================================
+    // Into Iterator
+    // =========================================================================
+
+    /// Convert to iterator consuming self.
+    public fn into_iter(self) -> ResultIter<T> {
+        ResultIter { inner: self.ok() }
+    }
+}
+
+// =============================================================================
+// Backoff Strategy
+// Spec: docs/improvements.md Section 16 - Rich combinators
+// =============================================================================
+
+/// Strategy for calculating delay between retry attempts.
+public type RetryBackoff is
+    /// No delay between retries.
+    | None
+    /// Constant delay between retries.
+    | Linear { delay_ms: Int }
+    /// Exponential backoff: delay doubles each attempt.
+    | Exponential { initial_ms: Int, max_ms: Int, multiplier: Float }
+    /// Exponential with random jitter to prevent thundering herd.
+    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float };
+
+implement RetryBackoff {
+    /// Calculate delay for the given attempt number (0-indexed).
+    public fn delay_for_attempt(&self, attempt: Int) -> Int {
+        match self {
+            None => 0,
+            Linear { delay_ms } => *delay_ms,
+            Exponential { initial_ms, max_ms, multiplier } => {
+                let delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
+                delay.min(*max_ms as Float).round() as Int
+            }
+            ExponentialJitter { initial_ms, max_ms, multiplier, jitter_factor } => {
+                let base_delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
+                let jitter = base_delay * jitter_factor * random_float();
+                let delay = base_delay + jitter;
+                delay.min(*max_ms as Float).round() as Int
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Retry Configuration
+// =============================================================================
+
+/// Configuration for retry behavior.
+public type RetryOptions<E> is {
+    /// Maximum number of attempts (including initial attempt).
+    max_attempts: Int,
+    /// Backoff strategy between attempts.
+    strategy: RetryBackoff,
+    /// Predicate to determine if error is retryable.
+    should_retry: fn(&E) -> Bool,
+};
+
+implement<E> RetryOptions<E> {
+    /// Create a simple config with max attempts and no delay.
+    public fn simple(max_attempts: Int) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.None,
+            should_retry: |_| true,
+        }
+    }
+
+    /// Create config with exponential backoff.
+    public fn exponential(
+        max_attempts: Int,
+        initial_ms: Int,
+        max_ms: Int
+    ) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.Exponential {
+                initial_ms: initial_ms,
+                max_ms: max_ms,
+                multiplier: 2.0,
+            },
+            should_retry: |_| true,
+        }
+    }
+
+    /// Set a custom should_retry predicate.
+    public fn with_filter<P: fn(&E) -> Bool>(self, predicate: P) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: self.max_attempts,
+            strategy: self.strategy,
+            should_retry: predicate,
+        }
+    }
+}
+
+// =============================================================================
+// Context Error - Error with context chain
+// Spec: docs/improvements.md Section 16 - Cause<E> lossless error chain
+// =============================================================================
+
+/// Error wrapped with additional context.
+///
+/// Forms a chain of errors preserving the full error history.
+public type ContextError<E> is {
+    /// Human-readable context description.
+    context: Text,
+    /// The underlying error.
+    source: E,
+};
+
+implement<E> ContextError<E> {
+    /// Create new context error.
+    public fn new(context: Text, source: E) -> ContextError<E> {
+        ContextError { context: context, source: source }
+    }
+
+    /// Get the context message.
+    public fn message(&self) -> &Text {
+        &self.context
+    }
+
+    /// Get the source error.
+    public fn source(&self) -> &E {
+        &self.source
+    }
+
+    /// Unwrap to get the source error.
+    public fn into_source(self) -> E {
+        self.source
+    }
+}
+
+implement<E: Debug> Debug for ContextError<E> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.context)?;
+        f.write_str("\n  caused by: ")?;
+        self.source.fmt_debug(f)
+    }
+}
+
+implement<E: Display> Display for ContextError<E> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.context)?;
+        f.write_str(": ")?;
+        self.source.fmt(f)
+    }
+}
+
+implement<E: Clone> Clone for ContextError<E> {
+    fn clone(&self) -> ContextError<E> {
+        ContextError {
+            context: self.context.clone(),
+            source: self.source.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Exit Type - Two-channel error model
+// Spec: docs/improvements.md Section 16 - Exit<E, A> two-channel model
+// =============================================================================
+
+/// Two-channel exit result: Expected errors vs Defects (bugs).
+///
+/// Unlike Result which conflates all errors, Exit distinguishes:
+/// - `Success(A)`: Successful completion
+/// - `Failure(E)`: Expected/recoverable error
+/// - `Defect(Defect)`: Unexpected error (bug, panic, assertion failure)
+///
+/// This enables different handling strategies for recoverable vs fatal errors.
+public type Exit<E, A> is
+    | Success(A)
+    | Failure(E)
+    | Defect(DefectInfo);
+
+/// Information about a defect (unexpected error).
+public type DefectInfo is {
+    /// Description of the defect.
+    message: Text,
+    /// Optional location where defect occurred.
+    location: Maybe<Text>,
+    /// Optional stack trace.
+    backtrace: Maybe<Text>,
+};
+
+implement<E, A> Exit<E, A> {
+    /// Check if this is a success.
+    public fn is_success(&self) -> Bool {
+        match self {
+            Success(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a failure (expected error).
+    public fn is_failure(&self) -> Bool {
+        match self {
+            Failure(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a defect (unexpected error).
+    public fn is_defect(&self) -> Bool {
+        match self {
+            Defect(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Convert to Result, treating defects as panics.
+    public fn to_result(self) -> Result<A, E> {
+        match self {
+            Success(a) => Ok(a),
+            Failure(e) => Err(e),
+            Defect(d) => panic(d.message),
+        }
+    }
+
+    /// Map success value.
+    public fn map<B, F: fn(A) -> B>(self, f: F) -> Exit<E, B> {
+        match self {
+            Success(a) => Success(f(a)),
+            Failure(e) => Failure(e),
+            Defect(d) => Defect(d),
+        }
+    }
+
+    /// Map failure error.
+    public fn map_error<F, O: fn(E) -> F>(self, f: O) -> Exit<F, A> {
+        match self {
+            Success(a) => Success(a),
+            Failure(e) => Failure(f(e)),
+            Defect(d) => Defect(d),
+        }
+    }
+
+    /// Chain on success.
+    public fn flat_map<B, F: fn(A) -> Exit<E, B>>(self, f: F) -> Exit<E, B> {
+        match self {
+            Success(a) => f(a),
+            Failure(e) => Failure(e),
+            Defect(d) => Defect(d),
+        }
+    }
+
+    /// Fold Exit into a single value.
+    public fn fold<B>(
+        self,
+        on_success: fn(A) -> B,
+        on_failure: fn(E) -> B,
+        on_defect: fn(DefectInfo) -> B
+    ) -> B {
+        match self {
+            Success(a) => on_success(a),
+            Failure(e) => on_failure(e),
+            Defect(d) => on_defect(d),
+        }
+    }
+
+    /// Create a success.
+    public fn succeed(value: A) -> Exit<E, A> {
+        Success(value)
+    }
+
+    /// Create a failure.
+    public fn fail(error: E) -> Exit<E, A> {
+        Failure(error)
+    }
+
+    /// Create a defect.
+    public fn die(message: Text) -> Exit<E, A> {
+        Defect(DefectInfo {
+            message: message,
+            location: None,
+            backtrace: None,
+        })
+    }
+
+    /// Create a defect with location.
+    public fn die_at(message: Text, location: Text) -> Exit<E, A> {
+        Defect(DefectInfo {
+            message: message,
+            location: Some(location),
+            backtrace: None,
+        })
+    }
+}
+
+implement DefectInfo {
+    /// Create new defect info.
+    public fn new(message: Text) -> DefectInfo {
+        DefectInfo {
+            message: message,
+            location: None,
+            backtrace: None,
+        }
+    }
+
+    /// Add location to defect info.
+    public fn with_location(self, loc: Text) -> DefectInfo {
+        DefectInfo {
+            message: self.message,
+            location: Some(loc),
+            backtrace: self.backtrace,
+        }
+    }
+}
+
+implement Debug for DefectInfo {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Defect { message: ")?;
+        self.message.fmt_debug(f)?;
+        if let Some(ref loc) = self.location {
+            f.write_str(", location: ")?;
+            loc.fmt_debug(f)?;
+        }
+        f.write_str(" }")
+    }
+}
+
+implement Clone for DefectInfo {
+    fn clone(&self) -> DefectInfo {
+        DefectInfo {
+            message: self.message.clone(),
+            location: self.location.clone(),
+            backtrace: self.backtrace.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Cause Type - Lossless error chain
+// Spec: docs/improvements.md Section 16 - Cause<E> lossless error chain
+// =============================================================================
+
+/// Lossless error chain preserving full error history.
+///
+/// Unlike simple error wrapping which loses information, Cause maintains
+/// the complete tree of errors that contributed to a failure.
+public type Cause<E> is
+    /// Single error.
+    | Fail(E)
+    /// Unexpected defect.
+    | Die(DefectInfo)
+    /// Sequential errors - first error caused second.
+    | Then(Heap<Cause<E>>, Heap<Cause<E>>)
+    /// Parallel errors - multiple independent errors.
+    | Both(Heap<Cause<E>>, Heap<Cause<E>>)
+    /// Empty cause (for identity in composition).
+    | Empty;
+
+implement<E> Cause<E> {
+    /// Create from a single error.
+    public fn fail(error: E) -> Cause<E> {
+        Fail(error)
+    }
+
+    /// Create from a defect.
+    public fn die(message: Text) -> Cause<E> {
+        Die(DefectInfo.new(message))
+    }
+
+    /// Check if this cause is empty.
+    public fn is_empty(&self) -> Bool {
+        match self {
+            Empty => true,
+            _ => false,
+        }
+    }
+
+    /// Get all errors in the cause (flattened).
+    public fn failures(&self) -> List<&E> {
+        let mut result = List.new();
+        self.collect_failures(&mut result);
+        result
+    }
+
+    // Note: Verum uses CBGR instead of explicit lifetimes
+    fn collect_failures(&self, out: &mut List<&E>) {
+        match self {
+            Fail(e) => out.push(e),
+            Die(_) => {}
+            Then(first, second) => {
+                first.collect_failures(out);
+                second.collect_failures(out);
+            }
+            Both(left, right) => {
+                left.collect_failures(out);
+                right.collect_failures(out);
+            }
+            Empty => {}
+        }
+    }
+
+    /// Get all defects in the cause.
+    public fn defects(&self) -> List<&DefectInfo> {
+        let mut result = List.new();
+        self.collect_defects(&mut result);
+        result
+    }
+
+    // Note: Verum uses CBGR instead of explicit lifetimes
+    fn collect_defects(&self, out: &mut List<&DefectInfo>) {
+        match self {
+            Fail(_) => {}
+            Die(d) => out.push(d),
+            Then(first, second) => {
+                first.collect_defects(out);
+                second.collect_defects(out);
+            }
+            Both(left, right) => {
+                left.collect_defects(out);
+                right.collect_defects(out);
+            }
+            Empty => {}
+        }
+    }
+
+    /// Combine two causes sequentially (first caused second).
+    public fn then(self, other: Cause<E>) -> Cause<E> {
+        match (&self, &other) {
+            (Empty, _) => other,
+            (_, Empty) => self,
+            _ => Then(Heap.new(self), Heap.new(other)),
+        }
+    }
+
+    /// Combine two causes in parallel (independent errors).
+    public fn both(self, other: Cause<E>) -> Cause<E> {
+        match (&self, &other) {
+            (Empty, _) => other,
+            (_, Empty) => self,
+            _ => Both(Heap.new(self), Heap.new(other)),
+        }
+    }
+
+    /// Map over the error type.
+    public fn map_error<F, O: fn(E) -> F>(self, f: O) -> Cause<F>
+    where E: Clone {
+        match self {
+            Fail(e) => Fail(f(e)),
+            Die(d) => Die(d),
+            Then(first, second) => {
+                Then(
+                    Heap.new((*first).clone().map_error(&f)),
+                    Heap.new((*second).clone().map_error(f))
+                )
+            }
+            Both(left, right) => {
+                Both(
+                    Heap.new((*left).clone().map_error(&f)),
+                    Heap.new((*right).clone().map_error(f))
+                )
+            }
+            Empty => Empty,
+        }
+    }
+}
+
+implement<E: Clone> Clone for Cause<E> {
+    fn clone(&self) -> Cause<E> {
+        match self {
+            Fail(e) => Fail(e.clone()),
+            Die(d) => Die(d.clone()),
+            Then(first, second) => Then(
+                Heap.new((*first).clone()),
+                Heap.new((*second).clone())
+            ),
+            Both(left, right) => Both(
+                Heap.new((*left).clone()),
+                Heap.new((*right).clone())
+            ),
+            Empty => Empty,
+        }
+    }
+}
+
+// =============================================================================
+// Validated Type - Error accumulation
+// Spec: docs/improvements.md Section 16 - Validated<E, A>
+// =============================================================================
+
+/// Validated result that accumulates all errors instead of short-circuiting.
+///
+/// Unlike Result which stops at first error, Validated collects ALL errors.
+/// Perfect for validation scenarios where you want to report all problems.
+///
+/// # Example
+/// ```verum
+/// let validated = Validated.validate_all([
+///     validate_name(form.name),
+///     validate_email(form.email),
+///     validate_age(form.age),
+/// ]);
+/// match validated {
+///     Valid(data) => save(data),
+///     Invalid(errors) => show_errors(errors),
+/// }
+/// ```
+public type Validated<E, A> is
+    | Valid(A)
+    | Invalid(List<E>);
+
+implement<E, A> Validated<E, A> {
+    /// Create a valid result.
+    public fn valid(value: A) -> Validated<E, A> {
+        Valid(value)
+    }
+
+    /// Create an invalid result with single error.
+    public fn invalid(error: E) -> Validated<E, A> {
+        Invalid([error])
+    }
+
+    /// Create an invalid result with multiple errors.
+    public fn invalid_all(errors: List<E>) -> Validated<E, A> {
+        Invalid(errors)
+    }
+
+    /// Check if valid.
+    public fn is_valid(&self) -> Bool {
+        match self {
+            Valid(_) => true,
+            Invalid(_) => false,
+        }
+    }
+
+    /// Check if invalid.
+    public fn is_invalid(&self) -> Bool {
+        !self.is_valid()
+    }
+
+    /// Get errors (empty list if valid).
+    public fn errors(&self) -> List<E>
+    where E: Clone {
+        match self {
+            Valid(_) => List.new(),
+            Invalid(errors) => errors.clone(),
+        }
+    }
+
+    /// Map the success value.
+    public fn map<B, F: fn(A) -> B>(self, f: F) -> Validated<E, B> {
+        match self {
+            Valid(a) => Valid(f(a)),
+            Invalid(errors) => Invalid(errors),
+        }
+    }
+
+    /// Map the error type.
+    public fn map_errors<F, O: fn(E) -> F>(self, f: O) -> Validated<F, A> {
+        match self {
+            Valid(a) => Valid(a),
+            Invalid(errors) => Invalid(errors.into_iter().map(f).collect()),
+        }
+    }
+
+    /// Convert from Result.
+    public fn from_result(result: Result<A, E>) -> Validated<E, A> {
+        match result {
+            Ok(a) => Valid(a),
+            Err(e) => Invalid([e]),
+        }
+    }
+
+    /// Convert to Result.
+    public fn to_result(self) -> Result<A, List<E>> {
+        match self {
+            Valid(a) => Ok(a),
+            Invalid(errors) => Err(errors),
+        }
+    }
+
+    /// Combine with another Validated using applicative semantics.
+    ///
+    /// If both are valid, combines values with the function.
+    /// If either or both are invalid, accumulates all errors.
+    public fn zip_with<B, C, F: fn(A, B) -> C>(
+        self,
+        other: Validated<E, B>,
+        f: F
+    ) -> Validated<E, C> {
+        match (self, other) {
+            (Valid(a), Valid(b)) => Valid(f(a, b)),
+            (Valid(_), Invalid(errors)) => Invalid(errors),
+            (Invalid(errors), Valid(_)) => Invalid(errors),
+            (Invalid(mut e1), Invalid(e2)) => {
+                e1.extend(e2);
+                Invalid(e1)
+            }
+        }
+    }
+
+    /// Combine two Validated, keeping the first value if both valid.
+    public fn and<B>(self, other: Validated<E, B>) -> Validated<E, B> {
+        self.zip_with(other, |_, b| b)
+    }
+
+    /// Sequential validation - short-circuits on first invalid.
+    public fn and_then<B, F: fn(A) -> Validated<E, B>>(self, f: F) -> Validated<E, B> {
+        match self {
+            Valid(a) => f(a),
+            Invalid(errors) => Invalid(errors),
+        }
+    }
+
+    /// Validate all items, accumulating errors.
+    public fn validate_all(items: List<Validated<E, A>>) -> Validated<E, List<A>>
+    where E: Clone, A: Clone {
+        let mut values = List.new();
+        let mut all_errors = List.new();
+
+        for item in items {
+            match item {
+                Valid(a) => values.push(a),
+                Invalid(errors) => all_errors.extend(errors),
+            }
+        }
+
+        if all_errors.is_empty() {
+            Valid(values)
+        } else {
+            Invalid(all_errors)
+        }
+    }
+
+    /// Traverse a list with a validating function.
+    public fn traverse<B, F: fn(A) -> Validated<E, B>>(
+        items: List<A>,
+        f: F
+    ) -> Validated<E, List<B>>
+    where E: Clone, B: Clone {
+        Validated.validate_all(items.into_iter().map(f).collect())
+    }
+
+    /// Sequence a list of Validated into Validated of list.
+    public fn sequence(items: List<Validated<E, A>>) -> Validated<E, List<A>>
+    where E: Clone, A: Clone {
+        Validated.validate_all(items)
+    }
+}
+
+implement<E, A> Validated<E, A>
+where A: Default {
+    /// Get value or default.
+    public fn value_or_default(self) -> A {
+        match self {
+            Valid(a) => a,
+            Invalid(_) => A.default(),
+        }
+    }
+}
+
+implement<E, A: Clone> Clone for Validated<E, A>
+where E: Clone {
+    fn clone(&self) -> Validated<E, A> {
+        match self {
+            Valid(a) => Valid(a.clone()),
+            Invalid(errors) => Invalid(errors.clone()),
+        }
+    }
+}
+
+implement<E: Debug, A: Debug> Debug for Validated<E, A> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Valid(a) => {
+                f.write_str("Valid(")?;
+                a.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            Invalid(errors) => {
+                f.write_str("Invalid(")?;
+                errors.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Validated Helpers Module
+// =============================================================================
+
+/// Helper functions for validating collections.
+public module Validated {
+    /// Validate all items, accumulating errors.
+    public fn validate_all<E, A>(items: List<Validated<E, A>>) -> Validated<E, List<A>>
+    where E: Clone, A: Clone {
+        let mut values = List.new();
+        let mut all_errors = List.new();
+
+        for item in items {
+            match item {
+                Valid(a) => values.push(a),
+                Invalid(errors) => all_errors.extend(errors),
+            }
+        }
+
+        if all_errors.is_empty() {
+            Valid(values)
+        } else {
+            Invalid(all_errors)
+        }
+    }
+
+    /// Traverse a list with a validating function.
+    public fn traverse<A, B, E, F: fn(A) -> Validated<E, B>>(
+        items: List<A>,
+        f: F
+    ) -> Validated<E, List<B>>
+    where E: Clone, B: Clone {
+        validate_all(items.into_iter().map(f).collect())
+    }
+
+    /// Sequence a list of Validated into Validated of list.
+    public fn sequence<E, A>(items: List<Validated<E, A>>) -> Validated<E, List<A>>
+    where E: Clone, A: Clone {
+        validate_all(items)
+    }
+}
+
+// =============================================================================
+// Transposition Functions
+// =============================================================================
+
+/// Transpose Result<Maybe<T>, E> to Maybe<Result<T, E>>.
+///
+/// This is a standalone function because Verum does not support
+/// specialized impl blocks (e.g., `implement<T, E> Result<Maybe<T>, E>`).
+///
+/// # Example
+/// ```verum
+/// let x: Result<Maybe<Int>, Text> = Ok(Some(42));
+/// assert_eq(transpose_result(x), Some(Ok(42)));
+///
+/// let y: Result<Maybe<Int>, Text> = Ok(None);
+/// assert_eq(transpose_result(y), None);
+///
+/// let z: Result<Maybe<Int>, Text> = Err("error");
+/// assert_eq(transpose_result(z), Some(Err("error")));
+/// ```
+public fn transpose_result<T, E>(result: Result<Maybe<T>, E>) -> Maybe<Result<T, E>> {
+    match result {
+        Ok(maybe) => {
+            match maybe {
+                Some(v) => Some(Ok(v)),
+                None => None,
+            }
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+/// Transpose Maybe<Result<T, E>> to Result<Maybe<T>, E>.
+///
+/// # Example
+/// ```verum
+/// let x: Maybe<Result<Int, Text>> = Some(Ok(42));
+/// assert_eq(transpose_maybe(x), Ok(Some(42)));
+///
+/// let y: Maybe<Result<Int, Text>> = None;
+/// assert_eq(transpose_maybe(y), Ok(None));
+///
+/// let z: Maybe<Result<Int, Text>> = Some(Err("error"));
+/// assert_eq(transpose_maybe(z), Err("error"));
+/// ```
+public fn transpose_maybe<T, E>(maybe: Maybe<Result<T, E>>) -> Result<Maybe<T>, E> {
+    match maybe {
+        Some(result) => {
+            match result {
+                Ok(v) => Ok(Some(v)),
+                Err(e) => Err(e),
+            }
+        }
+        None => Ok(None),
+    }
+}
+
+// =============================================================================
+// Collection Utilities for Result
+// =============================================================================
+
+/// Collects an iterator of Results into a Result of a List.
+/// Returns the first Err encountered, or Ok(List) if all are Ok.
+///
+/// # Example
+///
+/// ```verum
+/// let results = [Ok(1), Ok(2), Ok(3)];
+/// assert_eq(collect_results(results.iter()), Ok([1, 2, 3]));
+///
+/// let results = [Ok(1), Err("bad"), Ok(3)];
+/// assert_eq(collect_results(results.iter()), Err("bad"));
+/// ```
+public fn collect_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -> Result<List<T>, E> {
+    let mut collected: List<T> = List.new();
+    loop {
+        match iter.next() {
+            None => break,
+            Some(item) => {
+                match item {
+                    Ok(v) => {
+                        collected.push(v);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+    Ok(collected)
+}
+
+/// Partitions an iterator of Results into two lists:
+/// a list of Ok values and a list of Err values.
+///
+/// # Example
+///
+/// ```verum
+/// let results = [Ok(1), Err("a"), Ok(2), Err("b")];
+/// let (oks, errs) = partition_results(results.iter());
+/// assert_eq(oks, [1, 2]);
+/// assert_eq(errs, ["a", "b"]);
+/// ```
+public fn partition_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -> (List<T>, List<E>) {
+    let mut oks: List<T> = List.new();
+    let mut errs: List<E> = List.new();
+    loop {
+        match iter.next() {
+            None => break,
+            Some(item) => {
+                match item {
+                    Ok(v) => {
+                        oks.push(v);
+                    }
+                    Err(e) => {
+                        errs.push(e);
+                    }
+                }
+            }
+        }
+    }
+    (oks, errs)
+}
+
+// =============================================================================
+// Note: sleep_ms and random_float are imported from stdlib.intrinsics at the top
+// of this file and used directly by RetryBackoff.delay_for_attempt().
+// =============================================================================
+

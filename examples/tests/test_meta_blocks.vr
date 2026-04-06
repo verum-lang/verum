@@ -1,0 +1,37 @@
+// Test meta blocks - compile-time evaluation
+// According to grammar: meta_expr = 'meta' , block_expr ;
+
+fn main() {
+    // Simple meta block with arithmetic
+    let computed = meta {
+        2 + 3
+    };
+    let _ = println(f"Meta computed: {computed}");
+
+    // Meta block with more complex expression
+    let product = meta {
+        let a = 10;
+        let b = 20;
+        a * b
+    };
+    let _ = println(f"Meta product: {product}");
+
+    // Nested meta blocks
+    let nested = meta {
+        let inner = meta {
+            5 + 5
+        };
+        inner * 2
+    };
+    let _ = println(f"Meta nested: {nested}");
+
+    // Meta block with conditional
+    let conditional = meta {
+        if true {
+            42
+        } else {
+            0
+        }
+    };
+    let _ = println(f"Meta conditional: {conditional}");
+}

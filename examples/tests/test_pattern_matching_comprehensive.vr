@@ -1,0 +1,193 @@
+// Comprehensive Pattern Matching Test Suite for Verum
+
+// Test 1: Simple variant pattern matching
+type Maybe<T> is
+  | Some(T)
+  | None
+
+fn test_simple_variant_matching() -> Int {
+  let x = Some(42);
+  match x {
+    Some(n) => n,
+    None => 0
+  }
+}
+
+// Test 2: Pattern guards with `if`
+fn test_pattern_guard_if(x: Int) -> Text {
+  match x {
+    n if n > 0 => "positive",
+    n if n < 0 => "negative",
+    _ => "zero"
+  }
+}
+
+// Test 3: Pattern guards with `where`
+fn test_pattern_guard_where(x: Int) -> Text {
+  match x {
+    n where n > 0 => "positive",
+    n where n < 0 => "negative",
+    _ => "zero"
+  }
+}
+
+// Test 4: Record patterns
+type Point is {
+  x: Int,
+  y: Int
+}
+
+fn test_record_pattern() -> Int {
+  let p = Point { x: 10, y: 20 };
+  match p {
+    Point { x, y } => x + y
+  }
+}
+
+// Test 5: Nested patterns
+type Result<T, E> is
+  | Ok(T)
+  | Err(E)
+
+fn test_nested_patterns() -> Int {
+  let x = Some(Ok(42));
+  match x {
+    Some(Ok(n)) => n,
+    Some(Err(_)) => -1,
+    None => 0
+  }
+}
+
+// Test 6: Or patterns
+type Color is
+  | Red
+  | Green
+  | Blue
+  | Yellow
+
+fn test_or_patterns(c: Color) -> Text {
+  match c {
+    Red | Yellow => "warm",
+    Green | Blue => "cool"
+  }
+}
+
+// Test 7: Multiple field record pattern
+type Rectangle is {
+  x: Int,
+  y: Int,
+  width: Int,
+  height: Int
+}
+
+fn test_partial_record_pattern() -> Int {
+  let rect = Rectangle { x: 0, y: 0, width: 100, height: 50 };
+  match rect {
+    Rectangle { width, height, .. } => width * height
+  }
+}
+
+// Test 8: Tuple patterns
+fn test_tuple_pattern() -> Int {
+  let pair = (10, 20);
+  match pair {
+    (a, b) => a + b
+  }
+}
+
+// Test 9: List patterns
+fn test_list_pattern() -> Int {
+  let list = [1, 2, 3];
+  match list {
+    [first, ..] => first,
+    [] => 0
+  }
+}
+
+// Test 10: Complex nested pattern with guards
+fn test_complex_nested_with_guards() -> Text {
+  let x = Some(Point { x: 5, y: -3 });
+  match x {
+    Some(Point { x, y }) if x > 0 && y > 0 => "quadrant 1",
+    Some(Point { x, y }) if x < 0 && y > 0 => "quadrant 2",
+    Some(Point { x, y }) if x < 0 && y < 0 => "quadrant 3",
+    Some(Point { x, y }) if x > 0 && y < 0 => "quadrant 4",
+    Some(Point { x: 0, .. }) => "on y-axis",
+    Some(Point { y: 0, .. }) => "on x-axis",
+    None => "no point"
+  }
+}
+
+// Test 11: Literal patterns
+fn test_literal_patterns(x: Int) -> Text {
+  match x {
+    0 => "zero",
+    1 => "one",
+    2 => "two",
+    _ => "many"
+  }
+}
+
+// Test 12: String literal patterns
+fn test_string_patterns(s: Text) -> Text {
+  match s {
+    "hello" => "greeting",
+    "goodbye" => "farewell",
+    _ => "unknown"
+  }
+}
+
+// Main function to run all tests
+fn main() -> Int {
+  println("Test 1: Simple variant matching");
+  let result1 = test_simple_variant_matching();
+  println("  Result: {}", result1);
+  assert(result1 == 42, "Test 1 failed");
+
+  println("Test 2: Pattern guard with if");
+  let result2a = test_pattern_guard_if(5);
+  let result2b = test_pattern_guard_if(-5);
+  let result2c = test_pattern_guard_if(0);
+  println("  Result: {} {} {}", result2a, result2b, result2c);
+  assert(result2a == "positive", "Test 2a failed");
+  assert(result2b == "negative", "Test 2b failed");
+  assert(result2c == "zero", "Test 2c failed");
+
+  println("Test 3: Pattern guard with where");
+  let result3a = test_pattern_guard_where(5);
+  let result3b = test_pattern_guard_where(-5);
+  let result3c = test_pattern_guard_where(0);
+  println("  Result: {} {} {}", result3a, result3b, result3c);
+  assert(result3a == "positive", "Test 3a failed");
+  assert(result3b == "negative", "Test 3b failed");
+  assert(result3c == "zero", "Test 3c failed");
+
+  println("Test 4: Record pattern");
+  let result4 = test_record_pattern();
+  println("  Result: {}", result4);
+  assert(result4 == 30, "Test 4 failed");
+
+  println("Test 5: Nested patterns");
+  let result5 = test_nested_patterns();
+  println("  Result: {}", result5);
+  assert(result5 == 42, "Test 5 failed");
+
+  println("Test 6: Or patterns");
+  let result6a = test_or_patterns(Red);
+  let result6b = test_or_patterns(Blue);
+  println("  Result: {} {}", result6a, result6b);
+  assert(result6a == "warm", "Test 6a failed");
+  assert(result6b == "cool", "Test 6b failed");
+
+  println("Test 11: Literal patterns");
+  let result11a = test_literal_patterns(0);
+  let result11b = test_literal_patterns(1);
+  let result11c = test_literal_patterns(99);
+  println("  Result: {} {} {}", result11a, result11b, result11c);
+  assert(result11a == "zero", "Test 11a failed");
+  assert(result11b == "one", "Test 11b failed");
+  assert(result11c == "many", "Test 11c failed");
+
+  println("\nAll basic tests passed!");
+  0
+}

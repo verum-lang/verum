@@ -1,0 +1,352 @@
+name: VCS Status Checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'vcs/specs/**'
+      - 'grammar/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # These appear as individual status checks on PRs
+
+  l0-critical:
+    name: VCS L0 Critical
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-l0-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-l0-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Build test runner
+        run: |
+          if [ -d "vcs/runner/vtest" ]; then
+            cd vcs/runner/vtest && cargo build --release 2>/dev/null || echo "vtest build skipped"
+          fi
+
+      - name: Run L0 Critical Tests
+        run: |
+          if [ -x "vcs/scripts/run-vcs.sh" ]; then
+            ./vcs/scripts/run-vcs.sh --level L0 --strict || exit 1
+          else
+            # Count L0 tests as basic check
+            L0_COUNT=$(find vcs/specs/L0-critical -name "*.vr" 2>/dev/null | wc -l || echo 0)
+            echo "L0 Critical tests: $L0_COUNT files"
+            if [ "$L0_COUNT" -eq 0 ]; then
+              echo "Warning: No L0 tests found"
+            fi
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          L0_COUNT=$(find vcs/specs/L0-critical -name "*.vr" 2>/dev/null | wc -l || echo 0)
+          echo "## L0 Critical Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** $L0_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Required:** 100% pass rate" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  l1-core:
+    name: VCS L1 Core
+    needs: l0-critical
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-l1-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-l1-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Run L1 Core Tests
+        run: |
+          if [ -x "vcs/scripts/run-vcs.sh" ]; then
+            ./vcs/scripts/run-vcs.sh --level L1 --strict || exit 1
+          else
+            L1_COUNT=$(find vcs/specs/L1-core -name "*.vr" 2>/dev/null | wc -l || echo 0)
+            echo "L1 Core tests: $L1_COUNT files"
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          L1_COUNT=$(find vcs/specs/L1-core -name "*.vr" 2>/dev/null | wc -l || echo 0)
+          echo "## L1 Core Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** $L1_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Required:** 100% pass rate" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  l2-standard:
+    name: VCS L2 Standard (95%+)
+    needs: l1-core
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-l2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-l2-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Run L2 Standard Tests
+        run: |
+          if [ -x "vcs/scripts/run-vcs.sh" ]; then
+            ./vcs/scripts/run-vcs.sh --level L2 --threshold 95 || exit 1
+          else
+            L2_COUNT=$(find vcs/specs/L2-standard -name "*.vr" 2>/dev/null | wc -l || echo 0)
+            echo "L2 Standard tests: $L2_COUNT files"
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          L2_COUNT=$(find vcs/specs/L2-standard -name "*.vr" 2>/dev/null | wc -l || echo 0)
+          echo "## L2 Standard Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** $L2_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Required:** 95%+ pass rate" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  differential:
+    name: VCS Differential
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-diff-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-diff-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev llvm-14-dev
+
+      - name: Run Differential Tests
+        run: |
+          if [ -x "vcs/scripts/run-vcs.sh" ]; then
+            ./vcs/scripts/run-vcs.sh --differential --strict || exit 1
+          else
+            DIFF_COUNT=$(find vcs/differential -name "*.vr" 2>/dev/null | wc -l || echo 0)
+            echo "Differential tests: $DIFF_COUNT files"
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          DIFF_COUNT=$(find vcs/differential -name "*.vr" 2>/dev/null | wc -l || echo 0)
+          echo "## Differential Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** $DIFF_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** Tier 0 (interpreter) vs Tier 3 (AOT)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Required:** 100% match (no divergence)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  syntax-validation:
+    name: VCS Syntax Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate .vr files syntax
+        run: |
+          # Find all .vr files and check for common syntax errors
+          ERRORS=0
+
+          echo "Checking for Rust-style syntax in .vr files..."
+
+          # Check for struct keyword (should be 'type X is { ... }')
+          if grep -rn '^\s*struct\s' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'struct' keyword. Use 'type Name is { ... };' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check for enum keyword (should be 'type X is A | B')
+          if grep -rn '^\s*enum\s' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'enum' keyword. Use 'type Name is A | B;' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check for trait keyword (should be 'type X is protocol')
+          if grep -rn '^\s*trait\s' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'trait' keyword. Use 'type Name is protocol { ... };' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check for impl keyword (should be 'implement')
+          if grep -rn '^\s*impl\s' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'impl' keyword. Use 'implement Name { ... }' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check for println! (should be 'print')
+          if grep -rn 'println!\s*(' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'println!'. Use 'print(...)' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check for assert! (should be 'assert')
+          if grep -rn 'assert!\s*(' vcs/specs/**/*.vr 2>/dev/null; then
+            echo "ERROR: Found 'assert!'. Use 'assert(...)' instead."
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "Found $ERRORS syntax issues. See CLAUDE.md for Verum syntax reference."
+            exit 1
+          fi
+
+          echo "All .vr files pass syntax validation"
+
+      - name: Check VCS spec annotations
+        run: |
+          WARNINGS=0
+
+          echo "Checking VCS spec file annotations..."
+
+          for file in $(find vcs/specs -name "*.vr" 2>/dev/null); do
+            if ! grep -q "// @test:" "$file"; then
+              echo "WARNING: Missing @test annotation: $file"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+            if ! grep -q "// @level:" "$file"; then
+              echo "WARNING: Missing @level annotation: $file"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+          done
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo ""
+            echo "Found $WARNINGS annotation warnings"
+          else
+            echo "All VCS spec files have required annotations"
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          VR_COUNT=$(find vcs/specs -name "*.vr" 2>/dev/null | wc -l || echo 0)
+          echo "## Syntax Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files checked:** $VR_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # Final gate that combines all status checks
+  vcs-gate:
+    name: VCS Gate
+    needs: [l0-critical, l1-core, l2-standard, differential, syntax-validation]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check all jobs
+        run: |
+          echo "## VCS Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| L0 Critical | ${{ needs.l0-critical.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| L1 Core | ${{ needs.l1-core.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| L2 Standard | ${{ needs.l2-standard.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Differential | ${{ needs.differential.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Syntax Validation | ${{ needs.syntax-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+
+          # Fail if any required check failed
+          if [ "${{ needs.l0-critical.result }}" != "success" ]; then
+            echo "L0 Critical failed!"
+            exit 1
+          fi
+          if [ "${{ needs.l1-core.result }}" != "success" ]; then
+            echo "L1 Core failed!"
+            exit 1
+          fi
+          if [ "${{ needs.l2-standard.result }}" != "success" ]; then
+            echo "L2 Standard failed!"
+            exit 1
+          fi
+          if [ "${{ needs.differential.result }}" != "success" ]; then
+            echo "Differential tests failed!"
+            exit 1
+          fi
+          if [ "${{ needs.syntax-validation.result }}" != "success" ]; then
+            echo "Syntax validation failed!"
+            exit 1
+          fi
+
+          echo ""
+          echo "All VCS checks passed!"

@@ -1,0 +1,493 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, collections, list, invariants
+// @timeout: 15000
+// @expected-proof-time: <80ms
+
+/// Description: Tests SMT stability for list/collection invariants
+/// Regression Detection: Collection invariant proofs involve quantifiers and should
+/// complete within 80ms. Proof times exceeding 150ms or solver timeouts indicate regression.
+
+// ============================================================================
+// Length Invariants
+// ============================================================================
+
+/// Empty list has zero length
+@verify(proof)
+fn empty_list_length<T>() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let empty: List<T> = list![];
+    empty.len() == 0
+}
+
+/// Singleton list has length one
+@verify(proof)
+fn singleton_list_length<T>(item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let single = list![item];
+    single.len() == 1
+}
+
+/// Push increases length by one
+@verify(proof)
+fn push_increases_length<T>(list: List<T>, item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let old_len = list.len();
+    let new_list = list.push(item);
+    new_list.len() == old_len + 1
+}
+
+/// Pop decreases length by one (non-empty)
+@verify(proof)
+fn pop_decreases_length<T>(list: List<T>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    let old_len = list.len();
+    let (new_list, _) = list.pop();
+    new_list.len() == old_len - 1
+}
+
+/// Concatenation length is sum
+@verify(proof)
+fn concat_length<T>(a: List<T>, b: List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let combined = a.concat(b);
+    combined.len() == a.len() + b.len()
+}
+
+// ============================================================================
+// Indexing Invariants
+// ============================================================================
+
+/// Valid index range
+@verify(proof)
+fn valid_index_range<T>(list: &List<T>, idx: Int{>= 0}) -> Bool {
+    contract#"
+        requires idx >= 0;
+        requires idx < list.len();
+        ensures result == true;
+    "
+    idx >= 0 && idx < list.len()
+}
+
+/// First element is at index 0
+@verify(proof)
+fn first_at_zero<T: Eq>(list: &List<T>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    list.first() == Some(&list[0])
+}
+
+/// Last element is at index len-1
+@verify(proof)
+fn last_at_end<T: Eq>(list: &List<T>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    list.last() == Some(&list[list.len() - 1])
+}
+
+/// Get returns element at index
+@verify(proof)
+fn get_at_index<T: Eq>(list: &List<T>, idx: Int) -> Bool {
+    contract#"
+        requires idx >= 0 && idx < list.len();
+        ensures result == true;
+    "
+    list.get(idx) == Some(&list[idx])
+}
+
+// ============================================================================
+// Preservation Invariants
+// ============================================================================
+
+/// Push preserves existing elements
+@verify(proof)
+fn push_preserves_elements<T: Eq>(list: List<T>, item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let new_list = list.push(item);
+    // Original elements preserved at same indices
+    let preserved = true;
+    for i in 0..list.len() {
+        if new_list[i] != list[i] {
+            return false;
+        }
+    }
+    preserved
+}
+
+/// Pushed element is at end
+@verify(proof)
+fn push_element_at_end<T: Eq>(list: List<T>, item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let new_list = list.push(item);
+    new_list[new_list.len() - 1] == item
+}
+
+/// Pop returns last element
+@verify(proof)
+fn pop_returns_last<T: Eq>(list: List<T>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    let last = list[list.len() - 1];
+    let (_, popped) = list.pop();
+    popped == last
+}
+
+/// Pop preserves remaining elements
+@verify(proof)
+fn pop_preserves_remaining<T: Eq>(list: List<T>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    let (remaining, _) = list.pop();
+    for i in 0..remaining.len() {
+        if remaining[i] != list[i] {
+            return false;
+        }
+    }
+    true
+}
+
+// ============================================================================
+// Slice Invariants
+// ============================================================================
+
+/// Slice length
+@verify(proof)
+fn slice_length<T>(list: &List<T>, start: Int, end: Int) -> Bool {
+    contract#"
+        requires start >= 0;
+        requires end >= start;
+        requires end <= list.len();
+        ensures result == true;
+    "
+    let slice = list.slice(start, end);
+    slice.len() == end - start
+}
+
+/// Full slice equals original
+@verify(proof)
+fn full_slice_equals<T: Eq>(list: &List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let slice = list.slice(0, list.len());
+    slice == *list
+}
+
+/// Slice preserves elements
+@verify(proof)
+fn slice_preserves_elements<T: Eq>(list: &List<T>, start: Int, end: Int) -> Bool {
+    contract#"
+        requires start >= 0 && end >= start && end <= list.len();
+        ensures result == true;
+    "
+    let slice = list.slice(start, end);
+    for i in 0..slice.len() {
+        if slice[i] != list[start + i] {
+            return false;
+        }
+    }
+    true
+}
+
+// ============================================================================
+// Ordering Invariants (for sorted lists)
+// ============================================================================
+
+type SortedList<T> is List<T>;
+
+/// Sorted list property
+@verify(proof)
+fn is_sorted<T: Ord>(list: &SortedList<T>) -> Bool {
+    contract#"
+        ensures result == true implies forall i, j. 0 <= i < j < list.len() implies list[i] <= list[j];
+    "
+    for i in 1..list.len() {
+        if list[i - 1] > list[i] {
+            return false;
+        }
+    }
+    true
+}
+
+/// Binary search finds element in sorted list
+@verify(proof)
+fn binary_search_finds<T: Ord + Eq>(sorted: &SortedList<T>, target: &T) -> Bool {
+    contract#"
+        requires forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j];
+        ensures result == true implies exists i. 0 <= i < sorted.len() && sorted[i] == *target;
+    "
+    let idx = sorted.binary_search(target);
+    match idx {
+        Ok(i) => sorted[i] == *target,
+        Err(_) => true  // Not found case, invariant still holds
+    }
+}
+
+/// Sorted insert maintains ordering
+@verify(proof)
+fn sorted_insert_maintains_order<T: Ord>(sorted: SortedList<T>, value: T) -> Bool {
+    contract#"
+        requires forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j];
+        ensures result == true;
+    "
+    let result = sorted.sorted_insert(value);
+    // Check resulting list is still sorted
+    for i in 1..result.len() {
+        if result[i - 1] > result[i] {
+            return false;
+        }
+    }
+    true
+}
+
+// ============================================================================
+// Transformation Invariants
+// ============================================================================
+
+/// Map preserves length
+@verify(proof)
+fn map_preserves_length<T, U>(list: List<T>, f: fn(T) -> U) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let mapped = list.map(f);
+    mapped.len() == list.len()
+}
+
+/// Filter reduces or maintains length
+@verify(proof)
+fn filter_reduces_length<T>(list: List<T>, pred: fn(&T) -> Bool) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let filtered = list.filter(pred);
+    filtered.len() <= list.len()
+}
+
+/// Reverse preserves length
+@verify(proof)
+fn reverse_preserves_length<T>(list: List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let reversed = list.reverse();
+    reversed.len() == list.len()
+}
+
+/// Double reverse is identity
+@verify(proof)
+fn double_reverse_identity<T: Eq>(list: List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let double_rev = list.reverse().reverse();
+    double_rev == list
+}
+
+/// Reverse element positions
+@verify(proof)
+fn reverse_positions<T: Eq>(list: &List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let reversed = list.reverse();
+    let n = list.len();
+    for i in 0..n {
+        if reversed[i] != list[n - 1 - i] {
+            return false;
+        }
+    }
+    true
+}
+
+// ============================================================================
+// Fold Invariants
+// ============================================================================
+
+/// Sum via fold equals direct sum
+@verify(proof)
+fn fold_sum(list: List<Int>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let fold_sum = list.fold(0, |acc, x| acc + x);
+    let mut direct_sum = 0;
+    for x in list {
+        direct_sum += x;
+    }
+    fold_sum == direct_sum
+}
+
+/// Product via fold equals direct product
+@verify(proof)
+fn fold_product(list: List<Int>) -> Bool {
+    contract#"
+        requires list.len() > 0;
+        ensures result == true;
+    "
+    let fold_prod = list.fold(1, |acc, x| acc * x);
+    let mut direct_prod = 1;
+    for x in list {
+        direct_prod *= x;
+    }
+    fold_prod == direct_prod
+}
+
+/// Length via fold
+@verify(proof)
+fn fold_length<T>(list: List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let fold_len: Int = list.fold(0, |acc, _| acc + 1);
+    fold_len == list.len()
+}
+
+// ============================================================================
+// Contains Invariants
+// ============================================================================
+
+/// Contains after push
+@verify(proof)
+fn contains_after_push<T: Eq>(list: List<T>, item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let new_list = list.push(item);
+    new_list.contains(&item)
+}
+
+/// Contains implies index exists
+@verify(proof)
+fn contains_implies_index<T: Eq>(list: &List<T>, item: &T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    if list.contains(item) {
+        let idx = list.position(item);
+        idx.is_some()
+    } else {
+        true
+    }
+}
+
+/// Position returns valid index when found
+@verify(proof)
+fn position_valid_index<T: Eq>(list: &List<T>, item: &T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    match list.position(item) {
+        Some(idx) => idx >= 0 && idx < list.len() && list[idx] == *item,
+        None => !list.contains(item)
+    }
+}
+
+// ============================================================================
+// Empty and Non-Empty Invariants
+// ============================================================================
+
+/// Empty list is empty
+@verify(proof)
+fn empty_is_empty<T>() -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let empty: List<T> = list![];
+    empty.is_empty()
+}
+
+/// Non-empty after push
+@verify(proof)
+fn non_empty_after_push<T>(list: List<T>, item: T) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    let new_list = list.push(item);
+    !new_list.is_empty()
+}
+
+/// Is empty iff length is zero
+@verify(proof)
+fn empty_iff_zero_length<T>(list: &List<T>) -> Bool {
+    contract#"
+        ensures result == true;
+    "
+    list.is_empty() == (list.len() == 0)
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Length invariants
+    assert(empty_list_length<Int>());
+    assert(singleton_list_length(42));
+    assert(push_increases_length(list![1, 2, 3], 4));
+    assert(pop_decreases_length(list![1, 2, 3]));
+    assert(concat_length(list![1, 2], list![3, 4, 5]));
+
+    // Indexing invariants
+    let test_list = list![10, 20, 30, 40, 50];
+    assert(valid_index_range(&test_list, 2));
+    assert(first_at_zero(&test_list));
+    assert(last_at_end(&test_list));
+    assert(get_at_index(&test_list, 2));
+
+    // Preservation invariants
+    assert(push_preserves_elements(list![1, 2, 3], 4));
+    assert(push_element_at_end(list![1, 2, 3], 4));
+    assert(pop_returns_last(list![1, 2, 3]));
+    assert(pop_preserves_remaining(list![1, 2, 3, 4]));
+
+    // Slice invariants
+    assert(slice_length(&test_list, 1, 4));
+    assert(full_slice_equals(&test_list));
+    assert(slice_preserves_elements(&test_list, 1, 3));
+
+    // Transformation invariants
+    assert(reverse_preserves_length(list![1, 2, 3, 4]));
+    assert(double_reverse_identity(list![1, 2, 3, 4]));
+    assert(reverse_positions(&list![1, 2, 3, 4, 5]));
+
+    // Fold invariants
+    assert(fold_sum(list![1, 2, 3, 4, 5]));
+    assert(fold_product(list![1, 2, 3, 4]));
+    assert(fold_length(list![1, 2, 3, 4, 5]));
+
+    // Contains invariants
+    assert(contains_after_push(list![1, 2, 3], 4));
+    assert(contains_implies_index(&list![1, 2, 3, 4], &3));
+
+    // Empty invariants
+    assert(empty_is_empty<Int>());
+    assert(non_empty_after_push(list![], 1));
+    assert(empty_iff_zero_length(&list![]));
+
+    println("All list invariants verified successfully!");
+}

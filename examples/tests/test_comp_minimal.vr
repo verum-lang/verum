@@ -1,0 +1,21 @@
+// Minimal comprehension test - just list comprehensions
+
+fn main() -> Int {
+    // Test 1: Basic list comprehension
+    let numbers = [1, 2, 3];
+    let doubled = [x * 2 for x in numbers];
+
+    // Test 2: With filter
+    let nums = [-2, -1, 0, 1, 2, 3];
+    let positives = [x for x in nums if x > 0];
+
+    // Test 3: Nested for clauses (Cartesian product)
+    let xs = [1, 2];
+    let ys = [10, 20];
+    let pairs = [x + y for x in xs for y in ys];
+
+    // Test 4: Complex expression
+    let squares = [x * x for x in [1, 2, 3, 4, 5]];
+
+    0
+}

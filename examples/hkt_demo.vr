@@ -1,0 +1,22 @@
+// Higher-Kinded Type (HKT) Demonstration
+// This file demonstrates that the parser correctly handles HKT syntax
+
+// Simple type constructor placeholders
+type ListConstructor is List<_>;
+type MaybeConstructor is Maybe<_>;
+
+// Partial application with placeholders
+type ResultWithError is Result<_, Error>;
+
+// In function signatures
+fn map_list(f: fn(Int) -> Text, list: List<_>) -> List<Text> {
+    // Implementation would go here
+    List.new()
+}
+
+// In generic constraints (intended for protocol definitions)
+// Note: Full protocol syntax may need separate fixes
+fn works_with_any_container<C<_>>(container: C<Int>) -> C<Text> {
+    // Hypothetical HKT usage
+    container
+}

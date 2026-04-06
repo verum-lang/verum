@@ -1,0 +1,13 @@
+type Maybe<T> is Some(T) | None;
+
+fn infer_from_return() -> Maybe<Int> {
+    Some(42)
+}
+
+fn main() {
+    let result = infer_from_return();
+    match result {
+        Some(v) => { let _ = print(f"Result: Some({v})"); },
+        None => { let _ = print("Result: None"); }
+    }
+}

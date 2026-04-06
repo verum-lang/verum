@@ -1,0 +1,8 @@
+// Test deprecated where it syntax
+fn test_where_it() -> Int where it > 0 {
+    42
+}
+
+fn main() -> Int {
+    test_where_it()
+}

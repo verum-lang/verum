@@ -1,0 +1,7 @@
+// Test: BS-001 - Hello World
+// Priority: Critical
+// Expected output: Hello, World!
+
+fn main() {
+    print("Hello, World!");
+}

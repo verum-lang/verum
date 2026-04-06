@@ -1,0 +1,25 @@
+// Metrics protocol for system monitoring
+mount core.base.{Result, Text, Int, Float};
+
+pub type MetricsError is
+    | CollectionFailed(Text);
+
+pub type SystemMetrics is {
+    requests_total: Int,
+    requests_per_second: Float,
+    avg_response_time_ms: Float,
+    active_connections: Int,
+    memory_usage_mb: Int,
+    cpu_usage_percent: Float,
+};
+
+pub context protocol Metrics {
+    async fn get_current(self) -> Result<SystemMetrics, MetricsError>;
+    async fn record_request(self, duration_ms: Int) -> Result<(), MetricsError>;
+
+    // Detailed metrics methods
+    async fn get_total_requests(self) -> Result<Int, MetricsError>;
+    async fn get_requests_per_second(self) -> Result<Float, MetricsError>;
+    async fn get_avg_response_time(self) -> Result<Float, MetricsError>;
+    async fn get_active_connections(self) -> Result<Int, MetricsError>;
+}

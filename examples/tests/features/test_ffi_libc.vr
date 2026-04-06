@@ -1,0 +1,224 @@
+// Test: FFI with standard C library functions
+// Comprehensive test of common libc FFI bindings
+// Tests printf, malloc, string operations, etc.
+
+// Standard I/O functions
+ffi StdIO {
+    @extern("printf")
+    fn printf(format: *const Text) -> Int;
+
+    @extern("puts")
+    fn puts(s: *const Text) -> Int;
+
+    @extern("putchar")
+    fn putchar(c: Int) -> Int;
+
+    @extern("getchar")
+    fn getchar() -> Int;
+
+    memory_effects = Reads(format) + Writes(stdout);
+    thread_safe = false;
+    errors_via = ReturnCode(-1);
+}
+
+// Memory management functions
+ffi MemMgmt {
+    @extern("malloc")
+    fn malloc(size: Int) -> *mut Int;
+
+    @extern("calloc")
+    fn calloc(num: Int, size: Int) -> *mut Int;
+
+    @extern("realloc")
+    fn realloc(ptr: *mut Int, new_size: Int) -> *mut Int;
+
+    @extern("free")
+    fn free(ptr: *mut Int);
+
+    memory_effects = Allocates + Deallocates(ptr);
+    thread_safe = true;
+    errors_via = ReturnValue(null);
+}
+
+// String functions
+ffi Strings {
+    @extern("strlen")
+    fn strlen(s: *const Text) -> Int;
+
+    @extern("strcmp")
+    fn strcmp(s1: *const Text, s2: *const Text) -> Int;
+
+    @extern("strcpy")
+    fn strcpy(dest: *mut Text, src: *const Text) -> *mut Text;
+
+    @extern("strcat")
+    fn strcat(dest: *mut Text, src: *const Text) -> *mut Text;
+
+    @extern("strchr")
+    fn strchr(s: *const Text, c: Int) -> *const Text;
+
+    memory_effects = Reads(s) + Writes(dest);
+    thread_safe = true;
+    errors_via = ReturnValue(null);
+}
+
+// Math functions
+ffi MathLib {
+    @extern("sin")
+    fn sin(x: Float) -> Float;
+
+    @extern("cos")
+    fn cos(x: Float) -> Float;
+
+    @extern("tan")
+    fn tan(x: Float) -> Float;
+
+    @extern("sqrt")
+    fn sqrt(x: Float) -> Float;
+
+    @extern("pow")
+    fn pow(base: Float, exp: Float) -> Float;
+
+    @extern("log")
+    fn log(x: Float) -> Float;
+
+    @extern("exp")
+    fn exp(x: Float) -> Float;
+
+    @extern("floor")
+    fn floor(x: Float) -> Float;
+
+    @extern("ceil")
+    fn ceil(x: Float) -> Float;
+
+    @extern("round")
+    fn round(x: Float) -> Float;
+
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+}
+
+// Time functions
+ffi Time {
+    @extern("time")
+    fn time(timer: *mut Int) -> Int;
+
+    @extern("clock")
+    fn clock() -> Int;
+
+    memory_effects = Reads(system_time) + Writes(timer);
+    thread_safe = false;
+    errors_via = ReturnCode(-1);
+}
+
+// Process functions
+ffi Process {
+    @extern("exit")
+    fn exit(status: Int);
+
+    @extern("abort")
+    fn abort();
+
+    @extern("system")
+    fn system(command: *const Text) -> Int;
+
+    @extern("getenv")
+    fn getenv(name: *const Text) -> *const Text;
+
+    memory_effects = Reads(name) + Reads(environment);
+    thread_safe = false;
+    errors_via = ReturnValue(null);
+}
+
+// Character classification
+ffi CharOps {
+    @extern("isalpha")
+    fn isalpha(c: Int) -> Int;
+
+    @extern("isdigit")
+    fn isdigit(c: Int) -> Int;
+
+    @extern("isspace")
+    fn isspace(c: Int) -> Int;
+
+    @extern("toupper")
+    fn toupper(c: Int) -> Int;
+
+    @extern("tolower")
+    fn tolower(c: Int) -> Int;
+
+    memory_effects = Pure;
+    thread_safe = true;
+    errors_via = None;
+}
+
+// Test math library functions
+fn test_math() -> Float {
+    let x = 2.0;
+    let y = 3.0;
+
+    let sin_val = MathLib.sin(x);
+    let cos_val = MathLib.cos(x);
+    let sqrt_val = MathLib.sqrt(16.0);
+    let pow_val = MathLib.pow(x, y);
+    let floor_val = MathLib.floor(3.7);
+    let ceil_val = MathLib.ceil(3.2);
+
+    sqrt_val
+}
+
+// Test memory allocation
+fn test_memory() -> Int {
+    unsafe {
+        // Allocate memory
+        let ptr1 = MemMgmt.malloc(100);
+        let ptr2 = MemMgmt.calloc(10, 10);
+
+        // Reallocate
+        let ptr3 = MemMgmt.realloc(ptr1, 200);
+
+        // Free memory
+        MemMgmt.free(ptr3);
+        MemMgmt.free(ptr2);
+
+        0
+    }
+}
+
+// Test character operations
+fn test_char_ops() -> Int {
+    let c = 97; // 'a'
+
+    let is_alpha = CharOps.isalpha(c);
+    let is_digit = CharOps.isdigit(c);
+    let upper = CharOps.toupper(c);
+    let lower = CharOps.tolower(upper);
+
+    if is_alpha != 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn main() {
+    let _ = print("=== FFI LibC Tests ===");
+
+    // Test 1: Math library
+    let _ = print("\nTest 1: Math library functions");
+    let math_result = test_math();
+    let _ = print(f"Math result: {math_result}");
+
+    // Test 2: Memory management
+    let _ = print("\nTest 2: Memory management");
+    let mem_result = test_memory();
+    let _ = print(f"Memory test result: {mem_result}");
+
+    // Test 3: Character operations
+    let _ = print("\nTest 3: Character operations");
+    let char_result = test_char_ops();
+    let _ = print(f"Char test result: {char_result}");
+
+    let _ = print("\n=== All FFI LibC tests completed ===");
+}

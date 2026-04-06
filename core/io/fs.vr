@@ -1,0 +1,1248 @@
+// =============================================================================
+// fs.vr - Filesystem operations
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, text, collections, io/path, io/protocols, sys/{linux,darwin,windows}
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI system interfaces:
+// - Linux: Uses sys/linux/syscall direct syscalls (stat, lstat, mkdir, rmdir, etc.)
+// - macOS: Uses sys/darwin/libsystem bindings to libSystem.B.dylib
+// - Windows: Uses sys/windows/kernel32 bindings to kernel32.dll
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// This module provides filesystem operations:
+//
+// - File/directory metadata
+// - Directory traversal
+// - File system modification (create, remove, rename, copy)
+// - Permission handling
+//
+// # Example
+// ```verum
+// // Create a directory
+// fs.create_dir("/tmp/my_app")?;
+//
+// // List directory contents
+// for entry in fs.read_dir("/tmp/my_app")? {
+//     let entry = entry?;
+//     print(f"{entry.file_name()}: {entry.file_type()}");
+// }
+//
+// // Remove directory
+// fs.remove_dir("/tmp/my_app")?;
+// ```
+//
+// =============================================================================
+
+module core.io.fs;
+mount core.*;
+mount collections.*;
+mount io.path.{Path, PathBuf};
+mount io.protocols.{StreamError, StreamError as IoError, IoErrorKind, IoResult};
+mount core.base.env.{var as env_var};
+mount io.file.{File, read_to_string as file_read_to_string, read as file_read, write as file_write};
+
+// =============================================================================
+// V-LLSI Native Filesystem Imports
+// =============================================================================
+// Uses native platform syscalls instead of verum_runtime FFI.
+// =============================================================================
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{
+    stat as sys_stat,
+    lstat as sys_lstat,
+    mkdir as sys_mkdir,
+    rmdir as sys_rmdir,
+    unlink as sys_unlink,
+    rename as sys_rename,
+    symlink as sys_symlink,
+    readlink as sys_readlink,
+    mount as sys_link,
+    chmod as sys_chmod,
+    getcwd as sys_getcwd,
+    chdir as sys_chdir,
+    getdents64 as sys_getdents64,
+    open as sys_open,
+    close as sys_close,
+    read as sys_read,
+    write as sys_write,
+    Stat,
+    FileDesc,
+    O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_DIRECTORY,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{
+    safe_stat as sys_stat,
+    safe_lstat as sys_lstat,
+    safe_mkdir as sys_mkdir,
+    safe_rmdir as sys_rmdir,
+    safe_unlink as sys_unlink,
+    safe_rename as sys_rename,
+    safe_symlink as sys_symlink,
+    safe_readlink as sys_readlink,
+    safe_link as sys_link,
+    safe_chmod as sys_chmod,
+    safe_getcwd as sys_getcwd,
+    safe_chdir as sys_chdir,
+    opendir as sys_opendir,
+    readdir as sys_readdir,
+    closedir as sys_closedir,
+    errno,
+    Stat,
+    Dirent,
+    DIR,
+    O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_DIRECTORY,
+};
+@cfg(target_os = "macos")
+mount sys.common.FileDesc;
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{
+    // Windows uses different APIs for filesystem operations
+    GetFileAttributesW,
+    CreateDirectoryW,
+    RemoveDirectoryW,
+    DeleteFileW,
+    MoveFileW,
+    CreateHardLinkW,
+    CreateSymbolicLinkW,
+    GetCurrentDirectoryW,
+    SetCurrentDirectoryW,
+    FindFirstFileW,
+    FindNextFileW,
+    FindClose,
+};
+@cfg(target_os = "windows")
+mount sys.common.FileDesc;
+
+// =============================================================================
+// File type mode bits (Unix)
+// =============================================================================
+
+const S_IFMT: UInt32 = 0o170000;   // Bit mask for file type
+const S_IFREG: UInt32 = 0o100000;  // Regular file
+const S_IFDIR: UInt32 = 0o040000;  // Directory
+const S_IFLNK: UInt32 = 0o120000;  // Symbolic link
+
+/// Internal metadata structure derived from syscall Stat.
+type FsMetadataRaw is {
+    size: Int,
+    modified_secs: Int,
+    modified_nanos: Int,
+    accessed_secs: Int,
+    accessed_nanos: Int,
+    created_secs: Int,
+    created_nanos: Int,
+    mode: Int,       // Unix permissions and file type
+    is_dir: Int,
+    is_file: Int,
+    is_symlink: Int,
+};
+
+implement FsMetadataRaw {
+    /// Create FsMetadataRaw from a native Stat structure.
+    @cfg(target_os = "linux")
+    fn from_stat(stat: &Stat, follow_symlink: Bool) -> FsMetadataRaw {
+        let mode = stat.st_mode as Int;
+        let file_type = (stat.st_mode as UInt32) & S_IFMT;
+
+        FsMetadataRaw {
+            size: stat.st_size as Int,
+            modified_secs: stat.st_mtime_sec as Int,
+            modified_nanos: stat.st_mtime_nsec as Int,
+            accessed_secs: stat.st_atime_sec as Int,
+            accessed_nanos: stat.st_atime_nsec as Int,
+            created_secs: stat.st_ctime_sec as Int,  // Linux doesn't have birth time, use ctime
+            created_nanos: stat.st_ctime_nsec as Int,
+            mode: mode,
+            is_dir: if file_type == S_IFDIR { 1 } else { 0 },
+            is_file: if file_type == S_IFREG { 1 } else { 0 },
+            is_symlink: if !follow_symlink && file_type == S_IFLNK { 1 } else { 0 },
+        }
+    }
+
+    @cfg(target_os = "macos")
+    fn from_stat(stat: &Stat, follow_symlink: Bool) -> FsMetadataRaw {
+        let mode = stat.st_mode as Int;
+        let file_type = (stat.st_mode as UInt32) & S_IFMT;
+
+        FsMetadataRaw {
+            size: stat.st_size as Int,
+            modified_secs: stat.st_mtime.tv_sec,
+            modified_nanos: stat.st_mtime.tv_nsec,
+            accessed_secs: stat.st_atime.tv_sec,
+            accessed_nanos: stat.st_atime.tv_nsec,
+            created_secs: stat.st_birthtime.tv_sec,
+            created_nanos: stat.st_birthtime.tv_nsec,
+            mode: mode,
+            is_dir: if file_type == S_IFDIR { 1 } else { 0 },
+            is_file: if file_type == S_IFREG { 1 } else { 0 },
+            is_symlink: if !follow_symlink && file_type == S_IFLNK { 1 } else { 0 },
+        }
+    }
+}
+
+// =============================================================================
+// Metadata
+// =============================================================================
+
+/// Metadata about a file || directory.
+///
+/// Contains information like size, modification time, && file type.
+///
+/// # Example
+/// ```verum
+/// let meta = fs.metadata("/path/to/file")?;
+/// print(f"Size: {meta.len()} bytes");
+/// print(f"Is file: {meta.is_file()}");
+/// ```
+public type Metadata is {
+    raw: FsMetadataRaw,
+};
+
+implement Metadata {
+    /// Get the file size in bytes.
+    ///
+    /// Returns 0 for directories.
+    public fn len(&self) -> Int {
+        self.raw.size
+    }
+
+    /// Check if this is a regular file.
+    public fn is_file(&self) -> Bool {
+        self.raw.is_file != 0
+    }
+
+    /// Check if this is a directory.
+    public fn is_dir(&self) -> Bool {
+        self.raw.is_dir != 0
+    }
+
+    /// Check if this is a symbolic link.
+    public fn is_symlink(&self) -> Bool {
+        self.raw.is_symlink != 0
+    }
+
+    /// Get the file type.
+    public fn file_type(&self) -> FileType {
+        if self.raw.is_symlink != 0 {
+            FileType.Symlink
+        } else if self.raw.is_dir != 0 {
+            FileType.Dir
+        } else if self.raw.is_file != 0 {
+            FileType.File
+        } else {
+            FileType.Unknown
+        }
+    }
+
+    /// Get the last modification time as Unix timestamp (seconds).
+    public fn modified_secs(&self) -> Int {
+        self.raw.modified_secs
+    }
+
+    /// Get the last access time as Unix timestamp (seconds).
+    public fn accessed_secs(&self) -> Int {
+        self.raw.accessed_secs
+    }
+
+    /// Get the creation time as Unix timestamp (seconds).
+    ///
+    /// Note: Not available on all platforms.
+    public fn created_secs(&self) -> Int {
+        self.raw.created_secs
+    }
+
+    /// Get Unix permissions mode.
+    ///
+    /// Only meaningful on Unix systems.
+    @cfg(unix)
+    public fn permissions(&self) -> Permissions {
+        Permissions { mode: self.raw.mode }
+    }
+
+    /// Check if file is read-only.
+    public fn is_readonly(&self) -> Bool {
+        // On Unix, check if user has no write permission
+        (self.raw.mode & 0o200) == 0
+    }
+}
+
+implement Debug for Metadata {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Metadata {{ len: {self.len()}, file_type: {self.file_type()} }}")
+    }
+}
+
+// =============================================================================
+// FileType
+// =============================================================================
+
+/// Type of filesystem entry.
+public type FileType is
+    | File
+    | Dir
+    | Symlink
+    | Unknown;
+
+implement FileType {
+    /// Check if this is a regular file.
+    public fn is_file(&self) -> Bool {
+        match self {
+            File => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a directory.
+    public fn is_dir(&self) -> Bool {
+        match self {
+            Dir => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a symbolic link.
+    public fn is_symlink(&self) -> Bool {
+        match self {
+            Symlink => true,
+            _ => false,
+        }
+    }
+}
+
+implement Eq for FileType {
+    fn eq(&self, other: &FileType) -> Bool {
+        match (self, other) {
+            (File, File) => true,
+            (Dir, Dir) => true,
+            (Symlink, Symlink) => true,
+            (Unknown, Unknown) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Debug for FileType {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            File => f.write_str("File"),
+            Dir => f.write_str("Dir"),
+            Symlink => f.write_str("Symlink"),
+            Unknown => f.write_str("Unknown"),
+        }
+    }
+}
+
+implement Display for FileType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+// =============================================================================
+// Permissions
+// =============================================================================
+
+/// Unix file permissions.
+@cfg(unix)
+public type Permissions is {
+    mode: Int,
+};
+
+@cfg(unix)
+implement Permissions {
+    /// Create permissions from a Unix mode.
+    public fn from_mode(mode: Int) -> Permissions {
+        Permissions { mode: mode & 0o7777 }
+    }
+
+    /// Get the Unix mode.
+    public fn mode(&self) -> Int {
+        self.mode
+    }
+
+    /// Check if the file is read-only (no write permission for owner).
+    public fn readonly(&self) -> Bool {
+        (self.mode & 0o200) == 0
+    }
+
+    /// Set read-only (remove write permission for owner).
+    public fn set_readonly(&mut self, readonly: Bool) {
+        if readonly {
+            self.mode = self.mode & !0o200;
+        } else {
+            self.mode = self.mode | 0o200;
+        }
+    }
+}
+
+// =============================================================================
+// DirEntry
+// =============================================================================
+
+/// Entry in a directory listing.
+///
+/// Represents a file, directory, || symlink found while iterating a directory.
+///
+/// # Example
+/// ```verum
+/// for entry in fs.read_dir("/tmp")? {
+///     let entry = entry?;
+///     print(f"{entry.file_name()}: {entry.file_type()}");
+/// }
+/// ```
+public type DirEntry is {
+    path: PathBuf,
+    file_name: Text,
+    file_type: FileType,
+};
+
+implement DirEntry {
+    /// Get the full path to this entry.
+    public fn path(&self) -> Path {
+        self.path.as_path()
+    }
+
+    /// Get the file name of this entry.
+    public fn file_name(&self) -> &Text {
+        &self.file_name
+    }
+
+    /// Get the file type of this entry.
+    ///
+    /// This is usually available without a syscall (comes from readdir).
+    public fn file_type(&self) -> FileType {
+        self.file_type
+    }
+
+    /// Get full metadata for this entry.
+    ///
+    /// This may require an additional syscall.
+    public fn metadata(&self) -> IoResult<Metadata> {
+        metadata(&self.path.as_path())
+    }
+}
+
+implement Debug for DirEntry {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"DirEntry {{ path: {self.path}, file_type: {self.file_type} }}")
+    }
+}
+
+// =============================================================================
+// ReadDir Iterator
+// =============================================================================
+
+/// Iterator over directory entries.
+///
+/// Created by calling `read_dir()`.
+///
+/// Platform-specific implementation:
+/// - Linux: Uses getdents64 syscall with internal buffering
+/// - macOS: Uses opendir/readdir/closedir via libSystem
+public type ReadDir is {
+    // Linux: file descriptor for getdents64
+    fd: Int,
+    // macOS: opendir handle
+    dir_handle: Int,
+    base_path: PathBuf,
+    buffer: [Byte; 4096],
+    buffer_pos: Int,
+    buffer_len: Int,
+    finished: Bool,
+};
+
+// Linux implementation using getdents64
+@cfg(target_os = "linux")
+implement Iterator for ReadDir {
+    type Item = IoResult<DirEntry>;
+
+    fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
+        if self.finished {
+            return None;
+        }
+
+        loop {
+            // Check if we need to read more entries
+            if self.buffer_pos >= self.buffer_len {
+                match sys_getdents64(self.fd, &mut self.buffer) {
+                    Ok(n) => {
+                        if n == 0 {
+                            self.finished = true;
+                            return None;
+                        }
+                        self.buffer_len = n;
+                        self.buffer_pos = 0;
+                    }
+                    Err(e) => {
+                        self.finished = true;
+                        return Some(Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }));
+                    }
+                }
+            }
+
+            // Parse the dirent structure at current position
+            // Linux dirent64 layout: d_ino (8), d_off (8), d_reclen (2), d_type (1), d_name (...)
+            let entry_ptr = &self.buffer[self.buffer_pos..];
+            let d_reclen = ((entry_ptr[16] as UInt16) | ((entry_ptr[17] as UInt16) << 8)) as Int;
+            let d_type = entry_ptr[18];
+
+            // Extract name (null-terminated, starts at offset 19)
+            let mut name_end = 19;
+            while name_end < d_reclen && entry_ptr[name_end] != 0 {
+                name_end = name_end + 1;
+            }
+            let name = Text.from_utf8_lossy(&entry_ptr[19..name_end]);
+
+            // Move to next entry
+            self.buffer_pos = self.buffer_pos + d_reclen;
+
+            // Skip . and ..
+            if name == "." || name == ".." {
+                continue;
+            }
+
+            // Determine file type from d_type
+            // DT_UNKNOWN=0, DT_REG=8, DT_DIR=4, DT_LNK=10
+            let file_type = match d_type {
+                4 => FileType.Dir,     // DT_DIR
+                8 => FileType.File,    // DT_REG
+                10 => FileType.Symlink, // DT_LNK
+                _ => FileType.Unknown,
+            };
+
+            let mut full_path = self.base_path.clone();
+            full_path.push_str(&name);
+
+            return Some(Ok(DirEntry {
+                path: full_path,
+                file_name: name,
+                file_type: file_type,
+            }));
+        }
+    }
+}
+
+@cfg(target_os = "linux")
+implement Drop for ReadDir {
+    fn drop(&mut self) {
+        let _ = sys_close(self.fd);
+    }
+}
+
+// macOS implementation using opendir/readdir/closedir
+@cfg(target_os = "macos")
+implement Iterator for ReadDir {
+    type Item = IoResult<DirEntry>;
+
+    fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
+        if self.finished {
+            return None;
+        }
+
+        loop {
+            let entry = unsafe { sys_readdir(self.dir_handle) };
+            if entry.is_null() {
+                self.finished = true;
+                return None;
+            }
+
+            // Extract name from dirent
+            let name_len = unsafe { (*entry).d_namlen as Int };
+            let name_bytes = unsafe { &(*entry).d_name[..name_len] };
+            let name = Text.from_utf8_lossy(name_bytes);
+
+            // Skip . and ..
+            if name == "." || name == ".." {
+                continue;
+            }
+
+            // Determine file type from d_type
+            let d_type = unsafe { (*entry).d_type };
+            let file_type = match d_type {
+                4 => FileType.Dir,     // DT_DIR
+                8 => FileType.File,    // DT_REG
+                10 => FileType.Symlink, // DT_LNK
+                _ => FileType.Unknown,
+            };
+
+            let mut full_path = self.base_path.clone();
+            full_path.push_str(&name);
+
+            return Some(Ok(DirEntry {
+                path: full_path,
+                file_name: name,
+                file_type: file_type,
+            }));
+        }
+    }
+}
+
+@cfg(target_os = "macos")
+implement Drop for ReadDir {
+    fn drop(&mut self) {
+        if !self.dir_handle.is_null() {
+            unsafe { sys_closedir(self.dir_handle) };
+        }
+    }
+}
+
+// =============================================================================
+// Filesystem Functions
+// =============================================================================
+
+/// Get metadata for a file || directory.
+///
+/// This follows symbolic links. Use `symlink_metadata` to get
+/// metadata about the symlink itself.
+///
+/// # Example
+/// ```verum
+/// let meta = fs.metadata("/path/to/file")?;
+/// print(f"Size: {meta.len()}");
+/// ```
+public fn metadata(path: &Path) -> IoResult<Metadata> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+    let mut stat_buf = unsafe { @zeroed() as Stat };
+
+    match sys_stat(path_bytes, &mut stat_buf) {
+        Ok(()) => {
+            let raw = FsMetadataRaw.from_stat(&stat_buf, true);
+            Ok(Metadata { raw: raw })
+        }
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Get metadata for a symbolic link (doesn't follow the link).
+public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+    let mut stat_buf = unsafe { @zeroed() as Stat };
+
+    match sys_lstat(path_bytes, &mut stat_buf) {
+        Ok(()) => {
+            let raw = FsMetadataRaw.from_stat(&stat_buf, false);
+            Ok(Metadata { raw: raw })
+        }
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Check if a path exists.
+///
+/// # Example
+/// ```verum
+/// if fs.exists("/path/to/file") {
+///     print("File exists");
+/// }
+/// ```
+public fn exists(path: &Path) -> Bool {
+    // Use stat to check existence (follows symlinks)
+    metadata(path).is_ok()
+}
+
+/// Check if path is a regular file.
+public fn is_file(path: &Path) -> Bool {
+    match metadata(path) {
+        Ok(meta) => meta.is_file(),
+        Err(_) => false,
+    }
+}
+
+/// Check if path is a directory.
+public fn is_dir(path: &Path) -> Bool {
+    match metadata(path) {
+        Ok(meta) => meta.is_dir(),
+        Err(_) => false,
+    }
+}
+
+/// Check if path is a symbolic link.
+public fn is_symlink(path: &Path) -> Bool {
+    match symlink_metadata(path) {
+        Ok(meta) => meta.is_symlink(),
+        Err(_) => false,
+    }
+}
+
+/// Create a directory.
+///
+/// Parent directories must already exist.
+///
+/// # Example
+/// ```verum
+/// fs.create_dir("/tmp/my_app")?;
+/// ```
+public fn create_dir(path: &Path) -> IoResult<()> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+    // Default mode: rwxr-xr-x (0755)
+    let mode = 0o755;
+
+    match sys_mkdir(path_bytes, mode) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Create a directory && all parent directories.
+///
+/// # Example
+/// ```verum
+/// fs.create_dir_all("/tmp/my_app/subdir/deep")?;
+/// ```
+public fn create_dir_all(path: &Path) -> IoResult<()> {
+    // If path already exists as a directory, success
+    if is_dir(path) {
+        return Ok(());
+    }
+
+    // Try to create parent first
+    if let Some(parent) = path.parent() {
+        if !parent.as_str().is_empty() && !is_dir(&parent) {
+            create_dir_all(&parent)?;
+        }
+    }
+
+    // Create the directory
+    match create_dir(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == IoErrorKind.AlreadyExists => {
+            // Race condition: another process created it
+            if is_dir(path) { Ok(()) } else { Err(e) }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Remove an empty directory.
+///
+/// # Example
+/// ```verum
+/// fs.remove_dir("/tmp/my_app")?;
+/// ```
+public fn remove_dir(path: &Path) -> IoResult<()> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    match sys_rmdir(path_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Remove a directory && all its contents.
+///
+/// # Warning
+/// This recursively deletes everything. Use with caution.
+///
+/// # Example
+/// ```verum
+/// fs.remove_dir_all("/tmp/my_app")?;
+/// ```
+@allow(unbounded_recursion)
+public fn remove_dir_all(path: &Path) -> IoResult<()> {
+    // First, remove all contents
+    for entry_result in read_dir(path)? {
+        let entry = entry_result?;
+        let entry_path = entry.path();
+
+        if entry.file_type().is_dir() {
+            // Recursively remove subdirectory
+            remove_dir_all(&entry_path)?;
+        } else {
+            // Remove file
+            remove_file(&entry_path)?;
+        }
+    }
+
+    // Then remove the empty directory
+    remove_dir(path)
+}
+
+/// Read the contents of a directory.
+///
+/// Returns an iterator over directory entries.
+///
+/// # Example
+/// ```verum
+/// for entry in fs.read_dir("/tmp")? {
+///     let entry = entry?;
+///     print(entry.file_name());
+/// }
+/// ```
+@cfg(target_os = "linux")
+public fn read_dir(path: &Path) -> IoResult<ReadDir> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    // Open directory with O_RDONLY | O_DIRECTORY
+    match sys_open(path_bytes, O_RDONLY | O_DIRECTORY, 0) {
+        Ok(fd) => {
+            Ok(ReadDir {
+                fd: fd,
+                base_path: path.to_path_buf(),
+                buffer: [0; 4096],
+                buffer_pos: 0,
+                buffer_len: 0,
+                finished: false,
+            })
+        }
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+@cfg(target_os = "macos")
+public fn read_dir(path: &Path) -> IoResult<ReadDir> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    // Null-terminate the path
+    let mut path_buf = [0_u8; 4096];
+    let len = path_bytes.len().min(4095);
+    path_buf[..len].copy_from_slice(&path_bytes[..len]);
+    path_buf[len] = 0;
+
+    let dir_handle = unsafe { sys.darwin.libsystem.opendir(path_buf.as_ptr() as &Byte) };
+    if dir_handle.is_null() {
+        let err = sys.darwin.libsystem.errno();
+        return Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {err}") });
+    }
+
+    Ok(ReadDir {
+        fd: 0,
+        dir_handle: dir_handle as Int,
+        base_path: path.to_path_buf(),
+        buffer: [0; 4096],
+        buffer_pos: 0,
+        buffer_len: 0,
+        finished: false,
+    })
+}
+
+/// Remove a file.
+///
+/// # Example
+/// ```verum
+/// fs.remove_file("/tmp/old_file.txt")?;
+/// ```
+public fn remove_file(path: &Path) -> IoResult<()> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    match sys_unlink(path_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Rename a file || directory.
+///
+/// # Example
+/// ```verum
+/// fs.rename("/tmp/old.txt", "/tmp/new.txt")?;
+/// ```
+public fn rename(from: &Path, to: &Path) -> IoResult<()> {
+    let from_str = from.as_str();
+    let to_str = to.as_str();
+    let from_bytes = from_str.as_bytes();
+    let to_bytes = to_str.as_bytes();
+
+    match sys_rename(from_bytes, to_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Copy a file.
+///
+/// Returns the number of bytes copied.
+///
+/// # Example
+/// ```verum
+/// let bytes = fs.copy("/tmp/original.txt", "/tmp/copy.txt")?;
+/// print(f"Copied {bytes} bytes");
+/// ```
+public fn copy(from: &Path, to: &Path) -> IoResult<Int> {
+    // Open source file for reading
+    let mut src = File.open(&from.to_text())?;
+
+    // Open destination file for writing (create/truncate)
+    let mut dst = File.create(&to.to_text())?;
+
+    // Copy in chunks
+    let mut buf = [0_u8; 8192];
+    let mut total = 0;
+
+    loop {
+        let n = src.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        // Write all bytes from buffer
+        let mut written = 0;
+        while written < n {
+            let w = dst.write(&buf[written..n])?;
+            if w == 0 {
+                return Err(StreamError { kind: IoErrorKind.WriteZero, message: Some("write returned 0") });
+            }
+            written = written + w;
+        }
+        total = total + n;
+    }
+
+    Ok(total)
+}
+
+/// Create a hard link.
+///
+/// # Example
+/// ```verum
+/// fs.hard_link("/tmp/original.txt", "/tmp/link.txt")?;
+/// ```
+public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
+    let src_str = src.as_str();
+    let dst_str = dst.as_str();
+    let src_bytes = src_str.as_bytes();
+    let dst_bytes = dst_str.as_bytes();
+
+    match sys_link(src_bytes, dst_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Create a symbolic link.
+///
+/// # Example
+/// ```verum
+/// fs.symlink("/tmp/original.txt", "/tmp/symlink.txt")?;
+/// ```
+@cfg(unix)
+public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
+    let src_str = src.as_str();
+    let dst_str = dst.as_str();
+    let src_bytes = src_str.as_bytes();
+    let dst_bytes = dst_str.as_bytes();
+
+    match sys_symlink(src_bytes, dst_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Read the target of a symbolic link.
+///
+/// # Example
+/// ```verum
+/// let target = fs.read_link("/tmp/symlink")?;
+/// print(f"Points to: {target}");
+/// ```
+public fn read_link(path: &Path) -> IoResult<PathBuf> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+    let mut buf = [0_u8; 4096];
+
+    match sys_readlink(path_bytes, &mut buf) {
+        Ok(n) => {
+            let target = Text.from_utf8_lossy(&buf[..n]);
+            Ok(PathBuf.from(&target))
+        }
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Canonicalize a path (resolve all symlinks, . && ..).
+///
+/// Returns an absolute path.
+///
+/// # Example
+/// ```verum
+/// let real = fs.canonicalize("./relative/../path")?;
+/// print(f"Real path: {real}");
+/// ```
+public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
+    // Get absolute path first
+    let mut result = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        let mut cwd = current_dir()?;
+        cwd.push(path);
+        cwd
+    };
+
+    // Resolve symlinks by following them
+    let mut components = List.new();
+    for component in result.components() {
+        match component.as_str() {
+            "." => {
+                // Skip current dir
+            }
+            ".." => {
+                // Go up one level
+                if !components.is_empty() {
+                    components.pop();
+                }
+            }
+            name => {
+                components.push(name.clone());
+
+                // Check if this path so far is a symlink
+                let mut partial = PathBuf.from_str("/");
+                let comps_copy = components.clone();
+                for c in comps_copy.iter() {
+                    partial.push_str(c);
+                }
+
+                if is_symlink(&partial.as_path()) {
+                    // Read the link and recurse
+                    let target = read_link(&partial.as_path())?;
+                    if target.as_path().is_absolute() {
+                        // Start over from the symlink target
+                        components.clear();
+                        for c in target.components() {
+                            if c.as_str() != "/" {
+                                components.push(c.to_text());
+                            }
+                        }
+                    } else {
+                        // Relative symlink - replace last component
+                        components.pop();
+                        for c in target.components() {
+                            let s = c.as_str();
+                            if s == ".." && !components.is_empty() {
+                                components.pop();
+                            } else if s != "." && s != "/" {
+                                components.push(c.to_text());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build the canonical path
+    let mut canonical = PathBuf.from_str("/");
+    for c in &components {
+        canonical.push_str(c);
+    }
+
+    Ok(canonical)
+}
+
+/// Set permissions on a file.
+@cfg(unix)
+public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    match sys_chmod(path_bytes, perm.mode) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Get the temporary directory.
+///
+/// Returns `/tmp` on Unix, `%TEMP%` on Windows.
+@cfg(unix)
+public fn temp_dir() -> PathBuf {
+    // Check TMPDIR environment variable first (standard Unix behavior)
+    match env_var("TMPDIR") {
+        Ok(dir) => {
+            if !dir.is_empty() {
+                PathBuf.from_str(dir.as_str())
+            } else {
+                PathBuf.from_str("/tmp")
+            }
+        }
+        Err(_) => PathBuf.from_str("/tmp"),
+    }
+}
+
+@cfg(target_os = "windows")
+public fn temp_dir() -> PathBuf {
+    // Check TEMP, TMP environment variables first (standard Windows behavior)
+    match env_var("TEMP") {
+        Ok(dir) => {
+            if !dir.is_empty() {
+                PathBuf.from_str(dir.as_str())
+            } else {
+                match env_var("TMP") {
+                    Ok(tmp) => {
+                        if !tmp.is_empty() {
+                            PathBuf.from_str(tmp.as_str())
+                        } else {
+                            PathBuf.from_str("C:\\Windows\\Temp")
+                        }
+                    }
+                    Err(_) => PathBuf.from_str("C:\\Windows\\Temp"),
+                }
+            }
+        }
+        Err(_) => {
+            match env_var("TMP") {
+                Ok(tmp) => {
+                    if !tmp.is_empty() {
+                        PathBuf.from_str(tmp.as_str())
+                    } else {
+                        PathBuf.from_str("C:\\Windows\\Temp")
+                    }
+                }
+                Err(_) => PathBuf.from_str("C:\\Windows\\Temp"),
+            }
+        }
+    }
+}
+
+/// Get the current working directory.
+public fn current_dir() -> IoResult<PathBuf> {
+    let mut buf = [0_u8; 4096];
+
+    match sys_getcwd(&mut buf) {
+        Ok(n) => {
+            // Find the null terminator
+            let len = buf[..n].iter().position(|&b| b == 0).unwrap_or(n);
+            let path = Text.from_utf8_lossy(&buf[..len]);
+            Ok(PathBuf.from(&path))
+        }
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+/// Set the current working directory.
+public fn set_current_dir(path: &Path) -> IoResult<()> {
+    let path_str = path.as_str();
+    let path_bytes = path_str.as_bytes();
+
+    match sys_chdir(path_bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+    }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Read the entire contents of a file into bytes.
+///
+/// Convenience wrapper around File.open + read_to_end.
+///
+/// # Example
+/// ```verum
+/// let data = fs.read("/path/to/file")?;
+/// ```
+public fn read(path: &Path) -> IoResult<List<Byte>> {
+    file_read(&path.to_text())
+}
+
+/// Read the entire contents of a file into a string.
+///
+/// # Example
+/// ```verum
+/// let contents = fs.read_to_string("/path/to/file.txt")?;
+/// ```
+public fn read_to_string(path: &Path) -> IoResult<Text> {
+    file_read_to_string(&path.to_text())
+}
+
+/// Write bytes to a file.
+///
+/// Creates the file if it doesn't exist, truncates if it does.
+///
+/// # Example
+/// ```verum
+/// fs.write("/path/to/file", b"Hello, World!")?;
+/// ```
+public fn write(path: &Path, contents: &[Byte]) -> IoResult<()> {
+    let mut file = File.create(&path.to_text())?;
+    let mut written = 0;
+    while written < contents.len() {
+        let n = file.write(&contents[written..])?;
+        if n == 0 {
+            return Err(StreamError { kind: IoErrorKind.WriteZero, message: Some("write returned 0") });
+        }
+        written = written + n;
+    }
+    Ok(())
+}
+
+/// Write a string to a file.
+///
+/// # Example
+/// ```verum
+/// fs.write_str("/path/to/file.txt", "Hello, World!")?;
+/// ```
+public fn write_str(path: &Path, contents: &Text) -> IoResult<()> {
+    file_write(&path.to_text(), contents)
+}
+
+// =============================================================================
+// Walk Directory
+// =============================================================================
+
+/// Recursively walk a directory tree.
+///
+/// # Example
+/// ```verum
+/// for entry in fs.walk_dir("/home/user")? {
+///     let entry = entry?;
+///     print(entry.path());
+/// }
+/// ```
+public fn walk_dir(path: &Path) -> IoResult<WalkDir> {
+    let read_dir = read_dir(path)?;
+    Ok(WalkDir {
+        stack: List.of(read_dir),
+    })
+}
+
+/// Iterator that recursively walks a directory tree.
+public type WalkDir is {
+    stack: List<ReadDir>,
+};
+
+implement Iterator for WalkDir {
+    type Item = IoResult<DirEntry>;
+
+    fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
+        loop {
+            if self.stack.is_empty() {
+                return None;
+            }
+
+            let current = self.stack.last_mut()?;
+
+            match current.next() {
+                Some(Ok(entry)) => {
+                    // If it's a directory, push a new ReadDir
+                    if entry.file_type().is_dir() {
+                        if let Ok(sub_dir) = read_dir(&entry.path()) {
+                            self.stack.push(sub_dir);
+                        }
+                    }
+                    return Some(Ok(entry));
+                }
+                Some(Err(e)) => {
+                    return Some(Err(e));
+                }
+                None => {
+                    // This iterator is exhausted, pop it
+                    self.stack.pop();
+                }
+            }
+        }
+    }
+}

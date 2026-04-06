@@ -1,0 +1,15 @@
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+fn main() {
+    // Test: Unit variant pattern
+    let color = Color.Red;
+    match color {
+        Color.Red => print(f"Red"),
+        Color.Green => print(f"Green"),
+        Color.Blue => print(f"Blue"),
+    }
+    print(f"Unit variant pattern test complete!");
+}

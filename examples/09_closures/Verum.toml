@@ -1,0 +1,7 @@
+[package]
+name = "closures"
+version = "0.1.0"
+description = "Closures and higher-order functions"
+
+[language]
+profile = "application"

@@ -1,0 +1,34 @@
+// Test 1: Simple variant (enum)
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+// Test 2: Variant with data
+type Option<T> is
+    | Some(T)
+    | None;
+
+// Test 3: Variant with named fields
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float };
+
+fn main() {
+    print("=== Variant Types Test ===");
+
+    // Test simple variant
+    let color = Red;
+    print("Created Red color");
+
+    // Test Option
+    let some_val = Some(42);
+    let none_val = None;
+    print("Created Option values");
+
+    // Test Shape
+    let circle = Circle { radius: 5.0 };
+    print("Created Circle");
+
+    print("=== Test Complete ===");
+}

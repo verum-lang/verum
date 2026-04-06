@@ -1,0 +1,71 @@
+// First half
+
+type Display is protocol {
+    fn display(self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Int;
+};
+
+type Ord is protocol extends Eq {
+    fn cmp(&self, other: &Self) -> Int;
+
+    fn lt(&self, other: &Self) -> Bool {
+        self.cmp(other) < 0
+    }
+};
+
+type Point is { x: Int, y: Int };
+
+implement Display for Point {
+    fn display(self) -> Text {
+        "Point"
+    }
+}
+
+implement Debug for Point {
+    fn debug(&self) -> Text {
+        "Point"
+    }
+}
+
+implement Eq for Point {
+    fn eq(&self, other: &Self) -> Bool {
+        true
+    }
+}
+
+implement Ord for Point {
+    fn cmp(&self, other: &Self) -> Int {
+        0
+    }
+}
+
+type Converter<T> is protocol {
+    fn convert(&self) -> T;
+};
+
+implement Converter<Text> for Point {
+    fn convert(&self) -> Text {
+        "point"
+    }
+}
+
+fn main() {
+    print("First half parses");
+}

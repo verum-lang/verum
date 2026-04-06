@@ -1,0 +1,386 @@
+# Verum Compliance Suite (VCS) - Platform-Specific Configuration
+#
+# This file defines platform-specific settings for VCS test execution,
+# benchmark adjustments, and CI/CD workflow configuration.
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+
+# =============================================================================
+# Global Platform Settings
+# =============================================================================
+
+[global]
+# Supported platforms for CI matrix
+supported_platforms = [
+    "linux-x64",
+    "linux-arm64",
+    "macos-x64",
+    "macos-arm64",
+    "windows-x64"
+]
+
+# Primary platforms (must pass all tests)
+primary_platforms = [
+    "linux-x64",
+    "macos-arm64",
+    "windows-x64"
+]
+
+# Secondary platforms (best-effort)
+secondary_platforms = [
+    "linux-arm64",
+    "macos-x64"
+]
+
+# =============================================================================
+# Linux x86_64 (Primary)
+# =============================================================================
+
+[platforms.linux-x64]
+name = "Linux x86_64"
+os = "ubuntu-22.04"
+arch = "x86_64"
+tier = "primary"
+
+[platforms.linux-x64.rust]
+toolchain = "stable"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[platforms.linux-x64.dependencies]
+llvm_version = "14"
+llvm_package = "llvm-14-dev"
+z3_package = "libz3-dev"
+clang_package = "clang-14"
+additional = ["cmake", "pkg-config", "libssl-dev"]
+
+[platforms.linux-x64.environment]
+LLVM_SYS_140_PREFIX = "/usr/lib/llvm-14"
+LD_LIBRARY_PATH = "/usr/lib/llvm-14/lib"
+
+[platforms.linux-x64.benchmark_adjustments]
+# No adjustments needed - this is the reference platform
+multiplier = 1.0
+notes = "Reference platform for benchmark baselines"
+
+[platforms.linux-x64.test_settings]
+parallel = 8
+timeout_multiplier = 1.0
+enable_sanitizers = true
+enable_miri = true
+
+# =============================================================================
+# Linux x86_64 (Ubuntu 24.04)
+# =============================================================================
+
+[platforms.linux-x64-ubuntu24]
+name = "Linux x86_64 (Ubuntu 24.04)"
+os = "ubuntu-24.04"
+arch = "x86_64"
+tier = "primary"
+
+[platforms.linux-x64-ubuntu24.rust]
+toolchain = "stable"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[platforms.linux-x64-ubuntu24.dependencies]
+llvm_version = "16"
+llvm_package = "llvm-16-dev"
+z3_package = "libz3-dev"
+clang_package = "clang-16"
+additional = ["cmake", "pkg-config", "libssl-dev"]
+
+[platforms.linux-x64-ubuntu24.environment]
+LLVM_SYS_160_PREFIX = "/usr/lib/llvm-16"
+LD_LIBRARY_PATH = "/usr/lib/llvm-16/lib"
+
+[platforms.linux-x64-ubuntu24.benchmark_adjustments]
+multiplier = 1.0
+notes = "Modern Linux baseline"
+
+[platforms.linux-x64-ubuntu24.test_settings]
+parallel = 8
+timeout_multiplier = 1.0
+enable_sanitizers = true
+enable_miri = true
+
+# =============================================================================
+# Linux ARM64
+# =============================================================================
+
+[platforms.linux-arm64]
+name = "Linux ARM64"
+os = "ubuntu-22.04"
+arch = "aarch64"
+tier = "secondary"
+
+[platforms.linux-arm64.rust]
+toolchain = "stable"
+targets = ["aarch64-unknown-linux-gnu"]
+
+[platforms.linux-arm64.dependencies]
+llvm_version = "14"
+llvm_package = "llvm-14-dev"
+z3_package = "libz3-dev"
+clang_package = "clang-14"
+additional = ["cmake", "pkg-config", "libssl-dev"]
+
+[platforms.linux-arm64.environment]
+LLVM_SYS_140_PREFIX = "/usr/lib/llvm-14"
+
+[platforms.linux-arm64.benchmark_adjustments]
+# ARM may have different performance characteristics
+multiplier = 1.1
+notes = "ARM64 may have 10% variance in benchmarks"
+
+[platforms.linux-arm64.test_settings]
+parallel = 4
+timeout_multiplier = 1.2
+enable_sanitizers = true
+enable_miri = false  # Miri may have issues on ARM
+
+# =============================================================================
+# macOS x86_64 (Intel)
+# =============================================================================
+
+[platforms.macos-x64]
+name = "macOS x86_64"
+os = "macos-13"
+arch = "x86_64"
+tier = "secondary"
+
+[platforms.macos-x64.rust]
+toolchain = "stable"
+targets = ["x86_64-apple-darwin"]
+
+[platforms.macos-x64.dependencies]
+llvm_version = "21"
+llvm_package = "llvm@21"
+z3_package = "z3"
+package_manager = "brew"
+additional = ["cmake", "pkg-config", "openssl"]
+
+[platforms.macos-x64.environment]
+LLVM_SYS_210_PREFIX = "$(brew --prefix llvm@21)"
+DYLD_LIBRARY_PATH = "$(brew --prefix llvm@21)/lib"
+
+[platforms.macos-x64.benchmark_adjustments]
+multiplier = 1.05
+notes = "Intel macOS baseline"
+
+[platforms.macos-x64.test_settings]
+parallel = 8
+timeout_multiplier = 1.0
+enable_sanitizers = true
+enable_miri = true
+
+# =============================================================================
+# macOS ARM64 (Apple Silicon) - Primary
+# =============================================================================
+
+[platforms.macos-arm64]
+name = "macOS ARM64 (Apple Silicon)"
+os = "macos-14"
+arch = "aarch64"
+tier = "primary"
+
+[platforms.macos-arm64.rust]
+toolchain = "stable"
+targets = ["aarch64-apple-darwin"]
+
+[platforms.macos-arm64.dependencies]
+llvm_version = "21"
+llvm_package = "llvm@21"
+z3_package = "z3"
+package_manager = "brew"
+additional = ["cmake", "pkg-config", "openssl"]
+
+[platforms.macos-arm64.environment]
+LLVM_SYS_210_PREFIX = "$(brew --prefix llvm@21)"
+DYLD_LIBRARY_PATH = "$(brew --prefix llvm@21)/lib"
+
+[platforms.macos-arm64.benchmark_adjustments]
+# Apple Silicon is often faster than reference
+multiplier = 0.85
+notes = "Apple Silicon often outperforms x86 reference"
+
+[platforms.macos-arm64.test_settings]
+parallel = 8
+timeout_multiplier = 0.9  # Faster, so shorter timeouts ok
+enable_sanitizers = true
+enable_miri = true
+
+# =============================================================================
+# Windows x86_64 (Primary)
+# =============================================================================
+
+[platforms.windows-x64]
+name = "Windows x86_64"
+os = "windows-2022"
+arch = "x86_64"
+tier = "primary"
+
+[platforms.windows-x64.rust]
+toolchain = "stable"
+targets = ["x86_64-pc-windows-msvc"]
+
+[platforms.windows-x64.dependencies]
+llvm_version = "21"
+llvm_package = "llvm --version=21.1.0"
+z3_package = "z3"
+package_manager = "choco"
+additional = ["cmake"]
+
+[platforms.windows-x64.environment]
+LLVM_SYS_210_PREFIX = "C:\\Program Files\\LLVM"
+
+[platforms.windows-x64.benchmark_adjustments]
+# Windows often has higher overhead
+multiplier = 1.15
+notes = "Windows may show 15% higher latency due to system overhead"
+
+[platforms.windows-x64.test_settings]
+parallel = 4  # Windows often has lower default parallelism
+timeout_multiplier = 1.5  # Windows tests may be slower
+enable_sanitizers = false  # ASAN on Windows is problematic
+enable_miri = true
+
+# Windows-specific test exclusions
+[platforms.windows-x64.exclusions]
+# Tests that don't work on Windows
+patterns = [
+    "**/unix_signals/**",
+    "**/posix_**",
+    "**/fork_**"
+]
+reason = "Platform-specific tests for Unix"
+
+# =============================================================================
+# Cross-Compilation Targets
+# =============================================================================
+
+[cross_compile]
+enabled = true
+
+[cross_compile.targets.linux-musl]
+name = "Linux x86_64 (musl)"
+target = "x86_64-unknown-linux-musl"
+tier = "secondary"
+use_cross = true
+test_enabled = false  # Build-only for now
+
+[cross_compile.targets.linux-arm64-musl]
+name = "Linux ARM64 (musl)"
+target = "aarch64-unknown-linux-musl"
+tier = "secondary"
+use_cross = true
+test_enabled = false
+
+# =============================================================================
+# CI Runner Configuration
+# =============================================================================
+
+[ci]
+# GitHub Actions runner labels
+[ci.runners]
+linux-x64 = "ubuntu-22.04"
+linux-x64-ubuntu24 = "ubuntu-24.04"
+linux-arm64 = "ubuntu-22.04"  # Uses QEMU emulation
+macos-x64 = "macos-13"
+macos-arm64 = "macos-14"
+windows-x64 = "windows-2022"
+
+# Job timeouts (minutes)
+[ci.timeouts]
+l0_tests = 30
+l1_tests = 45
+l2_tests = 60
+l3_tests = 120
+l4_tests = 90
+fuzz = 540  # 9 hours max
+bench = 60
+differential = 60
+
+# Cache configuration
+[ci.cache]
+enabled = true
+prefix_key = "vcs-v1"
+cache_on_failure = true
+paths = [
+    "~/.cargo/registry",
+    "~/.cargo/git",
+    "target/",
+    "vcs/runner/*/target/"
+]
+
+# =============================================================================
+# Platform-Specific Test Adjustments
+# =============================================================================
+
+[test_adjustments]
+# Tests that need platform-specific handling
+
+[test_adjustments.async_tests]
+# Async tests may behave differently across platforms
+timeout_multiplier_windows = 2.0
+timeout_multiplier_macos = 1.2
+flaky_retry_count = 3
+
+[test_adjustments.memory_tests]
+# Memory behavior varies by platform
+tolerance_linux = 5
+tolerance_macos = 10
+tolerance_windows = 15
+
+[test_adjustments.benchmark_stability]
+# Benchmarks need warm-up on different platforms
+warmup_linux = 100
+warmup_macos = 150
+warmup_windows = 200
+# Minimum stable samples
+stable_samples_linux = 500
+stable_samples_macos = 500
+stable_samples_windows = 300
+
+# =============================================================================
+# Feature Flags by Platform
+# =============================================================================
+
+[features]
+# Features enabled/disabled by platform
+
+[features.linux-x64]
+default_features = true
+enabled = ["full-llvm", "z3-proofs", "async-runtime"]
+disabled = []
+
+[features.macos-arm64]
+default_features = true
+enabled = ["full-llvm", "z3-proofs", "async-runtime"]
+disabled = []
+
+[features.windows-x64]
+default_features = true
+enabled = ["full-llvm", "z3-proofs", "async-runtime"]
+disabled = ["unix-signals"]
+
+# =============================================================================
+# Notification Settings
+# =============================================================================
+
+[notifications]
+# Platform-specific notification settings
+
+[notifications.slack]
+enabled = true
+channel = "#verum-ci"
+mention_on_failure = "@channel"
+platforms_to_report = ["linux-x64", "macos-arm64", "windows-x64"]
+
+[notifications.github]
+enabled = true
+create_issues = true
+issue_labels_by_platform = {
+    "linux-x64" = ["platform:linux", "ci"],
+    "macos-arm64" = ["platform:macos", "ci"],
+    "windows-x64" = ["platform:windows", "ci"]
+}

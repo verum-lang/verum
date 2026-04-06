@@ -1,0 +1,24 @@
+// Example: Duration type with const ZERO in impl block
+
+type Duration is {
+    secs: Int,
+    nanos: Int,
+};
+
+implement Duration {
+    pub const ZERO: Duration = Duration { secs: 0, nanos: 0 };
+    pub const MAX: Duration = Duration { secs: 9999, nanos: 999999999 };
+
+    pub fn new(secs: Int, nanos: Int) -> Duration {
+        Duration { secs: secs, nanos: nanos }
+    }
+
+    pub fn is_zero(self: &Self) -> Bool {
+        self.secs == 0 && self.nanos == 0
+    }
+}
+
+// Example usage
+fn main() -> Duration {
+    Duration.ZERO
+}

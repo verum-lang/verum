@@ -1,0 +1,527 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L2
+// @tags: proof-stability, smt, contracts, loop-invariants, invariant
+// @timeout: 20000
+// @expected-proof-time: <120ms
+
+/// Description: Tests SMT stability for loop invariant verification
+/// Regression Detection: Loop invariants require inductive reasoning and are
+/// among the more complex SMT proofs. Expected time is <120ms. Proofs exceeding
+/// 250ms or showing non-determinism indicate potential regression.
+
+// ============================================================================
+// Simple Loop Invariants
+// ============================================================================
+
+/// Sum accumulator invariant
+@verify(proof)
+fn sum_to_n(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result == n * (n + 1) / 2;
+    "
+    let mut sum = 0;
+    let mut i = 0;
+    while i <= n
+        invariant sum == i * (i + 1) / 2 - i
+        invariant i >= 0 && i <= n + 1
+    {
+        sum += i;
+        i += 1;
+    }
+    sum
+}
+
+/// Counter invariant
+@verify(proof)
+fn count_up(start: Int, end: Int) -> Int {
+    contract#"
+        requires start <= end;
+        ensures result == end - start;
+    "
+    let mut count = 0;
+    let mut i = start;
+    while i < end
+        invariant count == i - start
+        invariant i >= start && i <= end
+    {
+        count += 1;
+        i += 1;
+    }
+    count
+}
+
+/// Product accumulator invariant
+@verify(proof)
+fn factorial(n: Int{>= 0 && <= 12}) -> Int {
+    contract#"
+        requires n >= 0 && n <= 12;
+        ensures result > 0;
+    "
+    let mut prod = 1;
+    let mut i = 1;
+    while i <= n
+        invariant prod > 0
+        invariant i >= 1 && i <= n + 1
+    {
+        prod *= i;
+        i += 1;
+    }
+    prod
+}
+
+// ============================================================================
+// Array/List Loop Invariants
+// ============================================================================
+
+/// All elements processed invariant
+@verify(proof)
+fn sum_list(list: &List<Int>) -> Int {
+    contract#"
+        ensures result == list.fold(0, |acc, x| acc + x);
+    "
+    let mut sum = 0;
+    let mut i = 0;
+    while i < list.len()
+        invariant i >= 0 && i <= list.len()
+        invariant sum == list.slice(0, i).fold(0, |acc, x| acc + x)
+    {
+        sum += list[i];
+        i += 1;
+    }
+    sum
+}
+
+/// Index bounds invariant
+@verify(proof)
+fn find_first_negative(list: &List<Int>) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < list.len() && list[idx] < 0,
+            None => forall i. 0 <= i < list.len() implies list[i] >= 0
+        };
+    "
+    let mut i = 0;
+    while i < list.len()
+        invariant i >= 0 && i <= list.len()
+        invariant forall j. 0 <= j < i implies list[j] >= 0
+    {
+        if list[i] < 0 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Transformation invariant
+@verify(proof)
+fn square_all(list: List<Int>) -> List<Int> {
+    contract#"
+        ensures result.len() == list.len();
+        ensures forall i. 0 <= i < result.len() implies result[i] == list[i] * list[i];
+    "
+    let mut result: List<Int> = list![];
+    let mut i = 0;
+    while i < list.len()
+        invariant i >= 0 && i <= list.len()
+        invariant result.len() == i
+        invariant forall j. 0 <= j < i implies result[j] == list[j] * list[j]
+    {
+        result = result.push(list[i] * list[i]);
+        i += 1;
+    }
+    result
+}
+
+// ============================================================================
+// Ordering Invariants
+// ============================================================================
+
+/// Sorted search invariant
+@verify(proof)
+fn binary_search(sorted: &List<Int>, target: Int) -> Maybe<Int> {
+    contract#"
+        requires forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j];
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < sorted.len() && sorted[idx] == target,
+            None => true
+        };
+    "
+    if sorted.is_empty() {
+        return None;
+    }
+
+    let mut low = 0;
+    let mut high = sorted.len();
+
+    while low < high
+        invariant low >= 0 && high <= sorted.len()
+        invariant low <= high
+        // Target, if present, is in [low, high)
+        invariant forall i. 0 <= i < low implies sorted[i] < target
+        invariant forall i. high <= i < sorted.len() implies sorted[i] > target
+    {
+        let mid = low + (high - low) / 2;
+        if sorted[mid] == target {
+            return Some(mid);
+        } else if sorted[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    None
+}
+
+/// Insertion sort invariant
+@verify(proof)
+fn insertion_sort(list: List<Int>) -> List<Int> {
+    contract#"
+        ensures result.len() == list.len();
+        ensures forall i, j. 0 <= i < j < result.len() implies result[i] <= result[j];
+    "
+    let mut sorted: List<Int> = list![];
+
+    let mut k = 0;
+    while k < list.len()
+        invariant k >= 0 && k <= list.len()
+        invariant sorted.len() == k
+        invariant forall i, j. 0 <= i < j < sorted.len() implies sorted[i] <= sorted[j]
+    {
+        // Insert list[k] into sorted position
+        let value = list[k];
+        let mut inserted: List<Int> = list![];
+        let mut done = false;
+
+        let mut i = 0;
+        while i < sorted.len()
+            invariant i >= 0 && i <= sorted.len()
+            invariant inserted.len() == i + (if done { 1 } else { 0 })
+        {
+            if !done && value <= sorted[i] {
+                inserted = inserted.push(value);
+                done = true;
+            }
+            inserted = inserted.push(sorted[i]);
+            i += 1;
+        }
+        if !done {
+            inserted = inserted.push(value);
+        }
+        sorted = inserted;
+        k += 1;
+    }
+    sorted
+}
+
+// ============================================================================
+// Nested Loop Invariants
+// ============================================================================
+
+/// Matrix sum invariant
+@verify(proof)
+fn matrix_sum(matrix: &List<List<Int>>) -> Int {
+    contract#"
+        ensures result == matrix.fold(0, |acc, row| acc + row.fold(0, |a, x| a + x));
+    "
+    let mut total = 0;
+    let mut i = 0;
+    while i < matrix.len()
+        invariant i >= 0 && i <= matrix.len()
+    {
+        let mut j = 0;
+        while j < matrix[i].len()
+            invariant j >= 0 && j <= matrix[i].len()
+        {
+            total += matrix[i][j];
+            j += 1;
+        }
+        i += 1;
+    }
+    total
+}
+
+/// Nested search invariant
+@verify(proof)
+fn find_in_matrix(matrix: &List<List<Int>>, target: Int) -> Maybe<(Int, Int)> {
+    contract#"
+        ensures match result {
+            Some((i, j)) => i >= 0 && i < matrix.len() &&
+                           j >= 0 && j < matrix[i].len() &&
+                           matrix[i][j] == target,
+            None => true
+        };
+    "
+    let mut i = 0;
+    while i < matrix.len()
+        invariant i >= 0 && i <= matrix.len()
+    {
+        let mut j = 0;
+        while j < matrix[i].len()
+            invariant j >= 0 && j <= matrix[i].len()
+        {
+            if matrix[i][j] == target {
+                return Some((i, j));
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    None
+}
+
+// ============================================================================
+// Decreasing Invariants (Termination)
+// ============================================================================
+
+/// While loop with decreasing variant
+@verify(proof)
+fn gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures a % result == 0 && b % result == 0;
+    "
+    let mut x = a;
+    let mut y = b;
+    while y != 0
+        invariant x > 0 && y >= 0
+        decreases y
+    {
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}
+
+/// Collatz-like with bounded variant
+@verify(proof)
+fn reduce_to_one(n: Int{> 0 && <= 100}) -> Int {
+    contract#"
+        requires n > 0 && n <= 100;
+        ensures result > 0;
+    "
+    let mut x = n;
+    let mut steps = 0;
+    while x > 1 && steps < 1000
+        invariant x > 0
+        invariant steps >= 0 && steps <= 1000
+        decreases 1000 - steps
+    {
+        if x % 2 == 0 {
+            x = x / 2;
+        } else {
+            x = 3 * x + 1;
+            if x > 1000 { x = x % 100 + 1; }  // Bound for termination
+        }
+        steps += 1;
+    }
+    x
+}
+
+// ============================================================================
+// Inductive Invariants
+// ============================================================================
+
+/// Fibonacci invariant
+@verify(proof)
+fn fibonacci(n: Int{>= 0 && <= 30}) -> Int{>= 0} {
+    contract#"
+        requires n >= 0 && n <= 30;
+        ensures result >= 0;
+    "
+    if n <= 1 {
+        return n;
+    }
+
+    let mut prev2 = 0;
+    let mut prev1 = 1;
+    let mut i = 2;
+
+    while i <= n
+        invariant i >= 2 && i <= n + 1
+        invariant prev1 >= prev2
+        invariant prev1 >= 0 && prev2 >= 0
+    {
+        let curr = prev1 + prev2;
+        prev2 = prev1;
+        prev1 = curr;
+        i += 1;
+    }
+    prev1
+}
+
+/// Power by squaring invariant
+@verify(proof)
+fn power(base: Int, exp: Int{>= 0}) -> Int {
+    contract#"
+        requires exp >= 0;
+        ensures result == base ** exp;
+    "
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+
+    while e > 0
+        invariant e >= 0
+        invariant result * (b ** e) == base ** exp
+    {
+        if e % 2 == 1 {
+            result *= b;
+        }
+        b *= b;
+        e /= 2;
+    }
+    result
+}
+
+// ============================================================================
+// Range Invariants
+// ============================================================================
+
+/// Partition invariant
+@verify(proof)
+fn partition(list: &mut List<Int>, pivot: Int) -> Int {
+    contract#"
+        requires list.len() > 0;
+        ensures result >= 0 && result <= list.len();
+        ensures forall i. 0 <= i < result implies list[i] < pivot;
+        ensures forall i. result <= i < list.len() implies list[i] >= pivot;
+    "
+    let mut less = 0;
+
+    let mut i = 0;
+    while i < list.len()
+        invariant i >= 0 && i <= list.len()
+        invariant less >= 0 && less <= i
+        invariant forall j. 0 <= j < less implies list[j] < pivot
+        invariant forall j. less <= j < i implies list[j] >= pivot
+    {
+        if list[i] < pivot {
+            // Swap list[less] and list[i]
+            let temp = list[less];
+            list[less] = list[i];
+            list[i] = temp;
+            less += 1;
+        }
+        i += 1;
+    }
+    less
+}
+
+/// Two-pointer invariant
+@verify(proof)
+fn reverse_in_place(list: &mut List<Int>) {
+    contract#"
+        ensures list.len() == old(list.len());
+        ensures forall i. 0 <= i < list.len() implies list[i] == old(list[list.len() - 1 - i]);
+    "
+    if list.len() <= 1 {
+        return;
+    }
+
+    let mut left = 0;
+    let mut right = list.len() - 1;
+
+    while left < right
+        invariant left >= 0 && right < list.len()
+        invariant left <= right + 1
+        // Elements outside [left, right] are correctly reversed
+        invariant forall i. 0 <= i < left implies list[i] == old(list[list.len() - 1 - i])
+        invariant forall i. right < i < list.len() implies list[i] == old(list[list.len() - 1 - i])
+    {
+        let temp = list[left];
+        list[left] = list[right];
+        list[right] = temp;
+        left += 1;
+        right -= 1;
+    }
+}
+
+// ============================================================================
+// Complex Combined Invariants
+// ============================================================================
+
+/// Dutch national flag invariant
+@verify(proof)
+fn dutch_flag(list: &mut List<Int>) {
+    contract#"
+        ensures forall i, j. 0 <= i < j < list.len() implies
+            (list[i] <= 1 || list[j] >= 1);
+    "
+    let mut low = 0;
+    let mut mid = 0;
+    let mut high = list.len();
+
+    while mid < high
+        invariant low >= 0 && mid >= low && high <= list.len()
+        invariant mid <= high
+        invariant forall i. 0 <= i < low implies list[i] == 0
+        invariant forall i. low <= i < mid implies list[i] == 1
+        invariant forall i. high <= i < list.len() implies list[i] == 2
+    {
+        if list[mid] == 0 {
+            let temp = list[low];
+            list[low] = list[mid];
+            list[mid] = temp;
+            low += 1;
+            mid += 1;
+        } else if list[mid] == 1 {
+            mid += 1;
+        } else {
+            high -= 1;
+            let temp = list[mid];
+            list[mid] = list[high];
+            list[high] = temp;
+        }
+    }
+}
+
+// ============================================================================
+// Main Test Entry
+// ============================================================================
+
+fn main() {
+    // Simple invariants
+    assert(sum_to_n(10) == 55);
+    assert(count_up(5, 10) == 5);
+    assert(factorial(5) == 120);
+
+    // Array/List invariants
+    assert(sum_list(&list![1, 2, 3, 4, 5]) == 15);
+    assert(find_first_negative(&list![1, 2, -3, 4]) == Some(2));
+    assert(find_first_negative(&list![1, 2, 3, 4]) == None);
+    assert(square_all(list![1, 2, 3]) == list![1, 4, 9]);
+
+    // Ordering invariants
+    assert(binary_search(&list![1, 2, 3, 4, 5], 3) == Some(2));
+    assert(binary_search(&list![1, 2, 3, 4, 5], 6) == None);
+    assert(insertion_sort(list![3, 1, 4, 1, 5]) == list![1, 1, 3, 4, 5]);
+
+    // Nested invariants
+    let matrix = list![list![1, 2], list![3, 4], list![5, 6]];
+    assert(matrix_sum(&matrix) == 21);
+    assert(find_in_matrix(&matrix, 4) == Some((1, 1)));
+
+    // Decreasing invariants
+    assert(gcd(48, 18) == 6);
+    assert(reduce_to_one(10) > 0);
+
+    // Inductive invariants
+    assert(fibonacci(10) == 55);
+    assert(power(2, 10) == 1024);
+
+    // Range invariants
+    let mut test_list = list![3, 1, 4, 1, 5, 9, 2, 6];
+    let pivot_idx = partition(&mut test_list, 4);
+    assert(pivot_idx >= 0);
+
+    let mut reverse_test = list![1, 2, 3, 4, 5];
+    reverse_in_place(&mut reverse_test);
+    assert(reverse_test == list![5, 4, 3, 2, 1]);
+
+    println("All loop invariant tests verified successfully!");
+}

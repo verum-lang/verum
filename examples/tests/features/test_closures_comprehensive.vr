@@ -1,0 +1,722 @@
+// ============================================================================
+// COMPREHENSIVE CLOSURE TEST SUITE FOR VERUM
+// Based on grammar/verum.ebnf - closure_expr (line 704)
+// ============================================================================
+// Grammar:
+//   closure_expr    = [ 'async' ] , closure_params , [ '->' , type_expr ] , expression ;
+//   closure_params  = '|' , [ param_list_lambda ] , '|' ;
+//   param_list_lambda = [ identifier , { ',' , identifier } ] ;
+// ============================================================================
+
+fn main() {
+    let _ = print("=== COMPREHENSIVE CLOSURE TEST SUITE ===");
+    let _ = print("");
+
+    let _ = test_1_basic_closures();
+    let _ = print("");
+
+    let _ = test_2_typed_closures();
+    let _ = print("");
+
+    let _ = test_3_multi_param_closures();
+    let _ = print("");
+
+    let _ = test_4_no_param_closures();
+    let _ = print("");
+
+    let _ = test_5_capturing_variables();
+    let _ = print("");
+
+    let _ = test_6_closures_as_arguments();
+    let _ = print("");
+
+    let _ = test_7_closures_as_return_values();
+    let _ = print("");
+
+    let _ = test_8_higher_order_functions();
+    let _ = print("");
+
+    let _ = test_9_closure_composition();
+    let _ = print("");
+
+    let _ = test_10_nested_closures();
+    let _ = print("");
+
+    let _ = test_11_closures_with_blocks();
+    let _ = print("");
+
+    let _ = test_12_closures_different_types();
+    let _ = print("");
+
+    let _ = test_13_currying();
+    let _ = print("");
+
+    let _ = test_14_practical_map_filter_fold();
+    let _ = print("");
+
+    let _ = test_15_closure_capture_semantics();
+    let _ = print("");
+
+    let _ = print("=== ALL COMPREHENSIVE CLOSURE TESTS COMPLETE ===");
+}
+
+// ============================================================================
+// TEST 1: BASIC CLOSURES - |x| x + 1
+// Grammar: closure_params = '|' , identifier , '|' ; expression
+// ============================================================================
+
+fn test_1_basic_closures() {
+    let _ = print("TEST 1: Basic Closures");
+    let _ = print("  Grammar: |x| expression");
+
+    // Single parameter, single expression
+    let add_one = |x| x + 1;
+    let result1 = add_one(5);
+    let _ = print(f"  |x| x + 1 applied to 5 = {result1}");
+
+    // Single parameter, arithmetic
+    let double = |x| x * 2;
+    let result2 = double(10);
+    let _ = print(f"  |x| x * 2 applied to 10 = {result2}");
+
+    // Single parameter, complex expression
+    let square = |x| x * x;
+    let result3 = square(7);
+    let _ = print(f"  |x| x * x applied to 7 = {result3}");
+
+    // Single parameter, compound operation
+    let complex = |x| x * 2 + 3;
+    let result4 = complex(5);
+    let _ = print(f"  |x| x * 2 + 3 applied to 5 = {result4}");
+}
+
+// ============================================================================
+// TEST 2: TYPED CLOSURES - |x: Int| -> Int { x + 1 }
+// Grammar: '|' , identifier , ':' , type_expr , '|' , '->' , type_expr , expression
+// ============================================================================
+
+fn test_2_typed_closures() {
+    let _ = print("TEST 2: Typed Closures");
+    let _ = print("  Grammar: |x: Type| -> ReturnType { expression }");
+
+    // Explicit parameter type, no return type
+    let typed1 = |x: Int| x + 10;
+    let result1 = typed1(5);
+    let _ = print(f"  |x: Int| x + 10 applied to 5 = {result1}");
+
+    // Explicit parameter and return type
+    let typed2 = |x: Int| -> Int { x * 2 };
+    let result2 = typed2(7);
+    let _ = print(f"  |x: Int| -> Int {{ x * 2 }} applied to 7 = {result2}");
+
+    // Float types
+    let typed3 = |x: Float| -> Float { x / 2.0 };
+    let result3 = typed3(10.0);
+    let _ = print(f"  |x: Float| -> Float {{ x / 2.0 }} applied to 10.0 = {result3}");
+
+    // Bool return type
+    let typed4 = |x: Int| -> Bool { x > 5 };
+    let result4 = typed4(7);
+    let result5 = typed4(3);
+    let _ = print(f"  |x: Int| -> Bool {{ x > 5 }} applied to 7 = {result4}, to 3 = {result5}");
+}
+
+// ============================================================================
+// TEST 3: MULTI-PARAMETER CLOSURES - |x, y| x + y
+// Grammar: '|' , identifier , { ',' , identifier } , '|' , expression
+// ============================================================================
+
+fn test_3_multi_param_closures() {
+    let _ = print("TEST 3: Multi-Parameter Closures");
+    let _ = print("  Grammar: |x, y, ...| expression");
+
+    // Two parameters
+    let add = |x, y| x + y;
+    let result1 = add(10, 20);
+    let _ = print(f"  |x, y| x + y applied to (10, 20) = {result1}");
+
+    // Two parameters with subtraction
+    let subtract = |x, y| x - y;
+    let result2 = subtract(50, 15);
+    let _ = print(f"  |x, y| x - y applied to (50, 15) = {result2}");
+
+    // Two parameters with multiplication
+    let multiply = |x, y| x * y;
+    let result3 = multiply(7, 8);
+    let _ = print(f"  |x, y| x * y applied to (7, 8) = {result3}");
+
+    // Three parameters
+    let sum_three = |x, y, z| x + y + z;
+    let result4 = sum_three(1, 2, 3);
+    let _ = print(f"  |x, y, z| x + y + z applied to (1, 2, 3) = {result4}");
+
+    // Three parameters with complex expression
+    let compute = |a, b, c| a * b + c;
+    let result5 = compute(2, 3, 4);
+    let _ = print(f"  |a, b, c| a * b + c applied to (2, 3, 4) = {result5}");
+
+    // Four parameters
+    let quad_sum = |a, b, c, d| a + b + c + d;
+    let result6 = quad_sum(1, 2, 3, 4);
+    let _ = print(f"  |a, b, c, d| a + b + c + d applied to (1, 2, 3, 4) = {result6}");
+}
+
+// ============================================================================
+// TEST 4: NO-PARAMETER CLOSURES - || print("hello")
+// Grammar: '|' , '|' , expression
+// ============================================================================
+
+fn test_4_no_param_closures() {
+    let _ = print("TEST 4: No-Parameter Closures");
+    let _ = print("  Grammar: || expression");
+
+    // Return constant
+    let get_const = || 42;
+    let result1 = get_const();
+    let _ = print(f"  || 42 returns {result1}");
+
+    // Return float
+    let get_pi = || 3.14159;
+    let result2 = get_pi();
+    let _ = print(f"  || 3.14159 returns {result2}");
+
+    // Return boolean
+    let get_true = || true;
+    let result3 = get_true();
+    let _ = print(f"  || true returns {result3}");
+
+    // Return calculation
+    let compute = || 10 * 5 + 7;
+    let result4 = compute();
+    let _ = print(f"  || 10 * 5 + 7 returns {result4}");
+
+    // Return string
+    let get_text = || "Hello, Verum!";
+    let result5 = get_text();
+    let _ = print(f"  || 'Hello, Verum!' returns '{result5}'");
+}
+
+// ============================================================================
+// TEST 5: CAPTURING VARIABLES - Closure captures from outer scope
+// ============================================================================
+
+fn test_5_capturing_variables() {
+    let _ = print("TEST 5: Capturing Variables");
+    let _ = print("  Closures can capture variables from outer scope");
+
+    // Capture single variable
+    let factor = 10;
+    let multiply = |x| x * factor;
+    let result1 = multiply(5);
+    let _ = print(f"  Captured factor=10, multiply(5) = {result1}");
+
+    // Capture multiple variables
+    let a = 3;
+    let b = 7;
+    let compute = |x| x * a + b;
+    let result2 = compute(4);
+    let _ = print(f"  Captured a=3, b=7, compute(4) = {result2}");
+
+    // Nested capture
+    let outer = 100;
+    let inner = 20;
+    let nested_compute = |x| x + outer - inner;
+    let result3 = nested_compute(5);
+    let _ = print(f"  Captured outer=100, inner=20, nested_compute(5) = {result3}");
+
+    // Capture in complex expression
+    let multiplier = 2;
+    let offset = 5;
+    let transform = |x| {
+        let scaled = x * multiplier;
+        scaled + offset
+    };
+    let result4 = transform(10);
+    let _ = print(f"  Captured multiplier=2, offset=5, transform(10) = {result4}");
+
+    // Multiple closures sharing capture
+    let shared = 50;
+    let add_shared = |x| x + shared;
+    let mult_shared = |x| x * shared;
+    let result5 = add_shared(5);
+    let result6 = mult_shared(3);
+    let _ = print(f"  Shared capture=50, add(5)={result5}, mult(3)={result6}");
+}
+
+// ============================================================================
+// TEST 6: CLOSURES AS FUNCTION ARGUMENTS
+// ============================================================================
+
+fn apply_op(x: Int, op: fn(Int) -> Int) -> Int {
+    op(x)
+}
+
+fn apply_binary(x: Int, y: Int, op: fn(Int, Int) -> Int) -> Int {
+    op(x, y)
+}
+
+fn apply_predicate(x: Int, pred: fn(Int) -> Bool) -> Bool {
+    pred(x)
+}
+
+fn apply_twice(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(x))
+}
+
+fn apply_three_times(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(f(x)))
+}
+
+fn test_6_closures_as_arguments() {
+    let _ = print("TEST 6: Closures as Function Arguments");
+    let _ = print("  Passing closures to functions");
+
+    // Pass simple closure
+    let result1 = apply_op(5, |x| x * 2);
+    let _ = print(f"  apply_op(5, |x| x * 2) = {result1}");
+
+    // Pass closure with capture
+    let multiplier = 10;
+    let result2 = apply_op(3, |x| x * multiplier);
+    let _ = print(f"  apply_op(3, |x| x * 10) with capture = {result2}");
+
+    // Pass binary closure
+    let result3 = apply_binary(15, 3, |a, b| a - b);
+    let _ = print(f"  apply_binary(15, 3, |a, b| a - b) = {result3}");
+
+    // Pass predicate
+    let result4 = apply_predicate(42, |x| x > 20);
+    let _ = print(f"  apply_predicate(42, |x| x > 20) = {result4}");
+
+    // Apply closure multiple times
+    let result5 = apply_twice(5, |x| x + 1);
+    let _ = print(f"  apply_twice(5, |x| x + 1) = {result5}");
+
+    let result6 = apply_three_times(2, |x| x * 2);
+    let _ = print(f"  apply_three_times(2, |x| x * 2) = {result6}");
+}
+
+// ============================================================================
+// TEST 7: CLOSURES AS RETURN VALUES
+// ============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(factor: Int) -> fn(Int) -> Int {
+    |x| x * factor
+}
+
+fn make_predicate(threshold: Int) -> fn(Int) -> Bool {
+    |x| x > threshold
+}
+
+fn make_transformer(scale: Int, offset: Int) -> fn(Int) -> Int {
+    |x| x * scale + offset
+}
+
+fn make_constant() -> fn() -> Int {
+    || 42
+}
+
+fn test_7_closures_as_return_values() {
+    let _ = print("TEST 7: Closures as Return Values");
+    let _ = print("  Functions returning closures");
+
+    // Return adder
+    let add10 = make_adder(10);
+    let result1 = add10(5);
+    let _ = print(f"  make_adder(10) returns closure, applied to 5 = {result1}");
+
+    // Return multiplier
+    let triple = make_multiplier(3);
+    let result2 = triple(7);
+    let _ = print(f"  make_multiplier(3) returns closure, applied to 7 = {result2}");
+
+    // Return predicate
+    let is_large = make_predicate(100);
+    let result3 = is_large(150);
+    let result4 = is_large(50);
+    let _ = print(f"  make_predicate(100): is_large(150)={result3}, is_large(50)={result4}");
+
+    // Return transformer
+    let transform = make_transformer(2, 10);
+    let result5 = transform(5);
+    let _ = print(f"  make_transformer(2, 10) applied to 5 = {result5}");
+
+    // Return no-param closure
+    let get_const = make_constant();
+    let result6 = get_const();
+    let _ = print(f"  make_constant() returns || 42, result = {result6}");
+}
+
+// ============================================================================
+// TEST 8: HIGHER-ORDER FUNCTIONS
+// ============================================================================
+
+fn map_int(value: Int, mapper: fn(Int) -> Int) -> Int {
+    mapper(value)
+}
+
+fn filter_int(value: Int, predicate: fn(Int) -> Bool) -> Bool {
+    predicate(value)
+}
+
+fn compose_int(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn pipe_int(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| g(f(x))
+}
+
+fn test_8_higher_order_functions() {
+    let _ = print("TEST 8: Higher-Order Functions");
+    let _ = print("  Functions that operate on other functions");
+
+    // Map
+    let result1 = map_int(5, |x| x * 2);
+    let _ = print(f"  map_int(5, |x| x * 2) = {result1}");
+
+    // Filter
+    let result2 = filter_int(42, |x| x > 20);
+    let _ = print(f"  filter_int(42, |x| x > 20) = {result2}");
+
+    // Compose (f . g)(x) = f(g(x))
+    let double = |x| x * 2;
+    let add5 = |x| x + 5;
+    let composed = compose_int(double, add5);
+    let result3 = composed(10);
+    let _ = print(f"  compose(double, add5)(10) = double(add5(10)) = {result3}");
+
+    // Pipe (f >> g)(x) = g(f(x))
+    let piped = pipe_int(add5, double);
+    let result4 = piped(10);
+    let _ = print(f"  pipe(add5, double)(10) = double(add5(10)) = {result4}");
+}
+
+// ============================================================================
+// TEST 9: CLOSURE COMPOSITION
+// ============================================================================
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn compose3(f: fn(Int) -> Int, g: fn(Int) -> Int, h: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(h(x)))
+}
+
+fn test_9_closure_composition() {
+    let _ = print("TEST 9: Closure Composition");
+    let _ = print("  Combining closures");
+
+    // Basic composition
+    let double = |x| x * 2;
+    let add10 = |x| x + 10;
+    let double_then_add = compose(add10, double);
+    let result1 = double_then_add(5);
+    let _ = print(f"  compose(add10, double)(5) = add10(double(5)) = {result1}");
+
+    // Triple composition
+    let square = |x| x * x;
+    let triple = |x| x * 3;
+    let add1 = |x| x + 1;
+    let complex = compose3(triple, square, add1);
+    let result2 = complex(3);
+    let _ = print(f"  compose3(triple, square, add1)(3) = triple(square(add1(3))) = {result2}");
+
+    // Chained composition
+    let inc = |x| x + 1;
+    let f1 = compose(inc, inc);
+    let f2 = compose(inc, f1);
+    let result3 = f2(10);
+    let _ = print(f"  Triple increment via composition(10) = {result3}");
+}
+
+// ============================================================================
+// TEST 10: NESTED CLOSURES
+// ============================================================================
+
+fn test_10_nested_closures() {
+    let _ = print("TEST 10: Nested Closures");
+    let _ = print("  Closures within closures");
+
+    // Closure returning closure
+    let outer = |x| {
+        let inner = |y| x + y;
+        inner
+    };
+    let add5 = outer(5);
+    let result1 = add5(10);
+    let _ = print(f"  outer(5) returns inner, inner(10) = {result1}");
+
+    // Nested with multiple levels
+    let level1 = |a| {
+        let level2 = |b| {
+            let level3 = |c| a + b + c;
+            level3
+        };
+        level2
+    };
+    let level2_fn = level1(1);
+    let level3_fn = level2_fn(2);
+    let result2 = level3_fn(3);
+    let _ = print(f"  Three-level nesting: level1(1)(2)(3) = {result2}");
+
+    // Nested with capture
+    let base = 100;
+    let outer_capture = |x| {
+        let inner_capture = |y| x + y + base;
+        inner_capture(10)
+    };
+    let result3 = outer_capture(5);
+    let _ = print(f"  Nested with capture base=100, outer(5) with inner(10) = {result3}");
+}
+
+// ============================================================================
+// TEST 11: CLOSURES WITH BLOCK BODIES
+// ============================================================================
+
+fn test_11_closures_with_blocks() {
+    let _ = print("TEST 11: Closures with Block Bodies");
+    let _ = print("  Closures using {{ }} blocks");
+
+    // Single parameter with block
+    let complex1 = |x| {
+        let temp = x * 2;
+        temp + 5
+    };
+    let result1 = complex1(10);
+    let _ = print(f"  |x| {{ let temp = x * 2; temp + 5 }} applied to 10 = {result1}");
+
+    // Multiple parameters with block
+    let complex2 = |a, b| {
+        let sum = a + b;
+        let product = a * b;
+        sum + product
+    };
+    let result2 = complex2(3, 4);
+    let _ = print(f"  |a, b| {{ sum + product }} applied to (3, 4) = {result2}");
+
+    // Nested blocks
+    let complex3 = |x| {
+        let y = {
+            let z = x * 2;
+            z + 1
+        };
+        y * 3
+    };
+    let result3 = complex3(5);
+    let _ = print(f"  Nested blocks: complex3(5) = {result3}");
+
+    // Block with conditional
+    let complex4 = |x| {
+        let doubled = x * 2;
+        if doubled > 10 {
+            doubled + 5
+        } else {
+            doubled
+        }
+    };
+    let result4 = complex4(3);
+    let result5 = complex4(7);
+    let _ = print(f"  With conditional: complex4(3)={result4}, complex4(7)={result5}");
+}
+
+// ============================================================================
+// TEST 12: CLOSURES WITH DIFFERENT TYPES
+// ============================================================================
+
+fn apply_float(x: Float, f: fn(Float) -> Float) -> Float {
+    f(x)
+}
+
+fn apply_bool(x: Int, f: fn(Int) -> Bool) -> Bool {
+    f(x)
+}
+
+fn apply_text(s: Text, f: fn(Text) -> Text) -> Text {
+    f(s)
+}
+
+fn test_12_closures_different_types() {
+    let _ = print("TEST 12: Closures with Different Types");
+    let _ = print("  Closures operating on various types");
+
+    // Float closures
+    let result1 = apply_float(5.5, |x| x * 2.0);
+    let _ = print(f"  Float: 5.5 * 2.0 = {result1}");
+
+    let result2 = apply_float(10.0, |x| x / 3.0);
+    let _ = print(f"  Float: 10.0 / 3.0 = {result2}");
+
+    // Bool closures
+    let result3 = apply_bool(42, |x| x > 20);
+    let _ = print(f"  Bool: 42 > 20 = {result3}");
+
+    let result4 = apply_bool(5, |x| x % 2 == 0);
+    let _ = print(f"  Bool: 5 is even = {result4}");
+
+    // Text closures
+    let result5 = apply_text("hello", |s| f"{s} world");
+    let _ = print(f"  Text: 'hello' + ' world' = '{result5}'");
+
+    // Text closures with concatenation
+    let make_greeting = |name: Text| -> Text {
+        f"Hello, {name}!"
+    };
+    let result6 = make_greeting("Verum");
+    let _ = print(f"  Text concat: make_greeting('Verum') = '{result6}'");
+}
+
+// ============================================================================
+// TEST 13: CURRYING
+// ============================================================================
+
+fn curry_add(a: Int) -> fn(Int) -> Int {
+    |b| a + b
+}
+
+fn curry_multiply(a: Int) -> fn(Int) -> Int {
+    |b| a * b
+}
+
+fn curry3(a: Int) -> fn(Int) -> fn(Int) -> Int {
+    |b| |c| a + b * c
+}
+
+fn partial_apply(base: Int, op: fn(Int, Int) -> Int) -> fn(Int) -> Int {
+    |x| op(base, x)
+}
+
+fn test_13_currying() {
+    let _ = print("TEST 13: Currying");
+    let _ = print("  Converting multi-arg functions to chains of single-arg functions");
+
+    // Basic currying
+    let add5 = curry_add(5);
+    let result1 = add5(10);
+    let _ = print(f"  curry_add(5)(10) = {result1}");
+
+    // Multiply currying
+    let triple = curry_multiply(3);
+    let result2 = triple(7);
+    let _ = print(f"  curry_multiply(3)(7) = {result2}");
+
+    // Three-level currying
+    let f1 = curry3(2);
+    let f2 = f1(3);
+    let result3 = f2(4);
+    let _ = print(f"  curry3(2)(3)(4) = 2 + 3 * 4 = {result3}");
+
+    // Partial application
+    let add_op = |a, b| a + b;
+    let add10 = partial_apply(10, add_op);
+    let result4 = add10(5);
+    let _ = print(f"  partial_apply(10, add)(5) = {result4}");
+}
+
+// ============================================================================
+// TEST 14: PRACTICAL HIGHER-ORDER FUNCTIONS
+// ============================================================================
+
+// Apply function twice
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+// Apply function three times
+fn thrice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(f(x)))
+}
+
+// Compose two functions
+fn compose_fn(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn test_14_practical_map_filter_fold() {
+    let _ = print("TEST 14: Practical Higher-Order Functions");
+    let _ = print("  Real-world function composition patterns");
+
+    // Apply function twice
+    let inc = |x| x + 1;
+    let result1 = twice(inc, 10);
+    let _ = print(f"  twice(inc, 10) = {result1}");
+
+    // Apply function three times
+    let double = |x| x * 2;
+    let result2 = thrice(double, 2);
+    let _ = print(f"  thrice(double, 2) = {result2}");
+
+    // Compose functions
+    let add5 = |x| x + 5;
+    let times3 = |x| x * 3;
+    let composed = compose_fn(times3, add5);
+    let result3 = composed(10);
+    let _ = print(f"  compose(times3, add5)(10) = {result3}");
+
+    // Chain with capture
+    let offset = 100;
+    let add_offset = |x| x + offset;
+    let composed2 = compose_fn(add_offset, double);
+    let result4 = composed2(5);
+    let _ = print(f"  compose(add_offset, double)(5) = {result4}");
+
+    // Multiple compositions
+    let f1 = |x| x + 1;
+    let f2 = |x| x * 2;
+    let f3 = |x| x - 3;
+    let chain = compose_fn(f3, compose_fn(f2, f1));
+    let result5 = chain(5);
+    let _ = print(f"  chain of 3 functions (5+1)*2-3 = {result5}");
+}
+
+// ============================================================================
+// TEST 15: CLOSURE CAPTURE SEMANTICS
+// ============================================================================
+
+fn test_15_closure_capture_semantics() {
+    let _ = print("TEST 15: Closure Capture Semantics");
+    let _ = print("  How closures capture and use variables");
+
+    // Simple capture
+    let x = 10;
+    let f1 = |y| y + x;
+    let result1 = f1(5);
+    let _ = print(f"  Simple capture x=10, f(5) = {result1}");
+
+    // Multiple closures capturing same variable
+    let shared = 100;
+    let f2 = |a| a + shared;
+    let f3 = |b| b * shared;
+    let result2 = f2(1);
+    let result3 = f3(2);
+    let _ = print(f"  Shared capture: f2(1)={result2}, f3(2)={result3}");
+
+    // Capture with shadowing
+    let val = 5;
+    let f4 = |val| val * 2;  // Parameter shadows captured var
+    let result4 = f4(10);
+    let _ = print(f"  Parameter shadowing: f4(10) = {result4}");
+
+    // Nested scope capture
+    let outer_var = 50;
+    let f5 = |x| {
+        let inner_var = 10;
+        let f6 = |y| x + y + inner_var + outer_var;
+        f6(5)
+    };
+    let result5 = f5(3);
+    let _ = print(f"  Nested scope capture: f5(3) = {result5}");
+
+    // Capture in returned closure
+    let make_adder = |n| {
+        |x| x + n
+    };
+    let add20 = make_adder(20);
+    let result6 = add20(5);
+    let _ = print(f"  Captured in returned closure: add20(5) = {result6}");
+}

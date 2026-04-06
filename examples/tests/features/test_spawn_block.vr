@@ -1,0 +1,13 @@
+// Test spawn with block expression
+fn main() {
+    println("Spawning block expression");
+    let handle = spawn {
+        println("Inside spawned block");
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    let result = handle.await;
+    println("Result: ");
+    println(result);
+}

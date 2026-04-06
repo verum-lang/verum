@@ -1,0 +1,27 @@
+// Test: Where clause refinement with type aliases
+// In return type position, 'where' is ambiguous with generic where clauses
+// Use type aliases to test where clause refinements
+
+type PositiveInt is Int where it > 0;
+type BoundedInt is Int where it >= 0 && it <= 100;
+type EvenBounded is Int where it > 10 && it < 20 && it % 2 == 0;
+
+fn test_where_simple() -> PositiveInt {
+    42
+}
+
+fn test_where_range() -> BoundedInt {
+    50
+}
+
+fn test_where_complex() -> EvenBounded {
+    12
+}
+
+fn main() {
+    let simple = test_where_simple();
+    let range = test_where_range();
+    let complex = test_where_complex();
+
+    simple + range + complex
+}

@@ -1,0 +1,23 @@
+// Test 2: Generic Functions
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn pair<A, B>(first: A, second: B) -> (A, B) {
+    (first, second)
+}
+
+fn main() {
+    let _ = println("=== Testing Generic Functions ===");
+
+    let num = identity(42);
+    let text = identity("hello");
+    let p = pair(1, "one");
+
+    let _ = println(f"identity(42): {num}");
+    let _ = println(f"identity(\"hello\"): {text}");
+    let _ = println("pair result created");
+
+    let _ = println("=== PASSED ===");
+}

@@ -1,0 +1,31 @@
+// Test type aliases (variant/record types only - primitive aliases not supported)
+
+type Result<T, E> is Ok(T) | Err(E);
+type CalcResult is Result<Float, Text>;
+
+fn divide(a: Float, b: Float) -> CalcResult {
+    if b == 0.0 {
+        Err("Division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn main() {
+    let _ = print("=== Type Alias Tests ===");
+
+    // Generic alias
+    let result1 = divide(10.0, 2.0);
+    match result1 {
+        Ok(v) => { let _ = print(f"10/2 = {v}"); },
+        Err(e) => { let _ = print(f"Error: {e}"); }
+    }
+
+    let result2 = divide(10.0, 0.0);
+    match result2 {
+        Ok(v) => { let _ = print(f"10/0 = {v}"); },
+        Err(e) => { let _ = print(f"Error: {e}"); }
+    }
+
+    let _ = print("=== Done ===");
+}

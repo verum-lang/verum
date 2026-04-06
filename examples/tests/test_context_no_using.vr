@@ -1,0 +1,20 @@
+// Test 7: Function without using clause (should fail if calling context-dependent function)
+context Logger {
+    fn log(self, msg: Text)
+}
+
+fn needs_logger(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+fn no_logger() {
+    // This should fail - no Logger context available
+    needs_logger("test");
+}
+
+type SimpleLogger is { prefix: Text };
+
+fn main() {
+    provide Logger = SimpleLogger { prefix: "[LOG]" };
+    no_logger();
+}

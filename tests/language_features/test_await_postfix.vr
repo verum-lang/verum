@@ -1,0 +1,10 @@
+// Test postfix await
+async fn async_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    // Test postfix .await syntax
+    let result = async_add(5, 3).await;
+    print(f"Postfix await result: {result}");
+}

@@ -1,0 +1,14 @@
+[package]
+name = "test_basic_types"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Comprehensive test of Verum basic types and collections"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []

@@ -1,0 +1,95 @@
+// =============================================================================
+// layout/responsive.vr - Responsive Breakpoints
+// =============================================================================
+// Layer: 4 (Layout Engine)
+// Dependencies: rect.vr
+// =============================================================================
+//
+// Responsive breakpoint system for terminal UIs. Defines standard breakpoints
+// based on terminal width and provides helpers for breakpoint-conditional
+// layout selection.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
+// =============================================================================
+
+module responsive;
+
+mount super.rect.Rect;
+
+// =============================================================================
+// Breakpoint Type
+// =============================================================================
+
+/// A responsive breakpoint defined by a minimum terminal width.
+public type Breakpoint is {
+    min_width: Int,
+    name: Text,
+};
+
+// =============================================================================
+// Standard Breakpoints
+// =============================================================================
+
+/// Mobile: terminals narrower than 80 columns.
+public const MOBILE: Breakpoint = Breakpoint { min_width: 0, name: "mobile" };
+
+/// Tablet: terminals 80-119 columns wide.
+public const TABLET: Breakpoint = Breakpoint { min_width: 80, name: "tablet" };
+
+/// Desktop: terminals 120-159 columns wide.
+public const DESKTOP: Breakpoint = Breakpoint { min_width: 120, name: "desktop" };
+
+/// Wide: terminals 160+ columns wide.
+public const WIDE: Breakpoint = Breakpoint { min_width: 160, name: "wide" };
+
+// =============================================================================
+// Breakpoint Detection
+// =============================================================================
+
+/// Determine the current breakpoint for a given terminal width.
+/// Returns the highest breakpoint whose min_width does not exceed width.
+public fn current_breakpoint(width: Int) -> Breakpoint {
+    if width >= WIDE.min_width {
+        WIDE
+    } else if width >= DESKTOP.min_width {
+        DESKTOP
+    } else if width >= TABLET.min_width {
+        TABLET
+    } else {
+        MOBILE
+    }
+}
+
+/// Check if the terminal width matches or exceeds a breakpoint.
+public fn matches_breakpoint(width: Int, bp: &Breakpoint) -> Bool {
+    width >= bp.min_width
+}
+
+// =============================================================================
+// Responsive Value Selection
+// =============================================================================
+
+/// Select a value based on the current terminal width.
+/// Provides three breakpoint tiers: mobile (< 80), tablet (80-119), desktop (120+).
+public fn responsive<T>(width: Int, mobile: T, tablet: T, desktop: T) -> T {
+    if width >= DESKTOP.min_width {
+        desktop
+    } else if width >= TABLET.min_width {
+        tablet
+    } else {
+        mobile
+    }
+}
+
+/// Select a value with four breakpoint tiers.
+public fn responsive4<T>(width: Int, mobile: T, tablet: T, desktop: T, wide: T) -> T {
+    if width >= WIDE.min_width {
+        wide
+    } else if width >= DESKTOP.min_width {
+        desktop
+    } else if width >= TABLET.min_width {
+        tablet
+    } else {
+        mobile
+    }
+}

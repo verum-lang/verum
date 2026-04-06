@@ -1,0 +1,32 @@
+// Test filtered stream comprehensions: stream[x for x in source if condition]
+
+fn main() -> Int {
+    // Test 1: Filter positive numbers in stream
+    let numbers = [-2, -1, 0, 1, 2, 3];
+    let positive_stream = stream[x for x in numbers if x > 0];
+    // Expected stream: [1, 2, 3]
+
+    // Test 2: Filter even numbers in stream
+    let all_nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let even_stream = stream[x for x in all_nums if x % 2 == 0];
+    // Expected stream: [2, 4, 6, 8, 10]
+
+    // Test 3: Multiple filters in stream
+    let filtered_stream = stream[x for x in all_nums if x > 3 if x < 8];
+    // Expected stream: [4, 5, 6, 7]
+
+    // Test 4: Filter with transformation
+    let filtered_doubled = stream[x * 2 for x in all_nums if x % 2 == 0];
+    // Even numbers: [2, 4, 6, 8, 10]
+    // Doubled: [4, 8, 12, 16, 20]
+
+    // Test 5: Filter that eliminates all elements
+    let empty_stream = stream[x for x in all_nums if x > 100];
+    // Expected: empty stream
+
+    // Test 6: Lazy evaluation benefit - should only process needed elements
+    let lazy_stream = stream[x for x in all_nums if x > 5];
+    // Stream should be lazy - only evaluated when consumed
+
+    0
+}

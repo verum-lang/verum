@@ -1,0 +1,97 @@
+// =============================================================================
+// text/regex.vr - Regular Expression Support
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core
+// =============================================================================
+//
+// Provides the Regex type for pattern matching on text.
+// Regex values are typically created from `re#"..."` or `rx#"..."` tagged literals.
+//
+// =============================================================================
+
+module regex;
+
+mount core.*;
+
+// =============================================================================
+// Regex Type
+// =============================================================================
+
+/// A compiled regular expression pattern.
+///
+/// Created from regex tagged literals:
+/// ```verum
+/// let pattern = re#"""\\d+""";
+/// let found = pattern.is_match("abc 123 def");
+/// ```
+public type Regex is {
+    /// The original pattern string
+    pattern: Text,
+};
+
+// =============================================================================
+// Regex Methods
+// =============================================================================
+
+implement Regex {
+    /// Create a new Regex from a pattern string.
+    public fn new(pattern: Text) -> Regex {
+        Regex { pattern: pattern }
+    }
+
+    /// Test whether the pattern matches anywhere in the given text.
+    /// Returns true if the regex matches at least one substring of the input.
+    public fn is_match(&self, text: Text) -> Bool {
+        // Intrinsic: delegates to the runtime regex engine
+        __regex_is_match(self.pattern, text)
+    }
+
+    /// Find the first match of the pattern in the text.
+    /// Returns the matched substring, or None if no match.
+    public fn find(&self, text: Text) -> Maybe<Text> {
+        __regex_find(self.pattern, text)
+    }
+
+    /// Find all non-overlapping matches of the pattern in the text.
+    public fn find_all(&self, text: Text) -> List<Text> {
+        __regex_find_all(self.pattern, text)
+    }
+
+    /// Replace the first match with the replacement string.
+    public fn replace(&self, text: Text, replacement: Text) -> Text {
+        __regex_replace(self.pattern, text, replacement)
+    }
+
+    /// Replace all matches with the replacement string.
+    public fn replace_all(&self, text: Text, replacement: Text) -> Text {
+        __regex_replace_all(self.pattern, text, replacement)
+    }
+
+    /// Split the text by the pattern.
+    public fn split(&self, text: Text) -> List<Text> {
+        __regex_split(self.pattern, text)
+    }
+
+    /// Capture groups from the first match.
+    public fn captures(&self, text: Text) -> List<Text> {
+        __regex_captures(self.pattern, text)
+    }
+
+    /// Returns the pattern string.
+    public fn as_str(&self) -> Text {
+        self.pattern
+    }
+}
+
+// =============================================================================
+// Intrinsic Declarations (implemented by runtime)
+// =============================================================================
+
+extern fn __regex_is_match(pattern: Text, text: Text) -> Bool;
+extern fn __regex_find(pattern: Text, text: Text) -> Maybe<Text>;
+extern fn __regex_find_all(pattern: Text, text: Text) -> List<Text>;
+extern fn __regex_replace(pattern: Text, text: Text, replacement: Text) -> Text;
+extern fn __regex_replace_all(pattern: Text, text: Text, replacement: Text) -> Text;
+extern fn __regex_split(pattern: Text, text: Text) -> List<Text>;
+extern fn __regex_captures(pattern: Text, text: Text) -> List<Text>;

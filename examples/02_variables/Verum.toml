@@ -1,0 +1,7 @@
+[package]
+name = "variables"
+version = "0.1.0"
+description = "Variable bindings, mutability, and basic types"
+
+[language]
+profile = "application"

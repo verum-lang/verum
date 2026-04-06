@@ -1,0 +1,94 @@
+module sys.time_ops;
+
+// =============================================================================
+// sys/time_ops.vr - Time Operations (replaces C verum_time_* functions)
+// =============================================================================
+// Layer: 1 (Core)
+// Dependencies: sys/raw
+// =============================================================================
+//
+// Pure Verum implementation of time operations. Compiled through
+// VBC → LLVM pipeline. No C runtime dependency.
+//
+// =============================================================================
+
+module time_ops;
+
+mount super.raw.*;
+
+/// A monotonic timestamp (nanoseconds since some fixed point).
+public type Instant is {
+    nanos: Int,
+};
+
+/// A duration in nanoseconds.
+public type Duration is {
+    nanos: Int,
+};
+
+implement Instant {
+    /// Get current monotonic time.
+    public fn now() -> Instant {
+        Instant { nanos: __time_monotonic_nanos_raw() }
+    }
+
+    /// Elapsed time since this instant.
+    public fn elapsed(&self) -> Duration {
+        let now = __time_monotonic_nanos_raw();
+        Duration { nanos: now - self.nanos }
+    }
+
+    /// Duration since another instant.
+    public fn duration_since(&self, earlier: Instant) -> Duration {
+        Duration { nanos: self.nanos - earlier.nanos }
+    }
+}
+
+implement Duration {
+    /// Create duration from nanoseconds.
+    public fn from_nanos(ns: Int) -> Duration { Duration { nanos: ns } }
+
+    /// Create duration from microseconds.
+    public fn from_micros(us: Int) -> Duration { Duration { nanos: us * 1000 } }
+
+    /// Create duration from milliseconds.
+    public fn from_millis(ms: Int) -> Duration { Duration { nanos: ms * 1000000 } }
+
+    /// Create duration from seconds.
+    public fn from_secs(s: Int) -> Duration { Duration { nanos: s * 1000000000 } }
+
+    /// Get as milliseconds.
+    public fn as_millis(&self) -> Int { self.nanos / 1000000 }
+
+    /// Get as microseconds.
+    public fn as_micros(&self) -> Int { self.nanos / 1000 }
+
+    /// Get as nanoseconds.
+    public fn as_nanos(&self) -> Int { self.nanos }
+
+    /// Get as seconds.
+    public fn as_secs(&self) -> Int { self.nanos / 1000000000 }
+
+    /// Zero duration.
+    public fn zero() -> Duration { Duration { nanos: 0 } }
+}
+
+/// Sleep for a specified duration.
+public fn sleep(d: Duration) {
+    __time_sleep_nanos_raw(d.nanos);
+}
+
+/// Sleep for specified milliseconds.
+public fn sleep_ms(ms: Int) {
+    __time_sleep_nanos_raw(ms * 1000000);
+}
+
+/// Sleep for specified seconds.
+public fn sleep_secs(s: Int) {
+    __time_sleep_nanos_raw(s * 1000000000);
+}
+
+/// Get wall-clock time in milliseconds since epoch.
+public fn wall_clock_ms() -> Int {
+    __time_now_ms_raw()
+}

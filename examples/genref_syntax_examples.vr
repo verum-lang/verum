@@ -1,0 +1,353 @@
+// GenRef<T> Syntax Examples
+// Spec: 18-advanced-protocols.md Section 1.2 lines 143-193
+//
+// This file demonstrates all valid GenRef<T> syntax forms including:
+// - Basic GenRef types
+// - GenRef with refinement predicates
+// - GenRef with generation predicates
+// - GenRef in protocol definitions
+// - GenRef in lending iterator patterns
+
+// ============================================================================
+// 1. BASIC GenRef SYNTAX
+// ============================================================================
+
+// Basic GenRef type in function signature
+fn borrow<T>(x: &T) -> GenRef<T> {
+    GenRef.new(x)
+}
+
+// GenRef with primitive types
+fn create_int_ref(x: Int) -> GenRef<Int> {
+    GenRef.new(x)
+}
+
+fn create_text_ref(s: Text) -> GenRef<Text> {
+    GenRef.new(s)
+}
+
+// GenRef with generic types
+fn create_list_ref<T>(list: List<T>) -> GenRef<List<T>> {
+    GenRef.new(list)
+}
+
+// GenRef wrapping references (common in lending iterators)
+fn borrow_slice<T>(data: &List<T>, start: Int, end: Int) -> GenRef<&[T]> {
+    let slice = &data[start..end];
+    GenRef.borrow(slice)
+}
+
+// ============================================================================
+// 2. GenRef WITH REFINEMENT PREDICATES
+// ============================================================================
+
+// GenRef with inline refinement (Rule 1)
+type ValidRef<T> is GenRef<T>{valid(it)};
+
+fn safe_deref<T>(r: ValidRef<T>) -> T {
+    *r  // Guaranteed valid by refinement
+}
+
+// GenRef with lambda-style refinement (Rule 2)
+type PositiveGenRef is GenRef<Int> where |x| x > 0;
+
+fn process_positive(r: PositiveGenRef) -> Int {
+    *r + 1
+}
+
+// GenRef with bare where refinement (Rule 5 - legacy)
+type NonEmptyGenRef is GenRef<Text> where len(it) > 0;
+
+fn get_first_char(r: NonEmptyGenRef) -> Char {
+    (*r)[0]
+}
+
+// ============================================================================
+// 3. GenRef WITH GENERATION PREDICATES
+// ============================================================================
+// Spec: 18-advanced-protocols.md lines 527-531
+// Built-in predicates: generation(), epoch(), valid(), same_allocation()
+
+// Validate generation counter
+fn validate_generation(r: GenRef<Int> where generation(r) > 0) -> Int {
+    *r
+}
+
+// Ensure reference is still valid
+fn safe_access(r: GenRef<Text> where valid(r)) -> Text {
+    *r
+}
+
+// Check epoch counter
+fn validate_epoch(r: GenRef<List<Int>> where epoch(r) < 1000) -> List<Int> {
+    *r
+}
+
+// Ensure two GenRefs point to same allocation
+fn compare_refs(a: GenRef<Int>, b: GenRef<Int>) -> Bool
+    where same_allocation(a, b)
+{
+    *a == *b
+}
+
+// Multiple predicates combined
+fn complex_validation(r: GenRef<Int> where valid(r) && generation(r) > 0) -> Int {
+    *r * 2
+}
+
+// ============================================================================
+// 4. GenRef IN PROTOCOL DEFINITIONS
+// ============================================================================
+
+// Basic lending iterator protocol
+protocol LendingIterator {
+    type Item;
+    fn next(&mut self) -> Maybe<GenRef<Self.Item>>;
+}
+
+// Streaming iterator with generation constraints
+protocol StreamingIterator {
+    type Item;
+
+    fn get(&self) -> Maybe<GenRef<&Self.Item>>
+        ensures generation(result) == generation(self);
+
+    fn advance(&mut self);
+}
+
+// Window iterator with slice borrowing
+protocol WindowIterator<T> {
+    fn next_window(&mut self) -> Maybe<GenRef<&[T]>>;
+    fn window_size(&self) -> usize;
+}
+
+// Protocol with validity constraint
+protocol SafeIterator {
+    type Item;
+
+    fn next(&mut self) -> Maybe<GenRef<Self.Item> where valid(it)>;
+}
+
+// ============================================================================
+// 5. GenRef IN LENDING ITERATOR IMPLEMENTATION
+// ============================================================================
+
+// Window iterator implementation (spec example)
+type WindowIterator<T> {
+    data: GenRef<List<T>>,
+    window_size: usize,
+    position: usize
+}
+
+implement<T> Iterator for WindowIterator<T> {
+    type Item is [T];
+
+    fn next(&mut self) -> Maybe<GenRef<&[T]>> {
+        // Returns generational reference to slice
+        let data = self.data.deref()?;
+        if self.position + self.window_size <= data.len() {
+            let slice = &data[self.position..self.position + self.window_size];
+            self.position += 1;
+            Some(GenRef.borrow(slice))
+        } else {
+            None
+        }
+    }
+}
+
+// Usage example
+fn process_windows<T>(data: List<T>, size: usize) {
+    let data_ref = GenRef.new(data);
+    let mut iter = WindowIterator {
+        data: data_ref,
+        window_size: size,
+        position: 0
+    };
+
+    while let Some(window) = iter.next() {
+        // window is a GenRef<&[T]> - generation is tracked automatically
+        let slice = window.deref().expect("Generation still valid");
+        process_slice(slice);
+    }
+}
+
+// ============================================================================
+// 6. SELF-REFERENTIAL TYPES WITH GenRef
+// ============================================================================
+
+// Self-referential structure using GenRef
+type SelfReferential<T> {
+    data: T,
+    reference: Maybe<GenRef<&T>>
+}
+
+fn create_self_ref<T>(value: T) -> SelfReferential<T> {
+    SelfReferential {
+        data: value,
+        reference: None
+    }
+}
+
+fn add_self_reference<T>(sr: &mut SelfReferential<T>) {
+    sr.reference = Some(GenRef.borrow(&sr.data));
+}
+
+// ============================================================================
+// 7. GenRef WITH COMPLEX TYPE COMBINATIONS
+// ============================================================================
+
+// GenRef with tuple types
+fn tuple_ref(a: Int, b: Text) -> GenRef<(Int, Text)> {
+    GenRef.new((a, b))
+}
+
+// GenRef with nested generics
+fn nested_generic() -> GenRef<Map<Text, List<Int>>> {
+    let map = Map.new();
+    GenRef.new(map)
+}
+
+// GenRef in Result type (fallible lending iterator)
+fn try_next<T>(iter: &mut LendingIterator<Item = T>) -> Result<GenRef<T>, Error> {
+    iter.next().ok_or(Error.EndOfIterator)
+}
+
+// GenRef array
+fn ref_array() -> [GenRef<Int>; 5] {
+    [
+        GenRef.new(1),
+        GenRef.new(2),
+        GenRef.new(3),
+        GenRef.new(4),
+        GenRef.new(5)
+    ]
+}
+
+// ============================================================================
+// 8. GENERATION TRACKING EXAMPLES
+// ============================================================================
+
+// Explicit generation constraint in function contract
+fn tied_generation<T>(source: GenRef<T>) -> GenRef<&T>
+    ensures generation(result) == generation(source)
+{
+    let value = source.deref().expect("Valid generation");
+    GenRef.borrow(value)
+}
+
+// Validate generation before access
+fn safe_deref_with_check<T>(r: GenRef<T>) -> Maybe<T> {
+    if valid(r) {
+        Some(*r)
+    } else {
+        None
+    }
+}
+
+// Epoch-based invalidation check
+fn check_epoch_limit<T>(r: GenRef<T>) -> Bool {
+    epoch(r) < 65535  // u16 max
+}
+
+// Same allocation check for aliasing
+fn are_aliased<T>(a: GenRef<T>, b: GenRef<T>) -> Bool {
+    same_allocation(a, b)
+}
+
+// ============================================================================
+// 9. PRACTICAL EXAMPLES
+// ============================================================================
+
+// Text splitting iterator without allocations
+type SplitIterator {
+    data: Text,
+    separator: Char,
+    position: usize
+}
+
+implement StreamingIterator for SplitIterator {
+    type Item is str;
+
+    fn get(&self) -> Maybe<&str> {
+        if self.position < self.data.len() {
+            let start = self.position;
+            let end = self.data[start..].find(self.separator)
+                .map(|i| start + i)
+                .unwrap_or(self.data.len());
+            Some(&self.data[start..end])
+        } else {
+            None
+        }
+    }
+
+    fn advance(&mut self) {
+        if let Some(pos) = self.data[self.position..].find(self.separator) {
+            self.position += pos + 1;
+        } else {
+            self.position = self.data.len();
+        }
+    }
+}
+
+// Zero-copy CSV row iterator
+type CsvRowIterator {
+    data: GenRef<Text>,
+    row_start: usize
+}
+
+implement Iterator for CsvRowIterator {
+    type Item is &str;
+
+    fn next(&mut self) -> Maybe<GenRef<&str>> {
+        let text = self.data.deref()?;
+        if self.row_start >= text.len() {
+            return None;
+        }
+
+        let end = text[self.row_start..]
+            .find('\n')
+            .map(|i| self.row_start + i)
+            .unwrap_or(text.len());
+
+        let row = &text[self.row_start..end];
+        self.row_start = end + 1;
+
+        Some(GenRef.borrow(row))
+    }
+}
+
+// ============================================================================
+// 10. ADVANCED: GenRef WITH CHECKED REFERENCES
+// ============================================================================
+
+// Combining GenRef with compile-time checked references
+fn zero_cost_lending<T>(data: &checked List<T>) -> GenRef<&checked T> {
+    // &checked T has zero runtime overhead when proven safe
+    // GenRef adds generation tracking for lending
+    let first = &checked data[0];
+    GenRef.borrow(first)
+}
+
+// GenRef with unsafe references (FFI scenarios)
+fn ffi_lending(ptr: &unsafe CString) -> GenRef<&unsafe CString> {
+    GenRef.borrow(ptr)
+}
+
+// ============================================================================
+// 11. ERROR EXAMPLES (COMMENTED OUT - WOULD NOT PARSE)
+// ============================================================================
+
+// INVALID: GenRef without type parameter
+// fn invalid1() -> GenRef {  // ERROR: Missing type parameter
+//     GenRef.new(42)
+// }
+
+// INVALID: Multiple type parameters
+// fn invalid2() -> GenRef<Int, Text> {  // ERROR: GenRef takes one type param
+//     ...
+// }
+
+// INVALID: Empty type parameter
+// fn invalid3() -> GenRef<> {  // ERROR: Empty type parameter
+//     ...
+// }

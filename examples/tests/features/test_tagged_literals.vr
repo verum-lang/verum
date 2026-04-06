@@ -1,0 +1,416 @@
+// Comprehensive Test for Tagged/Semantic Literals in Verum
+// Based on grammar/verum.ebnf Section 1.4 and 1.5
+//
+// Grammar References:
+// - tagged_literal      = identifier , '#' , ( plain_string | raw_string ) ;
+// - semantic_literal    = semantic_tag , '#' , ( plain_string | raw_string ) ;
+// - semantic_tag        = 'gql' | 'rx' | 'sql' | 'url' | 'email' | 'json' | 'xml' | 'yaml' | 'contract' | 'sh' ;
+// - interpolated_string = identifier , '"' , { string_char | interpolation } , '"' ;
+// - safe_interpolated   = semantic_tag , '"' , { string_char | safe_interpolation } , '"' ;
+// - raw_string          = 'r' , raw_string_delim ;
+// - multiline_string    = '"""' , { char_except_newline | '\n' | '\r\n' } , '"""' ;
+
+fn main() {
+    print("=== Comprehensive Tagged/Semantic Literals Test ===");
+    print("");
+
+    // =========================================================================
+    // Category 1: SEMANTIC LITERALS - Grammar-Defined Tags
+    // =========================================================================
+    print("--- Category 1: Semantic Literals (Grammar-Defined) ---");
+    print("");
+
+    // 1.1 Regular Expression (rx)
+    print("1.1 Regular Expression (rx#)");
+    let pattern1 = rx#"^[a-z]+$";
+    print(f"  Simple pattern: {pattern1}");
+
+    let pattern2 = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+    print(f"  Email pattern: {pattern2}");
+
+    let pattern3 = rx#"\d{3}-\d{2}-\d{4}";
+    print(f"  SSN pattern: {pattern3}");
+    print("");
+
+    // 1.2 SQL Queries (sql)
+    print("1.2 SQL Queries (sql#)");
+    let query1 = sql#"SELECT * FROM users";
+    print(f"  Basic query: {query1}");
+
+    let query2 = sql#"SELECT * FROM users WHERE id = 42";
+    print(f"  Query with WHERE: {query2}");
+
+    let query3 = sql#"SELECT u.name, COUNT(o.id) AS order_count FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.name HAVING COUNT(o.id) > 5";
+    print(f"  Complex query: {query3}");
+    print("");
+
+    // 1.3 GraphQL (gql)
+    print("1.3 GraphQL (gql#)");
+    let gql1 = gql#"query { users { id name } }";
+    print(f"  Simple query: {gql1}");
+
+    let gql2 = gql#"query GetUser($id: ID!) { user(id: $id) { name email posts { title } } }";
+    print(f"  Parameterized query: {gql2}");
+
+    let gql3 = gql#"mutation CreatePost { createPost(title: \"New Post\", body: \"Content\") { id createdAt } }";
+    print(f"  Mutation: {gql3}");
+    print("");
+
+    // 1.4 URL (url)
+    print("1.4 URL (url#)");
+    let url1 = url#"https://example.com";
+    print(f"  Simple URL: {url1}");
+
+    let url2 = url#"https://api.example.com/v1/users?limit=10&offset=0";
+    print(f"  API URL with params: {url2}");
+
+    let url3 = url#"https://example.com/path/to/resource#section";
+    print(f"  URL with fragment: {url3}");
+    print("");
+
+    // 1.5 Email (email)
+    print("1.5 Email (email#)");
+    let email1 = email#"user@example.com";
+    print(f"  Simple email: {email1}");
+
+    let email2 = email#"firstname.lastname@example.com";
+    print(f"  Email with dots: {email2}");
+
+    let email3 = email#"user+tag@subdomain.example.co.uk";
+    print(f"  Complex email: {email3}");
+    print("");
+
+    // 1.6 JSON (json)
+    print("1.6 JSON (json#)");
+    let json1 = json#"{\"key\": \"value\"}";
+    print(f"  Simple object: {json1}");
+
+    let json2 = json#"{\"name\": \"Alice\", \"age\": 30, \"active\": true}";
+    print(f"  Object with types: {json2}");
+
+    let json3 = json#"[1, 2, 3, {\"nested\": [4, 5, 6]}]";
+    print(f"  Nested array: {json3}");
+    print("");
+
+    // 1.7 XML (xml)
+    print("1.7 XML (xml#)");
+    let xml1 = xml#"<user><name>Bob</name></user>";
+    print(f"  Simple XML: {xml1}");
+
+    let xml2 = xml#"<root><item id=\"1\">First</item><item id=\"2\">Second</item></root>";
+    print(f"  XML with attributes: {xml2}");
+
+    let xml3 = xml#"<?xml version=\"1.0\"?><document><section>Content</section></document>";
+    print(f"  XML with declaration: {xml3}");
+    print("");
+
+    // 1.8 YAML (yaml)
+    print("1.8 YAML (yaml#)");
+    let yaml1 = yaml#"name: MyApp\nversion: 1.0.0";
+    print(f"  Simple YAML: {yaml1}");
+
+    let yaml2 = yaml#"server:\n  host: localhost\n  port: 8080\n  ssl: true";
+    print(f"  Nested YAML: {yaml2}");
+
+    let yaml3 = yaml#"features:\n  - auth\n  - api\n  - webhooks";
+    print(f"  YAML list: {yaml3}");
+    print("");
+
+    // 1.9 Contract (contract)
+    print("1.9 Contract (contract#)");
+    let contract1 = contract#"requires x > 0; ensures result >= 0";
+    print(f"  Simple contract: {contract1}");
+
+    let contract2 = contract#"invariant balance >= 0; decreases n";
+    print(f"  Loop contract: {contract2}");
+    print("");
+
+    // 1.10 Shell (sh)
+    print("1.10 Shell (sh#)");
+    let sh1 = sh#"ls -la";
+    print(f"  Simple command: {sh1}");
+
+    let sh2 = sh#"find . -name '*.vr' | xargs grep 'pattern'";
+    print(f"  Piped command: {sh2}");
+
+    let sh3 = sh#"for file in *.txt; do echo $file; done";
+    print(f"  Shell loop: {sh3}");
+    print("");
+
+    // =========================================================================
+    // Category 2: CUSTOM TAGGED LITERALS - User-Defined Identifiers
+    // =========================================================================
+    print("--- Category 2: Custom Tagged Literals (User-Defined) ---");
+    print("");
+
+    // 2.1 Date/Time Literals
+    print("2.1 Date/Time Tagged Literals");
+    let date1 = d#"2025-12-11";
+    print(f"  Date: {date1}");
+
+    let datetime1 = dt#"2025-12-11T15:30:00Z";
+    print(f"  DateTime: {datetime1}");
+
+    let time1 = t#"15:30:00";
+    print(f"  Time: {time1}");
+    print("");
+
+    // 2.2 Numeric Domain Literals
+    print("2.2 Numeric Domain Tagged Literals");
+    let vec1 = vec#"[1.0, 2.0, 3.0]";
+    print(f"  Vector: {vec1}");
+
+    let mat1 = mat#"[[1, 2], [3, 4]]";
+    print(f"  Matrix: {mat1}");
+
+    let complex1 = c#"3+4i";
+    print(f"  Complex: {complex1}");
+    print("");
+
+    // 2.3 Scientific Literals
+    print("2.3 Scientific Tagged Literals");
+    let chem1 = chem#"H2O";
+    print(f"  Chemical formula: {chem1}");
+
+    let bio1 = dna#"ATCGATCG";
+    print(f"  DNA sequence: {bio1}");
+    print("");
+
+    // 2.4 Format Literals
+    print("2.4 Format Tagged Literals");
+    let csv1 = csv#"name,age,city\nAlice,30,NYC";
+    print(f"  CSV: {csv1}");
+
+    let md1 = md#"# Header\n## Subheader\n- Item 1";
+    print(f"  Markdown: {md1}");
+    print("");
+
+    // 2.5 Network/Protocol Literals
+    print("2.5 Network/Protocol Tagged Literals");
+    let ip1 = ip#"192.168.1.1";
+    print(f"  IP address: {ip1}");
+
+    let mac1 = mac#"00:1B:44:11:3A:B7";
+    print(f"  MAC address: {mac1}");
+
+    let uuid1 = uuid#"550e8400-e29b-41d4-a716-446655440000";
+    print(f"  UUID: {uuid1}");
+    print("");
+
+    // =========================================================================
+    // Category 3: RAW STRING TAGGED LITERALS
+    // =========================================================================
+    print("--- Category 3: Raw String Tagged Literals ---");
+    print("");
+
+    // Raw strings preserve backslashes and don't interpret escapes
+    print("3.1 Raw Strings with Tagged Literals");
+    let raw_rx1 = rx#r#"C:\Users\path\to\file"#;
+    print(f"  Raw regex pattern: {raw_rx1}");
+
+    let raw_json1 = json#r#"{"path": "C:\\Users\\Documents", "value": "\n\t"}"#;
+    print(f"  Raw JSON: {raw_json1}");
+
+    let raw_sh1 = sh#r#"echo "C:\Program Files\app.exe""#;
+    print(f"  Raw shell: {raw_sh1}");
+    print("");
+
+    // =========================================================================
+    // Category 4: INTERPOLATED STRINGS (f-strings)
+    // =========================================================================
+    print("--- Category 4: Interpolated Strings ---");
+    print("");
+
+    print("4.1 Basic Interpolation");
+    let name = "Verum";
+    let version = 1;
+    let message1 = f"Hello {name}!";
+    print(f"  Simple: {message1}");
+
+    let message2 = f"Hello {name}, version {version}";
+    print(f"  Multiple: {message2}");
+    print("");
+
+    print("4.2 Expression Interpolation");
+    let count = 5;
+    let message3 = f"You have {count} messages";
+    print(f"  Variable: {message3}");
+
+    let x = 10;
+    let y = 20;
+    let message4 = f"Sum: {x} + {y} = {x + y}";
+    print(f"  Expression: {message4}");
+    print("");
+
+    // =========================================================================
+    // Category 5: SAFE INTERPOLATED LITERALS
+    // =========================================================================
+    print("--- Category 5: Safe Interpolated Literals ---");
+    print("");
+
+    // Safe interpolation automatically escapes/sanitizes based on context
+    print("5.1 SQL Safe Interpolation");
+    let user_id = 42;
+    let safe_query1 = sql"SELECT * FROM users WHERE id = {user_id}";
+    print(f"  Safe SQL: {safe_query1}");
+
+    let table = "users";
+    let limit = 10;
+    let safe_query2 = sql"SELECT * FROM {table} LIMIT {limit}";
+    print(f"  Multi-param SQL: {safe_query2}");
+    print("");
+
+    print("5.2 URL Safe Interpolation");
+    let endpoint = "users";
+    let page = 2;
+    let safe_url = url"https://api.example.com/v1/{endpoint}?page={page}";
+    print(f"  Safe URL: {safe_url}");
+    print("");
+
+    print("5.3 JSON Safe Interpolation");
+    let username = "alice";
+    let age = 30;
+    let safe_json = json"{\"name\": \"{username}\", \"age\": {age}}";
+    print(f"  Safe JSON: {safe_json}");
+    print("");
+
+    // =========================================================================
+    // Category 6: MULTILINE STRINGS
+    // =========================================================================
+    print("--- Category 6: Multiline Strings ---");
+    print("");
+
+    print("6.1 Multiline String Literals");
+    let multiline1 = """This is a
+multiline string
+that spans multiple lines""";
+    print(f"  Multiline: {multiline1}");
+
+    let multiline2 = """
+    Line 1
+    Line 2
+    Line 3
+    """;
+    print(f"  Indented multiline: {multiline2}");
+    print("");
+
+    // =========================================================================
+    // Category 7: EDGE CASES AND SPECIAL CHARACTERS
+    // =========================================================================
+    print("--- Category 7: Edge Cases ---");
+    print("");
+
+    print("7.1 Empty Tagged Literals");
+    let empty1 = sql#"";
+    print(f"  Empty SQL: '{empty1}'");
+
+    let empty2 = rx#"";
+    print(f"  Empty regex: '{empty2}'");
+    print("");
+
+    print("7.2 Special Characters in Tagged Literals");
+    let special1 = json#"{\"special\": \"!@#$%^&*()_+-=[]{}|;':,.<>/?`~\"}";
+    print(f"  Special chars: {special1}");
+
+    let special2 = sql#"SELECT * FROM `table-name` WHERE `column-name` = 'value'";
+    print(f"  Backticks in SQL: {special2}");
+    print("");
+
+    print("7.3 Escaped Characters");
+    let escaped1 = json#"{\"quote\": \"She said \\\"hello\\\"\"}";
+    print(f"  Escaped quotes: {escaped1}");
+
+    let escaped2 = rx#"\\d+\\.\\d+";
+    print(f"  Escaped regex: {escaped2}");
+    print("");
+
+    print("7.4 Unicode in Tagged Literals");
+    let unicode1 = json#"{\"emoji\": \"👋🌍\", \"text\": \"こんにちは\"}";
+    print(f"  Unicode JSON: {unicode1}");
+
+    let unicode2 = xml#"<message>Привет мир</message>";
+    print(f"  Unicode XML: {unicode2}");
+    print("");
+
+    // =========================================================================
+    // Category 8: NESTED AND COMPLEX PATTERNS
+    // =========================================================================
+    print("--- Category 8: Complex Patterns ---");
+    print("");
+
+    print("8.1 Nested Structures");
+    let nested_json = json#"{\"users\": [{\"id\": 1, \"name\": \"Alice\"}, {\"id\": 2, \"name\": \"Bob\"}]}";
+    print(f"  Nested JSON: {nested_json}");
+
+    let nested_xml = xml#"<root><items><item><name>First</name></item><item><name>Second</name></item></items></root>";
+    print(f"  Nested XML: {nested_xml}");
+    print("");
+
+    print("8.2 Complex Regex Patterns");
+    let ipv4_pattern = rx#"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$";
+    print(f"  IPv4 pattern: {ipv4_pattern}");
+
+    let url_pattern = rx#"^https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)$";
+    print(f"  URL pattern: {url_pattern}");
+    print("");
+
+    // =========================================================================
+    // Category 9: COMBINATION TESTS
+    // =========================================================================
+    print("--- Category 9: Combination Tests ---");
+    print("");
+
+    print("9.1 Tagged Literal with Interpolation Context");
+    let query_template = sql#"SELECT * FROM users WHERE status = 'active'";
+    let user_count = 10;
+    let report = f"Query: {query_template} (expected {user_count} results)";
+    print(f"  {report}");
+    print("");
+
+    print("9.2 Multiple Tagged Literals in Expression");
+    let db_query = sql#"SELECT email FROM users";
+    let email_validator = rx#"^[^@]+@[^@]+$";
+    let api_endpoint = url#"https://api.example.com/validate";
+    print(f"  Query: {db_query}");
+    print(f"  Validator: {email_validator}");
+    print(f"  API: {api_endpoint}");
+    print("");
+
+    // =========================================================================
+    // Category 10: TYPE-SPECIFIC VALIDATION PATTERNS
+    // =========================================================================
+    print("--- Category 10: Validation Patterns ---");
+    print("");
+
+    print("10.1 Common Validation Patterns");
+    let email_pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+    print(f"  Email validation: {email_pattern}");
+
+    let phone_pattern = rx#"^\+?1?\d{9,15}$";
+    print(f"  Phone validation: {phone_pattern}");
+
+    let zip_pattern = rx#"^\d{5}(-\d{4})?$";
+    print(f"  ZIP validation: {zip_pattern}");
+
+    let credit_card_pattern = rx#"^\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}$";
+    print(f"  Credit card validation: {credit_card_pattern}");
+    print("");
+
+    // =========================================================================
+    // Summary
+    // =========================================================================
+    print("=== Test Summary ===");
+    print("Tested:");
+    print("  ✓ 10 semantic literal types (rx, sql, gql, url, email, json, xml, yaml, contract, sh)");
+    print("  ✓ Custom tagged literals (date, vector, matrix, chemistry, etc.)");
+    print("  ✓ Raw string tagged literals");
+    print("  ✓ Interpolated strings (f-strings)");
+    print("  ✓ Safe interpolated literals");
+    print("  ✓ Multiline strings");
+    print("  ✓ Edge cases (empty, special chars, unicode)");
+    print("  ✓ Complex nested structures");
+    print("  ✓ Combination patterns");
+    print("  ✓ Validation patterns");
+    print("");
+    print("=== All Tagged/Semantic Literals Tests Complete ===");
+}

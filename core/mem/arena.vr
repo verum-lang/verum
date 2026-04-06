@@ -1,0 +1,503 @@
+// =============================================================================
+// mem/arena.vr - Generational Arena Allocator
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/header, mem/raw_ops, sys/raw
+// =============================================================================
+//
+// # Generational Arena: O(1) Mass Invalidation
+//
+// A region allocator where ALL allocations share a single generation counter.
+// When the arena is "reset", the generation increments once, invalidating
+// ALL ThinRefs into the arena simultaneously — O(1) cost regardless of
+// allocation count.
+//
+// # Architecture
+//
+// ```
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │                    GenerationalArena Layout                          │
+// ├──────────────────────────────────────────────────────────────────────┤
+// │                                                                      │
+// │  ┌─────────────┐                                                     │
+// │  │  ArenaConfig │  initial_capacity, max_capacity, growth_factor    │
+// │  └─────────────┘                                                     │
+// │                                                                      │
+// │  ┌───────────────────────────────────────────────────────────────┐   │
+// │  │  buffer (contiguous memory block)                              │   │
+// │  │  ┌──────┬──────┬──────┬──────┬─────────────────────────────┐  │   │
+// │  │  │alloc1│alloc2│alloc3│alloc4│    free space                │  │   │
+// │  │  └──────┴──────┴──────┴──────┴─────────────────────────────┘  │   │
+// │  │  ^                            ^                             ^  │   │
+// │  │  buffer                       buffer + used        buffer + cap│   │
+// │  └───────────────────────────────────────────────────────────────┘   │
+// │                                                                      │
+// │  generation: 1  ──────────────────────────── shared by ALL refs     │
+// │                                                                      │
+// │  On reset():                                                         │
+// │    generation: 1 → 2  (O(1), single increment)                      │
+// │    used: N → 0        (bump pointer reset)                           │
+// │    buffer: unchanged  (memory reused, not freed)                     │
+// │                                                                      │
+// │  ALL ThinRefs that stored generation=1 are now INVALID because      │
+// │  the arena's generation is now 2. No per-ref bookkeeping needed.    │
+// │                                                                      │
+// └──────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// # Use Cases
+//
+// 1. **Game Engines**: Per-frame allocator — allocate freely during the frame,
+//    reset at frame boundary. Zero cost for thousands of allocations.
+//
+// 2. **HTTP Request Handlers**: Per-request arena — all request-scoped data
+//    allocated from arena, single reset when response is sent.
+//
+// 3. **Parser Allocators**: AST nodes allocated in arena during parse,
+//    entire AST invalidated on error recovery or tree replacement.
+//
+// 4. **Render Passes**: GPU command buffer staging — allocate draw commands
+//    into arena, submit to GPU, reset for next pass.
+//
+// # Key Properties
+//
+// - Allocation: O(1) bump pointer (faster than malloc)
+// - Reset: O(1) generation increment + pointer reset
+// - Validation: Same ~15ns CBGR check as normal refs
+// - Memory reuse: Buffer is never freed on reset, only on destroy
+// - No fragmentation: Linear allocation, bulk deallocation
+//
+// # Comparison with Other Languages
+//
+// | Language       | Arena Pattern          | Mass Invalidation | Safety    |
+// |----------------|------------------------|-------------------|-----------|
+// | C              | Custom arena           | Manual (unsafe)   | None      |
+// | C++            | pmr::monotonic_buffer  | Manual reset      | None      |
+// | Rust           | bumpalo                | Lifetime-based    | Compile   |
+// | Go             | sync.Pool              | GC-based          | Runtime   |
+// | Zig            | ArenaAllocator         | Manual deinit     | None      |
+// | **Verum**      | **GenerationalArena**  | **O(1) gen bump** | **CBGR**  |
+//
+// Verum's approach is unique: the generation counter provides *runtime-verified*
+// invalidation without lifetimes (more flexible than Rust) and without GC
+// (more predictable than Go). The CBGR check catches stale arena refs at
+// dereference time with the same ~15ns cost as any other reference.
+//
+// # Thread Safety
+//
+// GenerationalArena is NOT thread-safe. For concurrent use, wrap in a Mutex
+// or use one arena per thread (recommended for performance).
+//
+// Spec: docs/detailed/26-cbgr-implementation.md Section 4 (Arena Integration)
+// =============================================================================
+
+module arena;
+
+mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};
+mount super.raw_ops.{memset, memzero, load_i64, store_i64};
+
+// Platform-level raw allocation intrinsics
+mount core.sys.raw.{__alloc_raw, __alloc_zeroed_raw, __dealloc_raw};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default arena capacity: 64 KiB
+public const DEFAULT_ARENA_CAPACITY: Int = 65536;
+
+/// Maximum arena capacity: 256 MiB
+public const MAX_ARENA_CAPACITY: Int = 268435456;
+
+/// Default growth factor: 200% (double)
+public const DEFAULT_GROWTH_FACTOR: Int = 200;
+
+/// Minimum alignment for arena allocations (8 bytes for i64 alignment)
+public const ARENA_ALIGNMENT: Int = 8;
+
+/// Initial generation value for a new arena
+public const ARENA_GEN_INITIAL: Int = 1;
+
+// =============================================================================
+// Arena Configuration
+// =============================================================================
+
+/// Configuration for arena creation.
+///
+/// Controls initial size, maximum size, and growth behavior when the arena
+/// needs more memory (if auto-growth is desired).
+public type ArenaConfig is {
+    /// Initial buffer capacity in bytes.
+    initial_capacity: Int,
+    /// Maximum capacity the arena can grow to (0 = no limit).
+    max_capacity: Int,
+    /// Growth factor as a percentage (e.g., 200 = double capacity).
+    growth_factor: Int,
+};
+
+implement ArenaConfig {
+    /// Create a default configuration: 64 KiB initial, 256 MiB max, 2x growth.
+    public fn default() -> ArenaConfig {
+        ArenaConfig {
+            initial_capacity: DEFAULT_ARENA_CAPACITY,
+            max_capacity: MAX_ARENA_CAPACITY,
+            growth_factor: DEFAULT_GROWTH_FACTOR,
+        }
+    }
+
+    /// Create a fixed-size arena configuration (no growth).
+    public fn fixed(capacity: Int) -> ArenaConfig {
+        ArenaConfig {
+            initial_capacity: capacity,
+            max_capacity: capacity,
+            growth_factor: 100,
+        }
+    }
+
+    /// Create a configuration with explicit parameters.
+    public fn custom(initial: Int, max: Int, growth: Int) -> ArenaConfig {
+        ArenaConfig {
+            initial_capacity: initial,
+            max_capacity: max,
+            growth_factor: growth,
+        }
+    }
+}
+
+// =============================================================================
+// Arena Error
+// =============================================================================
+
+/// Errors that can occur during arena operations.
+public type ArenaError is
+    | OutOfMemory { requested: Int, available: Int }
+    | ExceedsMaxCapacity { requested: Int, max: Int }
+    | InvalidAlignment { alignment: Int }
+    | AlreadyDestroyed
+    ;
+
+implement ArenaError {
+    /// Get a human-readable error message.
+    public fn message(&self) -> Text {
+        match self {
+            OutOfMemory { requested, available } =>
+                f"arena out of memory: requested {requested} bytes, {available} available",
+            ExceedsMaxCapacity { requested, max } =>
+                f"arena allocation exceeds max capacity: {requested} > {max}",
+            InvalidAlignment { alignment } =>
+                f"invalid alignment: {alignment} (must be power of 2)",
+            AlreadyDestroyed =>
+                "arena has been destroyed",
+        }
+    }
+}
+
+// =============================================================================
+// Generational Arena
+// =============================================================================
+
+/// A region allocator with O(1) mass invalidation via shared generation counter.
+///
+/// All allocations from this arena share the arena's generation. When `reset()`
+/// is called, the generation increments once, and ALL outstanding ThinRefs
+/// become invalid — detected on next CBGR dereference check.
+///
+/// # Example
+///
+/// ```verum
+/// let mut arena = GenerationalArena.new(4096);
+///
+/// // Frame 1: allocate game objects
+/// let ptr1 = arena.alloc(64);   // enemy sprite data
+/// let ptr2 = arena.alloc(128);  // particle system
+/// let ptr3 = arena.alloc(32);   // collision info
+/// // ... use ptrs freely during frame ...
+///
+/// // Frame boundary: invalidate everything in O(1)
+/// arena.reset();
+/// // ptr1, ptr2, ptr3 are now all invalid — CBGR catches any stale use
+///
+/// // Frame 2: reuse the same memory
+/// let ptr4 = arena.alloc(256);  // new frame's data
+///
+/// arena.destroy();
+/// ```
+public type GenerationalArena is {
+    /// Raw pointer to the contiguous memory block.
+    buffer: Int,
+    /// Total capacity of the buffer in bytes.
+    capacity: Int,
+    /// Number of bytes currently allocated (bump pointer offset).
+    used: Int,
+    /// Shared generation counter — ALL refs into this arena check this value.
+    /// Incremented on reset() to invalidate all outstanding references.
+    generation: Int,
+    /// Number of individual allocations made since last reset.
+    alloc_count: Int,
+    /// Total number of resets performed (lifetime statistic).
+    reset_count: Int,
+    /// Configuration for growth behavior.
+    config: ArenaConfig,
+};
+
+implement GenerationalArena {
+    /// Create a new arena with the given initial capacity (in bytes).
+    ///
+    /// The arena allocates a contiguous memory block and uses bump-pointer
+    /// allocation for O(1) alloc performance.
+    public fn new(capacity: Int) -> GenerationalArena {
+        let actual_cap = if capacity < ARENA_ALIGNMENT {
+            ARENA_ALIGNMENT
+        } else {
+            // Round up to alignment boundary
+            let mask = ARENA_ALIGNMENT - 1;
+            (capacity + mask) & (!mask)
+        };
+
+        let buf = __alloc_zeroed_raw(actual_cap);
+
+        GenerationalArena {
+            buffer: buf,
+            capacity: actual_cap,
+            used: 0,
+            generation: ARENA_GEN_INITIAL,
+            alloc_count: 0,
+            reset_count: 0,
+            config: ArenaConfig.fixed(actual_cap),
+        }
+    }
+
+    /// Create a new arena with explicit configuration.
+    public fn with_config(config: ArenaConfig) -> GenerationalArena {
+        let cap = config.initial_capacity;
+        let actual_cap = if cap < ARENA_ALIGNMENT {
+            ARENA_ALIGNMENT
+        } else {
+            let mask = ARENA_ALIGNMENT - 1;
+            (cap + mask) & (!mask)
+        };
+
+        let buf = __alloc_zeroed_raw(actual_cap);
+
+        GenerationalArena {
+            buffer: buf,
+            capacity: actual_cap,
+            used: 0,
+            generation: ARENA_GEN_INITIAL,
+            alloc_count: 0,
+            reset_count: 0,
+            config: config,
+        }
+    }
+
+    /// Allocate `size` bytes from the arena using bump-pointer allocation.
+    ///
+    /// Returns the raw pointer to the allocated region, or 0 if the arena
+    /// is exhausted and cannot grow.
+    ///
+    /// Time complexity: O(1) — just a pointer bump and alignment adjustment.
+    ///
+    /// The returned pointer is valid until the next `reset()` or `destroy()`.
+    /// Any ThinRef created with the current `generation()` will be invalidated
+    /// when the arena is reset.
+    public fn alloc(&mut self, size: Int) -> Int {
+        if self.buffer == 0 {
+            return 0;
+        }
+
+        // Align the current offset
+        let mask = ARENA_ALIGNMENT - 1;
+        let aligned_offset = (self.used + mask) & (!mask);
+        let end = aligned_offset + size;
+
+        if end > self.capacity {
+            // Try to grow if config allows
+            if self.config.max_capacity > 0 && self.capacity < self.config.max_capacity {
+                let new_cap = self.capacity * self.config.growth_factor / 100;
+                let target = if new_cap < end { end * 2 } else { new_cap };
+                let capped = if self.config.max_capacity > 0 && target > self.config.max_capacity {
+                    self.config.max_capacity
+                } else {
+                    target
+                };
+
+                if capped >= end {
+                    let new_buf = __alloc_zeroed_raw(capped);
+                    if new_buf != 0 {
+                        // Copy existing data to new buffer
+                        let mut i = 0;
+                        while i < self.used {
+                            let val = load_i64(self.buffer + i);
+                            store_i64(new_buf + i, val);
+                            i = i + 8;
+                        }
+                        // Free old buffer
+                        __dealloc_raw(self.buffer, self.capacity);
+                        self.buffer = new_buf;
+                        self.capacity = capped;
+                        // Fall through to allocate
+                    } else {
+                        return 0;
+                    }
+                } else {
+                    return 0;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let ptr = self.buffer + aligned_offset;
+        self.used = end;
+        self.alloc_count = self.alloc_count + 1;
+        ptr
+    }
+
+    /// Allocate `size` bytes with explicit alignment.
+    ///
+    /// The alignment must be a power of 2 and at least ARENA_ALIGNMENT.
+    public fn alloc_aligned(&mut self, size: Int, alignment: Int) -> Int {
+        if self.buffer == 0 {
+            return 0;
+        }
+
+        let align = if alignment < ARENA_ALIGNMENT { ARENA_ALIGNMENT } else { alignment };
+        let mask = align - 1;
+        let aligned_offset = (self.used + mask) & (!mask);
+        let end = aligned_offset + size;
+
+        if end > self.capacity {
+            return 0;
+        }
+
+        let ptr = self.buffer + aligned_offset;
+        self.used = end;
+        self.alloc_count = self.alloc_count + 1;
+        ptr
+    }
+
+    /// Reset the arena: O(1) mass invalidation.
+    ///
+    /// This is the key operation that makes GenerationalArena unique:
+    /// - Increments the shared generation counter (1 integer add)
+    /// - Resets the bump pointer to 0 (1 store)
+    /// - ALL outstanding ThinRefs are now invalid
+    ///
+    /// The memory buffer is NOT freed — it is reused for subsequent allocations.
+    /// This makes reset() extremely fast: O(1) regardless of how many
+    /// allocations were made.
+    ///
+    /// Any subsequent CBGR dereference of a pre-reset ThinRef will fail the
+    /// generation check and raise UseAfterFreeError.
+    public fn reset(&mut self) {
+        self.generation = self.generation + 1;
+        self.used = 0;
+        self.alloc_count = 0;
+        self.reset_count = self.reset_count + 1;
+    }
+
+    /// Get the current generation counter.
+    ///
+    /// ThinRefs created with this generation are valid until the next reset().
+    /// Use this value when constructing ThinRefs into arena-allocated memory.
+    public fn generation(&self) -> Int {
+        self.generation
+    }
+
+    /// Get the number of bytes currently in use.
+    public fn used(&self) -> Int {
+        self.used
+    }
+
+    /// Get the total capacity of the arena in bytes.
+    public fn capacity(&self) -> Int {
+        self.capacity
+    }
+
+    /// Get the number of individual allocations since last reset.
+    public fn alloc_count(&self) -> Int {
+        self.alloc_count
+    }
+
+    /// Get the total number of resets performed.
+    public fn reset_count(&self) -> Int {
+        self.reset_count
+    }
+
+    /// Get the number of bytes remaining before the arena is full.
+    public fn remaining(&self) -> Int {
+        self.capacity - self.used
+    }
+
+    /// Check if the arena has been destroyed.
+    public fn is_destroyed(&self) -> Bool {
+        self.buffer == 0
+    }
+
+    /// Check if a raw pointer falls within this arena's buffer range.
+    ///
+    /// This does NOT validate generation — use CBGR ThinRef for that.
+    /// This only checks address containment.
+    public fn contains_ptr(&self, ptr: Int) -> Bool {
+        ptr >= self.buffer && ptr < self.buffer + self.capacity
+    }
+
+    /// Destroy the arena and free the underlying memory buffer.
+    ///
+    /// After destroy(), the arena is unusable. All pointers into the
+    /// arena become dangling (caught by CBGR generation check).
+    public fn destroy(&mut self) {
+        if self.buffer != 0 {
+            __dealloc_raw(self.buffer, self.capacity);
+            self.buffer = 0;
+            self.capacity = 0;
+            self.used = 0;
+            self.generation = self.generation + 1;
+            self.alloc_count = 0;
+        }
+    }
+}
+
+// =============================================================================
+// Arena Snapshot — save/restore point within an arena
+// =============================================================================
+
+/// A snapshot of the arena's state that can be restored to.
+///
+/// This enables nested scoping within an arena: save state, allocate,
+/// then restore to free everything allocated after the snapshot.
+/// The generation is NOT incremented — only the bump pointer is rolled back.
+/// Use with caution: refs to memory between snapshot and restore become
+/// address-invalid but NOT generation-invalid.
+public type ArenaSnapshot is {
+    /// Saved used-bytes offset.
+    used: Int,
+    /// Saved allocation count.
+    alloc_count: Int,
+    /// Generation at snapshot time (for validation).
+    generation: Int,
+};
+
+implement GenerationalArena {
+    /// Take a snapshot of the current arena state.
+    public fn snapshot(&self) -> ArenaSnapshot {
+        ArenaSnapshot {
+            used: self.used,
+            alloc_count: self.alloc_count,
+            generation: self.generation,
+        }
+    }
+
+    /// Restore the arena to a previous snapshot.
+    ///
+    /// Returns true if the restore succeeded, false if the snapshot is stale
+    /// (i.e., the arena was reset since the snapshot was taken).
+    public fn restore(&mut self, snap: ArenaSnapshot) -> Bool {
+        if snap.generation != self.generation {
+            return false;
+        }
+        self.used = snap.used;
+        self.alloc_count = snap.alloc_count;
+        true
+    }
+}

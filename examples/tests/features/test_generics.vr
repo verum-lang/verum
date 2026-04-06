@@ -1,0 +1,67 @@
+// Test generic types and functions
+// Verifies polymorphism works correctly
+
+type Maybe<T> is Some(T) | None;
+type Pair<A, B> is { first: A, second: B };
+
+// Generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Generic swap
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+// Generic map over Maybe
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None
+    }
+}
+
+// Generic fold
+fn maybe_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(x) => x,
+        None => default
+    }
+}
+
+fn main() {
+    let _ = print("=== Generic Type Tests ===");
+
+    // Identity with Float
+    let n = identity(42.0);
+    let _ = print(f"identity(42.0) = {n}");
+
+    // Identity with Text
+    let s = identity("hello");
+    let _ = print(f"identity(\"hello\") = {s}");
+
+    // Pair creation and field access
+    let p: Pair<Float, Float> = Pair { first: 1.0, second: 2.0 };
+    let _ = print(f"Original pair: ({p.first}, {p.second})");
+
+    let swapped = swap(p);
+    let _ = print(f"Swapped pair: ({swapped.first}, {swapped.second})");
+
+    // Maybe operations
+    let some_val: Maybe<Float> = Some(10.0);
+    let none_val: Maybe<Float> = None;
+
+    let doubled = map_maybe(some_val, |x: Float| -> Float { x * 2.0 });
+    match doubled {
+        Some(v) => { let _ = print(f"map_maybe(Some(10), double) = Some({v})"); },
+        None => { let _ = print("Got None"); }
+    }
+
+    let result1 = maybe_or(some_val, 0.0);
+    let result2 = maybe_or(none_val, -1.0);
+    let _ = print(f"maybe_or(Some(10), 0) = {result1}");
+    let _ = print(f"maybe_or(None, -1) = {result2}");
+
+    let _ = print("=== Tests Complete ===");
+}

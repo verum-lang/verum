@@ -1,0 +1,11 @@
+// Step 4: Test single-level Box
+
+type Box<T> is {
+    value: T
+}
+
+fn main() -> Int {
+    let b = Box { value: 42 };
+    let result = b.value;
+    result
+}

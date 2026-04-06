@@ -1,0 +1,455 @@
+// =============================================================================
+// ast.vr - AST node definitions for the Verum bootstrap compiler
+// =============================================================================
+// Defines all AST nodes needed to represent Verum programs.
+// Uses sum types for node dispatch and records for structured data.
+// Recursive references use Heap<T> for indirection.
+// =============================================================================
+
+mount core.*;
+mount bootstrap.token.Span;
+
+// =============================================================================
+// Module (top-level compilation unit)
+// =============================================================================
+
+type Module is {
+    path: Text,
+    decls: List<Decl>,
+};
+
+// =============================================================================
+// Declarations
+// =============================================================================
+
+type Decl is
+    DeclFn(FnDef) |
+    DeclType(TypeDef) |
+    DeclImpl(ImplDef) |
+    DeclMount(MountDef) |
+    DeclConst(ConstDef) |
+    DeclModule(ModuleDef) |
+    DeclAttr(AttrDecl)
+    ;
+
+type FnDef is {
+    name: Text,
+    type_params: List<TypeParam>,
+    params: List<Param>,
+    return_type: Maybe<Heap<TypeExpr>>,
+    body: Maybe<List<Stmt>>,
+    is_pub: Bool,
+    is_pure: Bool,
+    is_async: Bool,
+    is_unsafe: Bool,
+    attrs: List<Attribute>,
+    span: Span,
+};
+
+type TypeDef is {
+    name: Text,
+    type_params: List<TypeParam>,
+    definition: TypeBody,
+    is_pub: Bool,
+    attrs: List<Attribute>,
+    span: Span,
+};
+
+type TypeBody is
+    RecordBody(List<Field>) |
+    SumBody(List<Variant>) |
+    ProtocolBody(List<ProtocolItem>) |
+    AliasBody(Heap<TypeExpr>) |
+    NewtypeBody(Heap<TypeExpr>) |
+    UnitBody
+    ;
+
+type ImplDef is {
+    target_type: Text,
+    type_params: List<TypeParam>,
+    protocol: Maybe<Text>,
+    methods: List<FnDef>,
+    span: Span,
+};
+
+type MountDef is {
+    path: List<Text>,
+    items: MountItems,
+    span: Span,
+};
+
+type MountItems is
+    MountAll |
+    MountSelected(List<MountItem>) |
+    MountSingle
+    ;
+
+type MountItem is {
+    name: Text,
+    alias: Maybe<Text>,
+};
+
+type ConstDef is {
+    name: Text,
+    type_annotation: Maybe<Heap<TypeExpr>>,
+    value: Heap<Expr>,
+    is_pub: Bool,
+    span: Span,
+};
+
+type ModuleDef is {
+    name: Text,
+    is_pub: Bool,
+    body: Maybe<List<Decl>>,
+    span: Span,
+};
+
+type AttrDecl is {
+    attr: Attribute,
+    inner: Heap<Decl>,
+};
+
+// =============================================================================
+// Supporting declaration types
+// =============================================================================
+
+type TypeParam is {
+    name: Text,
+    bounds: List<Heap<TypeExpr>>,
+};
+
+type Param is {
+    name: Text,
+    type_annotation: Maybe<Heap<TypeExpr>>,
+    default_value: Maybe<Heap<Expr>>,
+    is_mut: Bool,
+    is_self: Bool,
+    is_ref: Bool,
+    is_mut_ref: Bool,
+};
+
+type Field is {
+    name: Text,
+    type_expr: Heap<TypeExpr>,
+    is_pub: Bool,
+};
+
+type Variant is {
+    name: Text,
+    payload: VariantPayload,
+};
+
+type VariantPayload is
+    PayloadNone |
+    PayloadTuple(List<Heap<TypeExpr>>) |
+    PayloadRecord(List<Field>)
+    ;
+
+type ProtocolItem is
+    ProtoMethod(FnDef) |
+    ProtoAssocType(AssocType)
+    ;
+
+type AssocType is {
+    name: Text,
+    bounds: List<Heap<TypeExpr>>,
+    default_type: Maybe<Heap<TypeExpr>>,
+};
+
+type Attribute is {
+    name: Text,
+    args: List<Text>,
+    span: Span,
+};
+
+// =============================================================================
+// Statements
+// =============================================================================
+
+type Stmt is
+    StmtLet(LetDef) |
+    StmtExpr(Heap<Expr>) |
+    StmtWhile(WhileDef) |
+    StmtFor(ForDef) |
+    StmtLoop(List<Stmt>) |
+    StmtDecl(Decl) |
+    StmtReturn(Maybe<Heap<Expr>>) |
+    StmtBreak(Maybe<Heap<Expr>>) |
+    StmtContinue
+    ;
+
+type LetDef is {
+    pattern: Pattern,
+    type_annotation: Maybe<Heap<TypeExpr>>,
+    value: Maybe<Heap<Expr>>,
+    is_mut: Bool,
+    span: Span,
+};
+
+type WhileDef is {
+    condition: Heap<Expr>,
+    body: List<Stmt>,
+};
+
+type ForDef is {
+    binding: Pattern,
+    iterator: Heap<Expr>,
+    body: List<Stmt>,
+};
+
+// =============================================================================
+// Expressions
+// =============================================================================
+
+type Expr is
+    // Literals
+    ExprLitInt(Text) |
+    ExprLitFloat(Text) |
+    ExprLitBool(Bool) |
+    ExprLitStr(Text) |
+    ExprLitFStr(Text) |
+    ExprLitChar(Text) |
+    ExprLitNone |
+    // Primary
+    ExprIdent(Text) |
+    ExprSelf |
+    ExprSelfType |
+    ExprUnit |
+    // Operations
+    ExprBinary(BinOp) |
+    ExprUnary(UnOp) |
+    ExprCall(CallOp) |
+    ExprMethodCall(MethodOp) |
+    ExprFieldAccess(FieldOp) |
+    ExprIndex(IndexOp) |
+    // Compound
+    ExprIf(IfOp) |
+    ExprMatch(MatchOp) |
+    ExprBlock(BlockOp) |
+    ExprClosure(ClosureOp) |
+    // Construction
+    ExprConstruct(ConstructOp) |
+    ExprArray(List<Heap<Expr>>) |
+    ExprTuple(List<Heap<Expr>>) |
+    // Assignment
+    ExprAssign(AssignOp) |
+    ExprCompoundAssign(CompoundAssignOp) |
+    // Type operations
+    ExprCast(CastOp) |
+    ExprRange(RangeOp) |
+    // Control flow
+    ExprPipeline(PipeOp) |
+    ExprTry(Heap<Expr>) |
+    ExprAwait(Heap<Expr>) |
+    ExprSpawn(Heap<Expr>)
+    ;
+
+// =============================================================================
+// Expression sub-types (records)
+// =============================================================================
+
+type BinOp is {
+    op: Int,
+    left: Heap<Expr>,
+    right: Heap<Expr>,
+};
+
+type UnOp is {
+    op: Int,
+    operand: Heap<Expr>,
+};
+
+type CallOp is {
+    callee: Heap<Expr>,
+    type_args: List<Heap<TypeExpr>>,
+    args: List<Heap<Expr>>,
+};
+
+type MethodOp is {
+    receiver: Heap<Expr>,
+    method: Text,
+    type_args: List<Heap<TypeExpr>>,
+    args: List<Heap<Expr>>,
+};
+
+type FieldOp is {
+    object: Heap<Expr>,
+    field: Text,
+};
+
+type IndexOp is {
+    object: Heap<Expr>,
+    index: Heap<Expr>,
+};
+
+type IfOp is {
+    condition: Heap<Expr>,
+    then_body: List<Stmt>,
+    else_body: Maybe<ElseBranch>,
+};
+
+type ElseBranch is
+    ElseBlock(List<Stmt>) |
+    ElseIf(Heap<IfOp>)
+    ;
+
+type MatchOp is {
+    scrutinee: Heap<Expr>,
+    arms: List<MatchArm>,
+};
+
+type MatchArm is {
+    pattern: Pattern,
+    guard: Maybe<Heap<Expr>>,
+    body: Heap<Expr>,
+};
+
+type BlockOp is {
+    stmts: List<Stmt>,
+    trailing_expr: Maybe<Heap<Expr>>,
+};
+
+type ClosureOp is {
+    params: List<ClosureParam>,
+    return_type: Maybe<Heap<TypeExpr>>,
+    body: Heap<Expr>,
+};
+
+type ClosureParam is {
+    name: Text,
+    type_annotation: Maybe<Heap<TypeExpr>>,
+};
+
+type ConstructOp is {
+    type_name: TypePath,
+    fields: List<FieldInit>,
+};
+
+type TypePath is {
+    segments: List<Text>,
+    type_args: List<Heap<TypeExpr>>,
+};
+
+type FieldInit is {
+    name: Text,
+    value: Heap<Expr>,
+};
+
+type AssignOp is {
+    target: Heap<Expr>,
+    value: Heap<Expr>,
+};
+
+type CompoundAssignOp is {
+    op: Int,
+    target: Heap<Expr>,
+    value: Heap<Expr>,
+};
+
+type CastOp is {
+    expr: Heap<Expr>,
+    target_type: Heap<TypeExpr>,
+};
+
+type RangeOp is {
+    start: Maybe<Heap<Expr>>,
+    end: Maybe<Heap<Expr>>,
+    inclusive: Bool,
+};
+
+type PipeOp is {
+    left: Heap<Expr>,
+    right: Heap<Expr>,
+};
+
+// =============================================================================
+// Type Expressions
+// =============================================================================
+
+type TypeExpr is
+    TyNamed(Text) |
+    TyQualified(List<Text>) |
+    TyGeneric(GenericTy) |
+    TyRef(RefTy) |
+    TyMutRef(RefTy) |
+    TyUnsafeRef(RefTy) |
+    TyFn(FnTy) |
+    TyTuple(List<Heap<TypeExpr>>) |
+    TyArray(ArrayTy) |
+    TySlice(Heap<TypeExpr>) |
+    TyRefinement(RefineTy) |
+    TySelf |
+    TyUnit |
+    TyInferred
+    ;
+
+type GenericTy is {
+    base: Text,
+    args: List<Heap<TypeExpr>>,
+};
+
+type RefTy is {
+    inner: Heap<TypeExpr>,
+};
+
+type FnTy is {
+    params: List<Heap<TypeExpr>>,
+    return_type: Heap<TypeExpr>,
+};
+
+type ArrayTy is {
+    element: Heap<TypeExpr>,
+    size: Heap<Expr>,
+};
+
+type RefineTy is {
+    base: Heap<TypeExpr>,
+    predicate: Text,
+};
+
+// =============================================================================
+// Patterns
+// =============================================================================
+
+type Pattern is
+    PatWildcard |
+    PatBind(BindPat) |
+    PatLitInt(Text) |
+    PatLitFloat(Text) |
+    PatLitStr(Text) |
+    PatLitBool(Bool) |
+    PatLitNone |
+    PatVariant(VariantPat) |
+    PatRecord(RecordPat) |
+    PatTuple(List<Heap<Pattern>>) |
+    PatOr(List<Heap<Pattern>>) |
+    PatRange(RangePat) |
+    PatRest
+    ;
+
+type BindPat is {
+    name: Text,
+    is_mut: Bool,
+};
+
+type VariantPat is {
+    type_path: List<Text>,
+    fields: List<Heap<Pattern>>,
+};
+
+type RecordPat is {
+    type_name: Maybe<Text>,
+    fields: List<RecordPatField>,
+    has_rest: Bool,
+};
+
+type RecordPatField is {
+    name: Text,
+    pattern: Maybe<Heap<Pattern>>,
+};
+
+type RangePat is {
+    start: Maybe<Heap<Pattern>>,
+    end: Maybe<Heap<Pattern>>,
+    inclusive: Bool,
+};

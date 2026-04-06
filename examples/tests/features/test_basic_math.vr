@@ -1,0 +1,12 @@
+// Minimal arithmetic test
+
+fn main() {
+    let _ = print("=== Basic Math ===");
+
+    let a = 10.0;
+    let b = 3.0;
+    let sum = a + b;
+    let _ = print(f"Sum: {sum}");
+
+    let _ = print("=== Done ===");
+}

@@ -1,0 +1,82 @@
+// CLI Calculator v2.0
+// Demonstrates: functions, pattern matching, variant types
+
+// Result type for calculations
+type CalcResult is Result<Float, Text>;
+
+// Supported operators
+type Operator is | Add | Sub | Mul | Div;
+
+// Perform calculation
+fn calculate(a: Float, op: Operator, b: Float) -> CalcResult {
+    match op {
+        Add => Ok(a + b),
+        Sub => Ok(a - b),
+        Mul => Ok(a * b),
+        Div => {
+            if b == 0.0 {
+                Err("Division by zero")
+            } else {
+                Ok(a / b)
+            }
+        }
+    }
+}
+
+// Parse operator from string
+fn parse_op(s: Text) -> Maybe<Operator> {
+    match s {
+        "+" => Some(Add),
+        "-" => Some(Sub),
+        "*" => Some(Mul),
+        "/" => Some(Div),
+        _ => None
+    }
+}
+
+// Print result
+fn print_result(a: Float, op_str: Text, b: Float, result: CalcResult) {
+    match result {
+        Ok(value) => {
+            let _ = print(f"{a} {op_str} {b} = {value}");
+        },
+        Err(msg) => {
+            let _ = print(f"{a} {op_str} {b} = Error: {msg}");
+        }
+    }
+}
+
+// Process expression: "a op b"
+fn process(a: Float, op_str: Text, b: Float) {
+    let maybe_op = parse_op(op_str);
+    match maybe_op {
+        Some(op) => {
+            let result = calculate(a, op, b);
+            print_result(a, op_str, b, result);
+        },
+        None => {
+            let _ = print(f"Unknown operator: {op_str}");
+        }
+    }
+}
+
+fn print_usage() {
+    let _ = print("Verum Calculator v2.0");
+    let _ = print("Supported operators: + - * /");
+    let _ = print("");
+}
+
+fn demo() {
+    let _ = print("Demo calculations:");
+    process(10.0, "+", 5.0);
+    process(20.0, "-", 8.0);
+    process(6.0, "*", 7.0);
+    process(100.0, "/", 4.0);
+    process(3.14, "*", 2.0);
+    process(10.0, "/", 0.0);
+}
+
+fn main() {
+    print_usage();
+    demo();
+}

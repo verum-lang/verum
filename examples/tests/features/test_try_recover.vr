@@ -1,0 +1,59 @@
+// Test: Try/recover/finally blocks
+// Tests error handling with try/recover/finally syntax
+
+fn risky_operation() -> Int {
+    42
+}
+
+fn might_fail(should_fail: Bool) -> Int {
+    if should_fail {
+        panic("Operation failed");
+    } else {
+        100
+    }
+}
+
+fn cleanup() {
+    println("Cleanup called");
+}
+
+fn main() {
+    // Test basic try/recover
+    let result1 = try {
+        let result = risky_operation();
+        result
+    } recover {
+        0
+    };
+    println(result1);
+
+    // Test try/recover/finally
+    try {
+        let value = might_fail(false);
+        println(value);
+    } recover {
+        println(-1);
+    } finally {
+        cleanup();
+    };
+
+    // Test try/finally without recover
+    try {
+        println("Executing operation");
+    } finally {
+        println("Always executed");
+    };
+
+    // Test nested try blocks
+    try {
+        let inner = try {
+            let val = risky_operation();
+            val
+        } recover {
+            0
+        };
+        println(inner);
+    } finally {
+        println("Outer finally");
+    };
+}

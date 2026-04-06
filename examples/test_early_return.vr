@@ -1,0 +1,53 @@
+// Test for early return type checking fix
+// This should compile without errors now that return statements have Never type
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n == 2 { return true; }
+    if n % 2 == 0 { return false; }
+
+    // Check odd divisors up to sqrt(n)
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 {
+            return false;
+        }
+        i = i + 2;
+    }
+
+    true
+}
+
+fn absolute(x: Int) -> Int {
+    if x < 0 {
+        return -x;
+    }
+    x
+}
+
+fn classify(n: Int) -> Text {
+    if n < 0 { return "negative"; }
+    if n == 0 { return "zero"; }
+    if n > 0 { return "positive"; }
+    "unknown"  // Should never reach here
+}
+
+fn main() {
+    // Test is_prime
+    assert(is_prime(2) == true);
+    assert(is_prime(3) == true);
+    assert(is_prime(4) == false);
+    assert(is_prime(17) == true);
+
+    // Test absolute
+    assert(absolute(-5) == 5);
+    assert(absolute(10) == 10);
+    assert(absolute(0) == 0);
+
+    // Test classify
+    assert(classify(-10) == "negative");
+    assert(classify(0) == "zero");
+    assert(classify(42) == "positive");
+
+    print("All early return tests passed!");
+}

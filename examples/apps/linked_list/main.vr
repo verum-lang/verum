@@ -1,0 +1,154 @@
+// Linked List Implementation
+// Demonstrates: recursive data structures, functional operations
+
+type Maybe<T> is Some(T) | None;
+
+// Linked list type
+type List<T> is Nil | Cons(T, List<T>);
+
+// Create empty list
+fn empty<T>() -> List<T> {
+    Nil
+}
+
+// Prepend element to list
+fn prepend<T>(elem: T, list: List<T>) -> List<T> {
+    Cons(elem, list)
+}
+
+// Get head of list
+fn head<T>(list: List<T>) -> Maybe<T> {
+    match list {
+        Nil => None,
+        Cons(h, _) => Some(h)
+    }
+}
+
+// Get tail of list
+fn tail<T>(list: List<T>) -> List<T> {
+    match list {
+        Nil => Nil,
+        Cons(_, t) => t
+    }
+}
+
+// Check if list is empty
+fn is_nil<T>(list: List<T>) -> Bool {
+    match list {
+        Nil => true,
+        Cons(_, _) => false
+    }
+}
+
+// Get length of list
+fn length(list: List<Float>) -> Float {
+    match list {
+        Nil => 0.0,
+        Cons(_, t) => 1.0 + length(t)
+    }
+}
+
+// Sum all elements
+fn sum(list: List<Float>) -> Float {
+    match list {
+        Nil => 0.0,
+        Cons(h, t) => h + sum(t)
+    }
+}
+
+// Reverse a list
+fn reverse_helper(list: List<Float>, acc: List<Float>) -> List<Float> {
+    match list {
+        Nil => acc,
+        Cons(h, t) => reverse_helper(t, Cons(h, acc))
+    }
+}
+
+fn reverse(list: List<Float>) -> List<Float> {
+    reverse_helper(list, Nil)
+}
+
+// Get nth element (0-indexed)
+fn nth(list: List<Float>, n: Float) -> Maybe<Float> {
+    match list {
+        Nil => None,
+        Cons(h, t) => {
+            if n == 0.0 {
+                Some(h)
+            } else {
+                nth(t, n - 1.0)
+            }
+        }
+    }
+}
+
+// Append two lists
+fn append(l1: List<Float>, l2: List<Float>) -> List<Float> {
+    match l1 {
+        Nil => l2,
+        Cons(h, t) => Cons(h, append(t, l2))
+    }
+}
+
+// Print list
+fn print_list(list: List<Float>) {
+    match list {
+        Nil => { let _ = print("[]"); },
+        _ => {
+            let _ = print("[");
+            print_list_inner(list);
+            let _ = print("]");
+        }
+    }
+}
+
+fn print_list_inner(list: List<Float>) {
+    match list {
+        Nil => {},
+        Cons(h, t) => {
+            let _ = print(f"  {h}");
+            print_list_inner(t);
+        }
+    }
+}
+
+fn main() {
+    let _ = print("=== Linked List Demo ===");
+    let _ = print("");
+
+    // Create list: [1, 2, 3, 4, 5]
+    let list: List<Float> = Cons(1.0, Cons(2.0, Cons(3.0, Cons(4.0, Cons(5.0, Nil)))));
+
+    let _ = print("List: [1, 2, 3, 4, 5]");
+    let _ = print(f"Length: {length(list)}");
+    let _ = print(f"Sum: {sum(list)}");
+
+    match head(list) {
+        Some(h) => { let _ = print(f"Head: {h}"); },
+        None => { let _ = print("Empty list"); }
+    }
+
+    match nth(list, 2.0) {
+        Some(v) => { let _ = print(f"Element at index 2: {v}"); },
+        None => { let _ = print("Index out of bounds"); }
+    }
+
+    // Test reverse
+    let reversed = reverse(list);
+    let _ = print("Reversed list elements:");
+    print_list_inner(reversed);
+    let _ = print("");
+
+    // Test append
+    let list2: List<Float> = Cons(10.0, Cons(20.0, Nil));
+    let appended = append(list, list2);
+    let _ = print(f"Appended length: {length(appended)}");
+
+    // Empty list test
+    let empty_list: List<Float> = Nil;
+    let _ = print(f"Empty is_nil: {is_nil(empty_list)}");
+    let _ = print(f"Non-empty is_nil: {is_nil(list)}");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

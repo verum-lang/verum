@@ -1,0 +1,235 @@
+// =============================================================================
+// io/mod.vr - I/O module manifest
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core, text, collections
+// =============================================================================
+//
+// The I/O module provides input/output operations:
+//
+// - protocols.vr: Read, Write, Seek, BufRead protocols
+// - file.vr: File operations, BufReader, BufWriter
+// - stdio.vr: stdin, stdout, stderr
+// - path.vr: Path and PathBuf types, normalization, components
+// - fs.vr: Filesystem operations (metadata, directory listing, walk)
+//
+// =============================================================================
+
+module io;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module protocols;
+public module file;
+public module stdio;
+public module path;
+public module fs;
+public module buffer;
+public module process;
+public module async_protocols;
+public module engine;
+
+// =============================================================================
+// Re-exports from protocols
+// =============================================================================
+
+// Error types
+public mount .protocols.StreamError;
+public mount .protocols.IoErrorKind;
+public mount .protocols.IoResult;
+
+// Convenience alias: IoError is StreamError (used across the codebase)
+public type IoError is StreamError;
+public mount .protocols.SeekFrom;
+
+// Protocols
+public mount .protocols.Read;
+public mount .protocols.Write;
+public mount .protocols.Seek;
+public mount .protocols.BufRead;
+
+// Utility types
+public mount .protocols.Empty;
+public mount .protocols.ByteRepeat;
+public mount .protocols.Sink;
+public mount .protocols.Cursor;
+public mount .protocols.Chain;
+public mount .protocols.Take;
+public mount .protocols.BytesIter;
+public mount .protocols.LinesIter;
+
+// Factory functions
+public mount .protocols.empty_reader;
+public mount .protocols.repeat_byte;
+public mount .protocols.sink;
+
+// =============================================================================
+// Re-exports from file
+// =============================================================================
+
+public mount .file.File;
+public mount .file.OpenOptions;
+public mount .file.BufReader;
+public mount .file.BufWriter;
+
+// Open flags
+public mount .file.O_RDONLY;
+public mount .file.O_WRONLY;
+public mount .file.O_RDWR;
+public mount .file.O_CREAT;
+public mount .file.O_EXCL;
+public mount .file.O_TRUNC;
+public mount .file.O_APPEND;
+
+// Convenience functions
+public mount .file.read;
+public mount .file.read_to_string;
+public mount .file.write;
+public mount .file.write_bytes;
+
+// =============================================================================
+// Re-exports from stdio
+// =============================================================================
+
+public mount .stdio.Stdin;
+public mount .stdio.Stdout;
+public mount .stdio.Stderr;
+public mount .stdio.StdinLock;
+public mount .stdio.StdoutLock;
+public mount .stdio.StderrLock;
+
+// Handle functions
+public mount .stdio.stdin;
+public mount .stdio.stdout;
+public mount .stdio.stderr;
+
+// Print functions
+public mount .stdio.print;
+public mount .stdio.println;
+public mount .stdio.println_empty;
+public mount .stdio.eprint;
+public mount .stdio.eprintln;
+
+// Input functions
+public mount .stdio.read_line;
+public mount .stdio.read_int;
+public mount .stdio.read_float;
+
+// =============================================================================
+// Re-exports from path
+// =============================================================================
+
+public mount .path.Path;
+public mount .path.PathBuf;
+public mount .path.Component;
+public mount .path.MAIN_SEPARATOR;
+public mount .path.normalize;
+
+// =============================================================================
+// Re-exports from fs
+// =============================================================================
+
+public mount .fs.Metadata;
+public mount .fs.FileType;
+public mount .fs.DirEntry;
+public mount .fs.ReadDir;
+public mount .fs.WalkDir;
+
+// Filesystem functions
+public mount .fs.metadata;
+public mount .fs.exists;
+public mount .fs.is_file;
+public mount .fs.is_dir;
+public mount .fs.is_symlink;
+public mount .fs.create_dir;
+public mount .fs.create_dir_all;
+public mount .fs.remove_dir;
+public mount .fs.remove_dir_all;
+public mount .fs.read_dir;
+public mount .fs.remove_file;
+public mount .fs.rename;
+public mount .fs.copy;
+public mount .fs.canonicalize;
+public mount .fs.temp_dir;
+public mount .fs.current_dir;
+public mount .fs.set_current_dir;
+public mount .fs.walk_dir;
+
+// =============================================================================
+// Re-exports from buffer
+// =============================================================================
+
+public mount .buffer.LineWriter;
+public mount .buffer.IntoInnerError;
+public mount .buffer.copy;
+public mount .buffer.read_all;
+public mount .buffer.DEFAULT_BUF_CAPACITY;
+
+// =============================================================================
+// Re-exports from process
+// =============================================================================
+
+public mount .process.Command;
+public mount .process.Child;
+public mount .process.ExitStatus;
+public mount .process.Output;
+public mount .process.Stdio;
+public mount .process.run;
+
+// =============================================================================
+// Re-exports from async_protocols
+// =============================================================================
+
+public mount .async_protocols.AsyncRead;
+public mount .async_protocols.AsyncWrite;
+public mount .async_protocols.AsyncBufRead;
+public mount .async_protocols.ReadFuture;
+public mount .async_protocols.WriteFuture;
+public mount .async_protocols.FlushFuture;
+public mount .async_protocols.read_async;
+public mount .async_protocols.write_async;
+public mount .async_protocols.flush_async;
+
+// =============================================================================
+// Prelude exports
+// =============================================================================
+
+public module prelude {
+    // Error handling
+    public mount super.IoError;
+    public mount super.IoResult;
+
+    // Protocols
+    public mount super.Read;
+    public mount super.Write;
+    public mount super.BufRead;
+    public mount super.AsyncRead;
+    public mount super.AsyncWrite;
+
+    // Types
+    public mount super.File;
+    public mount super.BufReader;
+    public mount super.BufWriter;
+
+    // Path types
+    public mount super.Path;
+    public mount super.PathBuf;
+
+    // Print functions
+    public mount super.print;
+    public mount super.println;
+    public mount super.eprint;
+    public mount super.eprintln;
+
+    // I/O functions
+    public mount super.read_to_string;
+    public mount super.read_line;
+
+    // Filesystem functions
+    public mount super.exists;
+    public mount super.is_file;
+    public mount super.is_dir;
+    public mount super.read_dir;
+}

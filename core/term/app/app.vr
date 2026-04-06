@@ -1,0 +1,144 @@
+// =============================================================================
+// app.vr - The Elm Architecture for TUI applications
+// =============================================================================
+module app;
+
+mount core.time.Duration;
+mount super.super.event.{Event, KeyEvent, KeyCode, Modifiers, EventStream};
+mount super.super.render.frame.{Terminal, Frame};
+mount super.super.style.theme.Theme;
+mount super.command.Command;
+
+/// App message — wraps user messages with system messages.
+public type AppMessage<Msg> is
+    | User(Msg)
+    | TermEvent(Event)
+    | Tick
+    | Batch(List<AppMessage<Msg>>)
+    | Quit;
+
+/// Model protocol — core of the Elm Architecture.
+/// Every TUI application implements this protocol.
+public type Model is protocol {
+    type Msg;
+
+    /// Initial command on startup.
+    fn init(&self) -> Command<Self.Msg> {
+        Command.Noop
+    }
+
+    /// Update state: (Model, Msg) → (Model, Command).
+    /// Should be a pure function (no side effects).
+    fn update(&mut self, msg: Self.Msg) -> Command<Self.Msg>;
+
+    /// Render UI: Model → Frame.
+    /// Called each frame (immediate mode).
+    fn view(&self, frame: &mut Frame);
+
+    /// Handle terminal event → Maybe<Msg>.
+    /// Allows filtering and transforming events.
+    fn handle_event(&self, event: Event) -> Maybe<Self.Msg> {
+        None
+    }
+};
+
+/// Run a TUI application with the Elm Architecture.
+public fn run<M: Model>(mut model: M) -> IoResult<()> {
+    let mut terminal = Terminal.new()?;
+    terminal.init()?;
+
+    // Execute initial command
+    let init_cmd = model.init();
+    let mut pending_cmds: List<Command<M.Msg>> = List.new();
+    pending_cmds.push(init_cmd);
+
+    // Event loop
+    let mut events = EventStream.new(terminal.backend_mut());
+
+    loop {
+        // Render frame
+        terminal.draw(|frame| {
+            model.view(frame);
+        })?;
+
+        // Process pending commands
+        let mut new_cmds = List.new();
+        let cmds = pending_cmds;
+        pending_cmds = List.new();
+
+        for cmd in &cmds {
+            match cmd {
+                Command.Noop => {}
+                Command.Quit => {
+                    terminal.restore()?;
+                    return Ok(());
+                }
+                Command.Perform(f) => {
+                    let msg = f();
+                    let result_cmd = model.update(msg);
+                    new_cmds.push(result_cmd);
+                }
+                Command.Batch(batch_cmds) => {
+                    for c in batch_cmds {
+                        new_cmds.push(c);
+                    }
+                }
+                Command.Sequence(seq_cmds) => {
+                    // Execute sequentially
+                    for c in seq_cmds {
+                        match c {
+                            Command.Perform(f) => {
+                                let msg = f();
+                                let result_cmd = model.update(msg);
+                                new_cmds.push(result_cmd);
+                            }
+                            Command.Quit => {
+                                terminal.restore()?;
+                                return Ok(());
+                            }
+                            other => new_cmds.push(other),
+                        }
+                    }
+                }
+                Command.Tick(_) => {
+                    // Tick commands are handled via poll timeout
+                }
+                Command.Async(_) => {
+                    // Async commands require runtime — deferred
+                }
+            }
+        }
+        pending_cmds = new_cmds;
+
+        // Determine poll timeout from tick commands
+        let poll_timeout = Duration.from_millis(16);  // Default: ~60fps
+
+        // Read events with timeout
+        match events.poll(poll_timeout) {
+            Some(event) => {
+                // Global: Ctrl+C → Quit
+                match event {
+                    Event.Key(ke) => {
+                        if ke.code is KeyCode.Char('c') && ke.modifiers.contains(Modifiers.CTRL) {
+                            terminal.restore()?;
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Forward to model
+                match model.handle_event(event) {
+                    Some(msg) => {
+                        let cmd = model.update(msg);
+                        pending_cmds.push(cmd);
+                    }
+                    None => {}
+                }
+            }
+            None => {
+                // Timeout — could dispatch tick if subscribed
+            }
+        }
+    }
+}

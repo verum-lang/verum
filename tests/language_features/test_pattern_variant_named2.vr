@@ -1,0 +1,10 @@
+type Point is { x: Int, y: Int };
+
+fn main() {
+    // Test: Record type pattern (not a variant)
+    let point = Point { x: 10, y: 20 };
+    match point {
+        Point { x, y } => print(f"Point: ({x}, {y})"),
+    }
+    print(f"Record pattern test complete!");
+}

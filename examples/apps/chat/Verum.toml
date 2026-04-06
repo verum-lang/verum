@@ -1,0 +1,15 @@
+[package]
+name = "chat"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Multi-client chat application demonstrating async/await, networking, and context system"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []
+tls = []  # Enable TLS encryption

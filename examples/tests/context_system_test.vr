@@ -1,0 +1,16 @@
+// Define a context
+context Logger {
+    fn log(self, msg: Text)
+}
+
+// Function using context
+fn do_work(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+type ConsoleLogger is { prefix: Text };
+
+fn main() {
+    provide Logger = ConsoleLogger { prefix: "[LOG]" };
+    do_work("Working...");
+}

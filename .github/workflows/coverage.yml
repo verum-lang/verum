@@ -1,0 +1,246 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  COVERAGE_THRESHOLD: 95
+
+jobs:
+  coverage:
+    name: Code Coverage Analysis
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-tarpaulin
+        run: |
+          if ! command -v cargo-tarpaulin &> /dev/null; then
+            cargo install cargo-tarpaulin
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install lcov
+
+      # Run coverage for core crates sequentially to avoid resource contention
+      - name: Run coverage - verum_cbgr
+        run: ./scripts/coverage.sh --crate verum_cbgr
+
+      - name: Run coverage - verum_types
+        run: ./scripts/coverage.sh --crate verum_types
+
+      - name: Run coverage - verum_parser
+        run: ./scripts/coverage.sh --crate verum_parser
+
+      - name: Run coverage - verum_runtime
+        run: ./scripts/coverage.sh --crate verum_runtime
+
+      - name: Run coverage - verum_compiler
+        run: ./scripts/coverage.sh --crate verum_compiler
+
+      - name: Run coverage - verum_smt
+        run: ./scripts/coverage.sh --crate verum_smt
+
+      - name: Run coverage - verum_lsp
+        run: ./scripts/coverage.sh --crate verum_lsp
+
+      - name: Validate coverage thresholds
+        run: |
+          python3 scripts/validate_coverage.py coverage/ \
+            --all-crates \
+            --threshold ${{ env.COVERAGE_THRESHOLD }} \
+            --fail-below ${{ env.COVERAGE_THRESHOLD }} \
+            --json \
+            --output coverage/report.json
+
+      - name: Generate coverage badge
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Extract overall coverage percentage
+          COVERAGE=$(python3 -c "import json; data=json.load(open('coverage/report.json')); print(f\"{data['overall']['line_coverage']:.1f}\")")
+
+          # Determine badge color
+          if (( $(echo "$COVERAGE >= 95" | bc -l) )); then
+            COLOR="brightgreen"
+          elif (( $(echo "$COVERAGE >= 90" | bc -l) )); then
+            COLOR="green"
+          elif (( $(echo "$COVERAGE >= 80" | bc -l) )); then
+            COLOR="yellow"
+          else
+            COLOR="red"
+          fi
+
+          # Create badge JSON
+          cat > coverage/badge.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${COVERAGE}%",
+            "color": "${COLOR}"
+          }
+          EOF
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.os }}
+          path: |
+            coverage/
+            !coverage/**/*.log
+          retention-days: 30
+
+      - name: Upload to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/combined.info
+          flags: unittests
+          name: codecov-${{ matrix.os }}-${{ matrix.rust }}
+          fail_ci_if_error: false
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('coverage/report.json', 'utf8'));
+
+            const lineCov = report.overall.line_coverage.toFixed(2);
+            const funcCov = report.overall.function_coverage.toFixed(2);
+            const branchCov = report.overall.branch_coverage.toFixed(2);
+            const threshold = report.threshold;
+            const passed = report.passed;
+
+            // Build crate table
+            let crateTable = '| Crate | Line Coverage | Status |\n';
+            crateTable += '|-------|---------------|--------|\n';
+
+            for (const [name, crate] of Object.entries(report.crates)) {
+              const coverage = crate.line_coverage.toFixed(2);
+              const status = crate.line_coverage >= threshold ? '✅ Pass' : '❌ Below';
+              crateTable += `| ${name} | ${coverage}% | ${status} |\n`;
+            }
+
+            const statusEmoji = passed ? '✅' : '❌';
+
+            const body = `## ${statusEmoji} Coverage Report
+
+            ### Overall Coverage
+            - **Line Coverage:** ${lineCov}% ${lineCov >= threshold ? '✅' : '❌'}
+            - **Function Coverage:** ${funcCov}%
+            - **Branch Coverage:** ${branchCov}%
+            - **Threshold:** ${threshold}%
+
+            ### Per-Crate Coverage
+            ${crateTable}
+
+            ${passed ? '✅ All coverage requirements met!' : '❌ Some crates below threshold'}
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Fail if coverage below threshold
+        run: |
+          PASSED=$(python3 -c "import json; data=json.load(open('coverage/report.json')); print('true' if data['passed'] else 'false')")
+
+          if [ "$PASSED" = "false" ]; then
+            echo "❌ Coverage below threshold"
+            exit 1
+          else
+            echo "✅ Coverage meets threshold"
+          fi
+
+  coverage-summary:
+    name: Coverage Summary
+    needs: coverage
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-report-*
+          merge-multiple: true
+          path: coverage-combined/
+
+      - name: Create summary
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "coverage-combined/report.json" ]; then
+            python3 << 'EOF' >> $GITHUB_STEP_SUMMARY
+          import json
+
+          with open('coverage-combined/report.json') as f:
+              data = json.load(f)
+
+          print(f"- **Line Coverage:** {data['overall']['line_coverage']:.2f}%")
+          print(f"- **Function Coverage:** {data['overall']['function_coverage']:.2f}%")
+          print(f"- **Branch Coverage:** {data['overall']['branch_coverage']:.2f}%")
+          print(f"- **Threshold:** {data['threshold']}%")
+          print("")
+          print(f"Status: {'✅ PASSED' if data['passed'] else '❌ FAILED'}")
+          EOF
+          else
+            echo "❌ No coverage report found" >> $GITHUB_STEP_SUMMARY
+          fi

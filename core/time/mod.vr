@@ -1,0 +1,152 @@
+// =============================================================================
+// time - Time && duration types
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Dependencies: core, sys/{linux,darwin,windows}/time
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI time implementations:
+// - Monotonic time: sys/linux/time.monotonic_nanos (CLOCK_MONOTONIC)
+// - Real time: sys/linux/time.realtime_nanos (CLOCK_REALTIME)
+// - Sleep: sys/linux/time.sleep (nanosleep syscall)
+//
+// All FFI dependencies on verum_runtime have been eliminated.
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+//
+// =============================================================================
+//
+// This module provides types for working with time:
+// - Duration: A span of time (e.g., 5 seconds, 100 milliseconds)
+// - Instant: A point in monotonic time (for measuring elapsed time)
+// - SystemTime: Wall-clock time (for timestamps, file times)
+//
+// # Example
+// ```verum
+// // Measure elapsed time
+// let start = Instant.now();
+// do_work();
+// let elapsed = start.elapsed();
+// print(f"Work took {elapsed.as_millis()}ms");
+//
+// // Create durations
+// let timeout = Duration.secs(30);
+// let delay = Duration.millis(100);
+// ```
+//
+// =============================================================================
+
+module core.time;
+mount core.*;
+
+// Re-export submodules
+public mount .duration.{Duration};
+public mount .instant.{Instant};
+public mount .system_time.{SystemTime, SystemTimeError};
+public mount .interval.{Interval, AsyncInterval, interval, interval_ms};
+
+// =============================================================================
+// Time Intrinsics Import
+// =============================================================================
+// Uses intrinsics for VBC interpreter compatibility.
+// For AOT compilation, these intrinsics lower to platform-specific calls.
+// =============================================================================
+
+// Import time intrinsics from core/intrinsics/runtime/time.vr
+// These have @intrinsic attributes that enable VBC direct lowering
+mount core.intrinsics.runtime.time.{
+    monotonic_nanos,
+    realtime_nanos,
+    sleep_ms,
+    sleep_ns,
+};
+
+// Platform-specific sleep that returns remaining time (for signal handling)
+@cfg(target_os = "linux")
+mount sys.linux.time.{
+    sleep as sys_sleep,
+    Duration as SysDuration,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.time.{
+    sleep as sys_sleep,
+    Duration as SysDuration,
+};
+
+@cfg(target_os = "windows")
+mount sys.windows.time.{
+    sleep as sys_sleep,
+    Duration as SysDuration,
+};
+
+// =============================================================================
+// Time namespace (static methods)
+// =============================================================================
+
+/// Time namespace providing static methods.
+///
+/// # Example
+/// ```verum
+/// let now = Time.now();           // Current monotonic time as Duration
+/// let mono = Time.monotonic();    // Raw nanoseconds
+/// ```
+public type Time is ();
+
+implement Time {
+    /// Get current monotonic time as Duration since an unspecified epoch.
+    ///
+    /// Uses native platform time:
+    /// - Linux: clock_gettime(CLOCK_MONOTONIC)
+    /// - macOS: mach_absolute_time()
+    /// - Windows: QueryPerformanceCounter()
+    ///
+    /// This is useful for measuring elapsed time. The epoch is unspecified,
+    /// so the absolute value is meaningless - only differences matter.
+    ///
+    /// # Example
+    /// ```verum
+    /// let start = Time.now();
+    /// do_work();
+    /// let elapsed = Time.now() - start;
+    /// ```
+    public fn now() -> Duration {
+        let nanos = monotonic_nanos() as Int;
+        Duration.from_nanos(nanos)
+    }
+
+    /// Get current monotonic time in nanoseconds.
+    ///
+    /// Returns raw nanoseconds since an unspecified epoch.
+    /// Prefer `Instant.now()` for measuring elapsed time.
+    public fn monotonic() -> Int {
+        monotonic_nanos() as Int
+    }
+
+    /// Sleep for the specified duration.
+    ///
+    /// Uses native platform sleep:
+    /// - Linux: nanosleep()
+    /// - macOS: nanosleep()
+    /// - Windows: Sleep()
+    ///
+    /// # Example
+    /// ```verum
+    /// Time.sleep(Duration.millis(100));
+    /// ```
+    public fn sleep(duration: Duration) {
+        let sys_dur = SysDuration.from_nanos(duration.as_nanos() as UInt64);
+        let _ = sys_sleep(sys_dur);
+    }
+
+    /// Sleep for the specified number of milliseconds.
+    public fn sleep_ms(ms: Int) {
+        Time.sleep(Duration.millis(ms));
+    }
+
+    /// Sleep for the specified number of seconds.
+    public fn sleep_secs(secs: Int) {
+        Time.sleep(Duration.secs(secs));
+    }
+}

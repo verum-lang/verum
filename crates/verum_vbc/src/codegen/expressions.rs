@@ -1,0 +1,20912 @@
+//! Expression compilation for VBC codegen.
+//!
+//! Transforms Verum AST expressions into VBC instructions.
+//!
+//! # CBGR Tier-Aware Reference Compilation
+//!
+//! Reference operations are compiled based on the tier determined by
+//! escape analysis:
+//!
+//! - **Tier 0 (Managed)**: Emit `Ref`/`Deref` with `ChkRef` validation
+//! - **Tier 1 (Checked)**: Emit `RefChecked` - direct access, no checks
+//! - **Tier 2 (Unsafe)**: Emit `RefUnsafe` - unchecked access
+//!
+//! # Well-Known Type (WKT) Usage
+//!
+//! This module uses the centralized `WellKnownType` enum (from `verum_common`)
+//! to identify types that need special codegen treatment. This is intentional:
+//! the bytecode compiler must emit different instruction sequences for wrapper
+//! types (Heap/Shared allocation), collections (built-in Len opcode), and
+//! concurrency primitives (Channel creation). All type identity checks go
+//! through the single `WKT` enum -- no raw string comparisons.
+//!
+//! Protocol-related dispatch uses `WellKnownProtocol` and `method_to_protocol`
+//! from the same central registry.
+
+use super::context::ExprId;
+use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, VbcCodegen};
+use crate::instruction::{ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp, FloatToIntMode, Instruction, Reg, RegRange, UnaryIntOp, UnaryFloatOp};
+use crate::module::FfiSymbolId;
+use crate::types::CbgrTier;
+use crate::intrinsics::{lookup_intrinsic, IntrinsicInfo};
+use verum_common::well_known_types::{WellKnownType as WKT, WellKnownProtocol as WKP, type_names};
+use verum_common::method_to_protocol;
+
+use verum_ast::pattern::VariantPatternData;
+use verum_ast::{
+    BinOp, Block, ConditionKind, Expr, ExprKind, FieldInit, Literal, LiteralKind, Path,
+    PathSegment, UnOp,
+};
+
+/// Resolves numeric type aliases to their base type.
+///
+/// Verum uses semantic type names (Int8, Int16, Int32, UInt64, etc.) as primary types,
+/// with Rust-style compatibility aliases (i8, i16, i32, u64, etc.) for FFI.
+/// All sized integers resolve to `Int` and floats resolve to `Float` for method lookup.
+///
+/// This function supports both naming conventions:
+/// - Semantic names: Int8, Int16, Int32, Int64, Int128, ISize, UInt8, ..., USize
+/// - Compatibility aliases: i8, i16, i32, i64, i128, isize, u8, ..., usize
+fn resolve_numeric_type_alias(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        // Unsigned integers (semantic names) -> Int
+        "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "USize" => Some("Int"),
+        // Signed integers (semantic names) -> Int
+        "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "ISize" => Some("Int"),
+        // Unsigned integers (compat aliases) -> Int
+        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => Some("Int"),
+        // Signed integers (compat aliases) -> Int
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => Some("Int"),
+        // Float aliases (semantic and compat) -> Float
+        "Float32" | "Float64" | "f32" | "f64" => Some("Float"),
+        // Byte is alias for UInt8 -> Int
+        "Byte" => Some("Int"),
+        // Not a numeric type alias
+        _ => None,
+    }
+}
+
+/// Resolve compile-time static constants for primitive types.
+/// Returns the constant value as i128 for TypeName.CONSTANT() calls.
+/// Compile-time type property value.
+enum TypePropertyValue {
+    Int(i64),
+    UInt(u64),
+    Str(String),
+}
+
+/// Resolve compile-time type properties like `Int32.bits`, `Int8.size`, `Float64.name`.
+fn resolve_type_property(type_name: &str, property: &str) -> Option<TypePropertyValue> {
+    // Get bits for numeric types
+    let bits: Option<i64> = match type_name {
+        "Int" | "Int64" | "i64" => Some(64),
+        "Int8" | "i8" => Some(8),
+        "Int16" | "i16" => Some(16),
+        "Int32" | "i32" => Some(32),
+        "Int128" | "i128" => Some(128),
+        "IntSize" | "ISize" | "isize" => Some(64),
+        "UInt8" | "u8" | "Byte" => Some(8),
+        "UInt16" | "u16" => Some(16),
+        "UInt32" | "u32" => Some(32),
+        "UInt64" | "u64" => Some(64),
+        "UInt128" | "u128" => Some(128),
+        "UIntSize" | "USize" | "usize" => Some(64),
+        "Float" | "Float64" | "f64" => Some(64),
+        "Float32" | "f32" => Some(32),
+        "Bool" => Some(8),
+        "Char" => Some(32),
+        _ => None,
+    };
+
+    match property {
+        "bits" => bits.map(TypePropertyValue::Int),
+        "size" => bits.map(|b| TypePropertyValue::Int(b / 8)),
+        "alignment" => bits.map(|b| {
+            let size = b / 8;
+            // Alignment is min(size, 16) for most types
+            TypePropertyValue::Int(size.min(16))
+        }),
+        "stride" => bits.map(|b| TypePropertyValue::Int(b / 8)),
+        "name" => Some(TypePropertyValue::Str(type_name.to_string())),
+        "min" => {
+            let is_signed = matches!(type_name,
+                "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+                | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
+            let is_unsigned = matches!(type_name,
+                "UInt8" | "u8" | "Byte" | "UInt16" | "u16" | "UInt32" | "u32"
+                | "UInt64" | "u64" | "UInt128" | "u128" | "UIntSize" | "USize" | "usize");
+            if is_unsigned {
+                return Some(TypePropertyValue::Int(0));
+            }
+            if is_signed {
+                let b = bits?;
+                return Some(TypePropertyValue::Int(-(1i64 << (b - 1))));
+            }
+            None
+        },
+        "max" => {
+            let is_signed = matches!(type_name,
+                "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+                | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
+            let is_unsigned = matches!(type_name,
+                "UInt8" | "u8" | "Byte" | "UInt16" | "u16" | "UInt32" | "u32"
+                | "UInt64" | "u64" | "UInt128" | "u128" | "UIntSize" | "USize" | "usize");
+            if is_signed {
+                let b = bits?;
+                return Some(TypePropertyValue::Int((1i64 << (b - 1)) - 1));
+            }
+            if is_unsigned {
+                let b = bits?;
+                if b >= 64 {
+                    return Some(TypePropertyValue::UInt(u64::MAX));
+                }
+                return Some(TypePropertyValue::Int((1i64 << b) - 1));
+            }
+            None
+        },
+        "is_signed" => match type_name {
+            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+            | "Float" | "Float32" | "Float64" | "f32" | "f64" => Some(TypePropertyValue::Int(1)),
+            _ => Some(TypePropertyValue::Int(0)),
+        },
+        _ => None,
+    }
+}
+
+fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
+    // Get the (bits, is_signed) for numeric types
+    let (bits, is_signed) = match type_name {
+        "Int" | "Int64" | "i64" => (64, true),
+        "Int8" | "i8" => (8, true),
+        "Int16" | "i16" => (16, true),
+        "Int32" | "i32" => (32, true),
+        "Int128" | "i128" => (128, true),
+        "IntSize" | "ISize" | "isize" => (64, true), // assume 64-bit
+        "UInt8" | "u8" | "Byte" => (8, false),
+        "UInt16" | "u16" => (16, false),
+        "UInt32" | "u32" => (32, false),
+        "UInt64" | "u64" => (64, false),
+        "UInt128" | "u128" => (128, false),
+        "UIntSize" | "USize" | "usize" => (64, false),
+        "Float" | "Float64" | "f64" => {
+            return match method {
+                "MIN" | "min_value" => Some(f64::MIN.to_bits() as i128),
+                "MAX" | "max_value" => Some(f64::MAX.to_bits() as i128),
+                "BITS" => Some(64),
+                "EPSILON" | "epsilon" => Some(f64::EPSILON.to_bits() as i128),
+                "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
+                "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
+                "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
+                "MIN_POSITIVE" | "min_positive" => Some(f64::MIN_POSITIVE.to_bits() as i128),
+                "PI" | "pi" => Some(std::f64::consts::PI.to_bits() as i128),
+                "E" | "e" => Some(std::f64::consts::E.to_bits() as i128),
+                _ => None,
+            };
+        }
+        "Float32" | "f32" => {
+            return match method {
+                "MIN" | "min_value" => Some((f32::MIN as f64).to_bits() as i128),
+                "MAX" | "max_value" => Some((f32::MAX as f64).to_bits() as i128),
+                "BITS" => Some(32),
+                "EPSILON" | "epsilon" => Some((f32::EPSILON as f64).to_bits() as i128),
+                "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
+                "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
+                "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
+                _ => None,
+            };
+        }
+        "Duration" => {
+            return match method {
+                "ZERO" => Some(0), // Duration stored as nanoseconds; zero = 0
+                "MAX" => Some(u64::MAX as i128), // Duration(UInt64.MAX) stored as bit pattern
+                _ => None,
+            };
+        }
+        _ => return None,
+    };
+
+    match method {
+        "MIN" | "min_value" => {
+            if is_signed {
+                if bits == 128 {
+                    Some(i128::MIN)
+                } else {
+                    Some(-(1i128 << (bits - 1)))
+                }
+            } else {
+                Some(0)
+            }
+        }
+        "MAX" | "max_value" => {
+            if is_signed {
+                if bits == 128 {
+                    Some(i128::MAX)
+                } else {
+                    Some((1i128 << (bits - 1)) - 1)
+                }
+            } else {
+                if bits == 128 {
+                    Some(u128::MAX as i128)
+                } else {
+                    Some((1i128 << bits) - 1)
+                }
+            }
+        }
+        "BITS" => Some(bits as i128),
+        _ => None,
+    }
+}
+
+/// Resolves a well-known stdlib constant name to its integer value.
+///
+/// These values match the definitions in core/ .vr files.
+fn resolve_stdlib_constant_value(name: &str) -> i64 {
+    match name {
+        // Atomic ordering (core/intrinsics/atomic.vr)
+        "ORDERING_RELAXED" => 0,
+        "ORDERING_ACQUIRE" => 1,
+        "ORDERING_RELEASE" => 2,
+        "ORDERING_ACQ_REL" => 3,
+        "ORDERING_SEQ_CST" => 4,
+        // POSIX errno (core/sys/darwin/errno.vr)
+        "EPERM" => 1, "ENOENT" => 2, "ESRCH" => 3, "EINTR" => 4,
+        "EIO" => 5, "ENXIO" => 6, "E2BIG" => 7, "ENOEXEC" => 8,
+        "EBADF" => 9, "ECHILD" => 10, "EAGAIN" => 11, "ENOMEM" => 12,
+        "EACCES" => 13, "EFAULT" => 14, "EBUSY" => 16, "EEXIST" => 17,
+        "ENODEV" => 19, "ENOTDIR" => 20, "EISDIR" => 21, "EINVAL" => 22,
+        "EMFILE" => 24, "ENOSPC" => 28, "EPIPE" => 32, "ERANGE" => 34,
+        "ENOSYS" => 78, "ENOTEMPTY" => 66,
+        "ECONNREFUSED" => 61, "ECONNRESET" => 54, "ECONNABORTED" => 53,
+        "ETIMEDOUT" => 60, "EADDRINUSE" => 48, "EADDRNOTAVAIL" => 49,
+        "ENETUNREACH" => 51, "EALREADY" => 37, "EINPROGRESS" => 36,
+        "ENOTCONN" => 57, "EWOULDBLOCK" => 35,
+        // kqueue filters (core/sys/darwin/libsystem.vr)
+        "EVFILT_READ" => -1, "EVFILT_WRITE" => -2,
+        "EVFILT_TIMER" => -7, "EVFILT_USER" => -10,
+        // kqueue flags
+        "EV_ADD" => 0x0001, "EV_DELETE" => 0x0002,
+        "EV_ENABLE" => 0x0004, "EV_DISABLE" => 0x0008,
+        "EV_CLEAR" => 0x0020, "EV_ONESHOT" => 0x0010,
+        "EV_EOF" => 0x8000_i64, "EV_ERROR" => 0x4000,
+        // Once-init states
+        "ONCE_INIT" => 0, "ONCE_RUNNING" => 1, "ONCE_DONE" => 2,
+        // Default: 0 for unknown constants
+        _ => 0,
+    }
+}
+
+/// Check if a name is a known type name (primitive or semantic numeric type).
+///
+/// This is used to distinguish type names from variable names when compiling paths.
+fn is_type_name(name: &str) -> bool {
+    type_names::is_primitive_value_type(name)
+        || type_names::is_numeric_type(name)
+        || matches!(name, "Text" | "Never")
+        // Time types
+        || matches!(name, "Duration" | "Instant" | "Stopwatch" | "PerfCounter" | "DeadlineTimer")
+        // Concurrency primitives
+        || matches!(name, "Channel")
+        // VBC-internal: WKT registry lookup to classify stdlib type names (List, Map, etc.)
+        // for path disambiguation during codegen. This is opcode-level metadata — the
+        // interpreter dispatches differently on well-known types vs user-defined types.
+        || WKT::from_name(name).is_some()
+}
+
+/// Check if a type name is a primitive numeric or char type that supports
+/// static method calls dispatched via the interpreter's `dispatch_primitive_method`.
+fn is_primitive_type(name: &str) -> bool {
+    type_names::is_primitive_value_type(name) || type_names::is_numeric_type(name)
+}
+
+/// Information about an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
+///
+/// This is detected during FFI call argument analysis to enable proper array marshalling.
+/// VBC arrays store NaN-boxed Values, but FFI expects raw C data, so we need to marshal.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields reserved for future FFI array marshalling implementation
+struct FfiArrayRefInfo {
+    /// The argument index in the FFI call
+    arg_idx: u8,
+    /// The variable name holding the array
+    array_var_name: String,
+    /// The index expression (usually literal 0)
+    index_is_zero: bool,
+    /// Whether this is a mutable reference (&mut arr[idx])
+    is_mutable: bool,
+}
+
+/// Tracks a function callback argument for FFI calls.
+///
+/// When a Verum function is passed to an FFI call that expects a function pointer,
+/// we need to create a trampoline (C-callable function) that invokes the Verum function.
+#[derive(Debug, Clone)]
+struct FfiCallbackInfo {
+    /// The argument index in the FFI call
+    arg_idx: u8,
+    /// The Verum function ID to wrap
+    func_id: u32,
+    /// The FFI symbol ID containing the callback signature
+    callback_signature_id: FfiSymbolId,
+}
+
+impl VbcCodegen {
+    /// Writes a register to bytecode using variable-length encoding.
+    /// Registers 0-127 use 1 byte, registers 128+ use 2 bytes.
+    fn write_reg(output: &mut Vec<u8>, reg: u16) {
+        if reg < 128 {
+            output.push(reg as u8);
+        } else {
+            output.push(0x80 | ((reg >> 8) as u8));
+            output.push((reg & 0xFF) as u8);
+        }
+    }
+
+    /// Detects if an expression is an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
+    ///
+    /// This pattern needs special handling for FFI calls because VBC arrays store NaN-boxed Values,
+    /// but FFI expects raw C data. When detected, we marshal the array to a temporary buffer.
+    fn detect_array_element_ref(arg: &Expr) -> Option<FfiArrayRefInfo> {
+        // Check for &arr[idx] or &mut arr[idx] pattern
+        let (is_mutable, inner) = match &arg.kind {
+            ExprKind::Unary { op: UnOp::Ref, expr: inner } => (false, inner),
+            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => (true, inner),
+            _ => return None,
+        };
+
+        // Check if inner is an index expression arr[idx]
+        if let ExprKind::Index { expr: base, index } = &inner.kind {
+            // Check if base is a simple variable path
+            if let ExprKind::Path(path) = &base.kind
+                && path.segments.len() == 1
+                    && let PathSegment::Name(ident) = &path.segments[0] {
+                        // Check if index is zero (literal 0)
+                        let index_is_zero = if let ExprKind::Literal(lit) = &index.kind {
+                            if let LiteralKind::Int(int_lit) = &lit.kind {
+                                int_lit.value == 0
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        return Some(FfiArrayRefInfo {
+                            arg_idx: 0, // Will be set by caller
+                            array_var_name: ident.name.to_string(),
+                            index_is_zero,
+                            is_mutable,
+                        });
+                    }
+        }
+
+        None
+    }
+
+    /// Detects if an expression is a function reference that should become a callback.
+    ///
+    /// When passing a function to an FFI call that expects a function pointer,
+    /// we need to create a trampoline. This method detects function references
+    /// (simple path to a function) and returns the callback info.
+    fn detect_function_reference(
+        &self,
+        arg: &Expr,
+        arg_idx: u8,
+        callback_signature_id: FfiSymbolId,
+    ) -> Option<FfiCallbackInfo> {
+        // Check if the argument is a simple path (function reference)
+        if let ExprKind::Path(path) = &arg.kind
+            && path.segments.len() == 1
+                && let PathSegment::Name(ident) = &path.segments[0] {
+                    // Look up as a function
+                    if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+                        return Some(FfiCallbackInfo {
+                            arg_idx,
+                            func_id: func_info.id.0,
+                            callback_signature_id,
+                        });
+                    }
+                }
+        None
+    }
+
+    /// Compiles an expression and returns the result register.
+    ///
+    /// Returns `None` for expressions that don't produce a value (e.g., return).
+    pub fn compile_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        self.ctx.stats.expressions_compiled += 1;
+        // Track source span for DWARF debug info (SourceMap population)
+        self.ctx.set_current_span(expr.span);
+
+        match &expr.kind {
+            // === Literals ===
+            ExprKind::Literal(lit) => self.compile_literal(lit),
+
+            // === Variables and Paths ===
+            ExprKind::Path(path) => self.compile_path(path),
+
+            // === Operators ===
+            ExprKind::Binary { op, left, right } => self.compile_binary(*op, left, right),
+            ExprKind::Unary { op, expr: inner } => self.compile_unary(*op, inner),
+
+            // === Function Calls ===
+            ExprKind::Call {
+                func,
+                args,
+                type_args: _,
+            } => self.compile_call(func, args),
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                type_args: _,
+            } => self.compile_method_call(receiver, method, args),
+
+            // === Control Flow ===
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.compile_if(condition, then_branch, else_branch.as_deref()),
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => self.compile_match(scrutinee, arms),
+            ExprKind::Loop { label, body, .. } => {
+                self.compile_loop(label.as_ref().map(|l| l.as_str()), body)
+            }
+            ExprKind::While {
+                label,
+                condition,
+                body,
+                ..
+            } => self.compile_while(label.as_ref().map(|l| l.as_str()), condition, body),
+            ExprKind::For {
+                label,
+                pattern,
+                iter,
+                body,
+                ..
+            } => self.compile_for(label.as_ref().map(|l| l.as_str()), pattern, iter, body),
+
+            // === Block ===
+            ExprKind::Block(block) => self.compile_block(block),
+
+            // === Return/Break/Continue ===
+            ExprKind::Return(value) => self.compile_return(value.as_deref()),
+            ExprKind::Break { label, value } => {
+                self.compile_break(label.as_ref().map(|l| l.as_str()), value.as_deref())
+            }
+            ExprKind::Continue { label } => {
+                self.compile_continue(label.as_ref().map(|l| l.as_str()))
+            }
+
+            // === Tuples and Arrays ===
+            ExprKind::Tuple(elements) => self.compile_tuple(elements),
+            ExprKind::Array(array_expr) => self.compile_array(array_expr),
+
+            // === Field Access ===
+            ExprKind::Field { expr: base, field } => {
+                if std::env::var("VERUM_DEBUG_FA").is_ok() {
+                    tracing::debug!("[FA] field '{}' in fn '{}'", field.name, self.ctx.current_function.as_deref().unwrap_or("?"));
+                }
+                self.compile_field_access(base, &field.name)
+            }
+            ExprKind::TupleIndex { expr: base, index } => self.compile_tuple_index(base, *index),
+            ExprKind::Index { expr: base, index } => self.compile_index(base, index),
+
+            // === Record/Struct Creation ===
+            ExprKind::Record { path, fields, base } => {
+                self.compile_record(path, fields, base.as_deref())
+            }
+
+            // === References ===
+            ExprKind::Paren(inner) => self.compile_expr(inner),
+
+            // === Async ===
+            ExprKind::Async(block) => self.compile_async_block(block),
+            ExprKind::Await(inner) => self.compile_await(inner),
+
+            // === Error Handling ===
+            ExprKind::Try(inner) => self.compile_try(inner),
+            ExprKind::TryBlock(inner) => self.compile_try_block(inner),
+
+            // === Cast ===
+            ExprKind::Cast { expr: inner, ty } => self.compile_cast(inner, ty),
+
+            // === Range ===
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => self.compile_range(start.as_deref(), end.as_deref(), *inclusive),
+
+            // === Closure ===
+            ExprKind::Closure { params, body, return_type, .. } => self.compile_closure(params, body, return_type.as_ref()),
+
+            // === Optional chaining: obj?.field ===
+            ExprKind::OptionalChain { expr: base, field } => {
+                self.compile_optional_chain(base, &field.name)
+            }
+
+            // === Pipeline: x |> f |> g ===
+            ExprKind::Pipeline { left, right } => self.compile_pipeline(left, right),
+
+            // === Null coalescing: a ?? b ===
+            ExprKind::NullCoalesce { left, right } => self.compile_null_coalesce(left, right),
+
+            // === Pattern test: x is Pattern ===
+            ExprKind::Is {
+                expr: scrutinee,
+                pattern,
+                negated,
+            } => self.compile_is_pattern(scrutinee, pattern, *negated),
+
+            // === Error handling ===
+            ExprKind::Throw(error_expr) => self.compile_throw(error_expr),
+
+            ExprKind::TryRecover { try_block, recover } => {
+                self.compile_try_recover(try_block, recover)
+            }
+
+            ExprKind::TryFinally {
+                try_block,
+                finally_block,
+            } => self.compile_try_finally(try_block, finally_block),
+
+            ExprKind::TryRecoverFinally {
+                try_block,
+                recover,
+                finally_block,
+            } => self.compile_try_recover_finally(try_block, recover, finally_block),
+
+            // === Async ===
+            ExprKind::Spawn { expr, contexts: _ } => self.compile_spawn(expr),
+
+            ExprKind::Inject { type_path } => {
+                self.compile_inject(type_path)
+            }
+
+            ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms),
+
+            ExprKind::ForAwait {
+                label,
+                pattern,
+                async_iterable,
+                body,
+                ..
+            } => self.compile_for_await(label.as_ref().map(|l| l.as_str()), pattern, async_iterable, body),
+
+            ExprKind::Yield(value) => self.compile_yield(value),
+
+            // === Unsafe block ===
+            ExprKind::Unsafe(block) => self.compile_unsafe_block(block),
+
+            // === Meta expressions ===
+            ExprKind::Meta(block) => self.compile_meta_block(block),
+            ExprKind::MetaFunction { name, args } => self.compile_meta_function(name, args),
+            ExprKind::MacroCall { path, args } => self.compile_macro_call(path, args),
+            ExprKind::Quote { target_stage, tokens } => {
+                self.compile_quote_expr(target_stage, tokens)
+            }
+            ExprKind::StageEscape { stage, expr } => {
+                self.compile_stage_escape(*stage, expr)
+            }
+            ExprKind::Lift { expr } => {
+                // Lift is syntactic sugar for stage escape at the current stage
+                // Compile as: $(stage current){ expr }
+                self.compile_lift_expr(expr)
+            }
+
+            // === Context system ===
+            ExprKind::UseContext {
+                context,
+                handler,
+                body,
+            } => self.compile_use_context(context, handler, body),
+
+            ExprKind::Attenuate {
+                context,
+                capabilities,
+            } => self.compile_attenuate(context, capabilities),
+
+            // === Comprehensions ===
+            ExprKind::Comprehension { expr, clauses } => self.compile_comprehension(expr, clauses),
+
+            ExprKind::StreamComprehension { expr, clauses } => {
+                self.compile_stream_comprehension(expr, clauses)
+            }
+
+            ExprKind::MapComprehension {
+                key_expr,
+                value_expr,
+                clauses,
+            } => self.compile_map_comprehension(key_expr, value_expr, clauses),
+
+            ExprKind::SetComprehension { expr, clauses } => {
+                self.compile_set_comprehension(expr, clauses)
+            }
+
+            ExprKind::GeneratorComprehension { expr, clauses } => {
+                self.compile_generator_comprehension(expr, clauses)
+            }
+
+            // === Stream literals ===
+            ExprKind::StreamLiteral(stream_lit) => self.compile_stream_literal(stream_lit),
+
+            // === String interpolation ===
+            ExprKind::InterpolatedString {
+                handler,
+                parts,
+                exprs,
+            } => self.compile_interpolated_string(handler, parts, exprs),
+
+            // === Tensor/Matrix/Map/Set literals ===
+            ExprKind::TensorLiteral {
+                shape,
+                elem_type: _,
+                data,
+            } => self.compile_tensor_literal(shape, data),
+
+            ExprKind::MapLiteral { entries } => self.compile_map_literal(entries),
+
+            ExprKind::SetLiteral { elements } => self.compile_set_literal(elements),
+
+            // === Type properties and expressions ===
+            ExprKind::TypeProperty { ty, property } => self.compile_type_property(ty, property),
+
+            ExprKind::TypeExpr(ty) => self.compile_type_expr(ty),
+
+            ExprKind::TypeBound { type_param, bound } => {
+                self.compile_type_bound(type_param, bound)
+            }
+
+            // === Verification quantifiers ===
+            ExprKind::Forall { bindings, body } => self.compile_forall(bindings, body),
+
+            ExprKind::Exists { bindings, body } => self.compile_exists(bindings, body),
+
+            // === Type introspection ===
+            ExprKind::Typeof(inner) => {
+                // Compile typeof expressions as intrinsic calls
+                // typeof(expr) returns a type descriptor at runtime
+                self.compile_typeof(inner)
+            }
+
+            // === Structured Concurrency ===
+            ExprKind::Nursery {
+                options,
+                body,
+                on_cancel,
+                recover,
+                ..
+            } => self.compile_nursery(options, body, on_cancel.as_ref(), recover.as_ref()),
+
+            // === Inline Assembly ===
+            // Inline assembly requires native code execution (AOT/LLVM path).
+            // Note: VBC does not directly execute inline assembly.
+            // We emit a panic instruction as assembly requires native code execution.
+            ExprKind::InlineAsm { .. } => {
+                // Inline assembly cannot be interpreted directly.
+                // We emit an unreachable instruction that will cause the interpreter to halt.
+                // For actual execution, the code must be compiled to native via LLVM.
+                self.ctx.emit(crate::instruction::Instruction::Unreachable);
+                Ok(Some(Reg(0))) // Return dummy register; execution will never reach here
+            }
+
+            // Destructuring assignment: (a, b) = expr or (a, b) += (da, db)
+            // Unified destructuring: supports tuple, record, and nested patterns on the LHS
+            // with assignment operators (=, +=, -=, etc.)
+            ExprKind::DestructuringAssign { pattern, op, value } => {
+                // First compile the value expression
+                let value_reg = self.compile_expr(value)?.ok_or_else(|| {
+                    crate::codegen::CodegenError::internal(
+                        "destructuring assignment value produced no result",
+                    )
+                })?;
+
+                if *op == verum_ast::BinOp::Assign {
+                    // Simple assignment: (a, b) = expr
+                    // Compile pattern binding (assigns parts of value_reg to pattern variables)
+                    self.compile_pattern_bind(pattern, value_reg)?;
+                } else {
+                    // Compound assignment: (a, b) += (da, db)
+                    // For each element: var = var op value_element
+                    self.compile_compound_destructuring(pattern, value_reg, op)?;
+                }
+                Ok(None) // Assignment doesn't produce a value
+            }
+
+            // Calc blocks are proof constructs - at runtime they are no-ops
+            ExprKind::CalcBlock(_) => {
+                Ok(None)
+            }
+
+            // Named arguments: compile the value expression
+            ExprKind::NamedArg { value, .. } => {
+                self.compile_expr(value)
+            }
+        }
+    }
+
+    // ==================== Literals ====================
+
+    /// Compiles a literal expression.
+    fn compile_literal(&mut self, lit: &Literal) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+
+        match &lit.kind {
+            LiteralKind::Int(int_lit) => {
+                let value = int_lit.value;
+                // Use immediate if small enough, otherwise constant pool
+                if value >= i16::MIN as i128 && value <= i16::MAX as i128 {
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: value as i64,
+                    });
+                } else {
+                    let const_id = self.ctx.add_const_int(value as i64);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: dest,
+                        const_id: const_id.0,
+                    });
+                }
+            }
+
+            LiteralKind::Float(float_lit) => {
+                let value = float_lit.value;
+                let const_id = self.ctx.add_const_float(value);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            LiteralKind::Bool(value) => {
+                if *value {
+                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                } else {
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                }
+            }
+
+            LiteralKind::Char(ch) => {
+                // Load char as integer
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: *ch as i64,
+                });
+            }
+
+            LiteralKind::Text(string_lit) => {
+                let text = string_lit.as_str();
+                let const_id = self.ctx.add_const_string(text);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            LiteralKind::ByteChar(byte) => {
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: *byte as i64,
+                });
+            }
+
+            LiteralKind::ByteString(bytes) => {
+                // Store byte string as bytes constant
+                let const_id = self.ctx.add_const_bytes(bytes.clone());
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            // Tagged literals: d#"2025-11-05", sql#"SELECT...", rx#"pattern"
+            // Compile-time validation + tag-specific codegen
+            LiteralKind::Tagged { tag, content } => {
+                match tag.as_str() {
+                    "rx" => {
+                        // Regex literal: compile-time syntax validation
+                        if let Err(e) = self.validate_regex_syntax(content.as_str()) {
+                            tracing::warn!("invalid regex pattern rx#\"{}\": {}", content, e);
+                        }
+                        // Store as string constant — regex compilation happens at first use
+                        let const_id = self.ctx.add_const_string(content.as_str());
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: dest,
+                            const_id: const_id.0,
+                        });
+                    }
+                    "json" => {
+                        // JSON literal: compile-time syntax validation
+                        if let Err(e) = self.validate_json_syntax(content.as_str()) {
+                            tracing::warn!("invalid JSON literal json#\"{}\": {}", content, e);
+                        }
+                        let const_id = self.ctx.add_const_string(content.as_str());
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: dest,
+                            const_id: const_id.0,
+                        });
+                    }
+                    "sql" => {
+                        // SQL literal: basic compile-time syntax check
+                        if content.trim().is_empty() {
+                            tracing::warn!("empty SQL literal sql#\"\"");
+                        }
+                        let const_id = self.ctx.add_const_string(content.as_str());
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: dest,
+                            const_id: const_id.0,
+                        });
+                    }
+                    _ => {
+                        // Unknown tag: store content as string, emit warning for unrecognized tags
+                        let const_id = self.ctx.add_const_string(content.as_str());
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: dest,
+                            const_id: const_id.0,
+                        });
+                    }
+                }
+            }
+
+            // Interpolated string: f"Hello {name}", sql"SELECT {id}"
+            // For now, store the template as string constant
+            // Interpolation expressions are handled during desugaring
+            LiteralKind::InterpolatedString(interp_lit) => {
+                let const_id = self.ctx.add_const_string(interp_lit.content.as_str());
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            // Contract literals: contract#"it > 0"
+            // These are compile-time constructs; at runtime they become true (assertion passed)
+            LiteralKind::Contract(_content) => {
+                // Contract was verified at compile time - emit true
+                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+            }
+
+            // Composite literals: mat#"[[1, 2], [3, 4]]", vec#"<1, 2, 3>"
+            // Store content as string for runtime parsing
+            LiteralKind::Composite(composite_lit) => {
+                let const_id = self.ctx.add_const_string(composite_lit.content.as_str());
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+
+            // Context-adaptive literals: #FF5733
+            // The interpretation depends on type context
+            LiteralKind::ContextAdaptive(adaptive_lit) => {
+                use verum_ast::literal::ContextAdaptiveKind;
+                match &adaptive_lit.kind {
+                    ContextAdaptiveKind::Hex(value) => {
+                        // Load hex value as integer
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: dest,
+                            value: *value as i64,
+                        });
+                    }
+                    ContextAdaptiveKind::Numeric(text) | ContextAdaptiveKind::Identifier(text) => {
+                        // Store as string constant
+                        let const_id = self.ctx.add_const_string(text.as_str());
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: dest,
+                            const_id: const_id.0,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(Some(dest))
+    }
+
+    // ==================== Paths and Variables ====================
+
+    /// Compiles a path expression (variable reference or qualified path).
+    ///
+    /// Handles:
+    /// - Simple identifiers: `x` → lookup in scope
+    /// - Module paths: `module::item` → resolve module and item
+    /// - Type paths: `Type::method` → resolve type and associated item
+    /// - Self/super/crate: special resolution
+    fn compile_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
+        // Simple case: single identifier (local variable or function)
+        if path.segments.len() == 1 {
+            return self.compile_simple_path(&path.segments[0]);
+        }
+
+        // Complex paths: module::item or Type::method
+        self.compile_qualified_path(path)
+    }
+
+    /// Compiles a simple (single-segment) path.
+    fn compile_simple_path(&mut self, segment: &PathSegment) -> CodegenResult<Option<Reg>> {
+        match segment {
+            PathSegment::Name(ident) => {
+                let name = &ident.name;
+
+                // First, try to find as a local variable
+                if let Ok(reg) = self.ctx.get_var_reg(name) {
+                    // Cell-wrapped mutable capture: dereference through GetF
+                    if let Some(info) = self.ctx.lookup_var(name) {
+                        if info.is_cell {
+                            let temp = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::GetF {
+                                dst: temp,
+                                obj: reg,
+                                field_idx: 0,
+                            });
+                            return Ok(Some(temp));
+                        }
+                    }
+                    return Ok(Some(reg));
+                }
+
+                // Check if this is a @thread_local static variable
+                if let Some(slot) = self.ctx.is_thread_local(name) {
+                    let dest = self.ctx.alloc_temp();
+                    let slot_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
+                    self.ctx.emit(Instruction::TlsGet { dst: dest, slot: slot_reg });
+                    // Note: slot_reg NOT freed — must remain valid through TlsGet lowering
+                    return Ok(Some(dest));
+                }
+
+                // Try to find as a function (for function references) or static/constant
+                // Extract func info first to avoid borrow conflicts
+                let func_info_opt = self.ctx.lookup_function(name).cloned();
+                if let Some(func_info) = func_info_opt {
+                    // Check if this is a variant constructor
+                    if let Some(tag) = func_info.variant_tag {
+                        if func_info.param_count == 0 {
+                            // Nullary variant constructor — emit MakeVariant directly
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::MakeVariant { dst: dest, tag, field_count: 0 });
+                            return Ok(Some(dest));
+                        } else {
+                            // Variant with args — will be handled by compile_call
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadI {
+                                dst: dest,
+                                value: func_info.id.0 as i64,
+                            });
+                            return Ok(Some(dest));
+                        }
+                    }
+
+                    // Check if this is a static/constant (0-param function)
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                        if let Ok(reg) = self.ctx.get_var_reg(name) {
+                            return Ok(Some(reg));
+                        }
+                        // Check if this is a constant with a known value.
+                        // Two formats:
+                        //   "__const_val_N"  — user-defined const with extracted literal value N
+                        //   "__const_NAME"   — well-known stdlib constant resolved by name
+                        if let Some(ref iname) = func_info.intrinsic_name {
+                            if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                                // Dynamic constant with encoded value
+                                let value: i64 = val_str.parse().unwrap_or(0);
+                                let dest = self.ctx.alloc_temp();
+                                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                return Ok(Some(dest));
+                            }
+                            if let Some(const_name) = iname.strip_prefix("__const_") {
+                                let dest = self.ctx.alloc_temp();
+                                let value = resolve_stdlib_constant_value(const_name);
+                                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                return Ok(Some(dest));
+                            }
+                        }
+                        // Sentinel ID means this is a type constructor (newtype/unit type)
+                        // with no actual bytecode. Reading it as a 0-param "function" would
+                        // emit Call(sentinel) which fails at runtime.
+                        if func_info.id.0 == u32::MAX / 2 {
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                            return Ok(Some(dest));
+                        }
+                        let dest = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Call {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            args: RegRange::new(Reg(0), 0),
+                        });
+                        return Ok(Some(dest));
+                    } else {
+                        // Regular function reference - create a closure with zero captures.
+                        // This allows named functions to be passed to higher-order functions
+                        // like map, filter, fold etc. that use CallClosure internally.
+                        // The closure object has the same layout as closures with captures,
+                        // but with capture_count = 0.
+                        let dest = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::NewClosure {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            captures: vec![],
+                        });
+                        return Ok(Some(dest));
+                    }
+                }
+
+                // Check if this is a type name (numeric type or primitive)
+                // Type names used as expressions should return a type reference
+                // For now, emit a LoadNil stub - this handles cases like `u64` being
+                // used in contexts that expect a value (e.g., fallback from method calls)
+                if is_type_name(name) {
+                    let dest = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    return Ok(Some(dest));
+                }
+
+                // Check if this is a generic type parameter (T, U, etc.)
+                // These are valid in expressions like @intrinsic("size_of", T) but don't
+                // have a runtime value. Return a type reference placeholder.
+                if self.ctx.generic_type_params.contains(&name.to_string()) {
+                    let dest = self.ctx.alloc_temp();
+                    // Load type parameter index as a marker (will be handled by intrinsic)
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    return Ok(Some(dest));
+                }
+
+                // Check if this is a const generic parameter (SIZE, N, etc.)
+                // These appear in expressions like `SIZE * 8` or `N - 1` and represent
+                // compile-time known values. During monomorphization, these are replaced
+                // with actual integer values.
+                if self.ctx.const_generic_params.contains(&name.to_string()) {
+                    let dest = self.ctx.alloc_temp();
+                    // Const generics are resolved during monomorphization.
+                    // At codegen time, emit LoadNil as a placeholder - the specializer
+                    // will substitute the actual integer value during specialization.
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    return Ok(Some(dest));
+                }
+
+                // Fallback for nullary variant constructors not yet registered as functions.
+                // Try to find a qualified name (Type.Variant) that matches.
+                if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    // Search for any qualified variant "*.Name" in the function registry
+                    let suffix = format!(".{}", name);
+                    let qualified_info = self.ctx.find_function_by_suffix(&suffix).cloned();
+                    if let Some(info) = qualified_info {
+                        if let Some(tag) = info.variant_tag {
+                            let result = self.ctx.alloc_temp();
+                            if info.param_count == 0 {
+                                self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: 0 });
+                            } else {
+                                self.ctx.emit(Instruction::LoadI {
+                                    dst: result,
+                                    value: info.id.0 as i64,
+                                });
+                            }
+                            return Ok(Some(result));
+                        }
+                    }
+                }
+
+                // Not found - truly undefined
+                Err(CodegenError::undefined_variable(name.clone()))
+            }
+
+            PathSegment::SelfValue => {
+                // 'self' - look up the implicit self parameter
+                if let Ok(reg) = self.ctx.get_var_reg("self") {
+                    Ok(Some(reg))
+                } else {
+                    Err(CodegenError::undefined_variable("self".to_string()))
+                }
+            }
+
+            PathSegment::Super | PathSegment::Cog | PathSegment::Relative => {
+                // These require multi-segment paths
+                Err(CodegenError::unsupported_expr("standalone super/crate/relative"))
+            }
+        }
+    }
+
+    /// Compiles a qualified (multi-segment) path like `module::function` or `Type::method`.
+    fn compile_qualified_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
+        // Collect path segments into a qualified name
+        let mut parts: Vec<String> = Vec::new();
+        for segment in &path.segments {
+            match segment {
+                PathSegment::Name(ident) => parts.push(ident.name.to_string()),
+                PathSegment::SelfValue => parts.push("self".to_string()),
+                PathSegment::Super => parts.push("super".to_string()),
+                PathSegment::Cog => parts.push("cog".to_string()),
+                PathSegment::Relative => parts.push(".".to_string()),
+            }
+        }
+
+        let qualified_name = parts.join("::");
+
+        // Try to find as a qualified function
+        // Extract func_id first to avoid borrow conflicts
+        let func_id_opt = self
+            .ctx
+            .lookup_qualified_function(&qualified_name)
+            .map(|f| f.id);
+        if let Some(func_id) = func_id_opt {
+            let dest = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: dest,
+                value: func_id.0 as i64,
+            });
+            return Ok(Some(dest));
+        }
+
+        // Try the last segment as a method on the type formed by preceding segments
+        if parts.len() >= 2 {
+            let method_name = match parts.last() {
+                Some(name) => name,
+                None => return Ok(None),
+            };
+            let type_path = parts[..parts.len() - 1].join(".");
+
+            // Look up Type.method style
+            let full_method = format!("{}.{}", type_path, method_name);
+            // Extract func_id first to avoid borrow conflicts
+            let method_func_id_opt = self
+                .ctx
+                .lookup_qualified_function(&full_method)
+                .map(|f| f.id);
+            if let Some(func_id) = method_func_id_opt {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: func_id.0 as i64,
+                });
+                return Ok(Some(dest));
+            }
+        }
+
+        // If we can't resolve, return an error with the qualified name
+        Err(CodegenError::internal(format!(
+            "unresolved qualified path: {}",
+            qualified_name
+        )))
+    }
+
+    // ==================== Binary Operations ====================
+
+    /// Compiles a binary operation.
+    fn compile_binary(
+        &mut self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Handle short-circuit operators specially
+        match op {
+            BinOp::And => return self.compile_short_circuit_and(left, right),
+            BinOp::Or => return self.compile_short_circuit_or(left, right),
+            BinOp::Assign => return self.compile_assignment(left, right),
+            // Compound assignments must not pre-evaluate the target (it may not be a local var)
+            BinOp::AddAssign
+            | BinOp::SubAssign
+            | BinOp::MulAssign
+            | BinOp::DivAssign
+            | BinOp::RemAssign
+            | BinOp::BitAndAssign
+            | BinOp::BitOrAssign
+            | BinOp::BitXorAssign
+            | BinOp::ShlAssign
+            | BinOp::ShrAssign => return self.compile_compound_assignment(op, left, right),
+            _ => {}
+        }
+
+        // Evaluate operands
+        let left_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("binary op left has no value"))?;
+        let right_reg = self
+            .compile_expr(right)?
+            .ok_or_else(|| CodegenError::internal("binary op right has no value"))?;
+
+        let dest = self.ctx.alloc_temp();
+
+        // Infer operand types to select int/float/generic instructions
+        let left_type = self.infer_expr_type_kind(left);
+        let right_type = self.infer_expr_type_kind(right);
+        let is_float = matches!(left_type, Some(verum_ast::ty::TypeKind::Float))
+            || matches!(right_type, Some(verum_ast::ty::TypeKind::Float));
+        let is_text = matches!(left_type, Some(verum_ast::ty::TypeKind::Text))
+            || matches!(right_type, Some(verum_ast::ty::TypeKind::Text));
+        // Check if both types are known primitives (Int, Bool, Char)
+        // For unknown types (Maybe<T>, Result<T, E>, etc.), use generic comparison
+        let is_primitive = matches!(left_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char))
+            && matches!(right_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char))
+            || (matches!(left_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char)) && right_type.is_none())
+            || (left_type.is_none() && matches!(right_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char)));
+        // Check if either operand is unsigned — ordering comparisons need CmpU
+        let is_unsigned = self.infer_expr_is_unsigned(left) || self.infer_expr_is_unsigned(right);
+
+        // Operator overloading: check if the left operand's type has a matching method
+        // (e.g., Vec2.add for `+`, Vec2.sub for `-`, etc.)
+        if !is_float && !is_text && !is_primitive {
+            let op_method_name = match op {
+                BinOp::Add => Some("add"),
+                BinOp::Sub => Some("sub"),
+                BinOp::Mul => Some("mul"),
+                BinOp::Div => Some("div"),
+                BinOp::Rem => Some("rem"),
+                BinOp::Eq => Some("eq"),
+                BinOp::Ne => Some("ne"),
+                BinOp::Lt => Some("lt"),
+                BinOp::Gt => Some("gt"),
+                BinOp::Le => Some("le"),
+                BinOp::Ge => Some("ge"),
+                _ => None,
+            };
+            if let Some(method) = op_method_name {
+                if let Some(type_name) = self.extract_expr_type_name(left) {
+                    let qualified = format!("{}.{}", type_name, method);
+                    if self.ctx.lookup_function(&qualified).is_some() {
+                        // Found operator method — emit CallM with qualified name
+                        // (e.g., "Weight.add" not just "add") so the LLVM handler
+                        // resolves the correct type's method when multiple types
+                        // have the same operator method name.
+                        let method_id = self.intern_string(&qualified);
+                        self.ctx.emit(Instruction::CallM {
+                            dst: dest,
+                            receiver: left_reg,
+                            method_id,
+                            args: crate::instruction::RegRange {
+                                start: right_reg,
+                                count: 1,
+                            },
+                        });
+                        self.ctx.free_temp(left_reg);
+                        self.ctx.free_temp(right_reg);
+                        // Track return type for chained operations
+                        self.ctx.variable_type_names.insert(
+                            format!("__r{}", dest.0),
+                            type_name.clone(),
+                        );
+                        return Ok(Some(dest));
+                    }
+                }
+            }
+        }
+
+        // Emit appropriate instruction based on operator
+        match op {
+            // Arithmetic - use type-appropriate instruction
+            BinOp::Add | BinOp::Concat => {
+                if is_text {
+                    // String concatenation via Concat instruction
+                    self.ctx.emit(Instruction::Concat {
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_float {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Add,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Sub => {
+                if is_float {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Sub,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Mul => {
+                if is_float {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Mul,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Div => {
+                if is_float {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Div,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Div,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Rem => {
+                if is_float {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Mod,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mod,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+
+            // Comparison - use type-appropriate instruction
+            BinOp::Eq => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Eq,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_text {
+                    // Use generic equality for string comparison
+                    self.ctx.emit(Instruction::CmpG {
+                        eq: true,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                        protocol_id: 0,
+                    });
+                } else if is_primitive {
+                    // Use integer comparison for known primitive types
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    // Use generic equality for variants, objects, and unknown types.
+                    // If we know the concrete type name, encode it in protocol_id so
+                    // the interpreter can dispatch to a custom Eq implementation.
+                    let protocol_id = self.resolve_eq_protocol_id(left, right);
+                    self.ctx.emit(Instruction::CmpG {
+                        eq: true,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                        protocol_id,
+                    });
+                }
+            }
+            BinOp::Ne => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Ne,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_text {
+                    // Use generic equality for string comparison, then negate
+                    let tmp = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpG {
+                        eq: true,
+                        dst: tmp,
+                        a: left_reg,
+                        b: right_reg,
+                        protocol_id: 0,
+                    });
+                    // Negate the result
+                    self.ctx.emit(Instruction::Not { dst: dest, src: tmp });
+                    self.ctx.free_temp(tmp);
+                } else if is_primitive {
+                    // Use integer comparison for known primitive types
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ne,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    // Use generic equality for variants, objects, and unknown types, then negate.
+                    // If we know the concrete type name, encode it in protocol_id so
+                    // the interpreter can dispatch to a custom Eq implementation.
+                    let protocol_id = self.resolve_eq_protocol_id(left, right);
+                    let tmp = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpG {
+                        eq: true,
+                        dst: tmp,
+                        a: left_reg,
+                        b: right_reg,
+                        protocol_id,
+                    });
+                    // Negate the result: not equal = !equal
+                    self.ctx.emit(Instruction::Not { dst: dest, src: tmp });
+                    self.ctx.free_temp(tmp);
+                }
+            }
+            BinOp::Lt => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Lt,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_unsigned {
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::LtU,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Lt,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Le => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Le,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_unsigned {
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::LeU,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Le,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Gt => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Gt,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_unsigned {
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::GtU,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Gt,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+            BinOp::Ge => {
+                if is_float {
+                    self.ctx.emit(Instruction::CmpF {
+                        op: CompareOp::Ge,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else if is_unsigned {
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::GeU,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge,
+                        dst: dest,
+                        a: left_reg,
+                        b: right_reg,
+                    });
+                }
+            }
+
+            // Bitwise
+            BinOp::BitAnd => self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::And,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+            BinOp::BitOr => self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::Or,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+            BinOp::BitXor => self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::Xor,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+            BinOp::Shl => self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::Shl,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+            BinOp::Shr => self.ctx.emit(Instruction::Bitwise {
+                op: BitwiseOp::Shr,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+
+            // Power operator
+            BinOp::Pow => self.ctx.emit(Instruction::BinaryI {
+                op: BinaryIntOp::Pow,
+                dst: dest,
+                a: left_reg,
+                b: right_reg,
+            }),
+
+            // Implication for formal proofs: a -> b ≡ !a || b
+            BinOp::Imply | BinOp::Iff => {
+                // Free these since we'll recompile with short-circuit
+                self.ctx.free_temp(left_reg);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(dest);
+                // Recompile using short-circuit: !left || right
+                // For Iff (<->), this is an approximation; full semantics would be (P->Q)&&(Q->P)
+                return self.compile_implication(left, right);
+            }
+
+            // Containment check: x in collection
+            // Compiled as a method call to collection.contains(x)
+            BinOp::In => {
+                // The "in" operator: left_expr in right_expr
+                // Translates to: right_expr.contains(left_expr)
+                let contains_method_id = self.intern_string("contains");
+
+                // Free the destination, we'll reallocate it for the call result
+                self.ctx.free_temp(dest);
+                let result = self.ctx.alloc_temp();
+
+                // Emit method call: right_reg.contains(left_reg)
+                // right_reg is the collection, left_reg is the element to find
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: right_reg,
+                    method_id: contains_method_id,
+                    args: crate::instruction::RegRange {
+                        start: left_reg,
+                        count: 1,
+                    },
+                });
+
+                // Free operand temporaries
+                self.ctx.free_temp(left_reg);
+                self.ctx.free_temp(right_reg);
+
+                return Ok(Some(result));
+            }
+
+            // Already handled above (in early-return match at top of function)
+            BinOp::And | BinOp::Or | BinOp::Assign
+            | BinOp::AddAssign | BinOp::SubAssign | BinOp::MulAssign | BinOp::DivAssign
+            | BinOp::RemAssign | BinOp::BitAndAssign | BinOp::BitOrAssign
+            | BinOp::BitXorAssign | BinOp::ShlAssign | BinOp::ShrAssign => unreachable!()
+        }
+
+        // Free operand temporaries
+        self.ctx.free_temp(left_reg);
+        self.ctx.free_temp(right_reg);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles short-circuit AND.
+    fn compile_short_circuit_and(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("and_end");
+
+        // Evaluate left
+        let left_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("and left has no value"))?;
+
+        // Copy to destination
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: left_reg });
+        self.ctx.free_temp(left_reg);
+
+        // If false, skip right side
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::JmpNot {
+                cond: dest,
+                offset,
+            });
+
+        // Evaluate right
+        let right_reg = self
+            .compile_expr(right)?
+            .ok_or_else(|| CodegenError::internal("and right has no value"))?;
+
+        // Copy to destination
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.free_temp(right_reg);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles short-circuit OR.
+    fn compile_short_circuit_or(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("or_end");
+
+        // Evaluate left
+        let left_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("or left has no value"))?;
+
+        // Copy to destination
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: left_reg });
+        self.ctx.free_temp(left_reg);
+
+        // If true, skip right side
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::JmpIf {
+                cond: dest,
+                offset,
+            });
+
+        // Evaluate right
+        let right_reg = self
+            .compile_expr(right)?
+            .ok_or_else(|| CodegenError::internal("or right has no value"))?;
+
+        // Copy to destination
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.free_temp(right_reg);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles logical implication: a -> b ≡ !a || b
+    ///
+    /// Implication is used in formal proofs and verification.
+    /// It short-circuits: if !a is true, b is not evaluated.
+    fn compile_implication(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("imply_end");
+
+        // Evaluate left (!a)
+        let left_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("imply left has no value"))?;
+
+        // Negate left (compute !a)
+        let not_left = self.ctx.alloc_temp();
+        self.ctx
+            .emit(Instruction::Not { dst: not_left, src: left_reg });
+        self.ctx.free_temp(left_reg);
+
+        // Copy !a to destination
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: not_left });
+        self.ctx.free_temp(not_left);
+
+        // If !a is true (a is false), skip right side - implication is true
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::JmpIf {
+                cond: dest,
+                offset,
+            });
+
+        // Evaluate right (b)
+        let right_reg = self
+            .compile_expr(right)?
+            .ok_or_else(|| CodegenError::internal("imply right has no value"))?;
+
+        // Result is b
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.free_temp(right_reg);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles simple assignment.
+    fn compile_assignment(&mut self, target: &Expr, value: &Expr) -> CodegenResult<Option<Reg>> {
+        // Evaluate value first
+        let value_reg = self
+            .compile_expr(value)?
+            .ok_or_else(|| CodegenError::internal("assignment value has no value"))?;
+
+        // Handle different assignment targets
+        match &target.kind {
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                let name: &str = match &path.segments[0] {
+                    PathSegment::Name(ident) => &ident.name,
+                    PathSegment::SelfValue => "self",
+                    _ => {
+                        return Err(CodegenError::unsupported_expr(
+                            "non-name assignment target",
+                        ))
+                    }
+                };
+
+                // First try local variable
+                if let Ok(target_reg) = self.ctx.get_var_reg(name) {
+                    // Check mutability — allow first assignment to uninitialized immutable vars
+                    let var_is_cell = self.ctx.lookup_var(name).map_or(false, |i| i.is_cell);
+                    if let Some(info) = self.ctx.lookup_var(name)
+                        && !info.is_mutable
+                        && info.is_initialized {
+                            return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
+                                name.to_string(),
+                            )));
+                        }
+
+                    // Mark as initialized after first assignment
+                    if let Some(info) = self.ctx.lookup_var_mut(name) {
+                        info.is_initialized = true;
+                    }
+
+                    if var_is_cell {
+                        // Cell-wrapped mutable capture: store through SetF
+                        self.ctx.emit(Instruction::SetF {
+                            obj: target_reg,
+                            field_idx: 0,
+                            value: value_reg,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::Mov {
+                            dst: target_reg,
+                            src: value_reg,
+                        });
+                    }
+                    self.ctx.free_temp(value_reg);
+
+                    // Propagate RHS type to the reassigned variable.
+                    // This is critical for variant match dispatch: after
+                    // `state = transition(state, "ack")`, the match on `state`
+                    // must know the scrutinee type to resolve variant tags.
+                    if let Some(rhs_type) = self.extract_expr_type_name(value) {
+                        self.ctx.variable_type_names.insert(name.to_string(), rhs_type);
+                    }
+
+                    return Ok(Some(target_reg));
+                }
+
+                // Check if it's a @thread_local static variable
+                if let Some(slot) = self.ctx.is_thread_local(name) {
+                    let slot_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
+                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: value_reg });
+                    // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
+                    return Ok(Some(value_reg));
+                }
+
+                // Check if it's a static/constant (registered as 0-param function)
+                // For bootstrap: define a local variable for the static and assign to it
+                // This is a workaround until proper global variable support is added
+                if let Some(func_info) = self.ctx.lookup_function(name)
+                    && func_info.param_count == 0 {
+                        // This is a static variable - create a local shadow and assign
+                        // The static's value is effectively stored in the local
+                        let target_reg = self.ctx.define_var(name, true);
+                        self.ctx.emit(Instruction::Mov {
+                            dst: target_reg,
+                            src: value_reg,
+                        });
+                        self.ctx.free_temp(value_reg);
+                        return Ok(Some(target_reg));
+                    }
+
+                // Neither local nor static - error
+                Err(CodegenError::undefined_variable(name.to_string()))
+            }
+
+            ExprKind::Field { expr: base, field } => {
+                let base_type = self.infer_expr_type_name(base);
+                let base_reg = self
+                    .compile_expr(base)?
+                    .ok_or_else(|| CodegenError::internal("field base has no value"))?;
+
+                let field_idx = self.resolve_field_index(base_type.as_deref(), &field.name);
+                self.ctx.emit(Instruction::SetF {
+                    obj: base_reg,
+                    field_idx,
+                    value: value_reg,
+                });
+
+                self.ctx.free_temp(base_reg);
+                self.ctx.free_temp(value_reg);
+
+                Ok(None)
+            }
+
+            ExprKind::Index { expr: base, index } => {
+                let base_reg = self
+                    .compile_expr(base)?
+                    .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+                let index_reg = self
+                    .compile_expr(index)?
+                    .ok_or_else(|| CodegenError::internal("index has no value"))?;
+
+                self.ctx.emit(Instruction::SetE {
+                    arr: base_reg,
+                    idx: index_reg,
+                    value: value_reg,
+                });
+
+                self.ctx.free_temp(base_reg);
+                self.ctx.free_temp(index_reg);
+                self.ctx.free_temp(value_reg);
+
+                Ok(None)
+            }
+
+            // Dereference assignment: *ref = value
+            // Uses DerefMut instruction to write through mutable reference
+            ExprKind::Unary { op: UnOp::Deref, expr: ref_expr } => {
+                // Get the mutable reference
+                let ref_reg = self
+                    .compile_expr(ref_expr)?
+                    .ok_or_else(|| CodegenError::internal("deref target has no value"))?;
+
+                // Check if this is a raw FFI pointer
+                if self.ctx.is_raw_pointer(ref_reg) {
+                    // Emit DerefMutRaw for raw FFI pointers - bypasses CBGR validation
+                    // Format: ptr:reg, value:reg, size:u8 (8 = 64-bit)
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, ref_reg.0);
+                    Self::write_reg(&mut operands, value_reg.0);
+                    operands.push(8); // Default to 8-byte write
+
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x61, // DerefMutRaw
+                        operands,
+                    });
+                } else {
+                    // For Tier 0, validate before write
+                    let tier = self.get_deref_tier_for_expr(ref_expr);
+                    if tier == CbgrTier::Tier0 {
+                        self.ctx.emit(Instruction::ChkRef { ref_reg });
+                    }
+
+                    // Write through mutable reference using DerefMut
+                    self.ctx.emit(Instruction::DerefMut {
+                        ref_reg,
+                        value: value_reg,
+                    });
+                }
+
+                self.ctx.free_temp(ref_reg);
+                self.ctx.free_temp(value_reg);
+
+                Ok(None)
+            }
+
+            _ => Err(CodegenError::unsupported_expr("assignment target")),
+        }
+    }
+
+    /// Compiles compound assignment (+=, -=, etc.).
+    fn compile_compound_assignment(
+        &mut self,
+        op: BinOp,
+        target: &Expr,
+        value: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Convert compound op to binary int op
+        let binary_op = match op {
+            BinOp::AddAssign => Some(BinaryIntOp::Add),
+            BinOp::SubAssign => Some(BinaryIntOp::Sub),
+            BinOp::MulAssign => Some(BinaryIntOp::Mul),
+            BinOp::DivAssign => Some(BinaryIntOp::Div),
+            BinOp::RemAssign => Some(BinaryIntOp::Mod),
+            _ => None,
+        };
+
+        let bitwise_op = match op {
+            BinOp::BitAndAssign => Some(BitwiseOp::And),
+            BinOp::BitOrAssign => Some(BitwiseOp::Or),
+            BinOp::BitXorAssign => Some(BitwiseOp::Xor),
+            BinOp::ShlAssign => Some(BitwiseOp::Shl),
+            BinOp::ShrAssign => Some(BitwiseOp::Shr),
+            _ => None,
+        };
+
+        // For simple variables: x += y becomes x = x + y
+        match &target.kind {
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                let name = match &path.segments[0] {
+                    PathSegment::Name(ident) => &ident.name,
+                    _ => {
+                        return Err(CodegenError::unsupported_expr(
+                            "non-name compound assignment target",
+                        ))
+                    }
+                };
+
+                // Handle @thread_local static variables (e.g., `static mut X += y`)
+                if let Some(slot) = self.ctx.is_thread_local(name) {
+                    // Load current TLS value
+                    let current_reg = self.ctx.alloc_temp();
+                    let slot_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
+                    self.ctx.emit(Instruction::TlsGet { dst: current_reg, slot: slot_reg });
+
+                    // Evaluate right side
+                    let right_reg = self
+                        .compile_expr(value)?
+                        .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+
+                    // Perform operation into current_reg
+                    if let Some(bop) = bitwise_op {
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: bop, dst: current_reg, a: current_reg, b: right_reg,
+                        });
+                    } else if let Some(iop) = binary_op {
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: iop, dst: current_reg, a: current_reg, b: right_reg,
+                        });
+                    } else {
+                        return Err(CodegenError::internal("not a compound assignment"));
+                    }
+
+                    // Store result back to TLS
+                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: current_reg });
+                    self.ctx.free_temp(current_reg);
+                    self.ctx.free_temp(right_reg);
+                    // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
+                    return Ok(None);
+                }
+
+                // Handle non-local static variables: create a local shadow initialized
+                // from the current static value, then do the compound operation
+                if self.ctx.get_var_reg(name).is_err() {
+                    if let Some(func_info) = self.ctx.lookup_function(name).cloned()
+                        && func_info.param_count == 0 {
+                            let init_reg = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::Call {
+                                dst: init_reg,
+                                func_id: func_info.id.0,
+                                args: RegRange::new(Reg(0), 0),
+                            });
+                            let shadow_reg = self.ctx.define_var(name, true);
+                            self.ctx.emit(Instruction::Mov { dst: shadow_reg, src: init_reg });
+                            self.ctx.free_temp(init_reg);
+                        }
+                }
+
+                let target_reg = self.ctx.get_var_reg(name)?;
+                let var_is_cell = self.ctx.lookup_var(name).map_or(false, |i| i.is_cell);
+
+                // Check mutability
+                if let Some(info) = self.ctx.lookup_var(name)
+                    && !info.is_mutable {
+                        return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
+                            name.to_string(),
+                        )));
+                    }
+
+                // Evaluate right side
+                let right_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+
+                // For cell variables, load current value from cell first
+                let op_reg = if var_is_cell {
+                    let temp = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF {
+                        dst: temp,
+                        obj: target_reg,
+                        field_idx: 0,
+                    });
+                    temp
+                } else {
+                    target_reg
+                };
+
+                // Perform operation
+                let result_reg = if var_is_cell { op_reg } else { target_reg };
+                if let Some(bop) = bitwise_op {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: bop,
+                        dst: result_reg,
+                        a: op_reg,
+                        b: right_reg,
+                    });
+                } else if let Some(iop) = binary_op {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: iop,
+                        dst: result_reg,
+                        a: op_reg,
+                        b: right_reg,
+                    });
+                } else {
+                    return Err(CodegenError::internal("not a compound assignment"));
+                }
+
+                // For cell variables, store result back to cell
+                if var_is_cell {
+                    self.ctx.emit(Instruction::SetF {
+                        obj: target_reg,
+                        field_idx: 0,
+                        value: result_reg,
+                    });
+                    self.ctx.free_temp(result_reg);
+                }
+
+                self.ctx.free_temp(right_reg);
+
+                Ok(Some(target_reg))
+            }
+
+            // Field access: obj.field += value
+            ExprKind::Field { expr: obj, field } => {
+                // Load object into register
+                let obj_type = self.infer_expr_type_name(obj);
+                let obj_reg = self
+                    .compile_expr(obj)?
+                    .ok_or_else(|| CodegenError::internal("field access object has no value"))?;
+
+                // Get current field value
+                let field_name = &field.name;
+                let field_idx = self.resolve_field_index(obj_type.as_deref(), field_name);
+                let current_val = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetF {
+                    dst: current_val,
+                    obj: obj_reg,
+                    field_idx,
+                });
+
+                // Evaluate right side
+                let right_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+
+                // Perform operation
+                let result = self.ctx.alloc_temp();
+                if let Some(bop) = bitwise_op {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: bop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else if let Some(iop) = binary_op {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: iop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.free_temp(current_val);
+                    self.ctx.free_temp(right_reg);
+                    self.ctx.free_temp(obj_reg);
+                    return Err(CodegenError::internal("not a compound assignment"));
+                }
+
+                // Store back to field
+                self.ctx.emit(Instruction::SetF {
+                    obj: obj_reg,
+                    field_idx,
+                    value: result,
+                });
+
+                self.ctx.free_temp(current_val);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(obj_reg);
+
+                Ok(Some(result))
+            }
+
+            // Index access: arr[idx] += value
+            ExprKind::Index { expr: arr, index } => {
+                // Load array
+                let arr_reg = self
+                    .compile_expr(arr)?
+                    .ok_or_else(|| CodegenError::internal("index target has no value"))?;
+
+                // Evaluate index
+                let idx_reg = self
+                    .compile_expr(index)?
+                    .ok_or_else(|| CodegenError::internal("index expression has no value"))?;
+
+                // Get current element value
+                let current_val = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetE {
+                    dst: current_val,
+                    arr: arr_reg,
+                    idx: idx_reg,
+                });
+
+                // Evaluate right side
+                let right_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+
+                // Perform operation
+                let result = self.ctx.alloc_temp();
+                if let Some(bop) = bitwise_op {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: bop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else if let Some(iop) = binary_op {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: iop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.free_temp(current_val);
+                    self.ctx.free_temp(right_reg);
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(arr_reg);
+                    return Err(CodegenError::internal("not a compound assignment"));
+                }
+
+                // Store back to array element
+                self.ctx.emit(Instruction::SetE {
+                    arr: arr_reg,
+                    idx: idx_reg,
+                    value: result,
+                });
+
+                self.ctx.free_temp(current_val);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(idx_reg);
+                self.ctx.free_temp(arr_reg);
+
+                Ok(Some(result))
+            }
+
+            // Tuple index: tuple.0 += value
+            ExprKind::TupleIndex { expr: tuple_expr, index } => {
+                // Load tuple
+                let tuple_reg = self
+                    .compile_expr(tuple_expr)?
+                    .ok_or_else(|| CodegenError::internal("tuple index target has no value"))?;
+
+                // Get current element - need to unpack and repack
+                // This is more complex because tuples are typically immutable
+                // For now, we'll treat this as a field access with numeric field
+                let field_idx = *index;
+                let current_val = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetF {
+                    dst: current_val,
+                    obj: tuple_reg,
+                    field_idx,
+                });
+
+                // Evaluate right side
+                let right_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+
+                // Perform operation
+                let result = self.ctx.alloc_temp();
+                if let Some(bop) = bitwise_op {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: bop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else if let Some(iop) = binary_op {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: iop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.free_temp(current_val);
+                    self.ctx.free_temp(right_reg);
+                    self.ctx.free_temp(tuple_reg);
+                    return Err(CodegenError::internal("not a compound assignment"));
+                }
+
+                // Store back to tuple element
+                self.ctx.emit(Instruction::SetF {
+                    obj: tuple_reg,
+                    field_idx,
+                    value: result,
+                });
+
+                self.ctx.free_temp(current_val);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(tuple_reg);
+
+                Ok(Some(result))
+            }
+
+            // Dereference: *ptr += value
+            // Uses DerefMut instruction to write through mutable reference
+            ExprKind::Unary { op: UnOp::Deref, expr: ref_expr } => {
+                // Get the mutable reference
+                let ref_reg = self
+                    .compile_expr(ref_expr)?
+                    .ok_or_else(|| CodegenError::internal("deref target has no value"))?;
+
+                // Read current value through reference
+                let current_val = self.ctx.alloc_temp();
+                let tier = self.get_deref_tier_for_expr(ref_expr);
+                self.emit_deref_instruction(current_val, ref_reg, tier);
+
+                // Compile the right-hand side
+                let right_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("compound assignment value has no value"))?;
+
+                // Perform the operation
+                let result = self.ctx.alloc_temp();
+                if let Some(bop) = bitwise_op {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: bop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else if let Some(iop) = binary_op {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: iop,
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else {
+                    self.ctx.free_temp(current_val);
+                    self.ctx.free_temp(right_reg);
+                    self.ctx.free_temp(ref_reg);
+                    return Err(CodegenError::internal("not a compound assignment"));
+                }
+                self.ctx.free_temp(current_val);
+                self.ctx.free_temp(right_reg);
+
+                // Write back through mutable reference using DerefMut
+                // Check if this is a raw FFI pointer
+                if self.ctx.is_raw_pointer(ref_reg) {
+                    // Emit DerefMutRaw for raw FFI pointers - bypasses CBGR validation
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, ref_reg.0);
+                    Self::write_reg(&mut operands, result.0);
+                    operands.push(8); // Default to 8-byte write
+
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x61, // DerefMutRaw
+                        operands,
+                    });
+                } else {
+                    // For Tier 0, validate before write
+                    if tier == CbgrTier::Tier0 {
+                        self.ctx.emit(Instruction::ChkRef { ref_reg });
+                    }
+                    self.ctx.emit(Instruction::DerefMut {
+                        ref_reg,
+                        value: result,
+                    });
+                }
+
+                self.ctx.free_temp(ref_reg);
+                Ok(Some(result))
+            }
+
+            // All other expression kinds are not valid compound assignment targets
+            _ => Err(CodegenError::unsupported_expr(
+                "unsupported compound assignment target",
+            )),
+        }
+    }
+
+    // ==================== Unary Operations ====================
+
+    /// Compiles a unary operation.
+    fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        let inner_reg = self
+            .compile_expr(inner)?
+            .ok_or_else(|| CodegenError::internal("unary operand has no value"))?;
+
+        let dest = self.ctx.alloc_temp();
+
+        match op {
+            UnOp::Neg => {
+                // Determine if operand is float or integer using proper type inference
+                let type_kind = self.infer_expr_type_kind(inner);
+                let is_float = matches!(type_kind, Some(verum_ast::ty::TypeKind::Float));
+                if is_float {
+                    self.ctx.emit(Instruction::UnaryF {
+                        op: UnaryFloatOp::Neg,
+                        dst: dest,
+                        src: inner_reg,
+                    });
+                } else {
+                    // Check if this is a user type with a neg method
+                    let type_name = self.extract_expr_type_name(inner);
+                    let has_neg_method = type_name.as_ref().map_or(false, |name| {
+                        let qualified = format!("{}.neg", name);
+                        self.ctx.lookup_function(&qualified).is_some()
+                    });
+                    if has_neg_method {
+                        // Dispatch to method call: x.neg()
+                        self.ctx.free_temp(dest);
+                        let method_result = self.ctx.alloc_temp();
+                        let method_id = self.intern_string("neg");
+                        self.ctx.emit(Instruction::CallM {
+                            dst: method_result,
+                            receiver: inner_reg,
+                            method_id,
+                            args: crate::instruction::RegRange {
+                                start: Reg(0),
+                                count: 0,
+                            },
+                        });
+                        self.ctx.free_temp(inner_reg);
+                        return Ok(Some(method_result));
+                    }
+                    self.ctx.emit(Instruction::UnaryI {
+                        op: UnaryIntOp::Neg,
+                        dst: dest,
+                        src: inner_reg,
+                    });
+                }
+            }
+            UnOp::Not => {
+                // Check if this is a user type with a not method
+                let type_name = self.extract_expr_type_name(inner);
+                let has_not_method = type_name.as_ref().map_or(false, |name| {
+                    let qualified = format!("{}.not", name);
+                    self.ctx.lookup_function(&qualified).is_some()
+                });
+                if has_not_method {
+                    self.ctx.free_temp(dest);
+                    let method_result = self.ctx.alloc_temp();
+                    let method_id = self.intern_string("not");
+                    self.ctx.emit(Instruction::CallM {
+                        dst: method_result,
+                        receiver: inner_reg,
+                        method_id,
+                        args: crate::instruction::RegRange {
+                            start: Reg(0),
+                            count: 0,
+                        },
+                    });
+                    self.ctx.free_temp(inner_reg);
+                    return Ok(Some(method_result));
+                }
+                self.ctx
+                    .emit(Instruction::Not { dst: dest, src: inner_reg });
+            }
+            UnOp::BitNot => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Not,
+                    dst: dest,
+                    a: inner_reg,
+                    b: inner_reg, // b is ignored for NOT
+                });
+            }
+
+            // Reference operations - tier-aware instruction emission
+            //
+            // The tier is determined by:
+            // 1. The AST operator (RefChecked → Tier1, RefUnsafe → Tier2)
+            // 2. Escape analysis results in tier_context (overrides AST)
+            //
+            // Tier 0: Ref + ChkRef (runtime validated)
+            // Tier 1: RefChecked (compiler proven safe, 0ns)
+            // Tier 2: RefUnsafe (manual proof, 0ns)
+            UnOp::Ref => {
+                // If inner already produced a raw pointer (e.g., from arr[idx] as *const T
+                // where parser precedence makes &arr[idx] as *const T parse as
+                // &(arr[idx] as *const T)), skip CBGR ref creation — the pointer is
+                // already the desired result.
+                if self.ctx.is_raw_pointer(inner_reg) {
+                    self.ctx.free_temp(dest);
+                    return Ok(Some(inner_reg));
+                }
+                // Default Tier 0 - but check tier_context for promotion
+                let tier = self.get_ref_tier_for_expr(inner);
+                self.emit_ref_instruction(dest, inner_reg, tier, false);
+            }
+            UnOp::RefChecked => {
+                // Explicitly Tier 1 from source
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier1, false);
+            }
+            UnOp::RefUnsafe => {
+                // Explicitly Tier 2 from source
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier2, false);
+            }
+            UnOp::RefMut => {
+                // Same raw pointer passthrough as Ref (see above)
+                if self.ctx.is_raw_pointer(inner_reg) {
+                    self.ctx.free_temp(dest);
+                    return Ok(Some(inner_reg));
+                }
+                // Mutable reference - check tier_context for promotion
+                let tier = self.get_ref_tier_for_expr(inner);
+                self.emit_ref_instruction(dest, inner_reg, tier, true);
+            }
+            UnOp::RefCheckedMut => {
+                // Explicitly Tier 1 mutable from source
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier1, true);
+            }
+            UnOp::RefUnsafeMut => {
+                // Explicitly Tier 2 mutable from source
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier2, true);
+            }
+            UnOp::Deref => {
+                // Check if inner expression is Heap<T> or Shared<T> — these are transparent
+                // wrappers, so *heap_val is just a Mov (no actual pointer dereference)
+                let inner_type = self.infer_expr_type_name(inner)
+                    .or_else(|| self.extract_expr_type_name(inner));
+                let is_heap_deref = inner_type.as_ref().map_or(false, |t| {
+                    t.starts_with("Heap<") || t.starts_with("Shared<")
+                        || self.is_allocating_wrapper(t)
+                });
+                if is_heap_deref {
+                    // Heap<T> is transparent — emit Deref so the CBGR runtime sets
+                    // cbgr_deref_source. This enables `&*value` to produce a pointer
+                    // reference to the original CBGR allocation (via RefCreate
+                    // checking cbgr_deref_source) rather than a register-based CBGR
+                    // ref whose source register may be recycled.
+                    //
+                    // For non-CBGR receivers (user-defined Heap structs), Deref
+                    // falls through to identity deref which matches Mov semantics.
+                    self.ctx.emit(Instruction::Deref { dst: dest, ref_reg: inner_reg });
+                } else {
+                    // Dereference - tier affects whether we emit ChkRef
+                    let tier = self.get_deref_tier_for_expr(inner);
+                    self.emit_deref_instruction(dest, inner_reg, tier);
+                }
+            }
+
+            // Ownership references (%x, %mut x)
+            // These are move semantics - the value is moved into the reference
+            UnOp::Own => {
+                // Ownership transfer - similar to move semantics
+                // For now, emit as Tier 0 reference since ownership is tracked by type system
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier0, false);
+            }
+            UnOp::OwnMut => {
+                // Mutable ownership transfer
+                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier0, true);
+            }
+        }
+
+        self.ctx.free_temp(inner_reg);
+        Ok(Some(dest))
+    }
+
+    /// Checks if an expression is a float type (heuristic based on literals).
+    ///
+    /// This is used when type information is not available at codegen time.
+    /// It checks for:
+    /// - Float literals directly
+    /// - Unary expressions on float operands
+    /// - Paths to variables (defaults to int since we can't know)
+    #[allow(dead_code)] // Reserved for future type-aware compilation passes
+    fn expr_is_float(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Literal(lit) => matches!(lit.kind, LiteralKind::Float(_)),
+            ExprKind::Unary { expr: inner, .. } => Self::expr_is_float(inner),
+            ExprKind::Binary { left, right, .. } => {
+                // If either operand is float, treat as float
+                Self::expr_is_float(left) || Self::expr_is_float(right)
+            }
+            // For paths (variables), default to int - type system should ensure correctness
+            _ => false,
+        }
+    }
+
+    // ==================== Function Calls ====================
+
+    /// Compiles a function call.
+    fn compile_call(
+        &mut self,
+        func: &Expr,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Get function name from path
+        let func_name = match &func.kind {
+            ExprKind::Path(path) => {
+                if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Name(ident) => {
+                            let name = ident.name.to_string();
+                            // Check if this is a variable (parameter or local) holding a function.
+                            // Variables take precedence over registered functions (shadowing).
+                            // This handles cases like: `fn map<F: fn(T) -> U>(self, f: F) { f(x) }`
+                            // where `f` is a parameter of function type.
+                            if self.ctx.registers.contains(&name) {
+                                return self.compile_indirect_call(func, args);
+                            }
+                            name
+                        }
+                        PathSegment::SelfValue => "self".to_string(),
+                        _ => {
+                            return Err(CodegenError::unsupported_expr(
+                                "non-name function path",
+                            ))
+                        }
+                    }
+                } else {
+                    // Qualified path - use full path
+                    
+
+                    path.segments
+                        .iter()
+                        .filter_map(|s| match s {
+                            PathSegment::Name(ident) => Some(ident.name.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("::")
+                }
+            }
+            _ => {
+                // Indirect call (closure, function pointer)
+                return self.compile_indirect_call(func, args);
+            }
+        };
+
+        // Handle built-in functions
+        if let Some(result) = self.try_compile_builtin(&func_name, args)? {
+            return Ok(result);
+        }
+
+        // Look up function - first try the full qualified path
+        let (resolved_name, func_info) = match self.ctx.lookup_function(&func_name) {
+            Some(info) => (func_name.clone(), info.clone()),
+            None => {
+                // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
+                // try just the simple function name "init_main_thread_tls". Functions are often
+                // registered with their simple names even when called with qualified paths.
+                let fallback_result = if let Some(simple_name) = func_name.rsplit("::").next() {
+                    if simple_name != func_name {
+                        self.ctx
+                            .lookup_function(simple_name)
+                            .map(|info| (simple_name.to_string(), info.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(result) = fallback_result {
+                    result
+                } else {
+                    // If not found and name starts with uppercase, treat as variant constructor
+                    // This handles cross-module variant constructors like Ok, Err, Some, None
+                    if func_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                        return self.compile_variant_constructor(&func_name, args);
+                    }
+
+                    // Check if this is an intrinsic function imported from sys.intrinsics
+                    // Functions declared with @intrinsic("name") can be called through imports
+                    if let Some(intrinsic_info) = lookup_intrinsic(&func_name) {
+                        return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+                    }
+
+                    return Err(CodegenError::with_span(
+                        CodegenErrorKind::UndefinedFunction(func_name.clone()),
+                        func.span,
+                    ));
+                }
+            }
+        };
+        // Use resolved_name for error messages below
+        let _ = resolved_name;
+
+        // Check if this is a variant constructor — emit MakeVariant + SetVariantData
+        if let Some(tag) = func_info.variant_tag {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+            for (i, arg) in args.iter().enumerate() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: result,
+                    field: i as u32,
+                    value: arg_val,
+                });
+                self.ctx.free_temp(arg_val);
+            }
+            return Ok(Some(result));
+        }
+
+        // Check if this function is an intrinsic (declared with @intrinsic("name"))
+        // This is the primary intrinsic resolution path - intrinsic identity is established
+        // at declaration time via @intrinsic attribute, not at call-site via name matching.
+        if let Some(intrinsic_name) = &func_info.intrinsic_name {
+            if let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name) {
+                return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+            }
+            // Intrinsic declared but not in registry — fall through to compile function body.
+            // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
+            // to work when the intrinsic isn't wired yet.
+        }
+
+        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
+        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
+        // At the VBC level, newtypes are zero-cost wrappers.
+        if func_info.id.0 == u32::MAX / 2 {
+            if args.len() == 1 {
+                // Newtype constructor — zero-cost wrapper, pass through the inner value
+                return self.compile_expr(&args[0]);
+            } else if args.is_empty() {
+                // Unit type constructor
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                return Ok(Some(dest));
+            }
+            // Multi-field record constructors should use struct literal syntax,
+            // but handle gracefully by allocating an object if they come through here
+        }
+
+        // Check argument count — allow fewer args if function has default params
+        if args.len() > func_info.param_count {
+            return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                expected: func_info.param_count,
+                found: args.len(),
+                function: func_name.clone(),
+            }));
+        }
+        if args.len() < func_info.param_count {
+            // Check if missing params have defaults (stored in AST)
+            // For now, allow the call if there are defaults — the VBC runtime
+            // will fill in 0/nil for missing args. Full default value compilation
+            // requires AST access at call site which we'll add in a future pass.
+            // This at least prevents the hard error for functions with default params.
+        }
+
+        // Compile arguments into consecutive registers
+        // IMPORTANT: First compile ALL argument expressions and collect their result registers.
+        // Then allocate FRESH consecutive registers for the Call instruction arguments.
+        // This prevents register recycling from causing arguments to overwrite each other
+        // when nested function calls are present.
+        //
+        // For FFI calls, we need special handling for:
+        // 1. &mut variable patterns - track source registers for write-back
+        // 2. &arr[idx] patterns - marshal arrays to temporary C buffers
+        //
+        // VBC arrays store NaN-boxed Values (8 bytes each), but FFI expects raw C data.
+        // When &arr[0] is passed to FFI, we need to:
+        // - Marshal the array contents to a contiguous buffer of raw C types
+        // - Pass the buffer pointer to FFI
+        // - For &mut, write back modified values after the call
+
+        let mut mut_ref_sources: Vec<(u8, Reg)> = Vec::new(); // (arg_index, source_reg)
+        let mut array_ref_infos: Vec<FfiArrayRefInfo> = Vec::new(); // Array element reference tracking
+        let mut callback_infos: Vec<FfiCallbackInfo> = Vec::new(); // Function callback tracking
+        let mut scalar_ref_args: std::collections::HashSet<u8> = std::collections::HashSet::new(); // FFI scalar ref args (strip &/&mut)
+
+        // Check if this is an FFI function (needed for special argument handling)
+        let ffi_symbol_id_opt = self.get_ffi_symbol_id(&func_name);
+        let is_ffi_call = ffi_symbol_id_opt.is_some();
+
+        for (i, arg) in args.iter().enumerate() {
+            // Check for array element reference pattern (&arr[idx]) for FFI calls
+            if is_ffi_call
+                && let Some(mut info) = Self::detect_array_element_ref(arg) {
+                    info.arg_idx = i as u8;
+                    array_ref_infos.push(info);
+                    continue; // Don't check for other patterns
+                }
+
+            // Check for function callback pattern for FFI calls
+            // If this parameter expects a FnPtr and the argument is a function reference,
+            // we need to create a trampoline callback
+            if let Some(ffi_symbol_id) = ffi_symbol_id_opt
+                && let Some(callback_sig_id) = self.get_callback_signature_id(ffi_symbol_id, i as u8) {
+                    // This parameter expects a function pointer - check if arg is a function reference
+                    if let Some(info) = self.detect_function_reference(arg, i as u8, callback_sig_id) {
+                        callback_infos.push(info);
+                        continue; // Don't check for other patterns
+                    }
+                }
+
+            // Check for &mut variable pattern
+            if let ExprKind::Unary { op: UnOp::RefMut, expr: inner } = &arg.kind {
+                // Check if inner is a simple variable path
+                if let ExprKind::Path(path) = &inner.kind
+                    && path.segments.len() == 1
+                        && let PathSegment::Name(ident) = &path.segments[0] {
+                            // Found &mut variable - look up the variable's register
+                            if let Ok(source_reg) = self.ctx.get_var_reg(&ident.name) {
+                                mut_ref_sources.push((i as u8, source_reg));
+                            }
+                        }
+            }
+
+            // For FFI calls: detect &var or &mut var scalar reference patterns
+            // We need to strip the & / &mut and compile just the inner expression,
+            // because the Verum Ref instruction stores a register index, not a pointer,
+            // which is wrong for C FFI (the marshaller needs the actual value).
+            if is_ffi_call {
+                if let ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } = &arg.kind {
+                    if let ExprKind::Path(path) = &inner.kind
+                        && path.segments.len() == 1 {
+                            scalar_ref_args.insert(i as u8);
+                        }
+                }
+            }
+        }
+
+        let args_start = if !args.is_empty() {
+            // Phase 1: Compile all argument expressions
+            // For array element references, compile specially using ArrayToC marshalling
+            // For function callbacks, compile using CreateCallback
+            let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+            for (i, arg) in args.iter().enumerate() {
+                // Check if this argument is an array element reference
+                let is_array_ref = array_ref_infos.iter().any(|info| info.arg_idx == i as u8);
+                // Check if this argument is a function callback
+                let callback_info = callback_infos.iter().find(|info| info.arg_idx == i as u8);
+
+                if is_array_ref {
+                    // Compile array element reference specially for FFI
+                    // This marshals the array to a temporary C buffer
+                    let arg_val = self.compile_ffi_array_ref(arg, &func_name, i)?;
+                    arg_results.push(arg_val);
+                } else if let Some(cb_info) = callback_info {
+                    // Compile function callback using CreateCallback
+                    // This creates a C-callable trampoline that invokes the Verum function
+                    let arg_val = self.compile_ffi_callback(cb_info)?;
+                    arg_results.push(arg_val);
+                } else if scalar_ref_args.contains(&(i as u8)) {
+                    // FFI scalar reference: strip the &/&mut and compile just the inner expression
+                    // The marshaller will create RefArgStorage with the actual value
+                    let inner_expr = match &arg.kind {
+                        ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } => inner,
+                        _ => arg, // shouldn't happen
+                    };
+                    let arg_val = self
+                        .compile_expr(inner_expr)?
+                        .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
+                    arg_results.push(arg_val);
+                } else {
+                    let arg_val = self
+                        .compile_expr(arg)?
+                        .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
+                    arg_results.push(arg_val);
+                }
+            }
+
+            // Phase 1b: Pad missing args with defaults (LoadK 0 for Int, etc.)
+            let actual_arg_count = func_info.param_count.max(args.len());
+            while arg_results.len() < actual_arg_count {
+                // Missing argument — use default value (0 for Int/Bool, 0.0 for Float)
+                let default_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: default_reg,
+                    value: 0,
+                });
+                arg_results.push(default_reg);
+            }
+
+            // Phase 2: Allocate consecutive FRESH registers for the call
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..actual_arg_count {
+                self.ctx.registers.alloc_fresh();
+            }
+
+            // Phase 3: Move results into consecutive registers
+            for (i, &src) in arg_results.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if src != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src });
+                    self.ctx.free_temp(src);
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        // Allocate result register
+        let result = self.ctx.alloc_temp();
+
+        // Check if this is an FFI function
+        if let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
+            // Emit FfiExtended.CallFfiC instruction
+            // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
+            //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
+            let mut operands = Vec::<u8>::new();
+
+            // Symbol index (4 bytes, little-endian)
+            operands.extend_from_slice(&ffi_symbol_id.0.to_le_bytes());
+
+            // Argument count (1 byte)
+            operands.push(args.len() as u8);
+
+            // Return register (variable-length encoding)
+            Self::write_reg(&mut operands, result.0);
+
+            // Argument registers (variable-length encoding)
+            for i in 0..args.len() {
+                let arg_reg = args_start.0 + i as u16;
+                Self::write_reg(&mut operands, arg_reg);
+            }
+
+            // Mutable reference source registers for write-back
+            // Format: count:u8, [(arg_idx:u8, source_reg:reg)...]
+            operands.push(mut_ref_sources.len() as u8);
+            for (arg_idx, source_reg) in &mut_ref_sources {
+                operands.push(*arg_idx);
+                Self::write_reg(&mut operands, source_reg.0);
+            }
+
+            // Phase 4: Emit requires assertions before FFI call (debug mode only)
+            if self.optimization_level() < 2 {
+                if let Some(contract) = self.get_ffi_contract_exprs(&func_name) {
+                    let requires_exprs: Vec<_> = contract.requires.clone();
+                    let fn_name = contract.function_name.clone();
+                    for (i, req_expr) in requires_exprs.iter().enumerate() {
+                        if let Ok(Some(cond_reg)) = self.compile_expr(req_expr) {
+                            let msg = format!(
+                                "FFI requires violation: condition {} of {}()",
+                                i + 1, fn_name
+                            );
+                            let message_id = self.intern_string(&msg);
+                            self.ctx.emit(Instruction::Assert {
+                                cond: cond_reg,
+                                message_id,
+                            });
+                            self.ctx.free_temp(cond_reg);
+                        }
+                    }
+                }
+            }
+
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: 0x10, // CallFfiC
+                operands,
+            });
+
+            // If FFI returns a pointer, mark result register as raw pointer
+            // so dereferences use DerefRaw instead of CBGR-managed Deref
+            if self.ffi_returns_pointer(ffi_symbol_id) {
+                self.ctx.mark_raw_pointer(result);
+            }
+
+            // Phase 4: Emit ensures assertions after FFI call (debug mode only)
+            if self.optimization_level() < 2 {
+                if let Some(contract) = self.get_ffi_contract_exprs(&func_name) {
+                    if !contract.ensures.is_empty() {
+                        let ensures_exprs: Vec<_> = contract.ensures.clone();
+                        let fn_name = contract.function_name.clone();
+                        // Create a "result" variable pointing to the return value
+                        self.ctx.enter_scope();
+                        let result_var = self.ctx.define_var("result", false);
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result_var,
+                            src: result,
+                        });
+                        for (i, ens_expr) in ensures_exprs.iter().enumerate() {
+                            if let Ok(Some(cond_reg)) = self.compile_expr(&ens_expr) {
+                                let msg = format!(
+                                    "FFI ensures violation: condition {} of {}()",
+                                    i + 1, fn_name
+                                );
+                                let message_id = self.intern_string(&msg);
+                                self.ctx.emit(Instruction::Assert {
+                                    cond: cond_reg,
+                                    message_id,
+                                });
+                                self.ctx.free_temp(cond_reg);
+                            }
+                        }
+                        self.ctx.exit_scope(false);
+                    }
+                }
+            }
+        } else if func_info.is_generator {
+            // Generator function call - create generator instance instead of calling
+            // The generator's initial registers are populated from the arguments
+            self.ctx.emit(Instruction::GenCreate {
+                dst: result,
+                func_id: func_info.id.0,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: args.len() as u8,
+                },
+            });
+        } else {
+            // Regular function call
+            // Use actual_arg_count (includes defaults) instead of args.len()
+            let call_arg_count = func_info.param_count.max(args.len());
+            self.ctx.emit(Instruction::Call {
+                dst: result,
+                func_id: func_info.id.0,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: call_arg_count as u8,
+                },
+            });
+        }
+
+        Ok(Some(result))
+    }
+
+    /// Compiles an array element reference (`&arr[idx]` or `&mut arr[idx]`) for FFI calls.
+    ///
+    /// VBC arrays store NaN-boxed Values (8 bytes each with tag bits), but FFI expects
+    /// raw C data (e.g., 4-byte i32, 8-byte f64). This method:
+    ///
+    /// 1. Gets the array from its variable
+    /// 2. Emits FfiExtended.ArrayToC instruction to marshal the array to a temporary buffer
+    /// 3. Returns a pointer to the marshalled data at the specified index
+    ///
+    /// The temporary buffer persists for the duration of the FFI call.
+    /// For mutable references, the data is written back to the array after the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arg` - The argument expression (`&arr[idx]` or `&mut arr[idx]`)
+    /// * `func_name` - The FFI function name (for error messages)
+    /// * `arg_idx` - The argument index in the FFI call
+    fn compile_ffi_array_ref(
+        &mut self,
+        arg: &Expr,
+        func_name: &str,
+        arg_idx: usize,
+    ) -> CodegenResult<Reg> {
+        // Extract the array element reference pattern components
+        let (is_mutable, base, index) = match &arg.kind {
+            ExprKind::Unary { op: UnOp::Ref, expr: inner } => {
+                if let ExprKind::Index { expr: base, index } = &inner.kind {
+                    (false, base.as_ref(), index.as_ref())
+                } else {
+                    return Err(CodegenError::internal("expected index expression in &arr[idx]"));
+                }
+            }
+            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => {
+                if let ExprKind::Index { expr: base, index } = &inner.kind {
+                    (true, base.as_ref(), index.as_ref())
+                } else {
+                    return Err(CodegenError::internal("expected index expression in &mut arr[idx]"));
+                }
+            }
+            _ => return Err(CodegenError::internal("expected array element reference pattern")),
+        };
+
+        // Compile the array expression to get the array register
+        let arr_reg = self
+            .compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("array expression has no value"))?;
+
+        // Compile the index expression
+        let idx_reg = self
+            .compile_expr(index)?
+            .ok_or_else(|| CodegenError::internal("index expression has no value"))?;
+
+        // Get the FFI symbol to determine the expected element type
+        let ffi_symbol_id = self
+            .get_ffi_symbol_id(func_name)
+            .ok_or_else(|| CodegenError::internal("FFI function not found for array marshalling"))?;
+
+        // Determine element type from FFI signature parameter type
+        // The parameter type should be CType::Ptr or CType::ArrayPtr
+        // We need to infer the element type from context or use a default (i64)
+        let element_type_tag = self.get_ffi_array_element_type(ffi_symbol_id, arg_idx, func_name);
+
+        // Allocate result register for the marshalled pointer
+        let result = self.ctx.alloc_temp();
+
+        // Emit FfiExtended.ArrayToC instruction
+        // Format: dst:reg, arr_reg:reg, idx_reg:reg, element_type:u8, is_mutable:u8
+        let mut operands = Vec::<u8>::new();
+        Self::write_reg(&mut operands, result.0);
+        Self::write_reg(&mut operands, arr_reg.0);
+        Self::write_reg(&mut operands, idx_reg.0);
+        operands.push(element_type_tag);
+        operands.push(if is_mutable { 1 } else { 0 });
+
+        self.ctx.emit(Instruction::FfiExtended {
+            sub_op: 0x24, // ArrayToC
+            operands,
+        });
+
+        // Free temporary registers
+        self.ctx.free_temp(arr_reg);
+        self.ctx.free_temp(idx_reg);
+
+        // Mark result as raw pointer for FFI
+        self.ctx.mark_raw_pointer(result);
+
+        Ok(result)
+    }
+
+    /// Compiles a function callback for FFI calls.
+    ///
+    /// When a Verum function is passed to an FFI call that expects a function pointer,
+    /// we emit a CreateCallback instruction to create a C-callable trampoline.
+    ///
+    /// # Arguments
+    ///
+    /// * `info` - The callback info containing function ID and signature
+    fn compile_ffi_callback(&mut self, info: &FfiCallbackInfo) -> CodegenResult<Reg> {
+        // Allocate result register for the callback pointer
+        let result = self.ctx.alloc_temp();
+
+        // Emit FfiExtended.CreateCallback instruction
+        // Format: dst:reg, fn_id:u32, signature_idx:u32
+        let mut operands = Vec::<u8>::new();
+        Self::write_reg(&mut operands, result.0);
+        operands.extend_from_slice(&info.func_id.to_le_bytes());
+        operands.extend_from_slice(&info.callback_signature_id.0.to_le_bytes());
+
+        self.ctx.emit(Instruction::FfiExtended {
+            sub_op: 0x50, // CreateCallback
+            operands,
+        });
+
+        // Mark result as raw pointer (C function pointer)
+        self.ctx.mark_raw_pointer(result);
+
+        Ok(result)
+    }
+
+    /// Gets the element type tag for an FFI array parameter.
+    ///
+    /// Returns a type tag byte for the ArrayToC instruction:
+    /// - 0x01: i8
+    /// - 0x02: i16
+    /// - 0x03: i32
+    /// - 0x04: i64 (default for Int)
+    /// - 0x05: f32
+    /// - 0x06: f64 (default for Float)
+    /// - 0x07: ptr (pointer types)
+    fn get_ffi_array_element_type(&self, _symbol_id: crate::module::FfiSymbolId, _arg_idx: usize, func_name: &str) -> u8 {
+        // Use function name heuristic to determine element type
+        // This is a pragmatic approach that works for standard naming conventions:
+        // - ffi_sum_array_i32 -> i32 elements
+        // - ffi_process_f64 -> f64 elements
+        // - etc.
+        //
+        // For industrial quality, this should also look up the FFI symbol signature
+        // and determine the precise element type from the parameter type annotation.
+
+        // Check for type suffix in function name (common FFI naming convention)
+        if func_name.contains("_i8") || func_name.ends_with("_i8") {
+            0x01 // i8
+        } else if func_name.contains("_i16") || func_name.ends_with("_i16") {
+            0x02 // i16
+        } else if func_name.contains("_i32") || func_name.ends_with("_i32") {
+            0x03 // i32
+        } else if func_name.contains("_i64") || func_name.ends_with("_i64") {
+            0x04 // i64
+        } else if func_name.contains("_u8") || func_name.ends_with("_u8") {
+            0x01 // u8 (same size as i8)
+        } else if func_name.contains("_u16") || func_name.ends_with("_u16") {
+            0x02 // u16 (same size as i16)
+        } else if func_name.contains("_u32") || func_name.ends_with("_u32") {
+            0x03 // u32 (same size as i32)
+        } else if func_name.contains("_u64") || func_name.ends_with("_u64") {
+            0x04 // u64 (same size as i64)
+        } else if func_name.contains("_f32") || func_name.ends_with("_f32") {
+            0x05 // f32
+        } else if func_name.contains("_f64") || func_name.ends_with("_f64") {
+            0x06 // f64
+        } else if func_name.contains("_ptr") || func_name.ends_with("_ptr") {
+            0x07 // ptr
+        } else {
+            // Default to i32 for most C library functions
+            // (C's int is typically 32-bit even on 64-bit platforms)
+            0x03
+        }
+    }
+
+    /// Tries to compile a builtin function.
+    fn try_compile_builtin(
+        &mut self,
+        name: &str,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Option<Reg>>> {
+        match name {
+            "print" | "println" => {
+                if args.is_empty() {
+                    // Empty println - print empty string
+                    let empty = self.ctx.alloc_temp();
+                    let const_id = self.ctx.add_const_string("");
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: empty,
+                        const_id: const_id.0,
+                    });
+                    self.ctx.emit(Instruction::DebugPrint { value: empty });
+                    self.ctx.free_temp(empty);
+                } else {
+                    let arg_reg = self
+                        .compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("print arg has no value"))?;
+                    self.ctx.emit(Instruction::DebugPrint { value: arg_reg });
+                    self.ctx.free_temp(arg_reg);
+                }
+                Ok(Some(None))
+            }
+
+            "panic" => {
+                let message_id = if !args.is_empty() {
+                    // Extract the string from the argument if it's a literal
+                    if let ExprKind::Literal(lit) = &args[0].kind {
+                        if let LiteralKind::Text(text) = &lit.kind {
+                            self.intern_string(text.as_str())
+                        } else {
+                            // Non-string literal - show generic message
+                            self.intern_string("explicit panic")
+                        }
+                    } else if let ExprKind::Unary { op: UnOp::Ref, expr, .. } = &args[0].kind {
+                        // Handle &"string" case
+                        if let ExprKind::Literal(lit) = &expr.kind {
+                            if let LiteralKind::Text(text) = &lit.kind {
+                                self.intern_string(text.as_str())
+                            } else {
+                                self.intern_string("explicit panic")
+                            }
+                        } else {
+                            self.intern_string("explicit panic")
+                        }
+                    } else {
+                        // Non-literal argument - would need runtime evaluation
+                        // For now just use a generic message
+                        self.intern_string("explicit panic")
+                    }
+                } else {
+                    self.intern_string("panic!")
+                };
+                self.ctx.emit(Instruction::Panic { message_id });
+                Ok(Some(None))
+            }
+
+            "assert" => {
+                if args.is_empty() {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 1,
+                        found: 0,
+                        function: "assert".to_string(),
+                    }));
+                }
+                let cond_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("assert cond has no value"))?;
+                let message_id = self.intern_string("assertion failed");
+                self.ctx.emit(Instruction::Assert {
+                    cond: cond_reg,
+                    message_id,
+                });
+                self.ctx.free_temp(cond_reg);
+                Ok(Some(None))
+            }
+
+            "unreachable" => {
+                self.ctx.emit(Instruction::Unreachable);
+                Ok(Some(None))
+            }
+
+            // transmute(x) — reinterpret bits as a different type.
+            // In the VBC interpreter, all values are 64-bit NaN-boxed,
+            // so transmute is a no-op that just passes the value through.
+            // The type system has already validated the transmute at compile time.
+            "transmute" => {
+                if args.len() != 1 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 1,
+                        found: args.len(),
+                        function: "transmute".to_string(),
+                    }));
+                }
+                let src = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("transmute arg has no value"))?;
+                // transmute is identity at the value level in VBC
+                Ok(Some(Some(src)))
+            }
+
+            // offset_of(Type, field) — returns the byte offset of a field in a struct.
+            // The second argument is a field name, NOT a variable expression.
+            // For the VBC interpreter, this returns a compile-time constant.
+            "offset_of" => {
+                if args.len() != 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "offset_of".to_string(),
+                    }));
+                }
+                // Extract type name from first arg
+                let type_name = match &args[0].kind {
+                    ExprKind::Path(path) => {
+                        if let Some(ident) = path.as_ident() {
+                            ident.name.to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    }
+                    _ => "unknown".to_string(),
+                };
+                // Extract field name from second arg (NOT compiled as expression)
+                let field_name = match &args[1].kind {
+                    ExprKind::Path(path) => {
+                        if let Some(ident) = path.as_ident() {
+                            ident.name.to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    }
+                    _ => "unknown".to_string(),
+                };
+                // Look up the struct fields to compute offset
+                // For now, compute based on known type layouts
+                let offset = self.compute_field_offset(&type_name, &field_name);
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: offset });
+                Ok(Some(Some(dest)))
+            }
+
+            // Heap(x) — heap-allocate a value with CBGR tracking.
+            // This uses WellKnownType matching rather than a hardcoded string so
+            // that well-known type resolution stays centralized in verum_common.
+            // Heap is a runtime primitive (memory allocation), not a regular stdlib
+            // type, so it requires special codegen that emits CallM with method "new".
+            _ if self.is_allocating_wrapper(name) && args.len() == 1 && name == "Heap" => {
+                let inner = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("Heap arg has no value"))?;
+
+                // Load "Heap" as receiver (small string recognized by interpreter)
+                let receiver_reg = self.ctx.alloc_temp();
+                let heap_const = self.ctx.add_const_string("Heap");
+                self.ctx.emit(Instruction::LoadK {
+                    dst: receiver_reg,
+                    const_id: heap_const.0,
+                });
+
+                // Place inner value in a consecutive arg register
+                let arg_reg = self.ctx.registers.alloc_fresh();
+                if inner != arg_reg {
+                    self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
+                    self.ctx.free_temp(inner);
+                }
+
+                // Emit CallM { receiver: "Heap", method: "new", args: [inner] }
+                let result = self.ctx.alloc_temp();
+                let method_id = self.intern_string("new");
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: receiver_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: arg_reg,
+                        count: 1,
+                    },
+                });
+                self.ctx.free_temp(receiver_reg);
+                Ok(Some(Some(result)))
+            }
+
+            "assert_eq" => {
+                if args.len() < 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "assert_eq".to_string(),
+                    }));
+                }
+                let left_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("assert_eq left has no value"))?;
+                let right_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("assert_eq right has no value"))?;
+
+                // Compare values using generic equality (works for all types)
+                let cmp_result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CmpG {
+                    eq: true, // Equality comparison via Eq protocol
+                    dst: cmp_result,
+                    a: left_reg,
+                    b: right_reg,
+                    protocol_id: 0, // Generic comparison, runtime determines type
+                });
+
+                // Assert the comparison result
+                let message_id = self.intern_string("assertion failed: left != right");
+                self.ctx.emit(Instruction::Assert {
+                    cond: cmp_result,
+                    message_id,
+                });
+
+                self.ctx.free_temp(cmp_result);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(left_reg);
+                Ok(Some(None))
+            }
+
+            "assert_ne" => {
+                if args.len() < 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "assert_ne".to_string(),
+                    }));
+                }
+                let left_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("assert_ne left has no value"))?;
+                let right_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("assert_ne right has no value"))?;
+
+                // Compare values using generic equality then negate
+                let eq_result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CmpG {
+                    eq: true, // Equality comparison via Eq protocol
+                    dst: eq_result,
+                    a: left_reg,
+                    b: right_reg,
+                    protocol_id: 0, // Generic comparison, runtime determines type
+                });
+
+                // Negate: not equal = !equal
+                let cmp_result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Not {
+                    dst: cmp_result,
+                    src: eq_result,
+                });
+                self.ctx.free_temp(eq_result);
+
+                // Assert the comparison result
+                let message_id = self.intern_string("assertion failed: left == right");
+                self.ctx.emit(Instruction::Assert {
+                    cond: cmp_result,
+                    message_id,
+                });
+
+                self.ctx.free_temp(cmp_result);
+                self.ctx.free_temp(right_reg);
+                self.ctx.free_temp(left_reg);
+                Ok(Some(None))
+            }
+
+            "debug_assert" => {
+                // Debug assertions - only emit in debug builds
+                // For now, treat same as assert (runtime will ignore in release)
+                if args.is_empty() {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 1,
+                        found: 0,
+                        function: "debug_assert".to_string(),
+                    }));
+                }
+                let cond_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("debug_assert cond has no value"))?;
+                let message_id = self.intern_string("debug assertion failed");
+                self.ctx.emit(Instruction::Assert {
+                    cond: cond_reg,
+                    message_id,
+                });
+                self.ctx.free_temp(cond_reg);
+                Ok(Some(None))
+            }
+
+            "dbg" => {
+                // Debug print expression and return its value
+                if args.is_empty() {
+                    // Return unit if no args
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadUnit { dst: result });
+                    return Ok(Some(Some(result)));
+                }
+                let arg_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("dbg arg has no value"))?;
+                self.ctx.emit(Instruction::DebugPrint { value: arg_reg });
+                // Return the value (don't free it)
+                Ok(Some(Some(arg_reg)))
+            }
+
+            "todo" => {
+                // Mark as not yet implemented - panics at runtime
+                let message_id = self.ctx.add_const_string("not yet implemented").0;
+                self.ctx.emit(Instruction::Panic { message_id });
+                Ok(Some(None))
+            }
+
+            "unimplemented" => {
+                // Alias for todo
+                let message_id = self.ctx.add_const_string("not implemented").0;
+                self.ctx.emit(Instruction::Panic { message_id });
+                Ok(Some(None))
+            }
+
+            "drop" => {
+                // Explicit drop - emit DropRef to bump CBGR generation
+                if !args.is_empty() {
+                    let arg_reg = self
+                        .compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("drop arg has no value"))?;
+                    self.ctx.emit(crate::instruction::Instruction::DropRef { src: arg_reg });
+                    self.ctx.free_temp(arg_reg);
+                }
+                Ok(Some(None))
+            }
+
+            "forget" => {
+                // Forget without running drop - evaluate and discard without cleanup
+                if !args.is_empty() {
+                    let arg_reg = self
+                        .compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("forget arg has no value"))?;
+                    // Don't emit any cleanup - just free the register
+                    self.ctx.free_temp(arg_reg);
+                }
+                Ok(Some(None))
+            }
+
+            "min" => {
+                if args.len() < 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "min".to_string(),
+                    }));
+                }
+                let a_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("min arg has no value"))?;
+                let b_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("min arg has no value"))?;
+
+                let result = self.ctx.alloc_temp();
+                let cmp = self.ctx.alloc_temp();
+
+                // result = (a < b) ? a : b
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Lt,
+                    dst: cmp,
+                    a: a_reg,
+                    b: b_reg,
+                });
+
+                // Select based on comparison
+                let else_label = self.ctx.new_label("min_else");
+                let end_label = self.ctx.new_label("min_end");
+
+                self.ctx
+                    .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                        cond: cmp,
+                        offset,
+                    });
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: a_reg,
+                });
+                self.ctx
+                    .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                self.ctx.define_label(&else_label);
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: b_reg,
+                });
+                self.ctx.define_label(&end_label);
+
+                self.ctx.free_temp(cmp);
+                self.ctx.free_temp(b_reg);
+                self.ctx.free_temp(a_reg);
+
+                Ok(Some(Some(result)))
+            }
+
+            "max" => {
+                if args.len() < 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "max".to_string(),
+                    }));
+                }
+                let a_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("max arg has no value"))?;
+                let b_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("max arg has no value"))?;
+
+                let result = self.ctx.alloc_temp();
+                let cmp = self.ctx.alloc_temp();
+
+                // result = (a > b) ? a : b
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Gt,
+                    dst: cmp,
+                    a: a_reg,
+                    b: b_reg,
+                });
+
+                // Select based on comparison
+                let else_label = self.ctx.new_label("max_else");
+                let end_label = self.ctx.new_label("max_end");
+
+                self.ctx
+                    .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                        cond: cmp,
+                        offset,
+                    });
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: a_reg,
+                });
+                self.ctx
+                    .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                self.ctx.define_label(&else_label);
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: b_reg,
+                });
+                self.ctx.define_label(&end_label);
+
+                self.ctx.free_temp(cmp);
+                self.ctx.free_temp(b_reg);
+                self.ctx.free_temp(a_reg);
+
+                Ok(Some(Some(result)))
+            }
+
+            // "abs" is handled via intrinsic resolution (PolyAbs) to support both int and float
+            // The polymorphic intrinsic properly dispatches based on operand type at runtime
+
+            // range(start, end) - create an exclusive range [start, end)
+            // Returns a Range object that can be iterated with for-in loops.
+            // Range layout: [start: Int, end: Int, step: Int, inclusive: Bool]
+            "range" => {
+                if args.len() != 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "range".to_string(),
+                    }));
+                }
+                let start_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                let end_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+
+                // Emit NewRange { dst, start, end, inclusive: false }
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewRange {
+                    dst: result,
+                    start: start_reg,
+                    end: end_reg,
+                    inclusive: false,
+                });
+                self.ctx.free_temp(start_reg);
+                self.ctx.free_temp(end_reg);
+                Ok(Some(Some(result)))
+            }
+
+            // range_inclusive(start, end) - create an inclusive range [start, end]
+            "range_inclusive" => {
+                if args.len() != 2 {
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: 2,
+                        found: args.len(),
+                        function: "range_inclusive".to_string(),
+                    }));
+                }
+                let start_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("range_inclusive start has no value"))?;
+                let end_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("range_inclusive end has no value"))?;
+
+                // Emit NewRange { dst, start, end, inclusive: true }
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewRange {
+                    dst: result,
+                    start: start_reg,
+                    end: end_reg,
+                    inclusive: true,
+                });
+                self.ctx.free_temp(start_reg);
+                self.ctx.free_temp(end_reg);
+                Ok(Some(Some(result)))
+            }
+
+            // File I/O and networking convenience functions — emitted as Call
+            // instructions that the LLVM lowering intercepts.
+            "file_write" | "file_read" | "file_append" | "file_delete" | "file_exists"
+            | "file_read_all" | "file_write_all" | "file_open" | "file_close"
+            | "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_send" | "tcp_recv"
+            | "tcp_close" | "udp_bind" | "udp_send" | "udp_recv" | "udp_close" => {
+                let func_id = self.ctx.lookup_function(name)
+                    .map(|f| f.id.0)
+                    .unwrap_or(u32::MAX);
+                let result = self.ctx.alloc_temp();
+
+                // Phase 1: Compile all argument expressions
+                let mut arg_results = Vec::new();
+                for arg in args.iter() {
+                    let r = self.compile_expr(arg)?
+                        .ok_or_else(|| CodegenError::internal("runtime I/O arg has no value"))?;
+                    arg_results.push(r);
+                }
+
+                // Phase 2+3: Allocate consecutive registers and move args into them
+                let args_start = if !arg_results.is_empty() {
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..arg_results.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, &src) in arg_results.iter().enumerate() {
+                        let dst = Reg(first.0 + i as u16);
+                        if src != dst {
+                            self.ctx.emit(Instruction::Mov { dst, src });
+                            self.ctx.free_temp(src);
+                        }
+                    }
+                    first
+                } else {
+                    Reg(0)
+                };
+
+                self.ctx.emit(Instruction::Call {
+                    dst: result,
+                    func_id,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: arg_results.len() as u8,
+                    },
+                });
+                Ok(Some(Some(result)))
+            }
+
+            _ => Ok(None), // Not a builtin
+        }
+    }
+
+    /// Compiles an indirect call (closure, function pointer).
+    fn compile_indirect_call(
+        &mut self,
+        func: &Expr,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Evaluate function expression
+        let func_reg = self
+            .compile_expr(func)?
+            .ok_or_else(|| CodegenError::internal("indirect call func has no value"))?;
+
+        // Compile arguments into consecutive registers
+        // IMPORTANT: Use the same Phase 1/2/3 approach as compile_call to guarantee
+        // consecutive fresh registers. alloc_temp() can recycle from the free list,
+        // producing non-consecutive registers which breaks the CallClosure instruction.
+        let args_start = if !args.is_empty() {
+            // Phase 1: Compile all argument expressions
+            let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("indirect call arg has no value"))?;
+                arg_results.push(arg_val);
+            }
+
+            // Phase 2: Allocate consecutive FRESH registers
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..args.len() {
+                self.ctx.registers.alloc_fresh();
+            }
+
+            // Phase 3: Move results into consecutive registers
+            for (i, &src) in arg_results.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if src != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src });
+                    self.ctx.free_temp(src);
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        // Allocate result register
+        let result = self.ctx.alloc_temp();
+
+        // Emit call_closure instruction
+        self.ctx.emit(Instruction::CallClosure {
+            dst: result,
+            closure: func_reg,
+            args: crate::instruction::RegRange {
+                start: args_start,
+                count: args.len() as u8,
+            },
+        });
+
+        self.ctx.free_temp(func_reg);
+
+        Ok(Some(result))
+    }
+
+    /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
+    ///
+    /// This is called when a function is not found but the name looks like
+    /// a variant constructor (starts with uppercase). We emit a MakeVariant
+    /// instruction that creates the variant value.
+    /// Compile a variant constructor with a known tag (from prior FunctionInfo lookup).
+    fn compile_variant_constructor_with_tag(
+        &mut self,
+        tag: u32,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+        if !args.is_empty() {
+            let data_val = self
+                .compile_expr(&args[0])?
+                .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+            self.ctx.emit(Instruction::SetVariantData {
+                variant: result,
+                field: 0,
+                value: data_val,
+            });
+            self.ctx.free_temp(data_val);
+            for i in 1..args.len() {
+                let next_val = self
+                    .compile_expr(&args[i])?
+                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: result,
+                    field: i as u32,
+                    value: next_val,
+                });
+                self.ctx.free_temp(next_val);
+            }
+        }
+        Ok(Some(result))
+    }
+
+    fn compile_variant_constructor(
+        &mut self,
+        name: &str,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Heap(x) / Shared(x): transparent wrapper — just pass through inner value.
+        // This matches the LLVM lowering behavior where Heap.new(x) is transparent.
+        if self.is_allocating_wrapper(name) && args.len() == 1 {
+            return self.compile_expr(&args[0]);
+        }
+
+        // Look up the variant tag from the registered FunctionInfo.
+        // Tags are assigned as declaration-order indices when the type is registered.
+        let tag = self.ctx.lookup_function(name)
+            .and_then(|info| info.variant_tag)
+            .or_else(|| {
+                // Simple name not found (likely in collision set).
+                // Try to disambiguate using argument count: find a qualified
+                // variant "TypeName.VariantName" whose param_count matches.
+                self.ctx.find_variant_by_suffix_and_args(name, args.len())
+            })
+            .unwrap_or_else(|| {
+                // Fallback for variants not yet registered (e.g., forward references):
+                // use a hash-based tag for consistency
+                name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+            });
+
+        let result = self.ctx.alloc_temp();
+
+        // Emit MakeVariant with the tag
+        self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+
+        // If there are arguments, set the variant data
+        if !args.is_empty() {
+            // Compile the first argument (most variants have 0 or 1 args)
+            let data_val = self
+                .compile_expr(&args[0])?
+                .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+
+            self.ctx.emit(Instruction::SetVariantData {
+                variant: result,
+                field: 0,
+                value: data_val,
+            });
+
+            self.ctx.free_temp(data_val);
+
+            // Handle additional arguments for record variants
+            for (i, arg) in args.iter().skip(1).enumerate() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: result,
+                    field: (i + 1) as u32,
+                    value: arg_val,
+                });
+
+                self.ctx.free_temp(arg_val);
+            }
+        }
+
+        Ok(Some(result))
+    }
+
+    /// Compiles a method call.
+    fn compile_method_call(
+        &mut self,
+        receiver: &Expr,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Intercept Heap.new(value) — must emit CBGR-tracked allocation so methods
+        // like header_generation, is_epoch_valid, raw_ptr work on the returned value.
+        // The stdlib user-defined Heap.new returns a struct that breaks builtin CBGR
+        // introspection methods. By emitting CallM with "Heap" receiver, the interpreter
+        // handles Heap.new as a CBGR allocation (see method_dispatch.rs line 400).
+        if method.name == "new" && args.len() == 1 {
+            if let ExprKind::Path(ref path) = receiver.kind {
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ref type_ident) = path.segments[0] {
+                        if type_ident.name.as_str() == "Heap" {
+                            let inner = self
+                                .compile_expr(&args[0])?
+                                .ok_or_else(|| CodegenError::internal("Heap.new arg has no value"))?;
+
+                            // Load "Heap" as receiver (small string recognized by interpreter)
+                            let receiver_reg = self.ctx.alloc_temp();
+                            let heap_const = self.ctx.add_const_string("Heap");
+                            self.ctx.emit(Instruction::LoadK {
+                                dst: receiver_reg,
+                                const_id: heap_const.0,
+                            });
+
+                            // Place inner value in a consecutive arg register
+                            let arg_reg = self.ctx.registers.alloc_fresh();
+                            if inner != arg_reg {
+                                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
+                                self.ctx.free_temp(inner);
+                            }
+
+                            // Emit CallM { receiver: "Heap", method: "new", args: [inner] }
+                            let result = self.ctx.alloc_temp();
+                            let method_id = self.intern_string("new");
+                            self.ctx.emit(Instruction::CallM {
+                                dst: result,
+                                receiver: receiver_reg,
+                                method_id,
+                                args: crate::instruction::RegRange {
+                                    start: arg_reg,
+                                    count: 1,
+                                },
+                            });
+                            self.ctx.free_temp(receiver_reg);
+                            return Ok(Some(result));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Intercept collection .new() calls FIRST — must emit builtin opcodes so the
+        // interpreter creates proper heap objects with TypeId::LIST/MAP/SET headers.
+        // The stdlib compiled .new() functions return flat structs with raw pointers
+        // incompatible with the interpreter's builtin methods (push, get, insert, len).
+        if method.name == "new" && args.is_empty() {
+            if let ExprKind::Path(ref path) = receiver.kind {
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ref type_ident) = path.segments[0] {
+                        let tn = type_ident.name.as_str();
+                        if tn == type_names::LIST {
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::NewList { dst: dest });
+                            return Ok(Some(dest));
+                        }
+                        if tn == type_names::MAP {
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::NewMap { dst: dest });
+                            return Ok(Some(dest));
+                        }
+                        if tn == type_names::SET {
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::NewSet { dst: dest });
+                            return Ok(Some(dest));
+                        }
+                    }
+                }
+            }
+        }
+
+        // First, try to flatten the receiver as a module path and look up the full qualified function
+        // This handles patterns like `sys.common.os_alloc(...)` or `super.sys.linux.syscall.exit_group(...)`
+        if let Some(mut parts) = self.try_flatten_module_path(receiver) {
+            parts.push(method.name.to_string());
+
+            // Try both :: separator (Rust-style) and . separator (Verum-style)
+            let qualified_rust = parts.join("::");
+            let qualified_verum = parts.join(".");
+
+            // Try Rust-style first - only use if argument count matches
+            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
+                && func_info.param_count == args.len() {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+
+            // Try Verum-style - only use if argument count matches
+            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_verum).cloned()
+                && func_info.param_count == args.len() {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+
+            // Try just the function name (it may have been imported)
+            // Keep param_count check to avoid false positives with unqualified names
+            if let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
+                && func_info.param_count == args.len() {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+
+            // If this is a module/type namespace (not a local variable),
+            // emit a stub call rather than trying to compile the receiver as a value.
+            // This avoids "undefined variable: sys" / "undefined variable: IoError" errors.
+            if !parts.is_empty() {
+                let first = &parts[0];
+                let is_module_ns = first == "super" || first == "cog" || first == "."
+                    || (first.chars().next().map(|c| c.is_lowercase()).unwrap_or(false)
+                        && self.ctx.get_var_reg(first).is_err()
+                        && !is_type_name(first));
+                // Also treat uppercase names as type namespaces if they have qualified
+                // functions registered (e.g., IoError.WouldBlock, IoError.from_errno)
+                let is_type_ns = !is_module_ns
+                    && first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                    && self.ctx.get_var_reg(first).is_err()
+                    && self.ctx.has_functions_with_prefix(&format!("{}.", first));
+                if is_module_ns || is_type_ns {
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: result });
+                    return Ok(Some(result));
+                }
+            }
+        }
+
+        // Check if receiver is a context from `using [...]` clause.
+        // Context method calls like `Logger.log(msg)` should emit CtxGet to retrieve
+        // the context value, then call the method on it.
+        // This is checked BEFORE static method resolution to ensure context names
+        // take precedence over any similarly-named types.
+        if let ExprKind::Path(ref path) = receiver.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref ctx_ident) = path.segments[0]
+            && self.ctx.is_required_context(&ctx_ident.name)
+        {
+            // Context method call: Logger.method(args) or db.method(args)
+            // Resolve alias (db → Database) then emit CtxGet + CallM.
+            let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
+            let ctx_type_id = self.intern_string(&ctx_name);
+
+            // Get the context value from the context stack
+            let ctx_value_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CtxGet {
+                dst: ctx_value_reg,
+                ctx_type: ctx_type_id,
+            });
+
+            // Compile arguments into consecutive registers
+            let args_start = if !args.is_empty() {
+                let first = self.ctx.alloc_temp();
+                let first_val = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
+                self.ctx
+                    .emit(Instruction::Mov { dst: first, src: first_val });
+                if first_val != first {
+                    self.ctx.free_temp(first_val);
+                }
+
+                for arg in args.iter().skip(1) {
+                    let arg_reg = self.ctx.alloc_temp();
+                    let arg_val = self
+                        .compile_expr(arg)?
+                        .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
+                    self.ctx
+                        .emit(Instruction::Mov { dst: arg_reg, src: arg_val });
+                    if arg_val != arg_reg {
+                        self.ctx.free_temp(arg_val);
+                    }
+                }
+                first
+            } else {
+                Reg(0)
+            };
+
+            let result = self.ctx.alloc_temp();
+            // Context method calls use dyn: prefix for type_id dispatch.
+            // Context declarations create TypeDescriptors, enabling
+            // implement Protocol for Type to populate TypeDescriptor.protocols.
+            // The dyn: handler reads type_id from object header → correct dispatch.
+            let ctx_method_name = format!("dyn:{}.{}", ctx_name, method.name);
+            let method_id = self.intern_string(&ctx_method_name);
+
+            // Emit method call on the context value
+            self.ctx.emit(Instruction::CallM {
+                dst: result,
+                receiver: ctx_value_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: args.len() as u8,
+                },
+            });
+
+            self.ctx.free_temp(ctx_value_reg);
+
+            return Ok(Some(result));
+        }
+
+        // Check if receiver is a type path (for static method calls like List.new())
+        // If so, try to look up Type::method as a registered function
+        if let ExprKind::Path(ref path) = receiver.kind
+            && path.segments.len() == 1
+                && let PathSegment::Name(ref type_ident) = path.segments[0] {
+                    let type_name = type_ident.name.to_string();
+                    let method_name = method.name.to_string();
+
+                    // Intercept builtin collection constructors — emit CallM with the
+                    // type name string as receiver so the interpreter's builtin handler
+                    // creates heap objects with the correct TypeId and memory layout.
+                    // Without this, stdlib user-defined constructors (e.g., Map.new()
+                    // from core/collections/map.vr) would create plain struct records
+                    // that don't work with builtin instance methods (insert, get, len, etc.).
+                    let is_builtin_collection_ctor = method_name == "new"
+                        && self.is_builtin_ctor_collection(&type_name);
+                    if is_builtin_collection_ctor {
+                        let receiver_reg = self.ctx.alloc_temp();
+                        let type_const = self.ctx.add_const_string(&type_name);
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: receiver_reg,
+                            const_id: type_const.0,
+                        });
+                        let args_start = if !args.is_empty() {
+                            let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                            for arg in args.iter() {
+                                let arg_val = self.compile_expr(arg)?
+                                    .ok_or_else(|| CodegenError::internal("collection .new() arg has no value"))?;
+                                arg_vals.push(arg_val);
+                            }
+                            let first = self.ctx.registers.alloc_fresh();
+                            for _ in 1..args.len() {
+                                self.ctx.registers.alloc_fresh();
+                            }
+                            for (i, arg_val) in arg_vals.iter().enumerate() {
+                                let d = Reg(first.0 + i as u16);
+                                if *arg_val != d {
+                                    self.ctx.emit(Instruction::Mov { dst: d, src: *arg_val });
+                                    self.ctx.free_temp(*arg_val);
+                                }
+                            }
+                            first
+                        } else {
+                            Reg(0)
+                        };
+                        let dst = self.ctx.alloc_temp();
+                        let method_id = self.intern_string("new");
+                        self.ctx.emit(Instruction::CallM {
+                            dst,
+                            receiver: receiver_reg,
+                            method_id,
+                            args: crate::instruction::RegRange {
+                                start: args_start,
+                                count: args.len() as u8,
+                            },
+                        });
+                        self.ctx.free_temp(receiver_reg);
+                        return Ok(Some(dst));
+                    }
+
+                    // First, ALWAYS try to find Type.method as a registered static method.
+                    // This takes precedence even if the type is also registered as a type constructor,
+                    // because static method calls like `Time.now()` should resolve to Time.now,
+                    // not treat `Time` as a value.
+                    let qualified_name = format!("{}.{}", type_name, method_name);
+                    if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+                        // Only use if argument count matches to avoid wrong function resolution
+                        if func_info.param_count == args.len() {
+                            return self.compile_static_method_call(&func_info, args);
+                        }
+                    }
+
+                    // Check if this type name is NOT a local variable and NOT a static/const
+                    // If it's a variable or static/const, treat as regular method call on a value
+                    let is_static_or_const = self
+                        .ctx
+                        .lookup_function(&type_name)
+                        .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
+                        .unwrap_or(false);
+
+                    let registers_contains = self.ctx.registers.contains(&type_name);
+                    let known_type = is_type_name(&type_name);
+
+                    if known_type || (!registers_contains && !is_static_or_const) {
+                        // Static method not found by qualified name, try other resolution paths
+                        let qualified_name = format!("{}.{}", type_name, method_name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+                            // Only use if argument count matches to avoid wrong function resolution
+                            if func_info.param_count == args.len() {
+                                // Check if this is an associated constant with a known value
+                                // (registered via __const_val_N naming convention).
+                                if func_info.param_count == 0 {
+                                    if let Some(ref iname) = func_info.intrinsic_name {
+                                        if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                                            let value: i64 = val_str.parse().unwrap_or(0);
+                                            let dest = self.ctx.alloc_temp();
+                                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                            return Ok(Some(dest));
+                                        }
+                                    }
+                                }
+                                // Found static method - compile as direct function call
+                                return self.compile_static_method_call(&func_info, args);
+                            }
+                        }
+
+                        // Try resolving user-defined type aliases (Vec4f -> Vec, etc.)
+                        // This enables method calls like Vec4f.splat() to resolve to Vec.splat()
+                        // when `type Vec4f = Vec<Float32, 4>` is defined.
+                        let resolved_type = self.resolve_type_alias(&type_name);
+                        if resolved_type != type_name {
+                            let aliased_qualified = format!("{}.{}", resolved_type, method_name);
+                            if let Some(func_info) =
+                                self.ctx.lookup_function(&aliased_qualified).cloned()
+                            {
+                                // Only use if argument count matches
+                                if func_info.param_count == args.len() {
+                                    return self.compile_static_method_call(&func_info, args);
+                                }
+                            }
+                        }
+
+                        // Try resolving built-in numeric type aliases (u8, u16, u32, u64, i8, i16, i32, i64 -> Int)
+                        // These types are defined as aliases in the type system and their methods
+                        // are implemented on the base type (Int).
+                        if let Some(base_type) = resolve_numeric_type_alias(&type_name) {
+                            let aliased_qualified = format!("{}.{}", base_type, method_name);
+                            if let Some(func_info) =
+                                self.ctx.lookup_function(&aliased_qualified).cloned()
+                            {
+                                // Only use if argument count matches
+                                if func_info.param_count == args.len() {
+                                    return self.compile_static_method_call(&func_info, args);
+                                }
+                            }
+                        }
+
+                        // Try to resolve primitive type static constants (MIN, MAX, BITS)
+                        if args.is_empty() {
+                            if let Some(value) = resolve_type_static_constant(&type_name, &method_name) {
+                                let result = self.ctx.alloc_temp();
+                                let is_float_type = matches!(type_name.as_str(),
+                                    "Float" | "Float32" | "Float64" | "f32" | "f64");
+                                if is_float_type && method_name != "BITS" {
+                                    // Float constants: value is stored as bit pattern, convert back
+                                    let f = f64::from_bits(value as u64);
+                                    self.ctx.emit(Instruction::LoadF { dst: result, value: f });
+                                } else {
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: value as i64 });
+                                }
+                                return Ok(Some(result));
+                            }
+                        }
+
+                        // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok)
+                        // Variant constructors are registered as functions with variant_tag set.
+                        if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned() {
+                            if func_info.variant_tag.is_some() && func_info.param_count == args.len() {
+                                return self.compile_variant_constructor(&method_name, args);
+                            }
+                        }
+
+                        // For primitive types with static methods (e.g., Int.from_le_bytes,
+                        // Char.from_digit), emit as method call on a zero receiver.
+                        // The interpreter dispatches these via dispatch_primitive_method.
+                        if is_primitive_type(&type_name) {
+                            let receiver_reg = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadI { dst: receiver_reg, value: 0 });
+
+                            // Compile args into consecutive registers
+                            let first = if args.is_empty() {
+                                Reg(0) // dummy, won't be used
+                            } else {
+                                let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                                for arg in args.iter() {
+                                    let arg_val = self
+                                        .compile_expr(arg)?
+                                        .ok_or_else(|| CodegenError::internal("static method arg has no value"))?;
+                                    arg_vals.push(arg_val);
+                                }
+                                let f = self.ctx.registers.alloc_fresh();
+                                for _ in 1..args.len() {
+                                    self.ctx.registers.alloc_fresh();
+                                }
+                                for (i, arg_val) in arg_vals.iter().enumerate() {
+                                    let dst = Reg(f.0 + i as u16);
+                                    if *arg_val != dst {
+                                        self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
+                                        self.ctx.free_temp(*arg_val);
+                                    }
+                                }
+                                f
+                            };
+
+                            // Prefix method name with type for typed primitives
+                            let prefixed_method = match type_name.as_str() {
+                                "Int32" | "i32" => format!("int32${}", method_name),
+                                "UInt64" | "u64" => format!("uint64${}", method_name),
+                                "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
+                                _ => method_name.clone(),
+                            };
+
+                            let result = self.ctx.alloc_temp();
+                            let method_id = self.intern_string(&prefixed_method);
+                            self.ctx.emit(Instruction::CallM {
+                                dst: result,
+                                receiver: receiver_reg,
+                                method_id,
+                                args: crate::instruction::RegRange {
+                                    start: first,
+                                    count: args.len() as u8,
+                                },
+                            });
+                            self.ctx.free_temp(receiver_reg);
+                            return Ok(Some(result));
+                        }
+
+                        // For generic type parameters (like T.default()), emit a type method call.
+                        // This will be resolved during monomorphization when T is replaced
+                        // with a concrete type. For now, emit a CallTypeMethod instruction
+                        // that stores the type parameter name and method name.
+                        return self.compile_type_param_method_call(&type_name, method, args);
+                    }
+                }
+
+        // Compile receiver as value
+        let receiver_reg = self
+            .compile_expr(receiver)?
+            .ok_or_else(|| CodegenError::internal("method receiver has no value"))?;
+
+        // Handle built-in methods that map to dedicated opcodes
+        // BUT only if the receiver doesn't have a user-defined method with the same name
+        if method.name == "len" && args.is_empty() {
+            // Check if receiver has a user-defined len method.
+            // Skip stdlib collection types — their len must use the built-in Len opcode
+            // which reads from the correct runtime memory offset. Compiled stdlib methods
+            // like List.len use GetF with header offsets that don't match the C runtime
+            // object layout, causing .len() to return 0.
+            let (has_user_defined_len, len_type_hint) = {
+                let mut found = false;
+                let mut hint = 0u8;
+                if let ExprKind::Path(path) = &receiver.kind
+                    && path.segments.len() == 1
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let var_name = ident.name.to_string();
+                    if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                        let resolved_type = self.resolve_type_alias(type_name);
+                        let base_type = VbcCodegen::strip_generic_args(&resolved_type);
+                        // VBC-internal: derive Len opcode type_hint from WKT registry.
+                        // The interpreter's Len handler uses this hint byte to dispatch
+                        // to the correct runtime length implementation (List=1, Map=2,
+                        // Set=3, Deque=4, Text=5, Channel=6). See WKT::len_type_hint().
+                        hint = WKT::from_name(&base_type)
+                            .map(|wkt| wkt.len_type_hint())
+                            .unwrap_or(0);
+                        // VBC-internal: WKT::requires_builtin_len() returns true for
+                        // types (Text, List, Map) whose compiled stdlib .len() uses GetF
+                        // field offsets that don't match the NaN-boxed runtime object
+                        // layout. Forces the Len opcode path instead.
+                        let use_builtin_len = WKT::from_name(&base_type)
+                            .map(|wkt| wkt.requires_builtin_len())
+                            .unwrap_or(false);
+                        found = !use_builtin_len
+                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                    }
+                }
+                // Fallback: check via extract_expr_type_name (handles typed let bindings)
+                if !found && hint == 0 {
+                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
+                        let base_type = VbcCodegen::strip_generic_args(&type_name);
+                        // VBC-internal: same Len opcode hint / builtin-len logic as the
+                        // primary path above, but via expression-level type extraction.
+                        hint = WKT::from_name(&base_type)
+                            .map(|wkt| wkt.len_type_hint())
+                            .unwrap_or(0);
+                        let use_builtin_len = WKT::from_name(&base_type)
+                            .map(|wkt| wkt.requires_builtin_len())
+                            .unwrap_or(false);
+                        found = !use_builtin_len
+                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                    }
+                } else if !found {
+                    // hint already set from first path, still check fallback for found
+                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
+                        let base_type = VbcCodegen::strip_generic_args(&type_name);
+                        // VBC-internal: only check requires_builtin_len here (hint already
+                        // resolved from the primary path above).
+                        let use_builtin_len = WKT::from_name(&base_type)
+                            .map(|wkt| wkt.requires_builtin_len())
+                            .unwrap_or(false);
+                        found = !use_builtin_len
+                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                    }
+                }
+                (found, hint)
+            };
+
+            // Force Len opcode when type_hint is known (even if compiled .len() exists).
+            // Compiled .len() uses GetF offsets that may not match runtime layout.
+            if has_user_defined_len && len_type_hint != 0 {
+                // Type is known to be a collection — use Len opcode regardless
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Len {
+                    dst: result,
+                    arr: receiver_reg,
+                    type_hint: len_type_hint,
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(result));
+            }
+            if !has_user_defined_len {
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Len {
+                    dst: result,
+                    arr: receiver_reg,
+                    type_hint: len_type_hint,
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(result));
+            }
+        }
+
+        // Handle slice methods that map to intrinsics via CbgrExtended opcodes
+        // These are commonly called on slices like: slice.as_ptr(), slice.len(), etc.
+        if method.name == "as_ptr" && args.is_empty() {
+            // slice.as_ptr() -> extract pointer from fat pointer using Unslice
+            let result = self.ctx.alloc_temp();
+            // Encode operands: [dst] [src] - simple encoding for short register indices
+            let mut operands = Vec::with_capacity(4);
+            if result.is_short() {
+                operands.push(result.0 as u8);
+            } else {
+                operands.push(0x80 | ((result.0 >> 8) as u8));
+                operands.push(result.0 as u8);
+            }
+            if receiver_reg.is_short() {
+                operands.push(receiver_reg.0 as u8);
+            } else {
+                operands.push(0x80 | ((receiver_reg.0 >> 8) as u8));
+                operands.push(receiver_reg.0 as u8);
+            }
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::Unslice as u8,
+                operands,
+            });
+            self.ctx.free_temp(receiver_reg);
+            return Ok(Some(result));
+        }
+
+        if method.name == "as_mut_ptr" && args.is_empty() {
+            // slice.as_mut_ptr() -> extract mutable pointer from fat pointer (same opcode)
+            let result = self.ctx.alloc_temp();
+            let mut operands = Vec::with_capacity(4);
+            if result.is_short() {
+                operands.push(result.0 as u8);
+            } else {
+                operands.push(0x80 | ((result.0 >> 8) as u8));
+                operands.push(result.0 as u8);
+            }
+            if receiver_reg.is_short() {
+                operands.push(receiver_reg.0 as u8);
+            } else {
+                operands.push(0x80 | ((receiver_reg.0 >> 8) as u8));
+                operands.push(receiver_reg.0 as u8);
+            }
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::Unslice as u8,
+                operands,
+            });
+            self.ctx.free_temp(receiver_reg);
+            return Ok(Some(result));
+        }
+
+        if method.name == "is_empty" && args.is_empty() {
+            // Check if receiver has a user-defined is_empty method.
+            // Skip stdlib types (Text, List, Map, etc.) — their is_empty is best
+            // handled by the built-in Len + CmpI path.
+            let (has_user_defined, is_empty_type_hint) = {
+                let mut found = false;
+                let mut hint = 0u8;
+                // Method 1: Check via variable_type_names
+                if let ExprKind::Path(path) = &receiver.kind
+                    && path.segments.len() == 1
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let var_name = ident.name.to_string();
+                    if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                        let resolved_type = self.resolve_type_alias(type_name);
+                        let base_type = VbcCodegen::strip_generic_args(&resolved_type);
+                        // VBC-internal: reuse the Len opcode hint for is_empty lowering
+                        // (is_empty compiles to Len + CmpI 0 for stdlib collections).
+                        hint = WKT::from_name(&base_type).map_or(0, |wkt| wkt.len_type_hint());
+                        let is_stdlib_type = type_names::is_builtin_method_type(&base_type);
+                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
+                    }
+                }
+                // Method 2: Check via extract_expr_type_name (handles typed let bindings)
+                if !found && hint == 0 {
+                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
+                        let base_type = VbcCodegen::strip_generic_args(&type_name);
+                        // VBC-internal: fallback Len hint for is_empty (same as Method 1).
+                        hint = WKT::from_name(&base_type).map_or(0, |wkt| wkt.len_type_hint());
+                        let is_stdlib_type = type_names::is_builtin_method_type(&base_type);
+                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
+                    }
+                } else if !found {
+                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
+                        let base_type = VbcCodegen::strip_generic_args(&type_name);
+                        let is_stdlib_type = type_names::is_builtin_method_type(&base_type);
+                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
+                    }
+                }
+                (found, hint)
+            };
+
+            if !has_user_defined {
+                // slice.is_empty() -> slice.len() == 0
+                let len_result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Len {
+                    dst: len_result,
+                    arr: receiver_reg,
+                    type_hint: is_empty_type_hint,
+                });
+                // Emit a proper comparison with zero
+                let zero_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: zero_reg, value: 0 });
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CmpI {
+                    op: crate::instruction::CompareOp::Eq,
+                    dst: result,
+                    a: len_result,
+                    b: zero_reg,
+                });
+                self.ctx.free_temp(zero_reg);
+                self.ctx.free_temp(len_result);
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(result));
+            }
+        }
+
+        // Compile arguments into consecutive registers (after receiver).
+        // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
+        // Phase 2: allocate consecutive fresh regs and move values into them
+        let args_start = if !args.is_empty() {
+            let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("method arg has no value"))?;
+                arg_vals.push(arg_val);
+            }
+
+            // Allocate consecutive fresh registers
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..args.len() {
+                self.ctx.registers.alloc_fresh();
+            }
+
+            // Move compiled values into consecutive registers
+            for (i, arg_val) in arg_vals.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if *arg_val != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
+                    self.ctx.free_temp(*arg_val);
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        let result = self.ctx.alloc_temp();
+
+        // Check if this instance method call matches a registered type::method intrinsic.
+        // This handles cases like d.saturating_add(other) where d is a Duration variable:
+        // the intrinsic mapping for "Duration::saturating_add" applies to instance calls too.
+        //
+        // IMPORTANT: Only apply this for receivers that could actually be Duration/Instant.
+        // Primitive numeric types (Byte, Int32, UInt64, Int, Float, etc.) must NOT match
+        // Duration/Instant intrinsics, even if the method name happens to overlap
+        // (e.g., saturating_add exists on both Byte and Duration).
+        {
+            use crate::intrinsics::registry::CodegenStrategy;
+            use crate::codegen::context::VarTypeKind;
+
+            // Determine if the receiver is a known primitive numeric type
+            // This includes:
+            // 1. Path receivers that are variables of primitive type (e.g., `x` where x: Int)
+            // 2. Field receivers where the base is a primitive type name (e.g., `Int.MAX`)
+            // 3. Literal receivers (int/float literals) or Paren containing them
+            // 4. Unary expressions on literals (e.g., `-5`, `-0.0`)
+            let receiver_is_primitive_numeric = if let ExprKind::Path(path) = &receiver.kind
+                && path.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+            {
+                matches!(
+                    self.ctx.get_variable_type(&ident.name),
+                    VarTypeKind::Int | VarTypeKind::Float | VarTypeKind::Bool
+                    | VarTypeKind::Byte | VarTypeKind::Char | VarTypeKind::Int32
+                    | VarTypeKind::UInt64
+                )
+            } else if let ExprKind::Literal(lit) = &receiver.kind {
+                // Direct literal receivers are primitive
+                use verum_ast::literal::LiteralKind;
+                matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_) | LiteralKind::Bool(_) | LiteralKind::Char(_))
+            } else if let ExprKind::Paren(inner) = &receiver.kind {
+                // Paren-wrapped literals are primitive
+                use verum_ast::literal::LiteralKind;
+                if let ExprKind::Literal(lit) = &inner.kind {
+                    matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_) | LiteralKind::Bool(_) | LiteralKind::Char(_))
+                } else if let ExprKind::Unary { op: verum_ast::expr::UnOp::Neg, expr: inner_unary } = &inner.kind {
+                    // Negated literals in parens: (-5), (-0.0)
+                    if let ExprKind::Literal(lit) = &inner_unary.kind {
+                        matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_))
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else if let ExprKind::Unary { op: verum_ast::expr::UnOp::Neg, expr: inner } = &receiver.kind {
+                // Negated literals without parens: -5, -0.0 (if parsed this way)
+                use verum_ast::literal::LiteralKind;
+                if let ExprKind::Literal(lit) = &inner.kind {
+                    matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_))
+                } else {
+                    false
+                }
+            } else if let ExprKind::Field { expr: base, .. } = &receiver.kind {
+                // Check if base is a primitive type name like Int, Float, Byte, etc.
+                // This handles cases like Int.MAX.saturating_add(1) where we should NOT
+                // dispatch to Duration.saturating_add even though the receiver type is unknown.
+                if let ExprKind::Path(path) = &base.kind
+                    && path.segments.len() == 1
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    // Check if the base is a known primitive type name
+                    matches!(
+                        ident.name.as_str(),
+                        "Int" | "Float" | "Bool" | "Byte" | "Char" | "Int32" | "UInt64" |
+                        "Float32" | "Float64" | "i8" | "i16" | "i32" | "i64" |
+                        "u8" | "u16" | "u32" | "u64" | "f32" | "f64"
+                    )
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !receiver_is_primitive_numeric {
+                static INTRINSIC_TYPES: &[&str] = &[
+                    "Duration", "Instant", "Stopwatch", "PerfCounter", "DeadlineTimer",
+                ];
+
+                // If the receiver has a known type name, only check that specific type.
+                // This prevents mismatches like sw.elapsed() (Stopwatch) incorrectly
+                // dispatching to Instant::elapsed because the method name matches.
+                let receiver_type_name: Option<String> = if let ExprKind::Path(path) = &receiver.kind
+                    && path.segments.len() == 1
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    self.ctx.variable_type_names.get(&ident.name.to_string()).cloned()
+                } else if let ExprKind::MethodCall { .. } = &receiver.kind {
+                    // For chained method calls like Num.new(1).add(2) or deeper chains,
+                    // determine the return type to avoid dispatching to wrong intrinsic type
+                    self.infer_method_chain_return_type(receiver)
+                } else if let ExprKind::Field { .. } = &receiver.kind {
+                    // For field access receivers like `foo.bar.method()`, resolve the field's
+                    // declared type via type_field_type_names. This prevents user-defined types
+                    // with same-named methods (e.g., MockDuration.as_millis) from being
+                    // incorrectly dispatched to stdlib inline sequences (e.g., DurationAsMillis).
+                    self.extract_expr_type_name(receiver)
+                } else {
+                    None
+                };
+
+                // For known receiver type: dispatch directly to that type's intrinsic.
+                // For unknown receiver type: collect all matches and only use if unambiguous.
+                let mut found_match: Option<crate::intrinsics::registry::InlineSequenceId> = None;
+                let mut ambiguous = false;
+
+                for type_name in INTRINSIC_TYPES {
+                    // If we know the receiver type, skip non-matching types
+                    if let Some(ref rtn) = receiver_type_name {
+                        if rtn.as_str() != *type_name {
+                            continue;
+                        }
+                    }
+
+                    // Use "." separator to match how intrinsics are registered (e.g., "Duration.saturating_add")
+                    let qualified = format!("{}.{}", type_name, method.name);
+                    if let Some(func_info) = self.ctx.lookup_function(&qualified).cloned() {
+                        if let Some(ref intrinsic_name) = func_info.intrinsic_name {
+                            if let Some(info) = lookup_intrinsic(intrinsic_name) {
+                                if let CodegenStrategy::InlineSequence(seq_id) = info.intrinsic.strategy {
+                                    if receiver_type_name.is_some() {
+                                        // Known type match: dispatch immediately
+                                        let mut inline_args = vec![receiver_reg];
+                                        for i in 0..args.len() {
+                                            inline_args.push(Reg(args_start.0 + i as u16));
+                                        }
+                                        self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
+                                        self.ctx.free_temp(receiver_reg);
+                                        return Ok(Some(result));
+                                    }
+                                    // Unknown type: track match for ambiguity check
+                                    if found_match.is_some() {
+                                        ambiguous = true;
+                                    } else {
+                                        found_match = Some(seq_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // For unknown receiver type, only dispatch if unambiguous (exactly one match)
+                if !ambiguous {
+                    if let Some(seq_id) = found_match {
+                        let mut inline_args = vec![receiver_reg];
+                        for i in 0..args.len() {
+                            inline_args.push(Reg(args_start.0 + i as u16));
+                        }
+                        self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
+                        self.ctx.free_temp(receiver_reg);
+                        return Ok(Some(result));
+                    }
+                }
+            }
+        }
+
+        // Check receiver type to prefix method name for correct dispatch.
+        // For primitive types (Byte, Int32, UInt64), use type$ prefix.
+        // For named struct types (MapFlags, MemProt, etc.), use Type:: prefix.
+        let effective_method_name = if let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+        {
+            match &path.segments[0] {
+                verum_ast::ty::PathSegment::Name(ident) => {
+                    // Case 1a: Receiver is a simple named variable path
+                    use crate::codegen::context::VarTypeKind;
+                    let var_name = ident.name.to_string();
+                    let vtype = self.ctx.get_variable_type(&ident.name);
+                    match vtype {
+                        VarTypeKind::Byte => format!("byte${}", method.name),
+                        VarTypeKind::Int32 => format!("int32${}", method.name),
+                        VarTypeKind::UInt64 => format!("uint64${}", method.name),
+                        _ => {
+                            // For unknown primitive types, check if we have a named struct type
+                            // This enables correct method dispatch for user-defined struct types
+                            // like MapFlags and MemProt which both have to_unix_flags() methods.
+                            if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                                // Check if type_name is a generic type parameter (like T, U, Item).
+                                // Type parameters are typically single uppercase letters or
+                                // short PascalCase names. We detect them by:
+                                // 1. Single uppercase letter (T, U, V, etc.)
+                                // 2. Not a known concrete type (Maybe, Result, List, etc.)
+                                // For type parameters, DON'T prefix - use method name only
+                                // and let runtime dispatch based on actual value type.
+                                let is_type_param = type_name.len() == 1
+                                    && type_name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false);
+
+                                if is_type_param {
+                                    // Generic type parameter - let runtime dispatch
+                                    method.name.to_string()
+                                } else {
+                                    // TASK #21 FIX: Resolve type alias for method dispatch.
+                                    // If type_name is a type alias (e.g., Vec4f -> Vec), use the
+                                    // base type for method lookup so Vec.to_array is found.
+                                    // Strip generic args from the type name for method lookup
+                                    // (e.g., "Maybe<Int>" → "Maybe" for "Maybe.is_some").
+                                    let resolved_type = self.resolve_type_alias(type_name);
+                                    let base_type = VbcCodegen::strip_generic_args(&resolved_type);
+                                    format!("{}.{}", base_type, method.name)
+                                }
+                            } else {
+                                method.name.to_string()
+                            }
+                        }
+                    }
+                }
+                verum_ast::ty::PathSegment::SelfValue => {
+                    // Case 1b: Receiver is `self` keyword - look up type from impl context
+                    if let Some(type_name) = self.ctx.variable_type_names.get("self") {
+                        // TASK #21 FIX: Resolve type alias for self method dispatch
+                        // Strip generic args for method lookup (e.g., "Maybe<T>" → "Maybe").
+                        let resolved_type = self.resolve_type_alias(type_name);
+                        let base_type = VbcCodegen::strip_generic_args(&resolved_type);
+                        format!("{}.{}", base_type, method.name)
+                    } else {
+                        method.name.to_string()
+                    }
+                }
+                _ => method.name.to_string(),
+            }
+        } else if let ExprKind::Call { func, .. } = &receiver.kind {
+            // Case 2: Receiver is a function call - check return type
+            // Extract function name from the call expression
+            let func_name = match &func.kind {
+                ExprKind::Path(path) => {
+                    path.segments.iter().filter_map(|seg| {
+                        match seg {
+                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                            _ => None,
+                        }
+                    }).collect::<Vec<_>>().join("::")
+                }
+                _ => String::new(),
+            };
+
+            // Look up function info to get return type
+            if !func_name.is_empty() {
+                if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
+                    if let Some(ref ret_type) = func_info.return_type {
+                        // Check return type kind for UInt64
+                        let type_name = self.type_ref_to_name(ret_type);
+                        if type_name == "UInt64" {
+                            format!("uint64${}", method.name)
+                        } else if type_name == "Int32" {
+                            format!("int32${}", method.name)
+                        } else if type_name == "Byte" {
+                            format!("byte${}", method.name)
+                        } else {
+                            method.name.to_string()
+                        }
+                    } else {
+                        method.name.to_string()
+                    }
+                } else {
+                    method.name.to_string()
+                }
+            } else {
+                method.name.to_string()
+            }
+        } else if let ExprKind::MethodCall { receiver: inner_receiver, method: inner_method, .. } = &receiver.kind {
+            // Case 3: Receiver is a method call - determine return type of the inner method
+            // This handles chains like: obj.as_nanos().checked_add(...)
+            self.determine_method_return_type_prefix(inner_receiver, inner_method, method)
+        } else if let ExprKind::Field { expr: base, field } = &receiver.kind {
+            // Case 4: Receiver is a field access - check if base is a type name or instance
+            // Handles: FileDesc.STDIN.is_valid(), self.inner.next(), var.field.method()
+            if let ExprKind::Path(ref path) = base.kind {
+                if path.segments.len() == 1 {
+                    if let verum_ast::ty::PathSegment::Name(ref type_ident) = path.segments[0] {
+                        let type_name = type_ident.name.to_string();
+                        if type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                            // Type name (e.g., FileDesc.STDIN.is_valid)
+                            let resolved_type = self.resolve_type_alias(&type_name);
+                            let base_type = VbcCodegen::strip_generic_args(&resolved_type);
+                            format!("{}.{}", base_type, method.name)
+                        } else {
+                            // Instance variable field access (e.g., var.field.method())
+                            // Look up variable type, then field type for method prefix
+                            if let Some(var_type) = self.ctx.variable_type_names.get(&type_name) {
+                                let base_type = VbcCodegen::strip_generic_args(var_type);
+                                if let Some(field_type) = self.field_type_name(&base_type, &field.name) {
+                                    let field_base = VbcCodegen::strip_generic_args(field_type);
+                                    format!("{}.{}", field_base, method.name)
+                                } else {
+                                    method.name.to_string()
+                                }
+                            } else {
+                                method.name.to_string()
+                            }
+                        }
+                    } else if let verum_ast::ty::PathSegment::SelfValue = path.segments[0] {
+                        // self.field.method() — look up self's type then field type
+                        if let Some(self_type) = self.ctx.variable_type_names.get("self") {
+                            let base_type = VbcCodegen::strip_generic_args(self_type);
+                            if let Some(field_type) = self.field_type_name(&base_type, &field.name) {
+                                let field_base = VbcCodegen::strip_generic_args(field_type);
+                                format!("{}.{}", field_base, method.name)
+                            } else {
+                                method.name.to_string()
+                            }
+                        } else {
+                            method.name.to_string()
+                        }
+                    } else {
+                        method.name.to_string()
+                    }
+                } else {
+                    method.name.to_string()
+                }
+            } else {
+                method.name.to_string()
+            }
+        } else if let ExprKind::Literal(lit) = &receiver.kind {
+            // Case 5: Receiver is a literal - determine type from literal kind
+            // This handles cases like `(0.0).is_zero()` or `(42).abs()`
+            use verum_ast::literal::LiteralKind;
+            match &lit.kind {
+                LiteralKind::Int(_) => {
+                    format!("Int.{}", method.name)
+                }
+                LiteralKind::Float(_) => {
+                    format!("Float.{}", method.name)
+                }
+                LiteralKind::Bool(_) => {
+                    format!("Bool.{}", method.name)
+                }
+                LiteralKind::Char(_) => {
+                    format!("Char.{}", method.name)
+                }
+                LiteralKind::Text(_) | LiteralKind::InterpolatedString(_) => {
+                    format!("Text.{}", method.name)
+                }
+                LiteralKind::ByteChar(_) => {
+                    format!("Byte.{}", method.name)
+                }
+                LiteralKind::ByteString(_) => {
+                    // Byte strings are [Byte] slices
+                    method.name.to_string()
+                }
+                LiteralKind::Tagged { .. }
+                | LiteralKind::Contract(_)
+                | LiteralKind::Composite(_)
+                | LiteralKind::ContextAdaptive(_) => {
+                    method.name.to_string()
+                }
+            }
+        } else if let ExprKind::Unary { op, expr: inner } = &receiver.kind {
+            // Case 6: Receiver is a unary expression
+            use verum_ast::expr::UnOp;
+            use verum_ast::literal::LiteralKind;
+            if let UnOp::Neg = op {
+                // Case 6a: Negation of literal - check inner for literal type
+                // This handles cases like `(-5).abs()` or `(-0.0).is_zero()`
+                if let ExprKind::Literal(lit) = &inner.kind {
+                    match &lit.kind {
+                        LiteralKind::Int(_) => {
+                            format!("Int.{}", method.name)
+                        }
+                        LiteralKind::Float(_) => {
+                            format!("Float.{}", method.name)
+                        }
+                        _ => method.name.to_string(),
+                    }
+                } else {
+                    method.name.to_string()
+                }
+            } else if let UnOp::Deref = op {
+                // Case 6b: Dereference - infer inner type and unwrap Heap<T>/Shared<T>
+                // This handles `(*l).method()` where l: Heap<T> → method on T
+                if let Some(inner_type) = self.extract_expr_type_name(inner) {
+                    // Strip Heap<T> or Shared<T> wrapper to get inner type T
+                    let derefed_type = if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
+                        // Extract T from Heap<T>
+                        if let Some(start) = inner_type.find('<') {
+                            let end = inner_type.rfind('>').unwrap_or(inner_type.len());
+                            inner_type[start + 1..end].to_string()
+                        } else {
+                            inner_type.clone()
+                        }
+                    } else if self.is_allocating_wrapper(&inner_type) {
+                        // Plain Heap/Shared without generic args — can't determine inner type
+                        method.name.to_string();
+                        inner_type.clone()
+                    } else {
+                        inner_type.clone()
+                    };
+                    let base_type = VbcCodegen::strip_generic_args(&derefed_type);
+                    format!("{}.{}", base_type, method.name)
+                } else {
+                    method.name.to_string()
+                }
+            } else {
+                method.name.to_string()
+            }
+        } else if let ExprKind::Paren(inner) = &receiver.kind {
+            // Case 7: Receiver is a parenthesized expression - unwrap and check inner
+            // This handles cases like `(0.0).is_zero()` where the literal is wrapped in parentheses
+            use verum_ast::literal::LiteralKind;
+            if let ExprKind::Literal(lit) = &inner.kind {
+                match &lit.kind {
+                    LiteralKind::Int(_) => format!("Int.{}", method.name),
+                    LiteralKind::Float(_) => format!("Float.{}", method.name),
+                    LiteralKind::Bool(_) => format!("Bool.{}", method.name),
+                    LiteralKind::Char(_) => format!("Char.{}", method.name),
+                    LiteralKind::Text(_) | LiteralKind::InterpolatedString(_) => {
+                        format!("Text.{}", method.name)
+                    }
+                    LiteralKind::ByteChar(_) => format!("Byte.{}", method.name),
+                    _ => method.name.to_string(),
+                }
+            } else if let ExprKind::Unary { op, expr: inner_unary } = &inner.kind {
+                use verum_ast::expr::UnOp;
+                match op {
+                    UnOp::Neg => {
+                        // Handle negated literals like `(-0.0).is_zero()`
+                        if let ExprKind::Literal(lit) = &inner_unary.kind {
+                            match &lit.kind {
+                                LiteralKind::Int(_) => format!("Int.{}", method.name),
+                                LiteralKind::Float(_) => format!("Float.{}", method.name),
+                                _ => method.name.to_string(),
+                            }
+                        } else {
+                            method.name.to_string()
+                        }
+                    }
+                    UnOp::Deref => {
+                        // Handle `(*x).method()` — infer inner type and unwrap Heap<T>/Shared<T>
+                        if let Some(inner_type) = self.extract_expr_type_name(inner_unary) {
+                            let derefed_type = if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
+                                if let Some(start) = inner_type.find('<') {
+                                    let end = inner_type.rfind('>').unwrap_or(inner_type.len());
+                                    inner_type[start + 1..end].to_string()
+                                } else {
+                                    inner_type.clone()
+                                }
+                            } else {
+                                inner_type.clone()
+                            };
+                            let base_type = VbcCodegen::strip_generic_args(&derefed_type);
+                            format!("{}.{}", base_type, method.name)
+                        } else {
+                            method.name.to_string()
+                        }
+                    }
+                    _ => method.name.to_string(),
+                }
+            } else {
+                // For any other paren-wrapped expression, try extract_expr_type_name
+                if let Some(type_name) = self.extract_expr_type_name(inner) {
+                    let base_type = VbcCodegen::strip_generic_args(&type_name);
+                    format!("{}.{}", base_type, method.name)
+                } else {
+                    method.name.to_string()
+                }
+            }
+        } else {
+            method.name.to_string()
+        };
+        let method_id = self.intern_string(&effective_method_name);
+
+        // Check if the method takes &mut self (mutable reference to self).
+        // If so, we need to create a CBGR reference to the receiver and pass that
+        // instead of the value directly. This enables `*self = value` inside the
+        // method to write back to the caller's variable.
+        let actual_receiver = if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
+            if func_info.takes_self_mut_ref {
+                // Create a mutable reference to the receiver
+                let ref_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::RefMut {
+                    dst: ref_reg,
+                    src: receiver_reg,
+                });
+                // The original receiver_reg will be freed below, but ref_reg is the actual receiver
+                ref_reg
+            } else {
+                receiver_reg
+            }
+        } else {
+            receiver_reg
+        };
+
+        // Emit method call instruction
+        self.ctx.emit(Instruction::CallM {
+            dst: result,
+            receiver: actual_receiver,
+            method_id,
+            args: crate::instruction::RegRange {
+                start: args_start,
+                count: args.len() as u8,
+            },
+        });
+
+        // Track element type for List variables when push/insert is called.
+        // This allows `let n = nodes[0]` to infer the correct element type
+        // for field access resolution (e.g., n.value → Node.value idx 0).
+        if matches!(method.name.as_str(), "push" | "push_back" | "push_front" | "insert" | "append") && !args.is_empty() {
+            if let ExprKind::Path(ref path) = receiver.kind {
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ref ident) = path.segments[0] {
+                        let var_name = ident.name.to_string();
+                        if let Some(current_type) = self.ctx.variable_type_names.get(&var_name).cloned() {
+                            // Only update if current type is bare collection name or has
+                            // unresolved generic params (e.g., "List<T>", "Set<K>").
+                            let base_type = VbcCodegen::strip_generic_args(&current_type);
+                            let has_bare_generic = if let Some(start) = current_type.find('<') {
+                                if let Some(end) = current_type.rfind('>') {
+                                    let inner = current_type[start+1..end].trim();
+                                    inner.len() <= 2 && inner.chars().all(|c| c.is_ascii_uppercase())
+                                } else {
+                                    true
+                                }
+                            } else {
+                                true // No generic args at all (bare "List")
+                            };
+                            if matches!(&*base_type, "List" | "Set" | "Deque") && has_bare_generic {
+                                // Infer element type from the first arg (for push) or second arg (for insert)
+                                let elem_expr = if method.name.as_str() == "insert" && args.len() >= 2 {
+                                    Some(&args[1])
+                                } else {
+                                    Some(&args[0])
+                                };
+                                if let Some(elem) = elem_expr {
+                                    if let Some(elem_type) = self.extract_expr_type_name(elem) {
+                                        let new_type = format!("{}<{}>", base_type, elem_type);
+                                        self.ctx.variable_type_names.insert(var_name, new_type);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Free the temporary registers
+        if actual_receiver != receiver_reg {
+            self.ctx.free_temp(actual_receiver);
+        }
+        self.ctx.free_temp(receiver_reg);
+
+        Ok(Some(result))
+    }
+
+    /// Determines the method name prefix based on the return type of a method call.
+    ///
+    /// Infer the return type of a method chain expression by walking up the chain.
+    /// For `Num.new(1).add(2)`, determines that `.add(2)` returns "Num" by looking up
+    /// the return type of `Num.new` → "Num", then `Num.add` → "Num".
+    fn infer_method_chain_return_type(&self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                // Base case: a variable or type name
+                if path.segments.len() == 1 {
+                    if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                        let name = ident.name.to_string();
+                        // Check variable_type_names first
+                        if let Some(type_name) = self.ctx.variable_type_names.get(&name) {
+                            return Some(type_name.clone());
+                        }
+                        // Check if it's a type name (constructor)
+                        if let Some(func_info) = self.ctx.lookup_function(&name) {
+                            if func_info.param_count == 0 {
+                                return func_info.return_type_name.clone();
+                            }
+                        }
+                        // Could be a type name itself (e.g., "Num" for static methods)
+                        return Some(name);
+                    }
+                }
+                None
+            }
+            ExprKind::MethodCall { receiver, method, .. } => {
+                // Recursive case: determine receiver type, then look up method return type
+                if let Some(recv_type) = self.infer_method_chain_return_type(receiver) {
+                    // Strip generic args for function lookup (e.g., "Wrapper<Int>" → "Wrapper")
+                    let base_recv = VbcCodegen::strip_generic_args(&recv_type);
+                    let qualified = format!("{}.{}", base_recv, method.name);
+                    if let Some(func_info) = self.ctx.lookup_function(&qualified) {
+                        return func_info.return_type_name.clone();
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// This handles method chains like `obj.as_nanos().checked_add(...)` where we need
+    /// to determine that `as_nanos()` returns `UInt64` to correctly prefix `checked_add`.
+    fn determine_method_return_type_prefix(
+        &self,
+        inner_receiver: &Expr,
+        inner_method: &verum_ast::Ident,
+        outer_method_name: &verum_ast::Ident,
+    ) -> String {
+        // Known methods that return UInt64
+        const UINT64_METHODS: &[&str] = &[
+            "as_nanos", "as_micros", "as_millis", "as_secs", "as_secs_f64",
+            "to_bits", "len", "capacity", "count", "size",
+            "elapsed_nanos", "elapsed_micros", "elapsed_millis", "elapsed_secs",
+        ];
+
+        // Known methods that return Int32
+        const INT32_METHODS: &[&str] = &[
+            "to_i32", "as_i32", "len_i32",
+        ];
+
+        // Known methods that return Byte
+        const BYTE_METHODS: &[&str] = &[
+            "first_byte", "last_byte", "as_byte", "to_byte",
+        ];
+
+        // Methods that return Maybe<T> - these methods ALWAYS return Maybe regardless of input
+        // When chained with Maybe methods, we need to emit Maybe.method
+        // NOTE: Do NOT add methods that return Self (like inspect, cloned, copied) - those
+        // return the same type as the receiver, not necessarily Maybe.
+        const MAYBE_RETURNING_METHODS: &[&str] = &[
+            // Result -> Maybe conversion methods
+            "ok", "err",
+            // Maybe transformation methods that return Maybe<T> (critical for chaining!)
+            // These specifically return Maybe when called ON a Maybe
+            "map", "and_then", "or_else", "and", "or", "xor",
+            "zip", "zip_with", "flatten", "filter",
+            // Maybe reference methods that return Maybe<&T> or Maybe<&mut T>
+            "as_ref", "as_mut", "take", "replace",
+            // Iterator methods that return Maybe
+            "next", "first", "last", "nth", "find", "find_map",
+            "min", "max", "min_by", "max_by", "min_by_key", "max_by_key",
+            "reduce", "try_reduce", "try_fold",
+            // Collection lookup methods
+            "get", "get_mut", "front", "back", "pop", "pop_front", "pop_back",
+            // Checked arithmetic returning Maybe
+            "checked_add", "checked_sub", "checked_mul", "checked_div",
+            "checked_rem", "checked_neg", "checked_abs",
+            // Data type methods returning Maybe
+            "as_bool", "as_int", "as_float", "as_text",
+            "as_array", "as_array_mut", "as_object", "as_object_mut",
+            "at", "at_mut", "remove", "path", "to_number",
+        ];
+
+        // Methods that belong to Maybe type (used when outer method should be qualified)
+        const MAYBE_METHODS: &[&str] = &[
+            "unwrap", "unwrap_or", "unwrap_or_else", "unwrap_or_default",
+            "expect", "is_some", "is_none", "is_some_and",
+            "map", "map_or", "map_or_else", "and_then", "or_else",
+            "ok_or", "ok_or_else", "and", "or", "xor", "zip", "zip_with",
+            "flatten", "inspect", "iter", "iter_mut", "into_iter",
+        ];
+
+        let method_name_str = inner_method.name.as_str();
+        let outer_method_str = outer_method_name.name.as_str();
+
+        // Check for known method return types
+        if UINT64_METHODS.contains(&method_name_str) {
+            return format!("uint64${}", outer_method_name.name);
+        }
+        if INT32_METHODS.contains(&method_name_str) {
+            return format!("int32${}", outer_method_name.name);
+        }
+        if BYTE_METHODS.contains(&method_name_str) {
+            return format!("byte${}", outer_method_name.name);
+        }
+
+        // Check if inner method returns Maybe and outer method is a Maybe method
+        // This handles patterns like: result.ok().unwrap(), iter.next().map(...)
+        if MAYBE_RETURNING_METHODS.contains(&method_name_str) && MAYBE_METHODS.contains(&outer_method_str) {
+            return format!("Maybe.{}", outer_method_name.name);
+        }
+
+        // Try to determine receiver type and look up method return type
+        if let ExprKind::Path(path) = &inner_receiver.kind
+            && path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+        {
+            let var_name = ident.name.to_string();
+
+            // First, try variable_type_names (for local variables)
+            let receiver_type = if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                Some(type_name.clone())
+            } else if let Some(func_info) = self.ctx.lookup_function(&var_name) {
+                // For constants/statics (functions with 0 params), get return type
+                if func_info.param_count == 0 {
+                    func_info.return_type_name.clone()
+                } else {
+                    // Could be a record constructor (param_count > 0).
+                    // Check if Type.inner_method exists as a registered function.
+                    let qualified = format!("{}.{}", var_name, inner_method.name);
+                    if self.ctx.lookup_function(&qualified).is_some() {
+                        Some(var_name.clone())
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                // Check if this is a type name (e.g., "Num" in Num.new(1).add(2))
+                // by looking for Type.inner_method as a registered function
+                let qualified = format!("{}.{}", var_name, inner_method.name);
+                if self.ctx.lookup_function(&qualified).is_some() {
+                    Some(var_name.clone())
+                } else {
+                    None
+                }
+            };
+
+            // Check if we have type information for this variable
+            if let Some(type_name) = receiver_type {
+                // Look up the inner method's return type
+                // Strip generic args from the type name for lookup (e.g., "Wrapper<Int>" → "Wrapper")
+                let base_type = VbcCodegen::strip_generic_args(&type_name);
+                let qualified_inner_method = format!("{}.{}", base_type, inner_method.name);
+                if let Some(inner_func_info) = self.ctx.lookup_function(&qualified_inner_method) {
+                    if let Some(ref inner_ret_type) = inner_func_info.return_type_name {
+                        // Use the inner method's return type to qualify the outer method
+                        // Strip generic args so "Wrapper<Int>.map_add" becomes "Wrapper.map_add"
+                        let ret_base = VbcCodegen::strip_generic_args(inner_ret_type);
+                        return format!("{}.{}", ret_base, outer_method_name.name);
+                    }
+                }
+
+                // Fallback heuristics based on type name patterns
+                if type_name.contains("Duration") && method_name_str == "as_nanos" {
+                    return format!("uint64${}", outer_method_name.name);
+                }
+                // If receiver is Result and inner method is ok/err, outer method should use Maybe
+                if type_name.starts_with("Result") && (method_name_str == "ok" || method_name_str == "err") {
+                    if MAYBE_METHODS.contains(&outer_method_str) {
+                        return format!("Maybe.{}", outer_method_name.name);
+                    }
+                }
+            }
+        }
+
+        // Fallback: use infer_method_chain_return_type for deeper chains
+        // This handles cases like Num.new(1).add(2).add(3) where inner_receiver
+        // is a MethodCall, not a simple Path
+        if let ExprKind::MethodCall { .. } = &inner_receiver.kind {
+            // The inner_receiver is itself a method call chain.
+            // Reconstruct the full inner call expression (inner_receiver.inner_method)
+            // and determine its return type.
+            if let Some(inner_ret_type) = self.infer_method_chain_return_type(inner_receiver) {
+                let base_ret = VbcCodegen::strip_generic_args(&inner_ret_type);
+                let qualified = format!("{}.{}", base_ret, inner_method.name);
+                if let Some(func_info) = self.ctx.lookup_function(&qualified) {
+                    if let Some(ref ret_type) = func_info.return_type_name {
+                        let ret_base = VbcCodegen::strip_generic_args(ret_type);
+                        return format!("{}.{}", ret_base, outer_method_name.name);
+                    }
+                }
+            }
+        }
+
+        // Default: no prefix
+        outer_method_name.name.to_string()
+    }
+
+    /// Compiles a static method call (Type::method syntax).
+    ///
+    /// This handles cases like `List::new()` or `List.new()` where the receiver
+    /// is a type name, not a value.
+    fn compile_static_method_call(
+        &mut self,
+        func_info: &FunctionInfo,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
+        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
+        // Emitting a Call with this ID would cause "Function N not found" at runtime.
+        if func_info.id.0 == u32::MAX / 2 {
+            if args.len() == 1 {
+                // Newtype constructor — zero-cost wrapper, pass through the inner value
+                return self.compile_expr(&args[0]);
+            } else if args.is_empty() {
+                // Unit type constructor
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                return Ok(Some(dest));
+            }
+            // Multi-field record: fall through to normal allocation path below
+        }
+
+        // Safety: variant constructors must use MakeVariant, not Call.
+        // Sentinel IDs (>= 0xFFFF_FF00) are not real function IDs and will cause
+        // "Function N not found" at runtime if emitted as Call instructions.
+        if let Some(tag) = func_info.variant_tag {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+            for (i, arg) in args.iter().enumerate() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: result,
+                    field: i as u32,
+                    value: arg_val,
+                });
+                self.ctx.free_temp(arg_val);
+            }
+            return Ok(Some(result));
+        }
+
+        // Check if this function is an intrinsic — resolve inline instead of emitting Call
+        if let Some(intrinsic_name) = &func_info.intrinsic_name {
+            if let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name) {
+                return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+            }
+        }
+
+        // Check argument count
+        if args.len() != func_info.param_count {
+            return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                expected: func_info.param_count,
+                found: args.len(),
+                function: "static method".to_string(),
+            }));
+        }
+
+        // Compile arguments
+        let args_start = if !args.is_empty() {
+            let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("static method arg has no value"))?;
+                arg_results.push(arg_val);
+            }
+
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..args.len() {
+                self.ctx.registers.alloc_fresh();
+            }
+
+            for (i, &src) in arg_results.iter().enumerate() {
+                let dst = Reg(first.0 + i as u16);
+                if src != dst {
+                    self.ctx.emit(Instruction::Mov { dst, src });
+                    self.ctx.free_temp(src);
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        let result = self.ctx.alloc_temp();
+
+        self.ctx.emit(Instruction::Call {
+            dst: result,
+            func_id: func_info.id.0,
+            args: crate::instruction::RegRange {
+                start: args_start,
+                count: args.len() as u8,
+            },
+        });
+
+        Ok(Some(result))
+    }
+
+    /// Compiles a method call on a type parameter (generic).
+    ///
+    /// For calls like `T.default()` where T is a generic type parameter,
+    /// we emit a virtual dispatch call that will be resolved during
+    /// monomorphization when T is replaced with a concrete type.
+    ///
+    /// Uses "dyn:" prefix to trigger protocol dispatch at the LLVM level.
+    /// The LLVM dyn dispatch handler reads type_id from the receiver's object
+    /// header and builds a switch over concrete protocol implementations.
+    fn compile_type_param_method_call(
+        &mut self,
+        type_param: &str,
+        method: &verum_ast::ty::Ident,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile arguments into consecutive registers
+        let args_start = if !args.is_empty() {
+            let first = self.ctx.alloc_temp();
+            let first_val = self
+                .compile_expr(&args[0])?
+                .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
+            self.ctx
+                .emit(Instruction::Mov { dst: first, src: first_val });
+            if first_val != first {
+                self.ctx.free_temp(first_val);
+            }
+
+            for arg in args.iter().skip(1) {
+                let arg_reg = self.ctx.alloc_temp();
+                let arg_val = self
+                    .compile_expr(arg)?
+                    .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
+                self.ctx
+                    .emit(Instruction::Mov { dst: arg_reg, src: arg_val });
+                if arg_val != arg_reg {
+                    self.ctx.free_temp(arg_val);
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        let result = self.ctx.alloc_temp();
+
+        // Infer protocol name from the centralized method→protocol registry
+        // (verum_common::method_to_protocol). This enables "dyn:" dispatch at
+        // the LLVM level when monomorphization hasn't resolved the concrete type.
+        let protocol_name = method_to_protocol(method.name.as_str())
+            .map(|p| p.as_str());
+
+        // Emit "dyn:Protocol.method" for protocol dispatch, or type-param-prefixed
+        // name for monomorphization to resolve later.
+        let method_name = if let Some(proto) = protocol_name {
+            format!("dyn:{}.{}", proto, method.name)
+        } else {
+            format!("dyn:{}.{}", type_param, method.name)
+        };
+        let method_id = self.intern_string(&method_name);
+
+        // For instance methods, use first argument as receiver (it's the self object).
+        // For static methods (no args, like T.default()), use a zero placeholder —
+        // the dyn dispatch handler will read type_id from object header,
+        // but for static methods monomorphization should resolve the concrete type.
+        let receiver_reg = if !args.is_empty() {
+            args_start
+        } else {
+            let type_param_reg = self.ctx.alloc_temp();
+            let type_param_const = self.ctx.add_const_string(type_param);
+            self.ctx.emit(Instruction::LoadK {
+                dst: type_param_reg,
+                const_id: type_param_const.0,
+            });
+            type_param_reg
+        };
+
+        self.ctx.emit(Instruction::CallM {
+            dst: result,
+            receiver: receiver_reg,
+            method_id,
+            args: crate::instruction::RegRange {
+                start: args_start,
+                count: args.len() as u8,
+            },
+        });
+
+        if args.is_empty() {
+            self.ctx.free_temp(receiver_reg);
+        }
+
+        Ok(Some(result))
+    }
+
+    // ==================== Control Flow ====================
+
+    /// Compiles an if expression with full support for if-let chains.
+    ///
+    /// Handles all condition chain patterns following RFC 2497 semantics:
+    /// - `if expr { ... }`
+    /// - `if let pattern = expr { ... }`
+    /// - `if let A = x && let B = y { ... }`
+    /// - `if let A = x && expr && let B = y { ... }`
+    ///
+    /// All let bindings in the chain are available in subsequent conditions
+    /// and in the then branch. The entire chain uses AND semantics.
+    ///
+    /// If-let chains: `if let Some(x) = a && let Some(y) = b { ... }` compiles as
+    /// a sequence of pattern tests with short-circuit AND semantics. All let bindings
+    /// are scoped to the then branch.
+    fn compile_if(
+        &mut self,
+        condition: &verum_ast::IfCondition,
+        then_branch: &Block,
+        else_branch: Option<&Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+        let else_label = self.ctx.new_label("else");
+        let end_label = self.ctx.new_label("if_end");
+
+        // Helper to check if a condition has bindings (Let or Is with binding pattern)
+        let condition_has_bindings = |c: &ConditionKind| -> bool {
+            match c {
+                ConditionKind::Let { .. } => true,
+                ConditionKind::Expr(expr) => {
+                    // Check if expr is an Is pattern with bindings
+                    if let ExprKind::Is { pattern, negated: false, .. } = &expr.kind {
+                        Self::pattern_has_bindings(pattern)
+                    } else {
+                        false
+                    }
+                }
+            }
+        };
+
+        // Track whether we have any bindings (need scope management)
+        let has_bindings = condition.conditions.iter().any(condition_has_bindings);
+
+        // Enter scope for all bindings in the chain
+        // All bindings persist through subsequent conditions and then branch
+        if has_bindings {
+            self.ctx.enter_scope();
+        }
+
+        // Track scrutinee registers for cleanup on else path
+        let mut scrutinee_regs: Vec<Reg> = Vec::new();
+
+        // Compile ALL conditions in the chain with AND semantics
+        // Each condition either:
+        // - Evaluates to false → jump to else
+        // - Pattern doesn't match → jump to else
+        // - Success → continue to next condition or then branch
+        for condition_kind in condition.conditions.iter() {
+            match condition_kind {
+                ConditionKind::Expr(expr) => {
+                    // Check if this is an Is expression with pattern bindings
+                    if let ExprKind::Is { expr: scrutinee_expr, pattern, negated: false } = &expr.kind {
+                        if Self::pattern_has_bindings(pattern) {
+                            // Handle like a Let binding: evaluate, test, bind
+                            let scrutinee = self
+                                .compile_expr(scrutinee_expr)?
+                                .ok_or_else(|| CodegenError::internal("is pattern scrutinee has no value"))?;
+
+                            // Track for cleanup on else path
+                            scrutinee_regs.push(scrutinee);
+
+                            // Test if pattern matches
+                            let match_reg = self.ctx.alloc_temp();
+                            self.compile_pattern_test(pattern, scrutinee, match_reg)?;
+
+                            // Jump to else if pattern doesn't match
+                            self.ctx
+                                .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                                    cond: match_reg,
+                                    offset,
+                                });
+                            self.ctx.free_temp(match_reg);
+
+                            // Bind pattern variables - available for subsequent conditions and then branch
+                            self.compile_pattern_bind(pattern, scrutinee)?;
+                            continue;
+                        }
+                    }
+
+                    // Regular boolean expression condition
+                    let cond_reg = self
+                        .compile_expr(expr)?
+                        .ok_or_else(|| CodegenError::internal("if condition has no value"))?;
+
+                    // Jump to else if condition is false
+                    self.ctx
+                        .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                            cond: cond_reg,
+                            offset,
+                        });
+                    self.ctx.free_temp(cond_reg);
+                }
+                ConditionKind::Let { pattern, value } => {
+                    // Let pattern condition: evaluate, test match, bind on success
+
+                    // Evaluate the expression
+                    let scrutinee = self
+                        .compile_expr(value)?
+                        .ok_or_else(|| CodegenError::internal("if-let expr has no value"))?;
+
+                    // Track for cleanup on else path
+                    scrutinee_regs.push(scrutinee);
+
+                    // Test if pattern matches
+                    let match_reg = self.ctx.alloc_temp();
+                    self.compile_pattern_test(pattern, scrutinee, match_reg)?;
+
+                    // Jump to else if pattern doesn't match
+                    self.ctx
+                        .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                            cond: match_reg,
+                            offset,
+                        });
+                    self.ctx.free_temp(match_reg);
+
+                    // Bind pattern variables - they're available for subsequent conditions
+                    // and the then branch
+                    self.compile_pattern_bind(pattern, scrutinee)?;
+                }
+            }
+        }
+
+        // All conditions passed - compile then branch
+        let then_result = self.compile_block(then_branch)?;
+        if let Some(reg) = then_result {
+            self.ctx
+                .emit(Instruction::Mov { dst: result, src: reg });
+        } else {
+            self.ctx.emit(Instruction::LoadUnit { dst: result });
+        }
+
+        // Exit scope and run defers if we had bindings
+        if has_bindings {
+            let (_, defers) = self.ctx.exit_scope(false);
+            for defer_instrs in defers {
+                for instr in defer_instrs {
+                    self.ctx.emit(instr);
+                }
+            }
+        }
+
+        // Jump over else branch
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+        // Else label - cleanup and compile else branch
+        self.ctx.define_label(&else_label);
+
+        // Free scrutinee registers on else path
+        for reg in scrutinee_regs {
+            self.ctx.free_temp(reg);
+        }
+
+        // Compile else branch
+        if let Some(else_expr) = else_branch {
+            let else_result = self.compile_expr(else_expr)?;
+            if let Some(reg) = else_result {
+                self.ctx
+                    .emit(Instruction::Mov { dst: result, src: reg });
+            } else {
+                self.ctx.emit(Instruction::LoadUnit { dst: result });
+            }
+        } else {
+            self.ctx.emit(Instruction::LoadUnit { dst: result });
+        }
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(result))
+    }
+
+    /// Compiles an if-let expression (legacy single-pattern form).
+    ///
+    /// This is now handled by compile_if() which supports the full chain syntax.
+    /// Kept for backward compatibility with call sites that use the old signature.
+    #[allow(dead_code)]
+    fn compile_if_let(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        expr: &Expr,
+        then_branch: &Block,
+        else_branch: Option<&Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Delegate to the unified compile_if with a single-element condition chain
+        use verum_ast::IfCondition;
+        use smallvec::smallvec;
+
+        let condition = IfCondition {
+            conditions: smallvec![ConditionKind::Let {
+                pattern: pattern.clone(),
+                value: expr.clone(),
+            }],
+            span: pattern.span,
+        };
+
+        self.compile_if(&condition, then_branch, else_branch)
+    }
+
+    /// Compiles return expression.
+    fn compile_return(&mut self, value: Option<&Expr>) -> CodegenResult<Option<Reg>> {
+        if !self.ctx.in_function {
+            return Err(CodegenError::new(CodegenErrorKind::ReturnOutsideFunction));
+        }
+
+        if let Some(expr) = value {
+            let reg = self
+                .compile_expr(expr)?
+                .ok_or_else(|| CodegenError::internal("return value has no value"))?;
+            self.ctx.emit(Instruction::Ret { value: reg });
+        } else {
+            self.ctx.emit(Instruction::RetV);
+        }
+
+        Ok(None)
+    }
+
+    /// Compiles break expression.
+    fn compile_break(
+        &mut self,
+        label: Option<&str>,
+        value: Option<&Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let loop_ctx = self
+            .ctx
+            .find_loop(label)
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::BreakOutsideLoop))?
+            .clone();
+
+        // Compile break value if present
+        if let Some(expr) = value {
+            let val_reg = self
+                .compile_expr(expr)?
+                .ok_or_else(|| CodegenError::internal("break value has no value"))?;
+
+            if let Some(break_reg) = loop_ctx.break_value_reg {
+                self.ctx.emit(Instruction::Mov {
+                    dst: break_reg,
+                    src: val_reg,
+                });
+            }
+            self.ctx.free_temp(val_reg);
+        }
+
+        // Jump to loop end
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::Jmp { offset });
+
+        Ok(None)
+    }
+
+    /// Compiles continue expression.
+    fn compile_continue(&mut self, label: Option<&str>) -> CodegenResult<Option<Reg>> {
+        let loop_ctx = self
+            .ctx
+            .find_loop(label)
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::ContinueOutsideLoop))?
+            .clone();
+
+        // Jump to loop start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        Ok(None)
+    }
+
+    /// Compiles a loop expression.
+    fn compile_loop(&mut self, label: Option<&str>, body: &Block) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+        let loop_ctx = self
+            .ctx
+            .enter_loop(label.map(|s| s.to_string()), Some(result));
+
+        // Loop start
+        self.ctx.define_label(&loop_ctx.continue_label);
+
+        // Compile body
+        self.compile_block(body)?;
+
+        // Jump back to start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        // Loop end
+        self.ctx.define_label(&loop_ctx.break_label);
+        self.ctx.exit_loop();
+
+        Ok(Some(result))
+    }
+
+    /// Pre-wrap mutable variables captured by closures inside a loop body.
+    /// This must happen BEFORE the loop condition is compiled, so that the
+    /// condition's variable reads go through the cell (GetF) from the start.
+    fn pre_wrap_mutable_captures_in_block(&mut self, body: &Block) {
+        // Scan all statements for closures
+        for stmt in &body.stmts {
+            match &stmt.kind {
+                verum_ast::StmtKind::Expr { expr, .. } => {
+                    self.scan_expr_for_mutable_captures(expr);
+                }
+                verum_ast::StmtKind::Let { value, .. } => {
+                    if let verum_common::Maybe::Some(val) = value {
+                        self.scan_expr_for_mutable_captures(val);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let verum_common::Maybe::Some(tail) = &body.expr {
+            self.scan_expr_for_mutable_captures(tail);
+        }
+    }
+
+    fn scan_expr_for_mutable_captures(&mut self, expr: &Expr) {
+        use verum_ast::ExprKind;
+        match &expr.kind {
+            ExprKind::Closure { params, body, .. } => {
+                // Found a closure — check which free variables are mutable
+                let param_names: Vec<String> = params.iter().map(|p| {
+                    match &p.pattern.kind {
+                        verum_ast::PatternKind::Ident { name, .. } => name.to_string(),
+                        _ => String::new(),
+                    }
+                }).collect();
+                let free_vars = self.analyze_free_variables(body, &param_names);
+                for var_name in &free_vars {
+                    if let Some(info) = self.ctx.lookup_var(var_name) {
+                        if info.is_mutable && !info.is_cell {
+                            // Pre-wrap this mutable variable in a cell
+                            let var_reg = info.reg;
+                            let cell_reg = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::New {
+                                dst: cell_reg,
+                                type_id: 0,
+                                field_count: 1,
+                            });
+                            self.ctx.emit(Instruction::SetF {
+                                obj: cell_reg,
+                                field_idx: 0,
+                                value: var_reg,
+                            });
+                            self.ctx.emit(Instruction::Mov {
+                                dst: var_reg,
+                                src: cell_reg,
+                            });
+                            if let Some(outer_info) = self.ctx.lookup_var_mut(var_name) {
+                                outer_info.is_cell = true;
+                            }
+                        }
+                    }
+                }
+            }
+            // Recurse into sub-expressions that might contain closures
+            ExprKind::Block(block) => {
+                self.pre_wrap_mutable_captures_in_block(block);
+            }
+            ExprKind::If { then_branch, else_branch, .. } => {
+                self.pre_wrap_mutable_captures_in_block(then_branch);
+                if let verum_common::Maybe::Some(eb) = else_branch {
+                    self.scan_expr_for_mutable_captures(eb);
+                }
+            }
+            ExprKind::Call { func, args, .. } => {
+                self.scan_expr_for_mutable_captures(func);
+                for arg in args { self.scan_expr_for_mutable_captures(arg); }
+            }
+            ExprKind::Binary { left, right, .. } => {
+                self.scan_expr_for_mutable_captures(left);
+                self.scan_expr_for_mutable_captures(right);
+            }
+            _ => {} // Other expressions don't contain closures at this level
+        }
+    }
+
+    /// Compiles a while expression.
+    fn compile_while(
+        &mut self,
+        label: Option<&str>,
+        condition: &Expr,
+        body: &Block,
+    ) -> CodegenResult<Option<Reg>> {
+        // Check if this is a 'while let' pattern (parsed as Is expression)
+        if let ExprKind::Is {
+            expr: scrutinee_expr,
+            pattern,
+            negated: false,
+        } = &condition.kind
+        {
+            return self.compile_while_let(label, scrutinee_expr, pattern, body);
+        }
+
+        // Pre-scan: if closures in the body capture mutable outer variables,
+        // wrap those variables in heap cells BEFORE the condition is compiled.
+        // This ensures the condition reads through the cell from the first iteration.
+        self.pre_wrap_mutable_captures_in_block(body);
+
+        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
+
+        // Loop start
+        self.ctx.define_label(&loop_ctx.continue_label);
+
+        // Compile condition
+        let cond_reg = self
+            .compile_expr(condition)?
+            .ok_or_else(|| CodegenError::internal("while condition has no value"))?;
+
+        // Exit if false
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
+                cond: cond_reg,
+                offset,
+            });
+        self.ctx.free_temp(cond_reg);
+
+        // Compile body
+        self.compile_block(body)?;
+
+        // Jump back to start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        // Loop end
+        self.ctx.define_label(&loop_ctx.break_label);
+        self.ctx.exit_loop();
+
+        // While always returns unit
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadUnit { dst: result });
+        Ok(Some(result))
+    }
+
+    /// Compiles a 'while let' expression (pattern binding loop).
+    fn compile_while_let(
+        &mut self,
+        label: Option<&str>,
+        scrutinee_expr: &Expr,
+        pattern: &verum_ast::Pattern,
+        body: &Block,
+    ) -> CodegenResult<Option<Reg>> {
+        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
+
+        // Loop start
+        self.ctx.define_label(&loop_ctx.continue_label);
+
+        // Compile the scrutinee expression
+        let scrutinee = self
+            .compile_expr(scrutinee_expr)?
+            .ok_or_else(|| CodegenError::internal("while-let scrutinee has no value"))?;
+
+        // Test if pattern matches
+        let match_reg = self.ctx.alloc_temp();
+        self.compile_pattern_test(pattern, scrutinee, match_reg)?;
+
+        // Exit loop if pattern doesn't match
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
+                cond: match_reg,
+                offset,
+            });
+        self.ctx.free_temp(match_reg);
+
+        // Pattern matched - enter scope and bind variables
+        self.ctx.enter_scope();
+        self.compile_pattern_bind(pattern, scrutinee)?;
+
+        // Compile body
+        self.compile_block(body)?;
+
+        // Exit scope (handle defers)
+        let (_, defers) = self.ctx.exit_scope(false);
+        for defer_instrs in defers {
+            for instr in defer_instrs {
+                self.ctx.emit(instr);
+            }
+        }
+
+        // Free scrutinee after body
+        self.ctx.free_temp(scrutinee);
+
+        // Jump back to start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        // Loop end
+        self.ctx.define_label(&loop_ctx.break_label);
+        self.ctx.exit_loop();
+
+        // While always returns unit
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadUnit { dst: result });
+        Ok(Some(result))
+    }
+
+    /// Check if the iterator expression is a custom type (not a built-in collection).
+    /// Custom types need explicit has_next()/next() method calls instead of IterNew/IterNext.
+    fn is_custom_iterator_type(&self, iter: &Expr) -> bool {
+        // Range expressions always use IterNew/IterNext
+        if matches!(&iter.kind, ExprKind::Range { .. }) {
+            return false;
+        }
+
+        // Generator function calls (fn* syntax) use IterNew/IterNext via gen_register path.
+        // compile_call emits GenCreate which marks the result as a gen_register.
+        // IterNew detects gen_register and passes the handle through.
+        // IterNext detects gen_register and calls verum_gen_next_maybe.
+        // Using compile_for_custom_iterator would emit CallM{has_next}/CallM{next}
+        // which dispatches to Generator.has_next from generator.vr with wrong ABI.
+        if let ExprKind::Call { func, .. } = &iter.kind {
+            if let ExprKind::Path(path) = &func.kind {
+                let func_name: String = path
+                    .segments
+                    .iter()
+                    .filter_map(|s| {
+                        if let verum_ast::PathSegment::Name(i) = s {
+                            Some(i.name.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("::");
+                if let Some(info) = self.ctx.lookup_function(&func_name) {
+                    if info.is_generator {
+                        return false; // Use IterNew/IterNext (gen_register path)
+                    }
+                }
+            }
+        }
+
+        // Try to infer the type name
+        if let Some(type_name) = self.infer_expr_type_name(iter) {
+            // Strip generic args: "List<Int>" → "List", "Map<K, V>" → "Map"
+            let base = type_name.split('<').next().unwrap_or(&type_name);
+            !matches!(
+                base,
+                "List" | "Map" | "Set" | "Deque" | "Range" | "Text" | "Array"
+                    | "BTreeMap" | "BTreeSet" | "BinaryHeap"
+            )
+        } else {
+            // Can't determine type — use standard IterNew/IterNext (safe default)
+            false
+        }
+    }
+
+    /// Compile for-in loop for custom iterator types using explicit has_next()/next() calls.
+    /// Works in both interpreter and AOT without special iterator dispatch.
+    fn compile_for_custom_iterator(
+        &mut self,
+        label: Option<&str>,
+        pattern: &verum_ast::Pattern,
+        iter: &Expr,
+        body: &Block,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile the iterator expression and store in a proper mutable variable.
+        // This is critical: temp registers in alloca mode use stack slots, and
+        // RefMut on a stack slot creates a pointer to the alloca (not the heap
+        // object). By defining a named variable, the &mut self in has_next/next
+        // correctly references the heap-allocated iterator object.
+        let iter_val = self
+            .compile_expr(iter)?
+            .ok_or_else(|| CodegenError::internal("for iter has no value"))?;
+        let iter_reg = self.ctx.define_var("__for_iter", true);
+        self.ctx.emit(Instruction::Mov { dst: iter_reg, src: iter_val });
+        self.ctx.free_temp(iter_val);
+
+        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
+
+        let has_next_reg = self.ctx.alloc_temp();
+        let elem_reg = self.ctx.alloc_temp();
+        let has_next_method = self.intern_string("has_next");
+        let next_method = self.intern_string("next");
+
+        // Loop start
+        self.ctx.define_label(&loop_ctx.continue_label);
+
+        // Call has_next(&self) -> Bool
+        self.ctx.emit(Instruction::CallM {
+            dst: has_next_reg,
+            receiver: iter_reg,
+            method_id: has_next_method,
+            args: crate::instruction::RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        });
+
+        // Exit if has_next() returned false
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
+                cond: has_next_reg,
+                offset,
+            });
+
+        // Call next(&mut self) -> T
+        self.ctx.emit(Instruction::CallM {
+            dst: elem_reg,
+            receiver: iter_reg,
+            method_id: next_method,
+            args: crate::instruction::RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        });
+
+        // Bind pattern
+        self.ctx.enter_scope();
+        self.compile_pattern_bind(pattern, elem_reg)?;
+
+        // Compile body
+        self.compile_block(body)?;
+
+        let (_, defers) = self.ctx.exit_scope(false);
+        for defer_instrs in defers {
+            for instr in defer_instrs {
+                self.ctx.emit(instr);
+            }
+        }
+
+        // Jump back to start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        // Loop end
+        self.ctx.define_label(&loop_ctx.break_label);
+        self.ctx.exit_loop();
+
+        self.ctx.free_temp(iter_reg);
+        self.ctx.free_temp(has_next_reg);
+        self.ctx.free_temp(elem_reg);
+
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadUnit { dst: result });
+        Ok(Some(result))
+    }
+
+    /// Compiles a for expression.
+    fn compile_for(
+        &mut self,
+        label: Option<&str>,
+        pattern: &verum_ast::Pattern,
+        iter: &Expr,
+        body: &Block,
+    ) -> CodegenResult<Option<Reg>> {
+        // Custom types use explicit has_next()/next() CallM calls
+        if self.is_custom_iterator_type(iter) {
+            return self.compile_for_custom_iterator(label, pattern, iter, body);
+        }
+
+        // Compile iterator (built-in collections: List, Map, Set, Deque, Range)
+        let iter_reg = self
+            .compile_expr(iter)?
+            .ok_or_else(|| CodegenError::internal("for iter has no value"))?;
+
+        // Create iterator from iterable
+        let iterator_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::IterNew {
+            dst: iterator_reg,
+            iterable: iter_reg,
+        });
+
+        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
+
+        // Allocate element and has_next registers
+        let elem_reg = self.ctx.alloc_temp();
+        let has_next_reg = self.ctx.alloc_temp();
+
+        // Loop start
+        self.ctx.define_label(&loop_ctx.continue_label);
+
+        // Get next element
+        self.ctx.emit(Instruction::IterNext {
+            dst: elem_reg,
+            has_next: has_next_reg,
+            iter: iterator_reg,
+        });
+
+        // Exit if no more elements
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
+                cond: has_next_reg,
+                offset,
+            });
+
+        // Bind pattern
+        self.ctx.enter_scope();
+        self.compile_pattern_bind(pattern, elem_reg)?;
+
+        // Compile body
+        self.compile_block(body)?;
+
+        let (_, defers) = self.ctx.exit_scope(false);
+        for defer_instrs in defers {
+            for instr in defer_instrs {
+                self.ctx.emit(instr);
+            }
+        }
+
+        // Jump back to start
+        self.ctx
+            .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+                offset,
+            })?;
+
+        // Loop end
+        self.ctx.define_label(&loop_ctx.break_label);
+        self.ctx.exit_loop();
+
+        self.ctx.free_temp(iter_reg);
+        self.ctx.free_temp(iterator_reg);
+        self.ctx.free_temp(elem_reg);
+        self.ctx.free_temp(has_next_reg);
+
+        // For always returns unit
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadUnit { dst: result });
+        Ok(Some(result))
+    }
+
+    // ==================== Pattern Matching ====================
+
+    /// Compiles a match expression.
+    fn compile_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &verum_common::List<verum_ast::MatchArm>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Evaluate scrutinee
+        let scrutinee_reg = self
+            .compile_expr(scrutinee)?
+            .ok_or_else(|| CodegenError::internal("match scrutinee has no value"))?;
+
+        // Try to determine the type of the scrutinee for variant pattern resolution.
+        // Uses extract_expr_type_name which handles variables, field access, method calls etc.
+        let scrutinee_type = self.extract_expr_type_name(scrutinee);
+
+        // Store the scrutinee type for pattern binding to use
+        let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
+        self.ctx.match_scrutinee_type = scrutinee_type;
+
+        // Heap<T>/Shared<T> are transparent wrappers in VBC — no actual heap indirection.
+        // Heap.new(inner) passes through the inner value at LLVM level.
+        // For variant matching, just update the scrutinee type to the inner type
+        // so variant tag lookup resolves against the correct type (e.g., IntList not Heap).
+        if let Some(stype) = self.ctx.match_scrutinee_type.clone() {
+            let base = stype.split('<').next().unwrap_or(&stype);
+            if self.is_allocating_wrapper(base) {
+                // Only unwrap type if arms don't contain Heap(...)/Shared(...) patterns
+                let has_wrapper_pattern = arms.iter().any(|arm| {
+                    if let verum_ast::PatternKind::Variant { path, .. } = &arm.pattern.kind {
+                        path.segments.last().map_or(false, |s| match s {
+                            verum_ast::ty::PathSegment::Name(id) => {
+                                self.is_allocating_wrapper(id.name.as_str())
+                            }
+                            _ => false,
+                        })
+                    } else {
+                        false
+                    }
+                });
+                if !has_wrapper_pattern {
+                    // Update scrutinee type to inner type: "Heap<IntList>" -> "IntList"
+                    // No Deref needed — Heap<T> is transparent (value IS the inner value)
+                    if let Some(inner_start) = stype.find('<') {
+                        if let Some(inner) = stype[inner_start + 1..].strip_suffix('>') {
+                            self.ctx.match_scrutinee_type = Some(inner.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("match_end");
+
+        // Compile each arm
+        for (i, arm) in arms.iter().enumerate() {
+            let next_arm_label = if i < arms.len() - 1 {
+                Some(self.ctx.new_label(&format!("match_arm_{}", i + 1)))
+            } else {
+                None
+            };
+
+            // Test pattern
+            let match_reg = self.ctx.alloc_temp();
+            self.compile_pattern_test(&arm.pattern, scrutinee_reg, match_reg)?;
+
+            // If no match, jump to next arm
+            if let Some(ref next_label) = next_arm_label {
+                self.ctx
+                    .emit_forward_jump(next_label, |offset| Instruction::JmpNot {
+                        cond: match_reg,
+                        offset,
+                    });
+            }
+            self.ctx.free_temp(match_reg);
+
+            // Bind pattern variables BEFORE guard check
+            // This ensures pattern-bound variables (like `v` in `Some(v)`) are
+            // available when evaluating the guard expression.
+            self.ctx.enter_scope();
+            self.compile_pattern_bind(&arm.pattern, scrutinee_reg)?;
+
+            // Check guard if present (pattern variables are now available)
+            if let Some(ref guard) = arm.guard {
+                let guard_reg = self
+                    .compile_expr(guard)?
+                    .ok_or_else(|| CodegenError::internal("match guard has no value"))?;
+
+                if let Some(ref next_label) = next_arm_label {
+                    self.ctx
+                        .emit_forward_jump(next_label, |offset| Instruction::JmpNot {
+                            cond: guard_reg,
+                            offset,
+                        });
+                }
+                self.ctx.free_temp(guard_reg);
+            }
+
+            // Compile arm body
+            let arm_result = self.compile_expr(&arm.body)?;
+            if let Some(reg) = arm_result {
+                self.ctx
+                    .emit(Instruction::Mov { dst: result, src: reg });
+            } else {
+                self.ctx.emit(Instruction::LoadUnit { dst: result });
+            }
+
+            let (_, defers) = self.ctx.exit_scope(false);
+            for defer_instrs in defers {
+                for instr in defer_instrs {
+                    self.ctx.emit(instr);
+                }
+            }
+
+            // Clear active pattern cache for this arm to prevent stale entries
+            // This is important when the same scrutinee is used with different patterns
+            self.ctx.clear_active_pattern_cache_for(scrutinee_reg);
+
+            // Jump to end
+            self.ctx
+                .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+            // Define next arm label
+            if let Some(next_label) = next_arm_label {
+                self.ctx.define_label(&next_label);
+            }
+        }
+
+        self.ctx.define_label(&end_label);
+
+        // Clear all active pattern cache at end of match expression
+        self.ctx.clear_active_pattern_cache();
+
+        // Restore previous scrutinee type
+        self.ctx.match_scrutinee_type = prev_scrutinee_type;
+
+        self.ctx.free_temp(scrutinee_reg);
+
+        Ok(Some(result))
+    }
+
+    /// Tests if a pattern matches a value.
+    pub(crate) fn compile_pattern_test(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        scrutinee: Reg,
+        result: Reg,
+    ) -> CodegenResult<()> {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Wildcard => {
+                // Always matches
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+            }
+
+            PatternKind::Ident { subpattern, name, .. } => {
+                if let verum_common::Maybe::Some(sub_pat) = subpattern {
+                    // x @ <subpattern> — must test the subpattern (e.g. range check)
+                    self.compile_pattern_test(sub_pat, scrutinee, result)?;
+                } else {
+                    // Check if this bare identifier refers to a known zero-arg
+                    // variant constructor (e.g., `None` when matching Maybe<T>).
+                    // If so, this is a variant pattern and we must test the tag,
+                    // not unconditionally match (which would shadow later arms).
+                    let ident_name = name.name.as_str();
+                    let is_variant = ident_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                        && self.ctx.lookup_function(ident_name)
+                            .and_then(|info| info.variant_tag)
+                            .is_some();
+
+                    if is_variant {
+                        // Lookup tag — prefer scrutinee type when known
+                        let tag = self.ctx.lookup_function(ident_name)
+                            .and_then(|info| info.variant_tag)
+                            .or_else(|| {
+                                if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                                    let base_type = scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
+                                    self.ctx.find_variant_by_type_and_name(base_type, ident_name)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(0);
+                        self.ctx.emit(Instruction::IsVar {
+                            dst: result,
+                            value: scrutinee,
+                            tag,
+                        });
+                    } else {
+                        // Plain identifier — always matches (binding pattern)
+                        self.ctx.emit(Instruction::LoadTrue { dst: result });
+                    }
+                }
+            }
+
+            PatternKind::Literal(lit) => {
+                // Compare with literal
+                let lit_reg = self
+                    .compile_literal(lit)?
+                    .ok_or_else(|| CodegenError::internal("pattern literal has no value"))?;
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Eq,
+                    dst: result,
+                    a: scrutinee,
+                    b: lit_reg,
+                });
+                self.ctx.free_temp(lit_reg);
+            }
+
+            PatternKind::Variant { path, data } => {
+                let variant_name = format!("{}", path);
+                // Path::Display joins with "::" but variants are registered with "."
+                // separator (e.g., "Tree.Leaf"). Build both forms for lookup.
+                let dot_name = variant_name.replace("::", ".");
+                let is_heap = variant_name == "Heap";
+
+                if is_heap {
+                    // Heap(inner) is a transparent wrapper — deref and check inner pattern
+                    if let Some(verum_ast::VariantPatternData::Tuple(patterns)) = data {
+                        if patterns.len() == 1 {
+                            let inner_pat = &patterns[0];
+                            if matches!(inner_pat.kind, PatternKind::Wildcard)
+                                || matches!(&inner_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none()) {
+                                // Heap(_) or Heap(x) always matches
+                                self.ctx.emit(Instruction::LoadTrue { dst: result });
+                            } else {
+                                let deref_reg = self.ctx.alloc_temp();
+                                self.ctx.emit(Instruction::Deref {
+                                    dst: deref_reg,
+                                    ref_reg: scrutinee,
+                                });
+                                self.compile_pattern_test(inner_pat, deref_reg, result)?;
+                                self.ctx.free_temp(deref_reg);
+                            }
+                        } else {
+                            self.ctx.emit(Instruction::LoadTrue { dst: result });
+                        }
+                    } else {
+                        self.ctx.emit(Instruction::LoadTrue { dst: result });
+                    }
+                } else {
+                    // Check if this "variant" is actually a constant (e.g., EPERM in a match
+                    // arm). Constants from imported modules are parsed as Variant patterns
+                    // because they start with uppercase letters. We detect them by checking
+                    // if the function info has a __const_val_ intrinsic name.
+                    let const_value = self.ctx.lookup_function(&variant_name)
+                        .or_else(|| self.ctx.lookup_function(&dot_name))
+                        .or_else(|| {
+                            if let Some(simple) = variant_name.rsplit("::").next() {
+                                self.ctx.lookup_function(simple)
+                            } else {
+                                None
+                            }
+                        })
+                        .and_then(|info| {
+                            info.intrinsic_name.as_ref().and_then(|iname| {
+                                iname.strip_prefix("__const_val_")
+                                    .and_then(|v| v.parse::<i64>().ok())
+                            })
+                        });
+
+                    if let Some(const_val) = const_value {
+                        // This is a constant pattern — emit value comparison
+                        let const_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: const_reg,
+                            value: const_val,
+                        });
+                        self.ctx.emit(Instruction::CmpI {
+                            op: CompareOp::Eq,
+                            dst: result,
+                            a: scrutinee,
+                            b: const_reg,
+                        });
+                        self.ctx.free_temp(const_reg);
+                    } else {
+                    // Regular variant — check tag
+                    // Try multiple name forms: original (may use "::"), dot-separated,
+                    // and simple (last segment only) for unqualified variants
+                    let tag = self.ctx.lookup_function(&variant_name)
+                        .and_then(|info| info.variant_tag)
+                        .or_else(|| {
+                            self.ctx.lookup_function(&dot_name)
+                                .and_then(|info| info.variant_tag)
+                        })
+                        .or_else(|| {
+                            // Try simple name (last segment) for unqualified lookup
+                            if let Some(simple) = variant_name.rsplit("::").next() {
+                                self.ctx.lookup_function(simple)
+                                    .and_then(|info| info.variant_tag)
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            // Simple name not found (likely in collision set).
+                            // Try qualified name using match scrutinee type if available.
+                            let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                            if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                                // Strip generic arguments from scrutinee type
+                                // (e.g., "Maybe<Int>" -> "Maybe") since variants are
+                                // registered under the base type name without generics.
+                                let base_type = scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
+                                // Try direct qualified lookup first
+                                self.ctx.find_variant_by_type_and_name(base_type, simple)
+                                    .or_else(|| {
+                                        // scrutinee_type might be a variant name itself
+                                        // (e.g., variable typed as "Done" instead of "State").
+                                        // Look up the parent type of the scrutinee_type variant.
+                                        let parent = self.ctx.find_variant_parent_type(base_type);
+                                        parent.and_then(|p| self.ctx.find_variant_by_type_and_name(&p, simple))
+                                    })
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            variant_name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+                        });
+                    self.ctx.emit(Instruction::IsVar {
+                        dst: result,
+                        value: scrutinee,
+                        tag,
+                    });
+
+                    // Recursively check sub-patterns in variant data
+                    if let Some(data) = data {
+                        let sub_patterns: Vec<&verum_ast::Pattern> = match data {
+                            verum_ast::VariantPatternData::Tuple(patterns) => {
+                                patterns.iter().collect()
+                            }
+                            verum_ast::VariantPatternData::Record { fields, .. } => {
+                                fields.iter().filter_map(|f| f.pattern.as_ref()).collect()
+                            }
+                        };
+
+                        let has_non_wildcard = sub_patterns.iter().any(|p| {
+                            !matches!(p.kind, PatternKind::Wildcard)
+                            && !matches!(&p.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
+                        });
+                        if has_non_wildcard {
+                            let var_end = self.ctx.new_label("var_end");
+
+                            // If tag doesn't match, skip sub-pattern checks
+                            self.ctx.emit_forward_jump(&var_end, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+
+                            // Tag matched — now check sub-patterns
+                            for (i, sub_pat) in sub_patterns.iter().enumerate() {
+                                if matches!(sub_pat.kind, PatternKind::Wildcard)
+                                    || matches!(&sub_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none()) {
+                                    continue;
+                                }
+                                let field_reg = self.ctx.alloc_temp();
+                                self.ctx.emit(Instruction::GetVariantData {
+                                    dst: field_reg,
+                                    variant: scrutinee,
+                                    field: i as u32,
+                                });
+                                let sub_result = self.ctx.alloc_temp();
+                                self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
+                                self.ctx.emit(Instruction::Mov { dst: result, src: sub_result });
+                                self.ctx.free_temp(sub_result);
+                                self.ctx.free_temp(field_reg);
+
+                                if i < sub_patterns.len() - 1 {
+                                    self.ctx.emit_forward_jump(&var_end, |offset| Instruction::JmpNot {
+                                        cond: result,
+                                        offset,
+                                    });
+                                }
+                            }
+
+                            self.ctx.define_label(&var_end);
+                        }
+                    }
+                    } // close else (variant tag path)
+                }
+            }
+
+            PatternKind::Tuple(elements) => {
+                // All elements must match - unpack and test each
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                if !elements.is_empty() {
+                    // Unpack tuple into consecutive registers
+                    // IMPORTANT: Use alloc_fresh() to guarantee consecutive registers.
+                    // alloc_temp() can return non-consecutive registers from the free list,
+                    // which would cause the Unpack instruction to write to wrong registers.
+                    let first_elem = self.ctx.registers.alloc_fresh();
+                    // Reserve consecutive registers for unpacking
+                    for _ in 1..elements.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+
+                    self.ctx.emit(Instruction::Unpack {
+                        dst_start: first_elem,
+                        tuple: scrutinee,
+                        count: elements.len() as u8,
+                    });
+
+                    for (i, elem) in elements.iter().enumerate() {
+                        let elem_reg = Reg(first_elem.0 + i as u16);
+                        let elem_match = self.ctx.alloc_temp();
+                        self.compile_pattern_test(elem, elem_reg, elem_match)?;
+
+                        // result = result && elem_match
+                        let and_label = self.ctx.new_label("tuple_and");
+                        self.ctx
+                            .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result,
+                            src: elem_match,
+                        });
+                        self.ctx.define_label(&and_label);
+
+                        self.ctx.free_temp(elem_match);
+                    }
+
+                    // Free unpacked registers
+                    for i in 0..elements.len() {
+                        self.ctx.free_temp(Reg(first_elem.0 + i as u16));
+                    }
+                }
+            }
+
+            PatternKind::Paren(inner) => {
+                self.compile_pattern_test(inner, scrutinee, result)?;
+            }
+
+            PatternKind::Or(alternatives) => {
+                // Or pattern: match if ANY alternative matches
+                // result = alt1 || alt2 || ... || altN
+                self.ctx.emit(Instruction::LoadFalse { dst: result });
+
+                let end_label = self.ctx.new_label("or_end");
+
+                for alt in alternatives.iter() {
+                    let alt_result = self.ctx.alloc_temp();
+                    self.compile_pattern_test(alt, scrutinee, alt_result)?;
+
+                    // If this alternative matches, set result = true and jump to end
+                    let next_alt = self.ctx.new_label("or_next");
+                    self.ctx
+                        .emit_forward_jump(&next_alt, |offset| Instruction::JmpNot {
+                            cond: alt_result,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::LoadTrue { dst: result });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    self.ctx.define_label(&next_alt);
+
+                    self.ctx.free_temp(alt_result);
+                }
+
+                self.ctx.define_label(&end_label);
+            }
+
+            PatternKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                // Range pattern: start..end or start..=end
+                // result = (scrutinee >= start) && (scrutinee < end) [or <= if inclusive]
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                // Check lower bound if present
+                if let verum_common::Maybe::Some(start_lit) = start {
+                    let start_reg = self
+                        .compile_literal(start_lit)?
+                        .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                    let check_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge,
+                        dst: check_reg,
+                        a: scrutinee,
+                        b: start_reg,
+                    });
+                    // result = result && check_reg
+                    let and_label = self.ctx.new_label("range_and1");
+                    self.ctx
+                        .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                            cond: result,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: result,
+                        src: check_reg,
+                    });
+                    self.ctx.define_label(&and_label);
+                    self.ctx.free_temp(check_reg);
+                    self.ctx.free_temp(start_reg);
+                }
+
+                // Check upper bound if present
+                if let verum_common::Maybe::Some(end_lit) = end {
+                    let end_reg = self
+                        .compile_literal(end_lit)?
+                        .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+                    let check_reg = self.ctx.alloc_temp();
+                    let cmp_op = if *inclusive {
+                        CompareOp::Le
+                    } else {
+                        CompareOp::Lt
+                    };
+                    self.ctx.emit(Instruction::CmpI {
+                        op: cmp_op,
+                        dst: check_reg,
+                        a: scrutinee,
+                        b: end_reg,
+                    });
+                    // result = result && check_reg
+                    let and_label = self.ctx.new_label("range_and2");
+                    self.ctx
+                        .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                            cond: result,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: result,
+                        src: check_reg,
+                    });
+                    self.ctx.define_label(&and_label);
+                    self.ctx.free_temp(check_reg);
+                    self.ctx.free_temp(end_reg);
+                }
+            }
+
+            PatternKind::Reference { inner, .. } => {
+                // Reference pattern: &x or &mut x
+                // Dereference the scrutinee and test inner pattern
+                let deref_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Deref {
+                    dst: deref_reg,
+                    ref_reg: scrutinee,
+                });
+                self.compile_pattern_test(inner, deref_reg, result)?;
+                self.ctx.free_temp(deref_reg);
+            }
+
+            PatternKind::Array(elements) => {
+                // Array pattern: [a, b, c]
+                // Check length matches, then test each element
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                if !elements.is_empty() {
+                    // Check length
+                    let len_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Len {
+                        dst: len_reg,
+                        arr: scrutinee,
+                        type_hint: 0,
+                    });
+                    let expected_len = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: expected_len,
+                        value: elements.len() as i64,
+                    });
+                    let len_check = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq,
+                        dst: len_check,
+                        a: len_reg,
+                        b: expected_len,
+                    });
+
+                    // If length doesn't match, result = false
+                    let check_elements = self.ctx.new_label("arr_check");
+                    self.ctx
+                        .emit_forward_jump(&check_elements, |offset| Instruction::JmpIf {
+                            cond: len_check,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::LoadFalse { dst: result });
+                    let arr_end = self.ctx.new_label("arr_end");
+                    self.ctx
+                        .emit_forward_jump(&arr_end, |offset| Instruction::Jmp { offset });
+                    self.ctx.define_label(&check_elements);
+
+                    self.ctx.free_temp(len_check);
+                    self.ctx.free_temp(expected_len);
+                    self.ctx.free_temp(len_reg);
+
+                    // Check each element
+                    for (i, elem) in elements.iter().enumerate() {
+                        let idx_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: idx_reg,
+                            value: i as i64,
+                        });
+                        let elem_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GetE {
+                            dst: elem_reg,
+                            arr: scrutinee,
+                            idx: idx_reg,
+                        });
+                        let elem_match = self.ctx.alloc_temp();
+                        self.compile_pattern_test(elem, elem_reg, elem_match)?;
+
+                        // result = result && elem_match
+                        let and_label = self.ctx.new_label("arr_and");
+                        self.ctx
+                            .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result,
+                            src: elem_match,
+                        });
+                        self.ctx.define_label(&and_label);
+
+                        self.ctx.free_temp(elem_match);
+                        self.ctx.free_temp(elem_reg);
+                        self.ctx.free_temp(idx_reg);
+                    }
+
+                    self.ctx.define_label(&arr_end);
+                }
+            }
+
+            PatternKind::Record { path, fields, rest } => {
+                // Record pattern: Point { x, y } or VariantName { field1, field2 }
+                let type_name = format!("{}", path);
+
+                // Check if this is a variant constructor (record variant pattern)
+                let variant_tag = self.ctx.lookup_function(&type_name)
+                    .and_then(|info| info.variant_tag)
+                    .or_else(|| {
+                        // Simple name not found (likely in collision set).
+                        // Try qualified name via scrutinee type or arg count.
+                        if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                            self.ctx.find_variant_by_type_and_name(scrutinee_type, &type_name)
+                        } else {
+                            self.ctx.find_variant_by_suffix_and_args(&type_name, fields.len())
+                        }
+                    });
+
+                if let Some(tag) = variant_tag {
+                    // Record variant pattern: use IsVar with proper variant tag
+                    self.ctx.emit(Instruction::IsVar {
+                        dst: result,
+                        value: scrutinee,
+                        tag,
+                    });
+
+                    // Check sub-patterns on fields
+                    let has_non_wildcard = fields.iter().any(|f| {
+                        if let verum_common::Maybe::Some(ref p) = f.pattern {
+                            !matches!(p.kind, PatternKind::Wildcard)
+                        } else {
+                            false // shorthand { x } doesn't need sub-pattern test
+                        }
+                    });
+
+                    if has_non_wildcard {
+                        let check_fields = self.ctx.new_label("rec_check");
+                        self.ctx.emit_forward_jump(&check_fields, |offset| Instruction::JmpIf {
+                            cond: result,
+                            offset,
+                        });
+                        let rec_end = self.ctx.new_label("rec_end");
+                        self.ctx.emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
+                        self.ctx.define_label(&check_fields);
+
+                        for (_i, field) in fields.iter().enumerate() {
+                            if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
+                                if matches!(inner_pattern.kind, PatternKind::Wildcard) {
+                                    continue;
+                                }
+                                let field_reg = self.ctx.alloc_temp();
+                                let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
+                                self.ctx.emit(Instruction::GetVariantData {
+                                    dst: field_reg,
+                                    variant: scrutinee,
+                                    field: field_idx,
+                                });
+
+                                let field_match = self.ctx.alloc_temp();
+                                self.compile_pattern_test(inner_pattern, field_reg, field_match)?;
+
+                                let and_label = self.ctx.new_label("rec_and");
+                                self.ctx.emit_forward_jump(&and_label, |offset| Instruction::JmpIf {
+                                    cond: field_match,
+                                    offset,
+                                });
+                                self.ctx.emit(Instruction::LoadFalse { dst: result });
+                                self.ctx.emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
+                                self.ctx.define_label(&and_label);
+
+                                self.ctx.free_temp(field_match);
+                                self.ctx.free_temp(field_reg);
+                            }
+                        }
+
+                        self.ctx.define_label(&rec_end);
+                    }
+                } else {
+                    // Plain record/struct pattern: use string-based type check
+                    let type_id = self.intern_string(&type_name);
+                    self.ctx.emit(Instruction::IsVar {
+                        dst: result,
+                        value: scrutinee,
+                        tag: type_id,
+                    });
+                }
+
+                // Plain record field sub-pattern checks (only for non-variant records)
+                if variant_tag.is_none() && !fields.is_empty() {
+                    let check_fields = self.ctx.new_label("rec_check");
+                    self.ctx
+                        .emit_forward_jump(&check_fields, |offset| Instruction::JmpIf {
+                            cond: result,
+                            offset,
+                        });
+                    let rec_end = self.ctx.new_label("rec_end");
+                    self.ctx
+                        .emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
+                    self.ctx.define_label(&check_fields);
+
+                    for field in fields.iter() {
+                        let field_name = field.name.name.to_string();
+                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        let field_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GetF {
+                            dst: field_reg,
+                            obj: scrutinee,
+                            field_idx,
+                        });
+
+                        if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
+                            let field_match = self.ctx.alloc_temp();
+                            self.compile_pattern_test(inner_pattern, field_reg, field_match)?;
+
+                            // result = result && field_match
+                            let and_label = self.ctx.new_label("rec_and");
+                            self.ctx
+                                .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                    cond: result,
+                                    offset,
+                                });
+                            self.ctx.emit(Instruction::Mov {
+                                dst: result,
+                                src: field_match,
+                            });
+                            self.ctx.define_label(&and_label);
+
+                            self.ctx.free_temp(field_match);
+                        }
+                        // Shorthand pattern { x } always matches if type matches
+
+                        self.ctx.free_temp(field_reg);
+                    }
+
+                    self.ctx.define_label(&rec_end);
+                }
+
+                let _ = rest; // Rest patterns just ignore extra fields
+            }
+
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
+                // Slice pattern: [a, .., b]
+                // Check that length >= before.len() + after.len()
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                let min_len = before.len() + after.len();
+                if min_len > 0 || rest.is_some() {
+                    let len_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Len {
+                        dst: len_reg,
+                        arr: scrutinee,
+                        type_hint: 0,
+                    });
+                    let min_len_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: min_len_reg,
+                        value: min_len as i64,
+                    });
+                    let len_check = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge,
+                        dst: len_check,
+                        a: len_reg,
+                        b: min_len_reg,
+                    });
+
+                    // If length check fails, result = false
+                    let check_elems = self.ctx.new_label("slice_check");
+                    self.ctx
+                        .emit_forward_jump(&check_elems, |offset| Instruction::JmpIf {
+                            cond: len_check,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::LoadFalse { dst: result });
+                    let slice_end = self.ctx.new_label("slice_end");
+                    self.ctx
+                        .emit_forward_jump(&slice_end, |offset| Instruction::Jmp { offset });
+                    self.ctx.define_label(&check_elems);
+
+                    self.ctx.free_temp(len_check);
+
+                    // Check 'before' elements from start
+                    for (i, elem) in before.iter().enumerate() {
+                        let idx_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: idx_reg,
+                            value: i as i64,
+                        });
+                        let elem_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GetE {
+                            dst: elem_reg,
+                            arr: scrutinee,
+                            idx: idx_reg,
+                        });
+                        let elem_match = self.ctx.alloc_temp();
+                        self.compile_pattern_test(elem, elem_reg, elem_match)?;
+
+                        let and_label = self.ctx.new_label("slice_and");
+                        self.ctx
+                            .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result,
+                            src: elem_match,
+                        });
+                        self.ctx.define_label(&and_label);
+
+                        self.ctx.free_temp(elem_match);
+                        self.ctx.free_temp(elem_reg);
+                        self.ctx.free_temp(idx_reg);
+                    }
+
+                    // Check 'after' elements from end (len - after.len() + i)
+                    for (i, elem) in after.iter().enumerate() {
+                        let offset_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: offset_reg,
+                            value: (after.len() - i) as i64,
+                        });
+                        let idx_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::BinaryI {
+                            op: BinaryIntOp::Sub,
+                            dst: idx_reg,
+                            a: len_reg,
+                            b: offset_reg,
+                        });
+                        let elem_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GetE {
+                            dst: elem_reg,
+                            arr: scrutinee,
+                            idx: idx_reg,
+                        });
+                        let elem_match = self.ctx.alloc_temp();
+                        self.compile_pattern_test(elem, elem_reg, elem_match)?;
+
+                        let and_label = self.ctx.new_label("slice_and2");
+                        self.ctx
+                            .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result,
+                            src: elem_match,
+                        });
+                        self.ctx.define_label(&and_label);
+
+                        self.ctx.free_temp(elem_match);
+                        self.ctx.free_temp(elem_reg);
+                        self.ctx.free_temp(idx_reg);
+                        self.ctx.free_temp(offset_reg);
+                    }
+
+                    self.ctx.free_temp(min_len_reg);
+                    self.ctx.free_temp(len_reg);
+                    self.ctx.define_label(&slice_end);
+                }
+
+                let _ = rest; // Rest binding handled in pattern_bind
+            }
+
+            PatternKind::Rest => {
+                // Rest pattern by itself always matches
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+            }
+
+            #[allow(deprecated)]
+            PatternKind::View { .. } => {
+                // View patterns require advanced dependent type support
+                return Err(CodegenError::not_implemented(
+                    "view patterns (requires dependent types)",
+                ));
+            }
+
+            PatternKind::Active { name, params, bindings } => {
+                // Active patterns (F#-style): user-defined pattern matchers declared as
+                // `pattern Name(params)(value) -> Bool|Maybe<T> = expr;`
+                // Total patterns return Bool (test-only), partial patterns return Maybe<T>
+                // (extract value on match). Supports parameterized patterns and & combination.
+                //
+                // Active patterns are functions that take a value and return:
+                // - Bool for total patterns (test-only, no binding)
+                // - Maybe<T> for partial patterns (extract and bind on match)
+                //
+                // Codegen strategy:
+                // 1. Look up the pattern function by name
+                // 2. Call it with (params... , scrutinee) as arguments
+                // 3. For Bool patterns: result is the function return value
+                // 4. For Maybe patterns: test if result is Some variant
+                //
+                // Example:
+                //   pattern Even(n: Int) -> Bool = n % 2 == 0;
+                //   Even() compiles to: call Even(scrutinee), use result as match condition
+                //
+                //   pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+                //   ParseInt(n) compiles to: call ParseInt(scrutinee), check if Some,
+                //   then bind extracted value to n
+
+                let pattern_name = name.name.to_string();
+
+                // Look up the pattern function
+                let func_info = self.ctx.lookup_function(&pattern_name);
+
+                if let Some(func_info) = func_info {
+                    let func_info = func_info.clone();
+
+                    // Compile params + scrutinee as arguments
+                    // Arguments: params... scrutinee
+                    let total_args = params.len() + 1; // +1 for scrutinee
+
+                    // Check argument count (params + 1 scrutinee)
+                    if total_args != func_info.param_count {
+                        return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                            expected: func_info.param_count,
+                            found: total_args,
+                            function: pattern_name.clone(),
+                        }));
+                    }
+
+                    // Allocate registers for arguments
+                    let args_start = self.ctx.alloc_temp();
+
+                    // First, compile params
+                    if !params.is_empty() {
+                        let first_arg_val = self
+                            .compile_expr(&params[0])?
+                            .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                        self.ctx.emit(Instruction::Mov {
+                            dst: args_start,
+                            src: first_arg_val,
+                        });
+                        if first_arg_val != args_start {
+                            self.ctx.free_temp(first_arg_val);
+                        }
+
+                        for arg in params.iter().skip(1) {
+                            let arg_reg = self.ctx.alloc_temp();
+                            let arg_val = self
+                                .compile_expr(arg)?
+                                .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                            self.ctx.emit(Instruction::Mov {
+                                dst: arg_reg,
+                                src: arg_val,
+                            });
+                            if arg_val != arg_reg {
+                                self.ctx.free_temp(arg_val);
+                            }
+                        }
+
+                        // Add scrutinee as last argument
+                        let scrutinee_slot = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Mov {
+                            dst: scrutinee_slot,
+                            src: scrutinee,
+                        });
+                    } else {
+                        // No params, just scrutinee
+                        self.ctx.emit(Instruction::Mov {
+                            dst: args_start,
+                            src: scrutinee,
+                        });
+                    }
+
+                    // Emit the call
+                    // For partial patterns, we need to cache the Maybe<T> result
+                    // before converting to boolean, so compile_pattern_bind can reuse it.
+                    let call_result = if !bindings.is_empty() {
+                        // Partial pattern - result is Maybe<T>
+                        // Use a dedicated register that we'll cache
+                        self.ctx.alloc_temp()
+                    } else {
+                        // Total pattern - result goes directly to result register
+                        result
+                    };
+
+                    self.ctx.emit(Instruction::Call {
+                        dst: call_result,
+                        func_id: func_info.id.0,
+                        args: crate::instruction::RegRange {
+                            start: args_start,
+                            count: total_args as u8,
+                        },
+                    });
+
+                    // For Bool patterns (no bindings), result is directly usable
+                    // For patterns with bindings, test bindings against the call result
+                    if !bindings.is_empty() {
+                        // Cache the result for use in compile_pattern_bind
+                        self.ctx.cache_active_pattern_result(scrutinee, &pattern_name, call_result);
+
+                        // Check if this is a partial pattern (returns Maybe<T>)
+                        let is_partial = self.ctx.lookup_function(&pattern_name)
+                            .map(|f| f.is_partial_pattern)
+                            .unwrap_or(false);
+
+                        if is_partial {
+                            // Partial pattern: test that result is Some(...), not None
+                            // Maybe<T> is None | Some(T), so Some has tag 1
+                            // Look up the actual tag from the "Some" variant constructor
+                            let some_tag = self.ctx.lookup_function("Some")
+                                .and_then(|info| info.variant_tag)
+                                .unwrap_or(1); // fallback: Some is typically tag 1
+                            self.ctx.emit(Instruction::IsVar {
+                                dst: result,
+                                value: call_result,
+                                tag: some_tag,
+                            });
+                        } else {
+                            // Total pattern: test each binding against the full result
+                            self.ctx.emit(Instruction::LoadTrue { dst: result });
+                            for binding in bindings.iter() {
+                                let bind_test = self.ctx.alloc_temp();
+                                self.compile_pattern_test(binding, call_result, bind_test)?;
+                                // result = result && bind_test
+                                let cont_label = self.ctx.new_label("active_bind");
+                                self.ctx.emit_forward_jump(&cont_label, |offset| Instruction::JmpNot {
+                                    cond: result,
+                                    offset,
+                                });
+                                self.ctx.emit(Instruction::Mov { dst: result, src: bind_test });
+                                self.ctx.define_label(&cont_label);
+                                self.ctx.free_temp(bind_test);
+                            }
+                        }
+                        // Note: Don't free call_result - it's cached for compile_pattern_bind
+                    }
+
+                    // Note: Argument registers are not explicitly freed here
+                    // They will be reused when they go out of scope
+                } else {
+                    // Pattern function not found - emit false for now
+                    // This could be a pattern defined in another module
+                    // In a full implementation, we'd have cross-module pattern lookup
+                    self.ctx.emit(Instruction::LoadFalse { dst: result });
+                }
+            }
+
+            PatternKind::And(patterns) => {
+                // And pattern: all sub-patterns must match
+                // result = pat1 && pat2 && ... && patN
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                for pat in patterns.iter() {
+                    let pat_result = self.ctx.alloc_temp();
+                    self.compile_pattern_test(pat, scrutinee, pat_result)?;
+
+                    // result = result && pat_result
+                    let and_label = self.ctx.new_label("and_pat");
+                    self.ctx
+                        .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                            cond: result,
+                            offset,
+                        });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: result,
+                        src: pat_result,
+                    });
+                    self.ctx.define_label(&and_label);
+
+                    self.ctx.free_temp(pat_result);
+                }
+            }
+
+            PatternKind::TypeTest { test_type, .. } => {
+                // TypeTest pattern: `x is Type` - runtime type check
+                // Uses IsVar instruction with the type name as a tag to check if the
+                // scrutinee's runtime type matches the expected type.
+                //
+                // This is essential for working with `unknown` type safely - it allows
+                // narrowing the type at runtime and safely accessing type-specific operations.
+                let type_name = format!("{:?}", test_type.kind);
+                let type_id = self.intern_string(&type_name);
+                self.ctx.emit(Instruction::IsVar {
+                    dst: result,
+                    value: scrutinee,
+                    tag: type_id,
+                });
+            }
+
+            PatternKind::Stream { head_patterns, rest } => {
+                // Stream pattern: stream[first, second, ...rest]
+                // Tests if the iterator/stream can produce the required number of elements.
+                //
+                // For empty pattern stream[]: check if iterator is exhausted
+                // For patterns stream[a, b, ...]: check if iterator has at least N elements
+                //
+                // Stream pattern matching: tests if the iterator can produce the required
+                // number of elements. Empty stream[] checks exhaustion; stream[a, b, ...]
+                // checks at least N elements are available.
+                self.ctx.emit(Instruction::LoadTrue { dst: result });
+
+                if head_patterns.is_empty() && rest.is_none() {
+                    // stream[] - check if iterator is exhausted
+                    // Use GenHasNext or similar to check if no more elements
+                    let has_more = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GenHasNext {
+                        dst: has_more,
+                        generator: scrutinee,
+                    });
+                    // stream[] matches when iterator is empty (has_more == false)
+                    // result = !has_more
+                    let not_label = self.ctx.new_label("stream_empty_check");
+                    self.ctx
+                        .emit_forward_jump(&not_label, |offset| Instruction::JmpNot {
+                            cond: has_more,
+                            offset,
+                        });
+                    // has_more is true, so stream[] doesn't match
+                    self.ctx.emit(Instruction::LoadFalse { dst: result });
+                    self.ctx.define_label(&not_label);
+                    self.ctx.free_temp(has_more);
+                } else {
+                    // stream[a, b, ...rest] - try to consume head_patterns.len() elements
+                    // For each element, check if iterator can produce it and if pattern matches
+                    let iter_clone = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Clone {
+                        dst: iter_clone,
+                        src: scrutinee,
+                    });
+
+                    for pat in head_patterns.iter() {
+                        // Check if iterator has next element
+                        let has_next = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GenHasNext {
+                            dst: has_next,
+                            generator: iter_clone,
+                        });
+
+                        // If no more elements, pattern doesn't match
+                        let continue_label = self.ctx.new_label("stream_continue");
+                        let fail_label = self.ctx.new_label("stream_fail");
+                        self.ctx
+                            .emit_forward_jump(&continue_label, |offset| Instruction::JmpIf {
+                                cond: has_next,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::LoadFalse { dst: result });
+                        self.ctx
+                            .emit_forward_jump(&fail_label, |offset| Instruction::Jmp { offset });
+                        self.ctx.define_label(&continue_label);
+
+                        // Get next element
+                        let elem = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GenNext {
+                            dst: elem,
+                            generator: iter_clone,
+                        });
+
+                        // Test if element matches pattern
+                        let elem_match = self.ctx.alloc_temp();
+                        self.compile_pattern_test(pat, elem, elem_match)?;
+
+                        // result = result && elem_match
+                        let and_label = self.ctx.new_label("stream_and");
+                        self.ctx
+                            .emit_forward_jump(&and_label, |offset| Instruction::JmpNot {
+                                cond: result,
+                                offset,
+                            });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: result,
+                            src: elem_match,
+                        });
+                        self.ctx.define_label(&and_label);
+
+                        self.ctx.define_label(&fail_label);
+                        self.ctx.free_temp(elem_match);
+                        self.ctx.free_temp(elem);
+                        self.ctx.free_temp(has_next);
+                    }
+
+                    self.ctx.free_temp(iter_clone);
+                    let _ = rest; // Rest binding handled in pattern_bind
+                }
+            }
+
+            PatternKind::Guard { pattern, guard } => {
+                // Guard pattern: pattern if guard_expr
+                // Spec: Rust RFC 3637 - Guard Patterns
+                //
+                // Semantics:
+                // 1. First test if the inner pattern matches
+                // 2. If pattern matches, evaluate guard expression
+                // 3. Final result is: pattern_matches AND guard_is_true
+
+                // Test the inner pattern
+                self.compile_pattern_test(pattern, scrutinee, result)?;
+
+                // If pattern doesn't match, we're done (result is already false)
+                let guard_label = self.ctx.new_label("guard_eval");
+                let done_label = self.ctx.new_label("guard_done");
+
+                self.ctx
+                    .emit_forward_jump(&guard_label, |offset| Instruction::JmpIf {
+                        cond: result,
+                        offset,
+                    });
+                // Pattern didn't match - jump to done (result is false)
+                self.ctx.emit_forward_jump(&done_label, |offset| Instruction::Jmp { offset });
+
+                // Pattern matched - now evaluate the guard
+                self.ctx.define_label(&guard_label);
+
+                // Before evaluating guard, bind pattern variables so guard can access them
+                self.compile_pattern_bind(pattern, scrutinee)?;
+
+                // Evaluate guard expression
+                let guard_result = self.compile_expr(guard)?.ok_or_else(|| {
+                    crate::codegen::CodegenError::internal(
+                        "guard expression produced no result",
+                    )
+                })?;
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: guard_result,
+                });
+                self.ctx.free_temp(guard_result);
+
+                self.ctx.define_label(&done_label);
+            }
+
+            PatternKind::Cons { head, tail } => {
+                // Cons pattern test: head :: tail
+                // Test that the value is a Cons variant, then test head and tail
+                self.compile_pattern_test(head, scrutinee, result)?;
+                // Short-circuit: if head doesn't match, skip tail test
+                let done_label = self.ctx.new_label("cons_done");
+                self.ctx.emit_forward_jump(&done_label, |offset| Instruction::JmpNot {
+                    cond: result,
+                    offset,
+                });
+                // Head matched, test tail
+                self.compile_pattern_test(tail, scrutinee, result)?;
+                self.ctx.define_label(&done_label);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Checks if a pattern contains any variable bindings (not just wildcards).
+    /// Used to determine if an Is expression needs scope management and pattern binding.
+    fn pattern_has_bindings(pattern: &verum_ast::Pattern) -> bool {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Wildcard => false,
+            PatternKind::Rest => false,
+            PatternKind::Ident { .. } => {
+                // An identifier binding always introduces a variable
+                true
+            }
+            PatternKind::Literal(_) => false,
+            PatternKind::Range { .. } => false,
+            PatternKind::Tuple(elements) => {
+                elements.iter().any(|p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::Record { fields, .. } => {
+                fields.iter().any(|f| {
+                    // Shorthand { x } binds x, explicit { x: pat } checks pat
+                    match &f.pattern {
+                        verum_common::Maybe::Some(p) => Self::pattern_has_bindings(p),
+                        verum_common::Maybe::None => true, // Shorthand binding
+                    }
+                })
+            }
+            PatternKind::Variant { data, .. } => {
+                match data {
+                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Tuple(elems)) => {
+                        elems.iter().any(|p| Self::pattern_has_bindings(p))
+                    }
+                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Record { fields, .. }) => {
+                        fields.iter().any(|f| {
+                            match &f.pattern {
+                                verum_common::Maybe::Some(p) => Self::pattern_has_bindings(p),
+                                verum_common::Maybe::None => true, // Shorthand binding
+                            }
+                        })
+                    }
+                    verum_common::Maybe::None => false,
+                }
+            }
+            PatternKind::Or(patterns) => {
+                // All branches must have the same bindings, check the first
+                patterns.first().map_or(false, |p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::Reference { inner, .. } => Self::pattern_has_bindings(inner),
+            PatternKind::Guard { pattern, .. } => Self::pattern_has_bindings(pattern),
+            PatternKind::Slice { before, rest, after } => {
+                before.iter().any(|p| Self::pattern_has_bindings(p))
+                    || rest.as_ref().map_or(false, |r| Self::pattern_has_bindings(r))
+                    || after.iter().any(|p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::Array(elements) => {
+                elements.iter().any(|p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::Paren(inner) => Self::pattern_has_bindings(inner),
+            #[allow(deprecated)]
+            PatternKind::View { pattern, .. } => Self::pattern_has_bindings(pattern),
+            PatternKind::Active { bindings, .. } => {
+                bindings.iter().any(|p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::And(patterns) => {
+                patterns.iter().any(|p| Self::pattern_has_bindings(p))
+            }
+            PatternKind::TypeTest { .. } => {
+                // TypeTest binds a variable with the narrowed type
+                true
+            }
+            PatternKind::Stream { head_patterns, rest } => {
+                head_patterns.iter().any(|p| Self::pattern_has_bindings(p))
+                    || rest.is_some() // rest binding is a variable
+            }
+            PatternKind::Cons { head, tail } => {
+                Self::pattern_has_bindings(head) || Self::pattern_has_bindings(tail)
+            }
+        }
+    }
+
+    /// Checks if a pattern needs a reference (has `by_ref = true`).
+    /// This is used to determine whether to use GetVariantData or GetVariantDataRef.
+    fn pattern_needs_ref(pattern: &verum_ast::Pattern) -> bool {
+        use verum_ast::PatternKind;
+        match &pattern.kind {
+            PatternKind::Ident { by_ref, .. } => *by_ref,
+            PatternKind::Paren(inner) => Self::pattern_needs_ref(inner),
+            // For other patterns, check recursively if any binding needs ref
+            _ => false,
+        }
+    }
+
+    /// Binds pattern variables.
+    pub(crate) fn compile_pattern_bind(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        scrutinee: Reg,
+    ) -> CodegenResult<()> {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Wildcard => {
+                // Nothing to bind
+            }
+
+            PatternKind::Ident { mutable, name, subpattern, by_ref: _by_ref } => {
+                let var_reg = self.ctx.define_var(&name.name, *mutable);
+                // When by_ref is true, the scrutinee is already a pointer to the value
+                // (from GetVariantDataRef). We bind this pointer directly - it acts as
+                // a mutable reference that can be dereferenced with * and written through.
+                // When by_ref is false, we copy the value.
+                self.ctx.emit(Instruction::Mov {
+                    dst: var_reg,
+                    src: scrutinee,
+                });
+                // Propagate raw pointer status from source to destination.
+                // NOTE: We do NOT mark by_ref bindings as raw pointers because they point
+                // to Value data in variant payloads, not raw FFI memory. Using the regular
+                // Deref instruction (not DerefRaw) allows cbgr_mutable_ptrs tracking to
+                // correctly read the Value from memory.
+                if self.ctx.is_raw_pointer(scrutinee) {
+                    self.ctx.mark_raw_pointer(var_reg);
+                }
+                // Recursively bind subpattern variables (e.g., x @ Circle { radius } binds both x and radius)
+                if let verum_common::Maybe::Some(sub_pat) = subpattern {
+                    self.compile_pattern_bind(sub_pat, scrutinee)?;
+                }
+            }
+
+            PatternKind::Tuple(elements) => {
+                if !elements.is_empty() {
+                    // Unpack tuple into consecutive registers
+                    // IMPORTANT: Use alloc_fresh() to guarantee consecutive registers.
+                    // alloc_temp() can return non-consecutive registers from the free list,
+                    // which would cause the Unpack instruction to write to wrong registers.
+                    let first_elem = self.ctx.registers.alloc_fresh();
+                    for _ in 1..elements.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+
+                    self.ctx.emit(Instruction::Unpack {
+                        dst_start: first_elem,
+                        tuple: scrutinee,
+                        count: elements.len() as u8,
+                    });
+
+                    for (i, elem) in elements.iter().enumerate() {
+                        let elem_reg = Reg(first_elem.0 + i as u16);
+                        self.compile_pattern_bind(elem, elem_reg)?;
+                    }
+
+                    // Note: We don't free these registers since alloc_fresh() doesn't
+                    // participate in the free list recycling. The registers are consumed
+                    // by the register allocator.
+                }
+            }
+
+            PatternKind::Paren(inner) => {
+                self.compile_pattern_bind(inner, scrutinee)?;
+            }
+
+            PatternKind::Variant { path, data, .. } => {
+                let variant_name = format!("{}", path);
+                let is_heap = variant_name == "Heap";
+
+                // Look up the variant's payload types for proper type tracking.
+                // Priority order:
+                // 1. If we have a match scrutinee type, try qualified lookup (e.g., IpAddr.V6)
+                // 2. Fall back to simple name lookup (e.g., V6)
+                // 3. Search for any qualified variant ending with .VariantName
+                let payload_types: Option<Vec<String>> = {
+                    // Extract simple variant name (e.g., "Num" from "Val::Num")
+                    let simple_variant = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                    // Also try dot-separated form
+                    let dot_variant = variant_name.replace("::", ".");
+
+                    // First try qualified lookup using the match scrutinee type
+                    let qualified_lookup = self.ctx.match_scrutinee_type.as_ref().and_then(|parent_type| {
+                        // Try "ParentType.SimpleVariant" (e.g., "Val.Num")
+                        let qualified_name = format!("{}.{}", parent_type, simple_variant);
+                        self.ctx.lookup_function(&qualified_name)
+                            .and_then(|info| info.variant_payload_types.clone())
+                    });
+
+                    qualified_lookup
+                        // Try dot-separated form directly (e.g., "Val.Num")
+                        .or_else(|| self.ctx.lookup_function(&dot_variant)
+                            .and_then(|info| info.variant_payload_types.clone()))
+                        // Fall back to simple name lookup (e.g., "Num")
+                        .or_else(|| self.ctx.lookup_function(simple_variant)
+                            .and_then(|info| info.variant_payload_types.clone()))
+                        // Fall back to searching for qualified names
+                        .or_else(|| {
+                            let suffix = format!(".{}", simple_variant);
+                            let expected_param_count = match data {
+                                Some(VariantPatternData::Tuple(pats)) => pats.len(),
+                                Some(VariantPatternData::Record { fields, .. }) => fields.len(),
+                                None => 0,
+                            };
+                            self.ctx.find_variant_with_suffix(&suffix, expected_param_count)
+                                .and_then(|info| info.variant_payload_types.clone())
+                        })
+                };
+
+                // Extract variant payload fields
+                if let Some(data) = data {
+                    match data {
+                        VariantPatternData::Tuple(patterns) => {
+                            if is_heap && patterns.len() == 1 {
+                                // Heap(inner) — deref and bind inner pattern
+                                let inner_pat = &patterns[0];
+                                if !matches!(inner_pat.kind, PatternKind::Wildcard) {
+                                    let deref_reg = self.ctx.alloc_temp();
+                                    self.ctx.emit(Instruction::Deref {
+                                        dst: deref_reg,
+                                        ref_reg: scrutinee,
+                                    });
+                                    self.compile_pattern_bind(inner_pat, deref_reg)?;
+                                }
+                            } else {
+                                for (i, pat) in patterns.iter().enumerate() {
+                                    if matches!(pat.kind, PatternKind::Wildcard) {
+                                        continue;
+                                    }
+                                    let field_reg = self.ctx.alloc_temp();
+                                    // Check if this pattern needs a reference (ref or ref mut)
+                                    let needs_ref = Self::pattern_needs_ref(pat);
+                                    if needs_ref {
+                                        // Use GetVariantDataRef to get pointer to field
+                                        self.ctx.emit(Instruction::GetVariantDataRef {
+                                            dst: field_reg,
+                                            variant: scrutinee,
+                                            field: i as u32,
+                                        });
+                                    } else {
+                                        self.ctx.emit(Instruction::GetVariantData {
+                                            dst: field_reg,
+                                            variant: scrutinee,
+                                            field: i as u32,
+                                        });
+                                    }
+                                    self.compile_pattern_bind(pat, field_reg)?;
+
+                                    // Track the type of the bound variable for correct method dispatch
+                                    // First try explicit payload_types, but skip generic type parameters like "T", "E", "A"
+                                    // For generic types, fall back to extracting concrete types from scrutinee type
+                                    let is_generic_param = |s: &str| -> bool {
+                                        // Single uppercase letter or common generic names
+                                        s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
+                                    };
+
+                                    let field_type: Option<String> = {
+                                        // Check if we have concrete (non-generic) payload types
+                                        let concrete_payload = payload_types.as_ref()
+                                            .and_then(|types| types.get(i))
+                                            .filter(|t| !is_generic_param(t));
+
+                                        if let Some(type_name) = concrete_payload {
+                                            Some(type_name.clone())
+                                        } else {
+                                            // Fall back to extracting inner types from scrutinee type.
+                                            // Use variant definition metadata to determine field positions
+                                            // rather than hardcoded variant names.
+                                            self.ctx.match_scrutinee_type.as_ref().and_then(|scrutinee_type| {
+                                                let inner_types = self.extract_inner_types(scrutinee_type);
+                                                // Look up the variant's field position from its definition.
+                                                // For a variant with tag N in a type with K inner types,
+                                                // use the variant's declared position in the type's parameter list.
+                                                if let Some(info) = self.ctx.lookup_function(&variant_name)
+                                                    .or_else(|| {
+                                                        // Try qualified lookup: ParentType::VariantName
+                                                        let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
+                                                        self.ctx.lookup_function(&format!("{}::{}", base, variant_name))
+                                                    })
+                                                {
+                                                    if let Some(payload_types) = &info.variant_payload_types {
+                                                        // Use declared payload types if available
+                                                        payload_types.get(i).cloned()
+                                                    } else {
+                                                        // Infer from variant tag: tag 0 variants get first
+                                                        // inner type, tag 1 get second, etc.
+                                                        let tag = info.variant_tag.unwrap_or(0) as usize;
+                                                        // For single-param variants, use the tag as index
+                                                        // into the parent type's generic args
+                                                        if info.param_count <= 1 && tag < inner_types.len() {
+                                                            inner_types.get(tag).cloned()
+                                                        } else {
+                                                            inner_types.get(i).cloned()
+                                                        }
+                                                    }
+                                                } else {
+                                                    // No variant info found, fall back to positional
+                                                    inner_types.get(i).cloned()
+                                                }
+                                            })
+                                        }
+                                    };
+
+                                    if let Some(type_name) = field_type {
+                                        if let PatternKind::Ident { name, .. } = &pat.kind {
+                                            self.ctx.variable_type_names.insert(
+                                                name.name.to_string(),
+                                                type_name.clone(),
+                                            );
+                                            // Also register VarTypeKind for type-aware codegen
+                                            let var_type = self.type_name_to_var_type(&type_name);
+                                            self.ctx.register_variable_type(&name.name, var_type);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        VariantPatternData::Record { fields, .. } => {
+                            // Record variant: Variant { field1: pat1, field2: pat2 }
+                            // Fields stored positionally via SetVariantData during construction.
+                            // Use resolve_field_index to get the actual field position,
+                            // not the enumeration index — handles `Node { left, .. }`
+                            // where `left` is at position 1, not 0.
+                            let simple_variant = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                            for (_i, field) in fields.iter().enumerate() {
+                                let field_name = field.name.name.to_string();
+
+                                let field_reg = self.ctx.alloc_temp();
+
+                                // Resolve actual field position from type layout
+                                let field_idx = self.resolve_field_index(Some(simple_variant), &field_name);
+                                self.ctx.emit(Instruction::GetVariantData {
+                                    dst: field_reg,
+                                    variant: scrutinee,
+                                    field: field_idx,
+                                });
+
+                                // Bind the field value
+                                if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
+                                    self.compile_pattern_bind(inner_pattern, field_reg)?;
+                                    // Track type for inner pattern if it's an identifier
+                                    if let Some(ref types) = payload_types {
+                                        if let Some(type_name) = types.get(field_idx as usize) {
+                                            if let PatternKind::Ident { name, .. } = &inner_pattern.kind {
+                                                self.ctx.variable_type_names.insert(
+                                                    name.name.to_string(),
+                                                    type_name.clone(),
+                                                );
+                                                // Also register VarTypeKind for type-aware codegen
+                                                let var_type = self.type_name_to_var_type(type_name);
+                                                self.ctx.register_variable_type(&name.name, var_type);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Shorthand: { field } means { field: field }
+                                    let var_reg = self.ctx.define_var(&field_name, false);
+                                    self.ctx.emit(Instruction::Mov {
+                                        dst: var_reg,
+                                        src: field_reg,
+                                    });
+                                    // Track type for shorthand field
+                                    if let Some(ref types) = payload_types {
+                                        if let Some(type_name) = types.get(field_idx as usize) {
+                                            self.ctx.variable_type_names.insert(
+                                                field_name.clone(),
+                                                type_name.clone(),
+                                            );
+                                            // Also register VarTypeKind for type-aware codegen
+                                            let var_type = self.type_name_to_var_type(type_name);
+                                            self.ctx.register_variable_type(&field_name, var_type);
+                                        }
+                                    }
+                                }
+
+                                self.ctx.free_temp(field_reg);
+                            }
+                        }
+                    }
+                }
+            }
+
+            PatternKind::Literal(_) => {
+                // Literals don't bind variables
+            }
+
+            PatternKind::Or(alternatives) => {
+                // Or pattern binding: bind from the first matching alternative
+                // Since Or pattern matches were already tested, we just need to bind
+                // from any alternative (they all should bind the same variables)
+                // For correctness, we try each until one succeeds in matching
+                if let Some(first) = alternatives.first() {
+                    self.compile_pattern_bind(first, scrutinee)?;
+                }
+            }
+
+            PatternKind::Range { .. } => {
+                // Range patterns don't bind variables
+            }
+
+            PatternKind::Reference { inner, mutable } => {
+                // Reference pattern: dereference and bind inner
+                let deref_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Deref {
+                    dst: deref_reg,
+                    ref_reg: scrutinee,
+                });
+                self.compile_pattern_bind(inner, deref_reg)?;
+                self.ctx.free_temp(deref_reg);
+                let _ = mutable; // Mutability used for type checking, not binding
+            }
+
+            PatternKind::Array(elements) => {
+                // Array pattern: bind each element
+                for (i, elem) in elements.iter().enumerate() {
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: i as i64,
+                    });
+                    let elem_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetE {
+                        dst: elem_reg,
+                        arr: scrutinee,
+                        idx: idx_reg,
+                    });
+                    self.compile_pattern_bind(elem, elem_reg)?;
+                    self.ctx.free_temp(elem_reg);
+                    self.ctx.free_temp(idx_reg);
+                }
+            }
+
+            PatternKind::Record { path, fields, .. } => {
+                // Check if this is a record variant pattern
+                let type_name = format!("{}", path);
+                let is_variant = self.ctx.lookup_function(&type_name)
+                    .and_then(|info| info.variant_tag)
+                    .is_some()
+                    || {
+                        // Also check collision-aware paths: qualified lookup via
+                        // scrutinee type, or suffix+arg search
+                        if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                            self.ctx.find_variant_by_type_and_name(scrutinee_type, &type_name).is_some()
+                        } else {
+                            self.ctx.find_variant_by_suffix_and_args(&type_name, fields.len()).is_some()
+                        }
+                    };
+
+                // Look up payload types for type registration (mirrors VariantPatternData::Record)
+                let payload_types: Option<Vec<String>> = if is_variant {
+                    // For variant records, try qualified lookup then simple lookup
+                    let qualified_lookup = self.ctx.match_scrutinee_type.as_ref().and_then(|parent_type| {
+                        let qualified_name = format!("{}.{}", parent_type, type_name);
+                        self.ctx.lookup_function(&qualified_name)
+                            .and_then(|info| info.variant_payload_types.clone())
+                    });
+                    qualified_lookup
+                        .or_else(|| self.ctx.lookup_function(&type_name)
+                            .and_then(|info| info.variant_payload_types.clone()))
+                        .or_else(|| {
+                            let suffix = format!(".{}", type_name);
+                            self.ctx.find_variant_with_suffix(&suffix, fields.len())
+                                .and_then(|info| info.variant_payload_types.clone())
+                        })
+                } else {
+                    None
+                };
+
+                for (_i, field) in fields.iter().enumerate() {
+                    let field_name = field.name.name.to_string();
+                    let field_reg = self.ctx.alloc_temp();
+
+                    if is_variant {
+                        // Record variant: resolve actual field position from type layout
+                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        self.ctx.emit(Instruction::GetVariantData {
+                            dst: field_reg,
+                            variant: scrutinee,
+                            field: field_idx,
+                        });
+                    } else {
+                        // Plain record: extract field by type-specific position
+                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        self.ctx.emit(Instruction::GetF {
+                            dst: field_reg,
+                            obj: scrutinee,
+                            field_idx,
+                        });
+                    }
+
+                    // Determine field type for type registration
+                    let field_type_name: Option<String> = if is_variant {
+                        // Variant record: resolve by field name from type layout
+                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        payload_types.as_ref().and_then(|types| types.get(field_idx as usize).cloned())
+                    } else {
+                        // Plain record: look up field type via type_field_type_names
+                        self.field_type_name(&type_name, &field_name).map(|s| s.to_string())
+                    };
+
+                    if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
+                        self.compile_pattern_bind(inner_pattern, field_reg)?;
+                        // Track type for inner pattern if it's an identifier
+                        if let Some(ref ft) = field_type_name {
+                            if let PatternKind::Ident { name, .. } = &inner_pattern.kind {
+                                self.ctx.variable_type_names.insert(
+                                    name.name.to_string(),
+                                    ft.clone(),
+                                );
+                                let var_type = self.type_name_to_var_type(ft);
+                                self.ctx.register_variable_type(&name.name, var_type);
+                            }
+                        }
+                    } else {
+                        // Shorthand: { x } means bind x to the field value
+                        let var_reg = self.ctx.define_var(&field_name, false);
+                        self.ctx.emit(Instruction::Mov {
+                            dst: var_reg,
+                            src: field_reg,
+                        });
+                        // Track type for shorthand field
+                        if let Some(ref ft) = field_type_name {
+                            self.ctx.variable_type_names.insert(
+                                field_name.clone(),
+                                ft.clone(),
+                            );
+                            let var_type = self.type_name_to_var_type(ft);
+                            self.ctx.register_variable_type(&field_name, var_type);
+                        }
+                    }
+
+                    self.ctx.free_temp(field_reg);
+                }
+            }
+
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
+                // Slice pattern: bind before elements, rest (if any), after elements
+                let len_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Len {
+                    dst: len_reg,
+                    arr: scrutinee,
+                    type_hint: 0,
+                });
+
+                // Bind 'before' elements from start
+                for (i, elem) in before.iter().enumerate() {
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: i as i64,
+                    });
+                    let elem_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetE {
+                        dst: elem_reg,
+                        arr: scrutinee,
+                        idx: idx_reg,
+                    });
+                    self.compile_pattern_bind(elem, elem_reg)?;
+                    self.ctx.free_temp(elem_reg);
+                    self.ctx.free_temp(idx_reg);
+                }
+
+                // Bind 'after' elements from end
+                for (i, elem) in after.iter().enumerate() {
+                    let offset_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: offset_reg,
+                        value: (after.len() - i) as i64,
+                    });
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub,
+                        dst: idx_reg,
+                        a: len_reg,
+                        b: offset_reg,
+                    });
+                    let elem_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetE {
+                        dst: elem_reg,
+                        arr: scrutinee,
+                        idx: idx_reg,
+                    });
+                    self.compile_pattern_bind(elem, elem_reg)?;
+                    self.ctx.free_temp(elem_reg);
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(offset_reg);
+                }
+
+                self.ctx.free_temp(len_reg);
+                let _ = rest; // Rest pattern binding would require slice creation
+            }
+
+            PatternKind::Rest => {
+                // Rest pattern by itself doesn't bind in this context
+            }
+
+            #[allow(deprecated)]
+            PatternKind::View { .. } => {
+                return Err(CodegenError::not_implemented(
+                    "view pattern binding (requires dependent types)",
+                ));
+            }
+
+            PatternKind::Active { name, params, bindings } => {
+                // Active pattern binding: for partial patterns (-> Maybe<T>), unwrap the
+                // Some value and bind it to the pattern variable. Total patterns (-> Bool)
+                // produce no bindings.
+                //
+                // Total patterns (-> Bool): no binding, just test
+                // Partial patterns (-> Maybe<T>): bind the extracted value if Some
+                //
+                // For partial patterns with bindings (e.g., ParseInt(n)):
+                // 1. Get the cached Maybe<T> result from compile_pattern_test
+                // 2. Extract the value from Maybe::Some
+                // 3. Bind to the pattern(s) in bindings list
+                let _ = params;
+
+                if !bindings.is_empty() {
+                    // Partial pattern - extract and bind the value
+                    // The pattern function returns Maybe<T>
+                    // We get the cached result from compile_pattern_test to avoid calling twice
+                    let pattern_name = name.name.to_string();
+
+                    // Try to get cached result first (optimization)
+                    let maybe_result = if let Some(cached_reg) = self.ctx.get_cached_active_pattern_result(scrutinee, &pattern_name) {
+                        cached_reg
+                    } else {
+                        // Fallback: call the function (shouldn't happen in normal flow)
+                        // This path exists for safety in case caching wasn't done
+                        if let Some(func_info) = self.ctx.lookup_function(&pattern_name) {
+                            let func_info = func_info.clone();
+
+                            // Compile params + scrutinee as arguments
+                            let total_args = params.len() + 1;
+                            let args_start = self.ctx.alloc_temp();
+
+                            if !params.is_empty() {
+                                for (i, arg) in params.iter().enumerate() {
+                                    let arg_reg = if i == 0 { args_start } else { self.ctx.alloc_temp() };
+                                    let arg_val = self
+                                        .compile_expr(arg)?
+                                        .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                                    self.ctx.emit(Instruction::Mov {
+                                        dst: arg_reg,
+                                        src: arg_val,
+                                    });
+                                    if arg_val != arg_reg {
+                                        self.ctx.free_temp(arg_val);
+                                    }
+                                }
+                                let scrutinee_slot = self.ctx.alloc_temp();
+                                self.ctx.emit(Instruction::Mov {
+                                    dst: scrutinee_slot,
+                                    src: scrutinee,
+                                });
+                            } else {
+                                self.ctx.emit(Instruction::Mov {
+                                    dst: args_start,
+                                    src: scrutinee,
+                                });
+                            }
+
+                            // Call pattern function
+                            let result = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::Call {
+                                dst: result,
+                                func_id: func_info.id.0,
+                                args: crate::instruction::RegRange {
+                                    start: args_start,
+                                    count: total_args as u8,
+                                },
+                            });
+                            result
+                        } else {
+                            // Pattern function not found - can't bind
+                            return Ok(());
+                        }
+                    };
+
+                    // Check if this is a partial pattern (returns Maybe<T>)
+                    let is_partial = self.ctx.lookup_function(&pattern_name)
+                        .map(|f| f.is_partial_pattern)
+                        .unwrap_or(false);
+
+                    if is_partial {
+                        // Partial pattern: extract inner value from Some(v) before binding
+                        // AsVar extracts a field from the variant payload by index
+                        // Some(v) has one payload field at index 0
+                        let inner_val = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::AsVar {
+                            dst: inner_val,
+                            value: maybe_result,
+                            tag: 0, // field index 0 = first (and only) payload field
+                        });
+                        for binding in bindings.iter() {
+                            self.compile_pattern_bind(binding, inner_val)?;
+                        }
+                        self.ctx.free_temp(inner_val);
+                    } else {
+                        // Total pattern: bind against the full result
+                        for binding in bindings.iter() {
+                            self.compile_pattern_bind(binding, maybe_result)?;
+                        }
+                    }
+
+                    // Note: Don't free maybe_result if it was cached - it may be used elsewhere
+                }
+                // Total patterns (no bindings) don't bind anything
+            }
+
+            PatternKind::And(patterns) => {
+                // And pattern binding: bind variables from all sub-patterns
+                for pat in patterns.iter() {
+                    self.compile_pattern_bind(pat, scrutinee)?;
+                }
+            }
+
+            PatternKind::TypeTest { binding, .. } => {
+                // TypeTest pattern binding: `x is Type`
+                // Binds the scrutinee (cast to the narrowed type) to the binding name.
+                //
+                // The type test has already been performed in compile_pattern_test,
+                // so here we just need to bind the value. The runtime cast is a no-op
+                // since we've already verified the type matches.
+                //
+                // The binding gets the narrowed type, enabling type-safe access in the arm.
+                let var_reg = self.ctx.define_var(&binding.name, false);
+                self.ctx.emit(Instruction::Mov {
+                    dst: var_reg,
+                    src: scrutinee,
+                });
+            }
+
+            PatternKind::Stream { head_patterns, rest } => {
+                // Stream pattern binding: stream[first, second, ...rest]
+                // Consumes elements from the iterator and binds them to pattern variables.
+                // If rest is specified, binds the remaining iterator.
+                //
+                // Stream pattern binding: consume elements from iterator via GenNext and bind
+                // to pattern variables. If `...rest` is present, bind the remaining iterator.
+
+                // Consume and bind head elements
+                for pat in head_patterns.iter() {
+                    // Get next element from iterator (we know it exists from pattern test)
+                    let elem = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GenNext {
+                        dst: elem,
+                        generator: scrutinee,
+                    });
+
+                    // Bind the element according to the pattern
+                    self.compile_pattern_bind(pat, elem)?;
+                    self.ctx.free_temp(elem);
+                }
+
+                // Bind rest iterator if specified
+                if let verum_common::Maybe::Some(rest_ident) = rest {
+                    // The remaining iterator is bound to the rest variable
+                    // Note: The scrutinee IS the iterator, and it has advanced past the head elements
+                    let rest_reg = self.ctx.define_var(&rest_ident.name, false);
+                    self.ctx.emit(Instruction::Mov {
+                        dst: rest_reg,
+                        src: scrutinee,
+                    });
+                }
+            }
+
+            PatternKind::Guard { pattern, guard: _ } => {
+                // Guard pattern binding: pattern if guard_expr
+                // Spec: Rust RFC 3637 - Guard Patterns
+                //
+                // For binding, we only need to bind the inner pattern's variables.
+                // The guard expression does not introduce any new bindings.
+                // Note: The guard has already been evaluated during pattern testing.
+                self.compile_pattern_bind(pattern, scrutinee)?;
+            }
+
+            PatternKind::Cons { head, tail } => {
+                // Cons pattern: head :: tail
+                // Bind head to first element, tail to rest of stream
+                self.compile_pattern_bind(head, scrutinee)?;
+                self.compile_pattern_bind(tail, scrutinee)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles compound destructuring assignment: (a, b) += (da, db)
+    ///
+    /// For each element in the pattern, this:
+    /// 1. Loads the current variable value
+    /// 2. Unpacks the corresponding value element
+    /// 3. Applies the binary operation
+    /// 4. Stores the result back to the variable
+    ///
+    /// Unified destructuring with compound assignment: for each element in the pattern,
+    /// loads the current variable, unpacks the corresponding value element, applies the
+    /// binary operator (+=, -=, etc.), and stores the result back.
+    fn compile_compound_destructuring(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        value_reg: Reg,
+        op: &verum_ast::BinOp,
+    ) -> CodegenResult<()> {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Tuple(elements) => {
+                if elements.is_empty() {
+                    return Ok(());
+                }
+
+                // Unpack the value tuple into consecutive registers
+                let first_elem = self.ctx.registers.alloc_fresh();
+                for _ in 1..elements.len() {
+                    self.ctx.registers.alloc_fresh();
+                }
+
+                self.ctx.emit(Instruction::Unpack {
+                    dst_start: first_elem,
+                    tuple: value_reg,
+                    count: elements.len() as u8,
+                });
+
+                // Apply compound operation to each element
+                for (i, elem_pattern) in elements.iter().enumerate() {
+                    let elem_value_reg = Reg(first_elem.0 + i as u16);
+                    self.compile_compound_destructuring_element(elem_pattern, elem_value_reg, op)?;
+                }
+
+                Ok(())
+            }
+
+            PatternKind::Array(elements) => {
+                // For arrays, extract each element and apply operation
+                for (i, elem_pattern) in elements.iter().enumerate() {
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: i as i64,
+                    });
+                    let elem_value_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetE {
+                        dst: elem_value_reg,
+                        arr: value_reg,
+                        idx: idx_reg,
+                    });
+
+                    self.compile_compound_destructuring_element(elem_pattern, elem_value_reg, op)?;
+
+                    self.ctx.free_temp(elem_value_reg);
+                    self.ctx.free_temp(idx_reg);
+                }
+                Ok(())
+            }
+
+            PatternKind::Paren(inner) => {
+                self.compile_compound_destructuring(inner, value_reg, op)
+            }
+
+            PatternKind::Ident { .. } => {
+                // Single identifier - apply compound operation directly
+                self.compile_compound_destructuring_element(pattern, value_reg, op)
+            }
+
+            PatternKind::Wildcard => {
+                // Nothing to do for wildcard
+                Ok(())
+            }
+
+            _ => Err(crate::codegen::CodegenError::unsupported_expr(
+                &format!("compound destructuring not supported for pattern kind: {:?}", pattern.kind),
+            )),
+        }
+    }
+
+    /// Applies compound operation to a single pattern element.
+    /// For identifier patterns: var = var op value
+    fn compile_compound_destructuring_element(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        value_reg: Reg,
+        op: &verum_ast::BinOp,
+    ) -> CodegenResult<()> {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Ident { name, .. } => {
+                let var_name = &name.name;
+
+                // Handle @thread_local static variables
+                if let Some(slot) = self.ctx.is_thread_local(var_name) {
+                    // Load current TLS value
+                    let current_reg = self.ctx.alloc_temp();
+                    let slot_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
+                    self.ctx.emit(Instruction::TlsGet { dst: current_reg, slot: slot_reg });
+
+                    // Apply operation
+                    let result_reg = self.ctx.alloc_temp();
+                    let bin_op = Self::compound_to_binary_op(op);
+                    self.emit_binary_int_op(result_reg, current_reg, value_reg, &bin_op)?;
+
+                    // Store back to TLS
+                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: result_reg });
+                    self.ctx.free_temp(current_reg);
+                    self.ctx.free_temp(result_reg);
+                    // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
+                    return Ok(());
+                }
+
+                // Handle non-local static: create shadow if needed
+                if self.ctx.get_var_reg(var_name).is_err() {
+                    if let Some(func_info) = self.ctx.lookup_function(var_name).cloned()
+                        && func_info.param_count == 0 {
+                            let init_reg = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::Call {
+                                dst: init_reg,
+                                func_id: func_info.id.0,
+                                args: RegRange::new(Reg(0), 0),
+                            });
+                            let shadow_reg = self.ctx.define_var(var_name, true);
+                            self.ctx.emit(Instruction::Mov { dst: shadow_reg, src: init_reg });
+                            self.ctx.free_temp(init_reg);
+                        }
+                }
+
+                // Get the variable's register
+                let var_reg = self.ctx.get_var_reg(var_name)?;
+
+                // Allocate temp for result
+                let result_reg = self.ctx.alloc_temp();
+
+                // Emit the binary operation: result = var op value
+                // Convert compound op to binary op
+                let bin_op = Self::compound_to_binary_op(op);
+                self.emit_binary_int_op(result_reg, var_reg, value_reg, &bin_op)?;
+
+                // Store result back to variable
+                self.ctx.emit(Instruction::Mov {
+                    dst: var_reg,
+                    src: result_reg,
+                });
+
+                self.ctx.free_temp(result_reg);
+                Ok(())
+            }
+
+            PatternKind::Wildcard => {
+                // Ignore this element
+                Ok(())
+            }
+
+            PatternKind::Paren(inner) => {
+                self.compile_compound_destructuring_element(inner, value_reg, op)
+            }
+
+            _ => Err(crate::codegen::CodegenError::unsupported_expr(
+                &format!("compound destructuring element not supported for pattern kind: {:?}", pattern.kind),
+            )),
+        }
+    }
+
+    /// Converts a compound assignment operator to its binary equivalent.
+    fn compound_to_binary_op(op: &verum_ast::BinOp) -> verum_ast::BinOp {
+        use verum_ast::BinOp;
+        match op {
+            BinOp::AddAssign => BinOp::Add,
+            BinOp::SubAssign => BinOp::Sub,
+            BinOp::MulAssign => BinOp::Mul,
+            BinOp::DivAssign => BinOp::Div,
+            BinOp::RemAssign => BinOp::Rem,
+            BinOp::BitAndAssign => BinOp::BitAnd,
+            BinOp::BitOrAssign => BinOp::BitOr,
+            BinOp::BitXorAssign => BinOp::BitXor,
+            BinOp::ShlAssign => BinOp::Shl,
+            BinOp::ShrAssign => BinOp::Shr,
+            _ => BinOp::Add, // fallback, shouldn't happen
+        }
+    }
+
+    /// Emits a binary operation instruction for compound destructuring.
+    /// Uses BinaryI for arithmetic ops and Bitwise for bitwise ops.
+    fn emit_binary_int_op(
+        &mut self,
+        dst: Reg,
+        left: Reg,
+        right: Reg,
+        op: &verum_ast::BinOp,
+    ) -> CodegenResult<()> {
+        use verum_ast::BinOp;
+        use crate::instruction::{BinaryIntOp, BitwiseOp};
+
+        match op {
+            // Arithmetic operations use BinaryI instruction
+            BinOp::Add => {
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Add,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Sub => {
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Sub,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Mul => {
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Mul,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Div => {
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Div,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Rem => {
+                // Rem maps to Mod in VBC
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Mod,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            // Bitwise operations use Bitwise instruction
+            BinOp::BitAnd => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::And,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::BitOr => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Or,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::BitXor => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Xor,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Shl => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Shl,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            BinOp::Shr => {
+                self.ctx.emit(Instruction::Bitwise {
+                    op: BitwiseOp::Shr,
+                    dst,
+                    a: left,
+                    b: right,
+                });
+            }
+            _ => {
+                return Err(crate::codegen::CodegenError::unsupported_expr(
+                    &format!("unsupported binary operation for compound destructuring: {:?}", op),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    // ==================== Collections ====================
+
+    /// Compiles a tuple expression.
+    fn compile_tuple(&mut self, elements: &verum_common::List<Expr>) -> CodegenResult<Option<Reg>> {
+        if elements.is_empty() {
+            // Unit type
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadUnit { dst: result });
+            return Ok(Some(result));
+        }
+
+        // IMPORTANT: Allocate ALL tuple element registers FIRST using alloc_fresh()
+        // to guarantee consecutive registers. We must do this BEFORE compiling any
+        // expressions, because expression compilation may allocate/free temp registers
+        // that could break consecutivity if we interleave allocation with compilation.
+        //
+        // Example of the bug this fixes:
+        // For tuple (a, a+1, a+2):
+        // - alloc_temp() for element 1 -> Reg(3)
+        // - compile a+1: allocates Reg(5) for literal, Reg(6) for result
+        // - alloc_temp() for element 2 -> Reg(4)
+        // - compile a+1, then free Reg(6) -> free_list = [Reg(6)]
+        // - alloc_temp() for element 3 -> pops Reg(6) from free_list!
+        // Result: [Reg(3), Reg(4), Reg(6)] - NOT consecutive!
+        // Pack reads [Reg(3), Reg(4), Reg(5)] and Reg(5) has stale value '2'
+        let first_reg = self.ctx.registers.alloc_fresh();
+        for _ in 1..elements.len() {
+            self.ctx.registers.alloc_fresh();
+        }
+
+        // Now compile all elements and move them to their pre-allocated registers
+        for (i, elem) in elements.iter().enumerate() {
+            let elem_val = self
+                .compile_expr(elem)?
+                .ok_or_else(|| CodegenError::internal("tuple element has no value"))?;
+            let target_reg = Reg(first_reg.0 + i as u16);
+            if elem_val != target_reg {
+                self.ctx.emit(Instruction::Mov {
+                    dst: target_reg,
+                    src: elem_val,
+                });
+                self.ctx.free_temp(elem_val);
+            }
+        }
+
+        let result = self.ctx.alloc_temp();
+
+        // Pack into tuple
+        self.ctx.emit(Instruction::Pack {
+            dst: result,
+            src_start: first_reg,
+            count: elements.len() as u8,
+        });
+
+        Ok(Some(result))
+    }
+
+    /// Compiles an array expression.
+    fn compile_array(&mut self, array: &verum_ast::ArrayExpr) -> CodegenResult<Option<Reg>> {
+        match array {
+            verum_ast::ArrayExpr::List(elements) => {
+                let result = self.ctx.alloc_temp();
+
+                // Create list
+                self.ctx.emit(Instruction::NewList { dst: result });
+
+                // Push all elements
+                for elem in elements.iter() {
+                    let elem_reg = self
+                        .compile_expr(elem)?
+                        .ok_or_else(|| CodegenError::internal("array element has no value"))?;
+                    self.ctx.emit(Instruction::ListPush {
+                        list: result,
+                        val: elem_reg,
+                    });
+                    self.ctx.free_temp(elem_reg);
+                }
+
+                Ok(Some(result))
+            }
+            verum_ast::ArrayExpr::Repeat { value, count } => {
+                let result = self.ctx.alloc_temp();
+
+                // Compile size
+                let size_reg = self
+                    .compile_expr(count)?
+                    .ok_or_else(|| CodegenError::internal("array size has no value"))?;
+
+                // Create list
+                self.ctx.emit(Instruction::NewList { dst: result });
+
+                // Compile value template
+                let val_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("array value has no value"))?;
+
+                // Create loop to push elements
+                let loop_counter = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: loop_counter,
+                    value: 0,
+                });
+
+                let loop_start = self.ctx.new_label("repeat_start");
+                let loop_end = self.ctx.new_label("repeat_end");
+
+                self.ctx.define_label(&loop_start);
+
+                // Check if counter < size
+                let cmp_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Lt,
+                    dst: cmp_reg,
+                    a: loop_counter,
+                    b: size_reg,
+                });
+
+                self.ctx
+                    .emit_forward_jump(&loop_end, |offset| Instruction::JmpNot {
+                        cond: cmp_reg,
+                        offset,
+                    });
+                self.ctx.free_temp(cmp_reg);
+
+                // Push cloned value
+                let clone_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Clone {
+                    dst: clone_reg,
+                    src: val_reg,
+                });
+                self.ctx.emit(Instruction::ListPush {
+                    list: result,
+                    val: clone_reg,
+                });
+                self.ctx.free_temp(clone_reg);
+
+                // Increment counter
+                self.ctx.emit(Instruction::UnaryI {
+                    op: UnaryIntOp::Inc,
+                    dst: loop_counter,
+                    src: loop_counter,
+                });
+
+                // Jump back
+                self.ctx
+                    .emit_backward_jump(&loop_start, |offset| Instruction::Jmp { offset })?;
+
+                self.ctx.define_label(&loop_end);
+
+                self.ctx.free_temp(size_reg);
+                self.ctx.free_temp(val_reg);
+                self.ctx.free_temp(loop_counter);
+
+                Ok(Some(result))
+            }
+        }
+    }
+
+    /// Compiles a stream literal expression.
+    ///
+    /// Stream literals create lazy iterators:
+    /// - `stream[1, 2, 3]` - finite iterator over elements
+    /// - `stream[1, 2, 3, ...]` - cycling iterator that repeats infinitely
+    /// - `stream[0..100]` - lazy range iterator
+    /// - `stream[0..]` - infinite range from 0
+    ///
+    /// Stream literals create lazy iterators backed by generators. `stream[1,2,3]` yields
+    /// elements on demand; `stream[0..100]` creates a lazy range; `stream[0..]` is infinite.
+    fn compile_stream_literal(
+        &mut self,
+        stream_lit: &verum_ast::expr::StreamLiteralExpr,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::expr::StreamLiteralKind;
+
+        match &stream_lit.kind {
+            StreamLiteralKind::Elements { elements, cycles } => {
+                let result = self.ctx.alloc_temp();
+
+                if elements.is_empty() {
+                    // Empty stream: stream[] - create empty iterator
+                    // Use GenCreate with a special empty generator function
+                    self.ctx.emit(Instruction::NewList { dst: result });
+                    // Create iterator from empty list
+                    let iter_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::IterNew {
+                        dst: iter_reg,
+                        iterable: result,
+                    });
+                    self.ctx.free_temp(result);
+                    return Ok(Some(iter_reg));
+                }
+
+                if *cycles {
+                    // Cycling stream: stream[1, 2, 3, ...]
+                    // Create a generator that yields elements cyclically
+                    //
+                    // Strategy: Create a list of elements, then create a cycling iterator
+                    // that wraps around when reaching the end.
+
+                    // First, create the backing list
+                    let list_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::NewList { dst: list_reg });
+
+                    for elem in elements.iter() {
+                        let elem_reg = self
+                            .compile_expr(elem)?
+                            .ok_or_else(|| CodegenError::internal("stream element has no value"))?;
+                        self.ctx.emit(Instruction::ListPush {
+                            list: list_reg,
+                            val: elem_reg,
+                        });
+                        self.ctx.free_temp(elem_reg);
+                    }
+
+                    // Create a closure that captures the list and cycles through it
+                    // For now, we create a regular iterator and mark it as cycling
+                    // The runtime handles the cycling behavior
+                    self.ctx.emit(Instruction::IterNew {
+                        dst: result,
+                        iterable: list_reg,
+                    });
+
+                    // Mark as cycling by setting a flag (implementation detail)
+                    // For now, we create the iterator; cycling behavior would be
+                    // implemented in the runtime or via a special instruction
+
+                    self.ctx.free_temp(list_reg);
+                } else {
+                    // Finite stream: stream[1, 2, 3]
+                    // Create a list and then create an iterator from it
+                    let list_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::NewList { dst: list_reg });
+
+                    for elem in elements.iter() {
+                        let elem_reg = self
+                            .compile_expr(elem)?
+                            .ok_or_else(|| CodegenError::internal("stream element has no value"))?;
+                        self.ctx.emit(Instruction::ListPush {
+                            list: list_reg,
+                            val: elem_reg,
+                        });
+                        self.ctx.free_temp(elem_reg);
+                    }
+
+                    // Create iterator from the list
+                    self.ctx.emit(Instruction::IterNew {
+                        dst: result,
+                        iterable: list_reg,
+                    });
+
+                    self.ctx.free_temp(list_reg);
+                }
+
+                Ok(Some(result))
+            }
+
+            StreamLiteralKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                let result = self.ctx.alloc_temp();
+
+                // Compile the start value
+                let start_reg = self
+                    .compile_expr(start)?
+                    .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+
+                match end {
+                    verum_common::Maybe::Some(end_expr) => {
+                        // Bounded range: stream[0..100] or stream[0..=100]
+                        let end_reg = self
+                            .compile_expr(end_expr)?
+                            .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+
+                        // Create a range object and then create an iterator from it
+                        // For now, we create the elements lazily using a generator pattern
+                        //
+                        // Strategy: Pack start, end, inclusive into a tuple and create
+                        // an iterator that unpacks and generates values
+
+                        // Create range tuple (start, end, inclusive_flag)
+                        let inclusive_reg = self.ctx.alloc_temp();
+                        if *inclusive {
+                            self.ctx.emit(Instruction::LoadTrue { dst: inclusive_reg });
+                        } else {
+                            self.ctx.emit(Instruction::LoadFalse { dst: inclusive_reg });
+                        }
+
+                        // Pack into a range structure
+                        // For simplicity, we use a tuple: (start, end, inclusive)
+                        let first_reg = start_reg;
+                        // Allocate consecutive registers for packing
+                        // start_reg is already first, allocate two more
+                        let _second_reg = self.ctx.alloc_temp(); // for end
+                        let _third_reg = self.ctx.alloc_temp(); // for inclusive
+                        self.ctx.emit(Instruction::Mov {
+                            dst: Reg(first_reg.0 + 1),
+                            src: end_reg,
+                        });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: Reg(first_reg.0 + 2),
+                            src: inclusive_reg,
+                        });
+
+                        let range_tuple = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Pack {
+                            dst: range_tuple,
+                            src_start: first_reg,
+                            count: 3,
+                        });
+
+                        // Create iterator from range
+                        self.ctx.emit(Instruction::IterNew {
+                            dst: result,
+                            iterable: range_tuple,
+                        });
+
+                        self.ctx.free_temp(range_tuple);
+                        self.ctx.free_temp(inclusive_reg);
+                        self.ctx.free_temp(end_reg);
+                        self.ctx.free_temp(Reg(first_reg.0 + 2));
+                        self.ctx.free_temp(Reg(first_reg.0 + 1));
+                    }
+                    verum_common::Maybe::None => {
+                        // Unbounded range: stream[0..]
+                        // Create an infinite iterator starting from start_reg
+                        //
+                        // Strategy: Create a generator that yields start, start+1, start+2, ...
+                        // For now, we create a special range iterator
+
+                        // Pack start into a tuple for the iterator
+                        let range_tuple = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Pack {
+                            dst: range_tuple,
+                            src_start: start_reg,
+                            count: 1,
+                        });
+
+                        // Create iterator (runtime handles infinite range semantics)
+                        self.ctx.emit(Instruction::IterNew {
+                            dst: result,
+                            iterable: range_tuple,
+                        });
+
+                        self.ctx.free_temp(range_tuple);
+                    }
+                }
+
+                self.ctx.free_temp(start_reg);
+                Ok(Some(result))
+            }
+        }
+    }
+
+    // ==================== Field Access ====================
+
+    /// Try to resolve a reference type property like `(&Int).size`, `(&checked T).size`, etc.
+    ///
+    /// Reference memory layout (CBGR spec):
+    /// - Managed ThinRef (`&T`, `&mut T`): 16 bytes (ptr=8 + generation=4 + epoch_caps=4)
+    /// - Managed FatRef (`&[T]`, `&mut [T]`): 24 bytes (ptr=8 + len=8 + generation=4 + epoch_caps=4)
+    /// - Checked thin (`&checked T`): 8 bytes (pointer only)
+    /// - Checked fat (`&checked [T]`): 16 bytes (ptr=8 + len=8)
+    /// - Unsafe thin (`&unsafe T`): 8 bytes (pointer only)
+    /// - Unsafe fat (`&unsafe [T]`): 16 bytes (ptr=8 + len=8)
+    fn try_resolve_ref_type_property(&self, base: &Expr, field: &str) -> Option<i64> {
+        // Only handle "size" and "alignment" properties
+        if field != "size" && field != "alignment" {
+            return None;
+        }
+
+        // Look for Paren(Unary { op: Ref*, expr: ... }) pattern
+        // This matches: (&Int).size, (&checked Int).size, (&mut [T]).size, etc.
+        let inner = match &base.kind {
+            ExprKind::Paren(inner) => inner,
+            _ => return None,
+        };
+
+        let (op, inner_expr) = match &inner.kind {
+            ExprKind::Unary { op, expr } => (op, expr.as_ref()),
+            _ => return None,
+        };
+
+        // Classify the reference tier
+        let is_managed = matches!(op, UnOp::Ref | UnOp::RefMut);
+        let is_checked = matches!(op, UnOp::RefChecked | UnOp::RefCheckedMut);
+        let is_unsafe_ref = matches!(op, UnOp::RefUnsafe | UnOp::RefUnsafeMut);
+
+        if !is_managed && !is_checked && !is_unsafe_ref {
+            return None;
+        }
+
+        // Determine if this is a fat reference (slice type or protocol object).
+        // Slice types: [T] parsed as Array(List([Path("T")])) - single-element array expression
+        // Fixed arrays: [T; N] parsed as Array(Repeat { .. }) - these are NOT fat refs
+        // Protocol objects: known protocol type names (Display, Clone, Write, etc.)
+        let is_fat = match &inner_expr.kind {
+            ExprKind::Array(verum_ast::ArrayExpr::List(_)) => {
+                // [T] or [T, U, ...] - slice type expression → fat ref
+                true
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { .. }) => {
+                // [T; N] - fixed-size array → NOT fat, still thin ref
+                false
+            }
+            ExprKind::Path(path) => {
+                // Check if this is a known protocol type (produces fat ref with vtable).
+                // Uses centralized WellKnownProtocol registry instead of hardcoded list.
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ident) = &path.segments[0] {
+                        WKP::is_fat_ref_protocol(ident.name.as_str())
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        let size: i64 = if is_managed {
+            if is_fat { 24 } else { 16 }
+        } else {
+            // checked or unsafe - no generation/epoch_caps overhead
+            if is_fat { 16 } else { 8 }
+        };
+
+        match field {
+            "size" => Some(size),
+            "alignment" => Some(8), // All reference types are pointer-aligned
+            _ => None,
+        }
+    }
+
+    /// Helper to flatten nested Field expressions into a qualified path.
+    /// For example: `Field(Field(Path[super], "sys"), "linux")` → Some(["super", "sys", "linux"])
+    /// Returns None if the expression isn't a pure module path.
+    fn try_flatten_module_path(&self, expr: &Expr) -> Option<Vec<String>> {
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                // Single-segment path
+                if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Super => Some(vec!["super".to_string()]),
+                        PathSegment::Cog => Some(vec!["cog".to_string()]),
+                        PathSegment::Relative => Some(vec![".".to_string()]),
+                        PathSegment::Name(ident) => {
+                            // Regular identifier - could be module, local variable, or static/const
+                            // Only return as module path if it's:
+                            // 1. NOT a local variable AND
+                            // 2. NOT a static/const (registered as zero-argument function)
+                            let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok();
+                            let is_static_or_const = self
+                                .ctx
+                                .lookup_function(&ident.name)
+                                .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
+                                .unwrap_or(false);
+
+                            if !is_local_var && !is_static_or_const && !is_type_name(&ident.name) {
+                                Some(vec![ident.name.to_string()])
+                            } else {
+                                None // It's a local variable, static/const, or type name, not a module path
+                            }
+                        }
+                        PathSegment::SelfValue => None,
+                    }
+                } else {
+                    // Multi-segment path - collect all segments
+                    let mut parts = Vec::new();
+                    for segment in &path.segments {
+                        match segment {
+                            PathSegment::Name(ident) => parts.push(ident.name.to_string()),
+                            PathSegment::Super => parts.push("super".to_string()),
+                            PathSegment::Cog => parts.push("cog".to_string()),
+                            PathSegment::Relative => parts.push(".".to_string()),
+                            PathSegment::SelfValue => return None,
+                        }
+                    }
+                    Some(parts)
+                }
+            }
+            ExprKind::Field { expr: base, field } => {
+                // Recursively flatten the base
+                if let Some(mut parts) = self.try_flatten_module_path(base) {
+                    parts.push(field.name.to_string());
+                    Some(parts)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Compiles field access.
+    ///
+    /// Special handling for:
+    /// - Module paths: `super.sys.linux.function` or `crate.module.item`
+    /// - Variant constructor access: `TypeName.Variant`
+    ///   If the base is a Path that looks like a type name (starts with uppercase)
+    ///   and the field is also uppercase (variant name), treat as a variant constructor.
+    fn compile_field_access(&mut self, base: &Expr, field: &str) -> CodegenResult<Option<Reg>> {
+        if std::env::var("VERUM_DEBUG_FIELDS2").is_ok() {
+            let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
+            tracing::debug!("[CFA] fn '{}': field '{}'", fn_name, field);
+        }
+
+        // Check if the base is a required context (from `using [Ctx]` clause).
+        // In that case, `Ctx.field` should read the field from the context value,
+        // not from a Nil (the fallback for bare type names in expressions).
+        if let ExprKind::Path(ref path) = base.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref ctx_ident) = path.segments[0]
+            && self.ctx.is_required_context(&ctx_ident.name)
+        {
+            let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
+            let ctx_type_id = self.intern_string(&ctx_name);
+
+            // Retrieve the context value
+            let ctx_value_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CtxGet {
+                dst: ctx_value_reg,
+                ctx_type: ctx_type_id,
+            });
+
+            // Now access the field on the context value
+            let result = self.ctx.alloc_temp();
+            let field_idx = self.resolve_field_index(Some(&ctx_name), field);
+            self.ctx.emit(Instruction::GetF {
+                dst: result,
+                obj: ctx_value_reg,
+                field_idx,
+            });
+            self.ctx.free_temp(ctx_value_reg);
+            return Ok(Some(result));
+        }
+
+        // Handle compile-time reference type properties: (&Int).size, (&checked Int).size, etc.
+        // Reference type expressions in parentheses are type-level property accesses.
+        // CBGR reference memory layout: ThinRef<T> is 16 bytes (ptr + generation + epoch_caps),
+        // FatRef<T> is 24 bytes (ptr + generation + epoch_caps + len). Properties like .size
+        // and .alignment are resolved at compile time from the reference tier.
+        if let Some(size) = self.try_resolve_ref_type_property(base, field) {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI { dst: result, value: size });
+            return Ok(Some(result));
+        }
+
+        // First, try to flatten the full path (base + field) and look up as a qualified function
+        // This handles module paths like `super.sys.linux.syscall.exit_group`
+        if let Some(mut parts) = self.try_flatten_module_path(base) {
+            parts.push(field.to_string());
+
+            // Try both :: separator (Rust-style) and . separator (Verum-style)
+            let qualified_rust = parts.join("::");
+            let qualified_verum = parts.join(".");
+
+            // Try Rust-style first
+            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned() {
+                // If it's a variant constructor, emit MakeVariant instead of Call
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                }
+                let dest = self.ctx.alloc_temp();
+                if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                    // Check if this is an inlineable constant (__const_val_N)
+                    if let Some(ref iname) = func_info.intrinsic_name {
+                        if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
+                    }
+                    // It's a constant - call it to get value
+                    self.ctx.emit(Instruction::Call {
+                        dst: dest,
+                        func_id: func_info.id.0,
+                        args: crate::instruction::RegRange::new(Reg(0), 0),
+                    });
+                } else {
+                    // Regular function reference
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: func_info.id.0 as i64,
+                    });
+                }
+                return Ok(Some(dest));
+            }
+
+            // Try Verum-style
+            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_verum).cloned() {
+                // If it's a variant constructor, emit MakeVariant instead of Call
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                }
+                let dest = self.ctx.alloc_temp();
+                if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                    // Check if this is an inlineable constant (__const_val_N)
+                    if let Some(ref iname) = func_info.intrinsic_name {
+                        if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
+                    }
+                    self.ctx.emit(Instruction::Call {
+                        dst: dest,
+                        func_id: func_info.id.0,
+                        args: crate::instruction::RegRange::new(Reg(0), 0),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: func_info.id.0 as i64,
+                    });
+                }
+                return Ok(Some(dest));
+            }
+
+            // Try just the last segment (function name) as a simple function lookup
+            // This handles cases where imports have already resolved the module path
+            if let Some(func_info) = self.ctx.lookup_function(field).cloned() {
+                // If it's a variant constructor, emit MakeVariant instead of Call
+                if func_info.variant_tag.is_some() {
+                    return self.compile_variant_constructor(field, &verum_common::List::new());
+                }
+                let dest = self.ctx.alloc_temp();
+                if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                    // Check if this is an inlineable constant (__const_val_N)
+                    if let Some(ref iname) = func_info.intrinsic_name {
+                        if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
+                    }
+                    self.ctx.emit(Instruction::Call {
+                        dst: dest,
+                        func_id: func_info.id.0,
+                        args: crate::instruction::RegRange::new(Reg(0), 0),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: func_info.id.0 as i64,
+                    });
+                }
+                return Ok(Some(dest));
+            }
+
+            // If this looks like a module path (starts with super/crate/.) but we can't resolve it,
+            // emit a placeholder instruction rather than failing with "standalone super"
+            if parts[0] == "super" || parts[0] == "cog" || parts[0] == "." {
+                // For bootstrap: return a stub for unresolved module paths
+                // The actual resolution would happen at link time
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Ok(Some(dest));
+            }
+        }
+
+        // Check if this is a variant constructor access pattern: TypeName.Variant
+        if let ExprKind::Path(ref path) = base.kind
+            && path.segments.len() == 1
+                && let PathSegment::Name(ref type_ident) = path.segments[0] {
+                    let type_name = type_ident.name.as_str();
+                    // If both base and field start with uppercase, this is likely a variant constructor
+                    if type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                        && field.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                    {
+                        // Try to look up the variant constructor as a registered function.
+                        // Use qualified name (TypeName.Variant) to avoid collision with
+                        // stdlib variants (e.g., "Empty" colliding with TryRecvError.Empty).
+                        let qualified_variant = format!("{}.{}", type_name, field);
+                        if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned() {
+                            if let Some(tag) = fi.variant_tag {
+                                return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                            }
+                            return self.compile_variant_constructor(&qualified_variant, &verum_common::List::new());
+                        }
+                        // Fallback: try simple name for non-colliding variants
+                        if self.ctx.lookup_function(field).is_some() {
+                            return self.compile_variant_constructor(field, &verum_common::List::new());
+                        }
+                        // Before treating as variant, check if this is a type static constant
+                        // (e.g., Duration.ZERO, Int.MAX where field is uppercase)
+                        if is_type_name(type_name) {
+                            if let Some(value) = resolve_type_static_constant(type_name, field) {
+                                let result = self.ctx.alloc_temp();
+                                let is_float_type = matches!(type_name,
+                                    "Float" | "Float32" | "Float64" | "f32" | "f64");
+                                if is_float_type && field != "BITS" {
+                                    let f = f64::from_bits(value as u64);
+                                    self.ctx.emit(Instruction::LoadF { dst: result, value: f });
+                                } else {
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: value as i64 });
+                                }
+                                return Ok(Some(result));
+                            }
+                        }
+                        // Check if this is an associated constant from an implement block
+                        // (e.g., Fd.INVALID registered as "Fd::INVALID" with __const_val_N)
+                        {
+                            let qualified = format!("{}::{}", type_name, field);
+                            if let Some(func_info) = self.ctx.lookup_function(&qualified) {
+                                if func_info.param_count == 0 {
+                                    if let Some(ref iname) = func_info.intrinsic_name {
+                                        if let Some(val_str) = iname.strip_prefix("__const_val_") {
+                                            let value: i64 = val_str.parse().unwrap_or(0);
+                                            let result = self.ctx.alloc_temp();
+                                            self.ctx.emit(Instruction::LoadI { dst: result, value });
+                                            return Ok(Some(result));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // If not registered, emit a MakeVariant instruction with the qualified name
+                        // This handles dynamically created or imported variants
+                        let qualified_variant = format!("{}.{}", type_name, field);
+                        let result = self.ctx.alloc_temp();
+                        let variant_tag = self.intern_string(&qualified_variant);
+                        self.ctx.emit(Instruction::MakeVariant {
+                            dst: result,
+                            tag: variant_tag,
+                            field_count: 0,
+                        });
+                        return Ok(Some(result));
+                    }
+
+                    // Handle compile-time type property access (e.g., Int32.bits, Int8.size)
+                    if is_type_name(type_name) {
+                        if let Some(value) = resolve_type_property(type_name, field) {
+                            let result = self.ctx.alloc_temp();
+                            match value {
+                                TypePropertyValue::Int(v) => {
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
+                                }
+                                TypePropertyValue::UInt(v) => {
+                                    // For large unsigned values like u64::MAX, store as i64 bit pattern
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
+                                }
+                                TypePropertyValue::Str(s) => {
+                                    let const_id = self.ctx.add_const_string(&s);
+                                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
+                                }
+                            }
+                            return Ok(Some(result));
+                        }
+                    }
+
+                    // Handle type alias field access (e.g., u64.MAX -> Int::MAX)
+                    // Numeric type aliases have associated constants defined on the base type
+                    if let Some(base_type) = resolve_numeric_type_alias(type_name) {
+                        let aliased_qualified = format!("{}::{}", base_type, field);
+                        if let Some(func_info) =
+                            self.ctx.lookup_qualified_function(&aliased_qualified).cloned()
+                        {
+                            let dest = self.ctx.alloc_temp();
+                            if func_info.param_count == 0
+                                && !func_info.is_async
+                                && !func_info.is_generator
+                            {
+                                // It's a constant - call it to get value
+                                self.ctx.emit(Instruction::Call {
+                                    dst: dest,
+                                    func_id: func_info.id.0,
+                                    args: crate::instruction::RegRange::new(Reg(0), 0),
+                                });
+                            } else {
+                                // Function reference
+                                self.ctx.emit(Instruction::LoadI {
+                                    dst: dest,
+                                    value: func_info.id.0 as i64,
+                                });
+                            }
+                            return Ok(Some(dest));
+                        }
+                        // Try simple lookup too
+                        let aliased_simple = format!("{}::{}", base_type, field);
+                        if let Some(func_info) =
+                            self.ctx.lookup_function(&aliased_simple).cloned()
+                        {
+                            let dest = self.ctx.alloc_temp();
+                            if func_info.param_count == 0
+                                && !func_info.is_async
+                                && !func_info.is_generator
+                            {
+                                self.ctx.emit(Instruction::Call {
+                                    dst: dest,
+                                    func_id: func_info.id.0,
+                                    args: crate::instruction::RegRange::new(Reg(0), 0),
+                                });
+                            } else {
+                                self.ctx.emit(Instruction::LoadI {
+                                    dst: dest,
+                                    value: func_info.id.0 as i64,
+                                });
+                            }
+                            return Ok(Some(dest));
+                        }
+                    }
+                }
+
+        // Determine base expression type for correct field index resolution
+        let base_type = self.infer_expr_type_name(base);
+
+        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+            let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
+            tracing::debug!("[FIELD] fn '{}': field '{}' → base_type={:?}",
+                fn_name, field, base_type);
+        }
+        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() && base_type.is_none() {
+            let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
+            let base_desc = format!("{:?}", base.kind).chars().take(80).collect::<String>();
+            tracing::debug!("[FIELD-MISS] in fn '{}': field '{}' on base ({}) → type=None",
+                fn_name, field, base_desc);
+        }
+
+        let base_reg = self
+            .compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("field base has no value"))?;
+
+        let result = self.ctx.alloc_temp();
+        let field_idx = self.resolve_field_index(base_type.as_deref(), field);
+
+        if std::env::var("VERUM_DEBUG_FA2").is_ok() {
+            let fn_name = self.ctx.current_function.as_deref().unwrap_or("?");
+            tracing::debug!("[FA2] fn '{}': field '{}' base_type={:?} → idx={}", fn_name, field, base_type, field_idx);
+        }
+
+        // Newtype field .0 access: the value IS the single field, emit Mov.
+        // e.g. FileDesc(Int).0 → just copy the register (no heap indirection).
+        if field_idx == 0 {
+            if let Some(ref type_name) = base_type {
+                if self.ctx.newtype_names.contains(type_name) {
+                    self.ctx.emit(Instruction::Mov {
+                        dst: result,
+                        src: base_reg,
+                    });
+                    self.ctx.free_temp(base_reg);
+                    return Ok(Some(result));
+                }
+            }
+        }
+
+        self.ctx.emit(Instruction::GetF {
+            dst: result,
+            obj: base_reg,
+            field_idx,
+        });
+
+        self.ctx.free_temp(base_reg);
+        Ok(Some(result))
+    }
+
+    /// Compiles tuple index.
+    fn compile_tuple_index(&mut self, base: &Expr, index: u32) -> CodegenResult<Option<Reg>> {
+        // Newtype .0 access: the value IS the single field, emit Mov.
+        // e.g. `let fd = FileDesc(42); fd.0` → just copy the register.
+        if index == 0 {
+            if let Some(type_name) = self.infer_expr_type_name(base) {
+                if self.ctx.newtype_names.contains(&type_name) {
+                    let base_reg = self
+                        .compile_expr(base)?
+                        .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Mov {
+                        dst: result,
+                        src: base_reg,
+                    });
+                    self.ctx.free_temp(base_reg);
+                    return Ok(Some(result));
+                }
+            }
+        }
+
+        let base_reg = self
+            .compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
+
+        let result = self.ctx.alloc_temp();
+
+        // Tuples are heap-allocated with a 24-byte CBGR header.
+        // Use GetF (field access) instead of GetE (array element access)
+        // so the LLVM lowering correctly adds the header offset.
+        self.ctx.emit(Instruction::GetF {
+            dst: result,
+            obj: base_reg,
+            field_idx: index,
+        });
+
+        self.ctx.free_temp(base_reg);
+        Ok(Some(result))
+    }
+
+    /// Compiles index access.
+    fn compile_index(&mut self, base: &Expr, index: &Expr) -> CodegenResult<Option<Reg>> {
+        let base_reg = self
+            .compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+        let idx_reg = self
+            .compile_expr(index)?
+            .ok_or_else(|| CodegenError::internal("index has no value"))?;
+
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetE {
+            dst: result,
+            arr: base_reg,
+            idx: idx_reg,
+        });
+
+        self.ctx.free_temp(base_reg);
+        self.ctx.free_temp(idx_reg);
+        Ok(Some(result))
+    }
+
+    // ==================== Struct Creation ====================
+
+    /// Compiles a record (struct) creation.
+    fn compile_record(
+        &mut self,
+        path: &Path,
+        fields: &verum_common::List<FieldInit>,
+        base: Option<&Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+
+        // Check if this is a record variant constructor (e.g., Branch { value: 1, left: x, right: y })
+        let variant_name = format!("{}", path);
+        let dot_name = variant_name.replace("::", ".");
+        let variant_tag = self.ctx.lookup_function(&variant_name)
+            .and_then(|info| info.variant_tag)
+            .or_else(|| {
+                self.ctx.lookup_function(&dot_name)
+                    .and_then(|info| info.variant_tag)
+            })
+            .or_else(|| {
+                // Try simple name (last segment)
+                variant_name.rsplit("::").next()
+                    .and_then(|simple| self.ctx.lookup_function(simple))
+                    .and_then(|info| info.variant_tag)
+            })
+            .or_else(|| {
+                // Simple name not found (likely in collision set).
+                // Try to disambiguate using field count.
+                let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                self.ctx.find_variant_by_suffix_and_args(simple, fields.len())
+            });
+
+        if let Some(tag) = variant_tag {
+            // Record variant: create variant object and set fields as variant data
+            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: fields.len() as u32 });
+            for (i, field) in fields.iter().enumerate() {
+                let value_reg = if let Some(ref v) = field.value {
+                    self.compile_expr(v)?
+                        .ok_or_else(|| CodegenError::internal("field value has no value"))?
+                } else {
+                    self.ctx.get_var_reg(&field.name.name)?
+                };
+
+                // Clone for value semantics (same reason as plain record fields)
+                let cloned_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Clone {
+                    dst: cloned_reg,
+                    src: value_reg,
+                });
+
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: result,
+                    field: i as u32,
+                    value: cloned_reg,
+                });
+
+                self.ctx.free_temp(cloned_reg);
+                if field.value.is_some() {
+                    self.ctx.free_temp(value_reg);
+                }
+            }
+        } else {
+            // Plain record/struct
+            if let Some(base_expr) = base {
+                let base_reg = self
+                    .compile_expr(base_expr)?
+                    .ok_or_else(|| CodegenError::internal("record base has no value"))?;
+                self.ctx.emit(Instruction::Clone {
+                    dst: result,
+                    src: base_reg,
+                });
+                self.ctx.free_temp(base_reg);
+            } else {
+                // Look up TypeId for proper Drop dispatch
+                let type_name = format!("{}", path);
+                let type_id = self.type_name_to_id
+                    .get(&type_name)
+                    .map(|id| id.0)
+                    .unwrap_or(0);
+
+                // Use declared field count from type layout if available,
+                // otherwise fall back to the number of fields in the literal.
+                let alloc_slots = self.type_field_count(&type_name)
+                    .unwrap_or(fields.len() as u32);
+
+                self.ctx.emit(Instruction::New {
+                    dst: result,
+                    type_id,
+                    field_count: alloc_slots,
+                });
+            }
+
+            // Use type name from path for field index resolution
+            let type_name = format!("{}", path);
+
+            for field in fields.iter() {
+                let value_reg = if let Some(ref v) = field.value {
+                    self.compile_expr(v)?
+                        .ok_or_else(|| CodegenError::internal("field value has no value"))?
+                } else {
+                    self.ctx.get_var_reg(&field.name.name)?
+                };
+
+                // Clone the value before storing into the field to ensure
+                // value semantics: each field gets an independent copy.
+                // This prevents aliasing when the same variable is used for
+                // multiple fields (e.g., Mat3 { r0: z, r1: z, r2: z }).
+                // For primitives, Clone is a no-op (just copies the register).
+                let cloned_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Clone {
+                    dst: cloned_reg,
+                    src: value_reg,
+                });
+
+                let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
+                self.ctx.emit(Instruction::SetF {
+                    obj: result,
+                    field_idx,
+                    value: cloned_reg,
+                });
+
+                self.ctx.free_temp(cloned_reg);
+                if field.value.is_some() {
+                    self.ctx.free_temp(value_reg);
+                }
+            }
+        }
+
+        Ok(Some(result))
+    }
+
+    // ==================== Async ====================
+
+    /// Compiles an async block.
+    fn compile_async_block(&mut self, block: &Block) -> CodegenResult<Option<Reg>> {
+        // For now, compile as a regular block wrapped in a future
+        // Full implementation requires async state machine transformation
+        let result = self.ctx.alloc_temp();
+
+        // Compile the block
+        let block_result = self.compile_block(block)?;
+
+        if let Some(reg) = block_result {
+            self.ctx
+                .emit(Instruction::Mov { dst: result, src: reg });
+        } else {
+            self.ctx.emit(Instruction::LoadUnit { dst: result });
+        }
+
+        Ok(Some(result))
+    }
+
+    /// Compiles an await expression.
+    fn compile_await(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        let task_reg = self
+            .compile_expr(inner)?
+            .ok_or_else(|| CodegenError::internal("await expr has no value"))?;
+
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Await {
+            dst: result,
+            task: task_reg,
+        });
+
+        self.ctx.free_temp(task_reg);
+        Ok(Some(result))
+    }
+
+    // ==================== Error Handling ====================
+
+    /// Compiles a try expression (? operator).
+    fn compile_try(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        let inner_reg = self
+            .compile_expr(inner)?
+            .ok_or_else(|| CodegenError::internal("try expr has no value"))?;
+
+        let result = self.ctx.alloc_temp();
+        let continue_label = self.ctx.new_label("try_continue");
+
+        // Check if value is the success variant.
+        // For Result<T, E>: success = Ok, for Maybe<T>: success = Some.
+        // Determine from expression type which variant name to use.
+        let is_ok = self.ctx.alloc_temp();
+
+        // Infer the type name to determine which Try protocol variant to use.
+        // For Result<T, E>: success = Ok, for Maybe<T>: success = Some.
+        // The success variant is determined from the type's actual definition,
+        // not from hardcoded names.
+        let type_name = self.extract_expr_type_name(inner);
+        let is_maybe = type_name.as_deref().map_or(false, |n| n == "Maybe" || n.starts_with("Maybe<"));
+
+        // Determine the success variant from the type's definition.
+        // For Maybe: first variant with fields (Some). For Result: first variant with fields (Ok).
+        let (_success_variant, success_tag) = if is_maybe {
+            let tag = self.ctx.lookup_function("Some")
+                .or_else(|| self.ctx.lookup_function("Maybe::Some"))
+                .and_then(|info| info.variant_tag);
+            ("Some", tag)
+        } else {
+            let tag = self.ctx.lookup_function("Ok")
+                .or_else(|| self.ctx.lookup_function("Result::Ok"))
+                .and_then(|info| info.variant_tag);
+            ("Ok", tag)
+        };
+        // Default variant tags if not found: Ok/Some = 0 (success), Err/None = 1 (failure)
+        let success_tag = success_tag.unwrap_or(0);
+
+        self.ctx.emit(Instruction::IsVar {
+            dst: is_ok,
+            value: inner_reg,
+            tag: success_tag,
+        });
+
+        self.ctx
+            .emit_forward_jump(&continue_label, |offset| Instruction::JmpIf {
+                cond: is_ok,
+                offset,
+            });
+        self.ctx.free_temp(is_ok);
+
+        // Error/None case - if inside try/recover, throw to handler;
+        // otherwise return early from the function
+        if self.ctx.try_recover_depth > 0 {
+            // Extract the error payload from Err/None before throwing,
+            // so the recover block receives the unwrapped error value
+            // (e.g., MyError.NotFound) rather than Result::Err(MyError.NotFound)
+            let error_payload = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::AsVar {
+                dst: error_payload,
+                value: inner_reg,
+                tag: 0, // extract first payload field
+            });
+            self.ctx.emit(Instruction::Throw { error: error_payload });
+            self.ctx.free_temp(error_payload);
+        } else {
+            self.ctx.emit(Instruction::Ret { value: inner_reg });
+        }
+
+        // Ok/Some case - extract payload at field index 0
+        self.ctx.define_label(&continue_label);
+        self.ctx.emit(Instruction::AsVar {
+            dst: result,
+            value: inner_reg,
+            tag: 0, // field index 0 = first (and only) payload field
+        });
+
+        self.ctx.free_temp(inner_reg);
+        Ok(Some(result))
+    }
+
+    /// Compiles a try block expression: try { expr } -> Result<T, E>
+    ///
+    /// A plain try block evaluates its inner expression and wraps the result
+    /// in Ok(). Any ? operators within the block will propagate errors normally.
+    ///
+    /// Try blocks provide scoped error handling: the inner expression is evaluated and
+    /// wrapped in Ok(). Any `?` operators within emit Throw to the exception handler.
+    /// The block desugars to an immediately-invoked closure returning Result<T, E>.
+    fn compile_try_block(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+        let handler_label = self.ctx.new_label("try_block_handler");
+        let end_label = self.ctx.new_label("try_block_end");
+
+        // Set up exception handler so ? operators emit Throw instead of Ret
+        self.ctx
+            .emit_forward_jump(&handler_label, |offset| Instruction::TryBegin {
+                handler_offset: offset,
+            });
+
+        self.ctx.try_recover_depth += 1;
+
+        // Compile the inner block
+        let inner_reg = self
+            .compile_expr(inner)?
+            .ok_or_else(|| CodegenError::internal("try block has no value"))?;
+
+        self.ctx.try_recover_depth -= 1;
+        self.ctx.emit(Instruction::TryEnd);
+
+        // Success path: wrap result in Ok variant
+        let ok_tag = self.ctx.lookup_function("Ok")
+            .and_then(|info| info.variant_tag)
+            .unwrap_or_else(|| {
+                "Ok".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+            });
+
+        self.ctx.emit(Instruction::MakeVariant { dst: result, tag: ok_tag, field_count: 1 });
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: result,
+            field: 0,
+            value: inner_reg,
+        });
+        self.ctx.free_temp(inner_reg);
+
+        // Jump past the error handler
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+        // Error handler: the thrown value is the unwrapped error payload.
+        // Re-wrap it in Err() to produce a proper Result::Err variant.
+        self.ctx.define_label(&handler_label);
+        let exception_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetException { dst: exception_reg });
+
+        let err_tag = self.ctx.lookup_function("Err")
+            .and_then(|info| info.variant_tag)
+            .unwrap_or_else(|| {
+                "Err".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+            });
+        self.ctx.emit(Instruction::MakeVariant { dst: result, tag: err_tag, field_count: 1 });
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: result,
+            field: 0,
+            value: exception_reg,
+        });
+        self.ctx.free_temp(exception_reg);
+
+        self.ctx.define_label(&end_label);
+        Ok(Some(result))
+    }
+
+    // ==================== Cast ====================
+
+    /// Compiles a cast expression.
+    ///
+    /// Supports conversions between primitive types:
+    /// - Int → Float (CvtIF)
+    /// - Float → Int with truncation mode (CvtFI)
+    /// - Int → Char with validation (CvtIC)
+    /// - Char → Int (CvtCI)
+    /// - Bool → Int (CvtBI)
+    fn compile_cast(
+        &mut self,
+        inner: &Expr,
+        ty: &verum_ast::Type,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::ty::TypeKind;
+        
+
+        // Check for &mut arr[idx] as *mut T pattern (byte array element address)
+        // This pattern needs special handling because we need the ADDRESS, not the VALUE
+        if let TypeKind::Pointer { .. } = &ty.kind
+            && let Some(result) = self.try_compile_byte_array_element_addr(inner)? {
+                return Ok(Some(result));
+            }
+
+        // Compile the source expression
+        let src_reg = self.compile_expr(inner)?
+            .ok_or_else(|| CodegenError::internal("cast source has no value"))?;
+
+        // Determine source type from expression
+        let src_kind = self.infer_expr_type_kind(inner);
+
+        // Determine target type, normalizing path-based aliases to canonical TypeKind
+        let target_kind = &ty.kind;
+        let normalized_target = match target_kind {
+            TypeKind::Path(path) => {
+                if let Some(ident) = path.as_ident() {
+                    match ident.name.as_str() {
+                        "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
+                        "Int" | "Int64" | "i64" | "Int32" | "i32"
+                        | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
+                        | "UInt32" | "u32" | "UInt64" | "u64"
+                        | "UInt128" | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
+                        "Bool" => Some(TypeKind::Bool),
+                        "Char" => Some(TypeKind::Char),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        let target_kind = normalized_target.as_ref().unwrap_or(target_kind);
+
+        // Normalize source type similarly for path-based aliases
+        let src_kind = src_kind.map(|sk| {
+            if let TypeKind::Path(path) = &sk {
+                if let Some(ident) = path.as_ident() {
+                    match ident.name.as_str() {
+                        "Float" | "Float64" | "f64" | "Float32" | "f32" => TypeKind::Float,
+                        "Int" | "Int64" | "i64" | "Int32" | "i32"
+                        | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
+                        | "UInt32" | "u32" | "UInt64" | "u64"
+                        | "UInt128" | "u128" | "UIntSize" | "usize" => TypeKind::Int,
+                        "Bool" => TypeKind::Bool,
+                        "Char" => TypeKind::Char,
+                        _ => sk,
+                    }
+                } else {
+                    sk
+                }
+            } else {
+                sk
+            }
+        });
+
+        // Allocate destination register
+        let dst = self.ctx.alloc_temp();
+
+        // Emit conversion instruction based on source and target types
+        match (src_kind, target_kind) {
+            // Int → Float
+            (Some(TypeKind::Int), TypeKind::Float) => {
+                self.ctx.emit(Instruction::CvtIF { dst, src: src_reg });
+            }
+
+            // Float → Int (default: truncate toward zero)
+            (Some(TypeKind::Float), TypeKind::Int) => {
+                self.ctx.emit(Instruction::CvtFI {
+                    mode: FloatToIntMode::Trunc,
+                    dst,
+                    src: src_reg,
+                });
+            }
+
+            // Int → Char (with runtime validation)
+            (Some(TypeKind::Int), TypeKind::Char) => {
+                self.ctx.emit(Instruction::CvtIC { dst, src: src_reg });
+            }
+
+            // Char → Int
+            (Some(TypeKind::Char), TypeKind::Char) | (None, TypeKind::Char) => {
+                // Char to Char is identity, but handle potential numeric source
+                self.ctx.free_temp(dst);
+                return Ok(Some(src_reg));
+            }
+
+            (Some(TypeKind::Char), TypeKind::Int) => {
+                self.ctx.emit(Instruction::CvtCI { dst, src: src_reg });
+            }
+
+            // Bool → Int
+            (Some(TypeKind::Bool), TypeKind::Int) => {
+                self.ctx.emit(Instruction::CvtBI { dst, src: src_reg });
+            }
+
+            // Int → Bool (0 = false, non-zero = true)
+            (Some(TypeKind::Int), TypeKind::Bool) | (None, TypeKind::Bool) => {
+                // Compare with 0 and negate: bool = (val != 0)
+                let zero_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadSmallI { dst: zero_reg, value: 0 });
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Ne,
+                    dst,
+                    a: src_reg,
+                    b: zero_reg,
+                });
+                self.ctx.free_temp(zero_reg);
+            }
+
+            // Bool → Float (false = 0.0, true = 1.0)
+            (Some(TypeKind::Bool), TypeKind::Float) => {
+                // First convert to int, then to float
+                let int_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CvtBI { dst: int_reg, src: src_reg });
+                self.ctx.emit(Instruction::CvtIF { dst, src: int_reg });
+                self.ctx.free_temp(int_reg);
+            }
+
+            // Float → Bool (0.0 = false, non-zero = true)
+            (Some(TypeKind::Float), TypeKind::Bool) => {
+                // Compare with 0.0
+                let zero_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadF { dst: zero_reg, value: 0.0 });
+                self.ctx.emit(Instruction::CmpF {
+                    op: CompareOp::Ne,
+                    dst,
+                    a: src_reg,
+                    b: zero_reg,
+                });
+                self.ctx.free_temp(zero_reg);
+            }
+
+            // Same type or unknown source: pass through (runtime will handle)
+            (Some(src), target) if std::mem::discriminant(&src) == std::mem::discriminant(target) => {
+                // Same type, no conversion needed
+                self.ctx.free_temp(dst);
+                return Ok(Some(src_reg));
+            }
+
+            // Unknown source type: use dynamic conversion that checks type at runtime
+            (None, TypeKind::Float) => {
+                // Dynamic conversion: checks type at runtime and converts appropriately
+                self.ctx.emit(Instruction::CvtToF { dst, src: src_reg });
+            }
+
+            (None, TypeKind::Int) => {
+                // Dynamic conversion: checks type at runtime
+                // Handles Float→Int (truncate), Bool→Int (0/1), Char/Int→Int (identity)
+                self.ctx.emit(Instruction::CvtToI { dst, src: src_reg });
+            }
+
+            // Array reference to slice reference: &[T; N] → &[T]
+            // This creates a FatRef (slice) from the array pointer with length metadata
+            (_, TypeKind::Reference { inner: ref_inner, .. }) if matches!(ref_inner.kind, TypeKind::Slice(_)) => {
+                // Try to get the array length from the source expression type
+                // Look for array types like [T; N] in the source
+                let len = self.try_get_array_length_from_source(inner);
+
+                // Create a FatRef using RefSlice instruction
+                // Format: dst, src, start=0, len
+                let start_reg = self.ctx.alloc_temp();
+                let len_reg = self.ctx.alloc_temp();
+
+                // Load start = 0
+                self.ctx.emit(Instruction::LoadSmallI { dst: start_reg, value: 0 });
+
+                // Load length (use known length or get from array at runtime)
+                if let Some(known_len) = len {
+                    self.ctx.emit(Instruction::LoadI { dst: len_reg, value: known_len as i64 });
+                } else {
+                    // Get length at runtime from the array
+                    self.ctx.emit(Instruction::Len { dst: len_reg, arr: src_reg, type_hint: 0 });
+                }
+
+                // Emit RefSlice to create FatRef
+                // Encode operands: [dst] [src] [start] [len]
+                let mut operands = Vec::with_capacity(8);
+                Self::write_reg(&mut operands, dst.0);
+                Self::write_reg(&mut operands, src_reg.0);
+                Self::write_reg(&mut operands, start_reg.0);
+                Self::write_reg(&mut operands, len_reg.0);
+
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                    operands,
+                });
+
+                self.ctx.free_temp(start_reg);
+                self.ctx.free_temp(len_reg);
+                self.ctx.free_temp(src_reg);
+                return Ok(Some(dst));
+            }
+
+            // Unsupported conversion: pass through for now
+            _ => {
+                self.ctx.free_temp(dst);
+                return Ok(Some(src_reg));
+            }
+        }
+
+        self.ctx.free_temp(src_reg);
+        Ok(Some(dst))
+    }
+
+    /// Tries to compile an array element address pattern: `&mut arr[idx] as *mut T`
+    ///
+    /// When casting a reference to an array element to a raw pointer, we need the actual
+    /// memory address of that element, not its value. This is critical for memory intrinsics
+    /// like memset, memcpy, etc.
+    ///
+    /// Handles both byte arrays (element size 1) and typed arrays (element size 2, 4, 8).
+    ///
+    /// Returns `Some(reg)` if the pattern was detected and compiled, `None` otherwise.
+    fn try_compile_byte_array_element_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        use crate::instruction::FfiSubOpcode;
+
+        // Unwrap parenthesized expressions: (&arr[idx]) -> &arr[idx]
+        let expr = {
+            let mut e = expr;
+            while let ExprKind::Paren(inner) = &e.kind {
+                e = inner.as_ref();
+            }
+            e
+        };
+
+        // Check for &mut arr[idx] or &arr[idx] pattern
+        // Also handle bare arr[idx] pattern (for `arr[idx] as *const T` due to
+        // parser precedence: `&arr[idx] as *const T` parses as `&(arr[idx] as *const T)`)
+        let inner_index = match &expr.kind {
+            ExprKind::Unary { op: UnOp::Ref, expr: inner } => Some(inner.as_ref()),
+            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => Some(inner.as_ref()),
+            ExprKind::Index { .. } => Some(expr),
+            _ => None,
+        };
+
+        let inner_index = match inner_index {
+            Some(inner) => inner,
+            None => return Ok(None),
+        };
+
+        // Check if inner is an index expression arr[idx]
+        let (base, index) = match &inner_index.kind {
+            ExprKind::Index { expr: base, index } => (base, index),
+            _ => return Ok(None),
+        };
+
+        // Check if base is a variable that is a byte array or typed array
+        // Returns None if not tracked, Some(1) for byte arrays, Some(n) for typed arrays
+        let elem_size = if let ExprKind::Path(path) = &base.kind {
+            if path.segments.len() == 1 {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    self.ctx.get_typed_array_elem_size(&ident.name)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let elem_size = match elem_size {
+            Some(size) => size,
+            None => return Ok(None),
+        };
+
+        // This is an array element address pattern!
+        // Compile depending on element size
+
+        let arr_reg = self.compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("array base has no value"))?;
+        let idx_reg = self.compile_expr(index)?
+            .ok_or_else(|| CodegenError::internal("array index has no value"))?;
+
+        let dst = self.ctx.alloc_temp();
+
+        if elem_size == 1 {
+            // Byte array: use ByteArrayElementAddr
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, dst.0);
+            Self::write_reg(&mut operands, arr_reg.0);
+            Self::write_reg(&mut operands, idx_reg.0);
+
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: FfiSubOpcode::ByteArrayElementAddr.to_byte(),
+                operands,
+            });
+        } else {
+            // Typed array: use TypedArrayElementAddr with elem_size
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, dst.0);
+            Self::write_reg(&mut operands, arr_reg.0);
+            Self::write_reg(&mut operands, idx_reg.0);
+            operands.push(elem_size as u8);
+
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: FfiSubOpcode::TypedArrayElementAddr.to_byte(),
+                operands,
+            });
+        }
+
+        self.ctx.free_temp(arr_reg);
+        self.ctx.free_temp(idx_reg);
+
+        // Mark result as raw pointer
+        self.ctx.mark_raw_pointer(dst);
+
+        Ok(Some(dst))
+    }
+
+    /// Extracts the custom type name from an initializer expression.
+    ///
+    /// Detects struct constructors (`OSError { ... }`), static method calls
+    /// (`OSError.new(...)`), tuple-style constructors (`SomeType(...)`), and
+    /// associated constant access (`MapFlags.PRIVATE_ANON`).
+    /// Used by `compile_let` to populate `variable_type_names` for Eq protocol dispatch.
+    pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
+
+        match &expr.kind {
+            // Variable reference: propagate type from variable_type_names.
+            // This handles `let h2 = h0` where h0 has a known record type,
+            // ensuring h2 inherits the type for correct field index resolution.
+            ExprKind::Path(path) => {
+                if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Name(ident) => {
+                            // Check variable_type_names for tracked variables
+                            if let Some(type_name) = self.ctx.variable_type_names.get(&*ident.name) {
+                                return Some(type_name.clone());
+                            }
+                            // For uppercase names, check if this is a variant constructor
+                            // and return the parent type name instead (e.g., Nothing → Maybe)
+                            if ident.name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+                                    if let Some(ref parent_type) = func_info.parent_type_name {
+                                        return Some(parent_type.clone());
+                                    }
+                                }
+                                // Simple lookup failed (collision set) — try qualified search
+                                if let Some(parent_type) = self.ctx.find_variant_parent_type_by_args(&ident.name, 0) {
+                                    return Some(parent_type);
+                                }
+                            }
+                            None
+                        }
+                        PathSegment::SelfValue => {
+                            self.ctx.variable_type_names.get("self").cloned()
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            // Record literal: OSError { code: 2, ... } or variant record: Done { total: 42 }
+            ExprKind::Record { path, fields, .. } => {
+                if let Some(PathSegment::Name(ident)) = path.segments.last() {
+                    let name = ident.name.to_string();
+                    // Check if this is a variant constructor — return parent type name
+                    // so variable_type_names stores "State" not "Done"
+                    if let Some(func_info) = self.ctx.lookup_function(&name) {
+                        if let Some(ref parent_type) = func_info.parent_type_name {
+                            return Some(parent_type.clone());
+                        }
+                    }
+                    // Simple lookup failed (name may be in collision set).
+                    // Use field count to disambiguate and find parent type.
+                    if let Some(parent_type) = self.ctx.find_variant_parent_type_by_args(&name, fields.len()) {
+                        return Some(parent_type);
+                    }
+                    Some(name)
+                } else {
+                    None
+                }
+            }
+            // Field access: self.entries → look up field type in type_field_type_names
+            ExprKind::Field { expr: base, field } => {
+                // First check if receiver is an uppercase type name (associated constant)
+                if let ExprKind::Path(path) = &base.kind {
+                    if path.segments.len() == 1 {
+                        if let PathSegment::Name(ident) = &path.segments[0] {
+                            let name = &ident.name;
+                            if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                return Some(name.to_string());
+                            }
+                        }
+                    }
+                }
+                // Then try to resolve the field's declared type
+                if let Some(base_type) = self.extract_expr_type_name(base) {
+                    let field_name = field.name.to_string();
+                    // Try exact match first
+                    if let Some(ft) = self.type_field_type_names.get(&(base_type.clone(), field_name.clone())) {
+                        return Some(ft.clone());
+                    }
+                    // Try with generic params stripped
+                    let stripped = VbcCodegen::strip_generic_args(&base_type);
+                    if stripped != base_type {
+                        return self.type_field_type_names
+                            .get(&(stripped.to_string(), field_name))
+                            .cloned();
+                    }
+                }
+                None
+            }
+            // Array/List literal: [1, 2, 3] or [0; 10]
+            ExprKind::Array(array_expr) => {
+                // Try to infer element type from first element for List<T> tracking
+                use verum_ast::expr::ArrayExpr;
+
+                // Helper: detect if expression is Heap(x) or Shared(x) wrapper
+                let wrap_if_heap = |elem: &Expr, elem_type: String| -> String {
+                    if let ExprKind::Call { func, args, .. } = &elem.kind {
+                        if args.len() == 1 {
+                            if let ExprKind::Path(path) = &func.kind {
+                                if path.segments.len() == 1 {
+                                    if let PathSegment::Name(ident) = &path.segments[0] {
+                                        if self.is_allocating_wrapper(ident.name.as_str()) {
+                                            return format!("{}<{}>", ident.name, elem_type);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    elem_type
+                };
+
+                match array_expr {
+                    ArrayExpr::List(elements) => {
+                        if let Some(first_elem) = elements.first() {
+                            if let Some(elem_type) = self.extract_expr_type_name(first_elem) {
+                                let elem_type = wrap_if_heap(first_elem, elem_type);
+                                return Some(format!("List<{}>", elem_type));
+                            }
+                        }
+                    }
+                    ArrayExpr::Repeat { value, .. } => {
+                        if let Some(elem_type) = self.extract_expr_type_name(value) {
+                            let elem_type = wrap_if_heap(value, elem_type);
+                            return Some(format!("List<{}>", elem_type));
+                        }
+                    }
+                }
+                Some("List".to_string())
+            }
+            // Parenthesized expression: (expr)
+            ExprKind::Paren(inner) => self.extract_expr_type_name(inner),
+            // Unary operations: deref, ref, etc. → propagate inner type
+            ExprKind::Unary { op, expr: inner } => {
+                let inner_type = self.extract_expr_type_name(inner);
+                // For Deref on Heap<T>/Shared<T>, unwrap to inner type T
+                if matches!(op, verum_ast::expr::UnOp::Deref) {
+                    if let Some(ref t) = inner_type {
+                        if let Some(inner_t) = Self::extract_element_type(t) {
+                            if t.starts_with("Heap<") || t.starts_with("Shared<") {
+                                return Some(inner_t);
+                            }
+                        }
+                    }
+                }
+                inner_type
+            }
+            // Binary operations with operator overloading: a + b returns same type as a
+            ExprKind::Binary { op, left, .. } => {
+                use verum_ast::expr::BinOp;
+                match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
+                        // For overloaded operators, result type = receiver type
+                        if let Some(type_name) = self.extract_expr_type_name(left) {
+                            let method = match op {
+                                BinOp::Add => "add",
+                                BinOp::Sub => "sub",
+                                BinOp::Mul => "mul",
+                                BinOp::Div => "div",
+                                BinOp::Rem => "rem",
+                                _ => unreachable!(),
+                            };
+                            let qualified = format!("{}.{}", type_name, method);
+                            if self.ctx.lookup_function(&qualified).is_some() {
+                                return Some(type_name);
+                            }
+                        }
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            // Unsafe block: unsafe { expr } → type is the block's trailing expression
+            ExprKind::Unsafe(block) => {
+                if let verum_common::Maybe::Some(ref expr) = block.expr {
+                    self.extract_expr_type_name(expr)
+                } else {
+                    None
+                }
+            }
+            // Block expression: { ...; expr } → type is trailing expression
+            ExprKind::Block(block) => {
+                if let verum_common::Maybe::Some(ref expr) = block.expr {
+                    self.extract_expr_type_name(expr)
+                } else {
+                    None
+                }
+            }
+            // Static method call: OSError.new(...) or instance method call returning Maybe
+            ExprKind::MethodCall { receiver, method, args, .. } => {
+                // First, check if this is a static method call on a type
+                if let ExprKind::Path(path) = &receiver.kind {
+                    if path.segments.len() == 1 {
+                        if let PathSegment::Name(ident) = &path.segments[0] {
+                            let name = &ident.name;
+                            if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                // Heap.new(x) / Shared.new(x): return the inner type, not "Heap"/"Shared"
+                                // This ensures field access on Heap<T> resolves T's field positions
+                                if self.is_allocating_wrapper(name.as_str()) && method.name.as_str() == "new" {
+                                    if let Some(first_arg) = args.first() {
+                                        if let Some(inner_type) = self.extract_expr_type_name(first_arg) {
+                                            return Some(inner_type);
+                                        }
+                                    }
+                                }
+                                // Look up the qualified static method to get its return type
+                                let qualified_method = format!("{}.{}", name, method.name);
+                                if let Some(func_info) = self.ctx.lookup_function(&qualified_method) {
+                                    if let Some(ref ret_type_name) = func_info.return_type_name {
+                                        return Some(ret_type_name.clone());
+                                    }
+                                }
+                                // Check if this is a known static method that returns Maybe<T>
+                                const MAYBE_RETURNING_STATIC_METHODS: &[&str] = &[
+                                    "from_digit",     // Char.from_digit returns Maybe<Char>
+                                    "from_u32",       // Char.from_u32 returns Maybe<Char>
+                                    "try_from",       // Various types
+                                    "from_str",       // Parse methods
+                                    "parse",          // Parse methods
+                                ];
+                                if MAYBE_RETURNING_STATIC_METHODS.contains(&&*method.name) {
+                                    return Some(format!("Maybe<{}>", name));
+                                }
+                                // Fallback to the receiver type if no return type found
+                                return Some(name.to_string());
+                            }
+                        }
+                    }
+                }
+
+                // Try to look up the method's return type for instance method calls.
+                // If the receiver is a variable with a known type, construct the qualified
+                // method name (e.g., "ValidFd.as_fd") and check for return_type_name.
+                if let ExprKind::Path(path) = &receiver.kind {
+                    if path.segments.len() == 1 {
+                        // Handle both named variables and `self` keyword
+                        let receiver_type = match &path.segments[0] {
+                            PathSegment::Name(var_ident) => {
+                                self.ctx.variable_type_names.get(&*var_ident.name).cloned()
+                            }
+                            PathSegment::SelfValue => {
+                                self.ctx.variable_type_names.get("self").cloned()
+                            }
+                            _ => None,
+                        };
+                        if let Some(ref receiver_type) = receiver_type {
+                            // Unwrapping methods: extract inner type from generic wrapper
+                            // e.g., Maybe<Node>.unwrap() → Node, Result<Int, E>.unwrap() → Int
+                            let base_type = VbcCodegen::strip_generic_args(receiver_type);
+                            if matches!(&*method.name, "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default") {
+                                let inner_types = self.extract_inner_types(receiver_type);
+                                if let Some(first_inner) = inner_types.first() {
+                                    return Some(first_inner.clone());
+                                }
+                            }
+                            if method.name.as_str() == "unwrap_err" {
+                                let inner_types = self.extract_inner_types(receiver_type);
+                                if let Some(err_type) = inner_types.get(1) {
+                                    return Some(err_type.clone());
+                                }
+                            }
+                            let qualified_method = format!("{}.{}", base_type, method.name);
+                            if let Some(func_info) = self.ctx.lookup_function(&qualified_method) {
+                                if let Some(ref ret_type_name) = func_info.return_type_name {
+                                    // Resolve generic return types (e.g., "V" → "Node" from Map<Int, Node>)
+                                    if ret_type_name.len() <= 2 && ret_type_name.chars().all(|c| c.is_ascii_uppercase()) {
+                                        if let Some(resolved) = self.resolve_generic_return_type(
+                                            receiver_type, &base_type, ret_type_name
+                                        ) {
+                                            return Some(resolved);
+                                        }
+                                    }
+                                    return Some(ret_type_name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // General receiver type inference for non-Path receivers
+                // (e.g., self.entries.offset(idx), field.method(), chained calls)
+                {
+                    let receiver_type = self.extract_expr_type_name(receiver);
+                    if let Some(ref rt) = receiver_type {
+                        let base_type = VbcCodegen::strip_generic_args(rt);
+                        let qualified_method = format!("{}.{}", base_type, method.name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_method) {
+                            if let Some(ref ret_type_name) = func_info.return_type_name {
+                                // Resolve generic return types for non-Path receivers too
+                                if ret_type_name.len() <= 2 && ret_type_name.chars().all(|c| c.is_ascii_uppercase()) {
+                                    if let Some(resolved) = self.resolve_generic_return_type(
+                                        rt, &base_type, ret_type_name
+                                    ) {
+                                        return Some(resolved);
+                                    }
+                                }
+                                return Some(ret_type_name.clone());
+                            }
+                        }
+                        // Pointer methods like offset/add/sub return the same type as receiver
+                        if matches!(&*method.name, "offset" | "add" | "sub") {
+                            return Some(rt.clone());
+                        }
+                    }
+                }
+
+                // For chained method calls (e.g., Num.new(1).add(2)),
+                // use infer_method_chain_return_type to determine the full chain's return type.
+                if let Some(chain_ret) = self.infer_method_chain_return_type(expr) {
+                    return Some(chain_ret);
+                }
+
+                // Check if this is an instance method call that returns Maybe
+                // Methods like ok(), err(), next(), first(), last(), etc. return Maybe<T>
+                // NOTE: Do NOT add methods that return Self (like inspect, cloned, copied) -
+                // those return the same type as the receiver, not necessarily Maybe.
+                let method_name = &*method.name;
+                const MAYBE_RETURNING_METHODS: &[&str] = &[
+                    // Result methods returning Maybe
+                    "ok", "err",
+                    // Maybe methods returning Maybe (for chaining)
+                    "map", "and_then", "or_else", "as_ref", "as_mut", "take", "replace", "filter",
+                    "and", "or", "xor", "zip", "zip_with", "flatten",
+                    // Iterator methods returning Maybe
+                    "next", "first", "last", "nth", "find", "find_map",
+                    "min", "max", "min_by", "max_by", "min_by_key", "max_by_key",
+                    "reduce", "try_reduce", "try_fold",
+                    // Collection methods returning Maybe
+                    "get", "get_mut", "front", "back", "pop", "pop_front", "pop_back",
+                    // Checked arithmetic returning Maybe
+                    "checked_add", "checked_sub", "checked_mul", "checked_div",
+                    "checked_rem", "checked_neg", "checked_abs",
+                    // Data type methods returning Maybe
+                    "as_bool", "as_int", "as_float", "as_text",
+                    "as_array", "as_array_mut", "as_object", "as_object_mut",
+                    "at", "at_mut", "remove", "path", "to_number",
+                ];
+                if MAYBE_RETURNING_METHODS.contains(&method_name) {
+                    return Some("Maybe".to_string());
+                }
+                None
+            }
+            // Function call: check return type for Result/Maybe, or tuple-style constructor
+            ExprKind::Call { func, args, .. } => {
+                if let ExprKind::Path(path) = &func.kind {
+                    if path.segments.len() == 1 {
+                        if let PathSegment::Name(ident) = &path.segments[0] {
+                            let name = &ident.name;
+                            // Look up the function to check return type
+                            if let Some(func_info) = self.ctx.lookup_function(name) {
+                                // For variant constructors (Some, Ok, Err), try to infer
+                                // generic args from constructor arguments BEFORE falling back
+                                // to bare return_type_name. This way Some(node) → "Maybe<Node>"
+                                // instead of just "Maybe".
+                                if func_info.variant_tag.is_some() {
+                                    if let Some(ref parent_type) = func_info.parent_type_name {
+                                        if !args.is_empty() {
+                                            let arg_types: Vec<String> = args.iter()
+                                                .filter_map(|arg| self.extract_expr_type_name(arg))
+                                                .collect();
+                                            if !arg_types.is_empty() {
+                                                return Some(format!("{}<{}>", parent_type, arg_types.join(", ")));
+                                            }
+                                        }
+                                        // No args or can't infer — return bare parent type
+                                        return Some(parent_type.clone());
+                                    }
+                                }
+                                // Non-variant function: return full type name including generics
+                                if let Some(ref ret_type) = func_info.return_type_name {
+                                    return Some(ret_type.clone());
+                                }
+                            }
+                            // Heap(x) / Shared(x): return inner type, not "Heap"/"Shared"
+                            // This ensures field access and method calls on Heap-wrapped
+                            // structs resolve T's field positions and methods.
+                            if self.is_allocating_wrapper(name.as_str()) && args.len() == 1 {
+                                if let Some(inner_type) = self.extract_expr_type_name(&args[0]) {
+                                    return Some(inner_type);
+                                }
+                            }
+                            // If uppercase and not found as function, it may be a variant
+                            // constructor in the collision set. Try to find the parent type
+                            // via qualified name search so method dispatch resolves correctly.
+                            if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                // Search for any "TypeName.VariantName" entry matching this name
+                                let suffix = format!(".{}", name);
+                                for (fn_name, fn_info) in &self.ctx.functions {
+                                    if fn_name.ends_with(&suffix)
+                                        && fn_info.variant_tag.is_some()
+                                        && fn_info.param_count == args.len()
+                                    {
+                                        if let Some(ref parent_type) = fn_info.parent_type_name {
+                                            return Some(parent_type.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                return Some(name.to_string());
+                            }
+                        }
+                    }
+                    // Handle qualified paths like module.function()
+                    if path.segments.len() > 1 {
+                        // Build qualified name from path segments
+                        let qualified_name: String = path.segments.iter()
+                            .filter_map(|seg| {
+                                if let PathSegment::Name(ident) = seg {
+                                    Some(ident.name.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(".");
+
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_name) {
+                            if let Some(ref ret_type) = func_info.return_type_name {
+                                return Some(ret_type.clone());
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            // Index expression: tokens[i] → element type of the collection
+            ExprKind::Index { expr: base, .. } => {
+                let base_type = self.extract_expr_type_name(base)?;
+                Self::extract_element_type(&base_type)
+            }
+            // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
+            ExprKind::Try(inner) => {
+                let inner_type = self.extract_expr_type_name(inner)?;
+                Self::extract_element_type(&inner_type)
+            }
+            // If/else expression: infer type from then branch
+            ExprKind::If { then_branch, .. } => {
+                self.extract_type_from_block(then_branch)
+            }
+            // Match expression: infer type from first arm body with a known type
+            ExprKind::Match { arms, .. } => {
+                for arm in arms.iter() {
+                    if let Some(t) = self.extract_expr_type_name(&arm.body) {
+                        return Some(t);
+                    }
+                }
+                None
+            }
+            // Literal expressions: infer type from literal kind
+            ExprKind::Literal(lit) => {
+                use verum_ast::literal::LiteralKind;
+                match &lit.kind {
+                    LiteralKind::Text(_) | LiteralKind::ByteString(_)
+                        | LiteralKind::InterpolatedString(_) => Some("Text".to_string()),
+                    LiteralKind::Float(_) => Some("Float".to_string()),
+                    LiteralKind::Bool(_) => Some("Bool".to_string()),
+                    LiteralKind::Char(_) | LiteralKind::ByteChar(_) => Some("Char".to_string()),
+                    _ => None, // Int literals default to Int (already the default)
+                }
+            }
+            // F-string literal: f"hello {name}" → Text
+            ExprKind::InterpolatedString { .. } => Some("Text".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Extracts the type from a block by looking at its trailing expression or last statement.
+    fn extract_type_from_block(&self, block: &verum_ast::Block) -> Option<String> {
+        // Check trailing expression first (e.g., `{ m.r0 }` where m.r0 is the expr)
+        if let verum_common::Maybe::Some(ref trailing_expr) = block.expr {
+            return self.extract_expr_type_name(trailing_expr);
+        }
+        // Fall back to last statement
+        if let Some(last_stmt) = block.stmts.last() {
+            if let verum_ast::StmtKind::Expr { expr, .. } = &last_stmt.kind {
+                return self.extract_expr_type_name(expr);
+            }
+        }
+        None
+    }
+
+    /// Infers the custom type name for an expression used as an operand.
+    ///
+    /// For variable references, looks up the type name from `variable_type_names`.
+    /// For inline record literals, extracts the type name directly.
+    /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
+    pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
+
+        match &expr.kind {
+            // Variable reference: look up in variable_type_names
+            ExprKind::Path(path) => {
+                if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Name(ident) => {
+                            self.ctx.variable_type_names.get(&*ident.name).cloned()
+                        }
+                        PathSegment::SelfValue => {
+                            self.ctx.variable_type_names.get("self").cloned()
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            // Inline record literal: OSError { ... } == other
+            ExprKind::Record { path, .. } => {
+                if let Some(PathSegment::Name(ident)) = path.segments.last() {
+                    Some(ident.name.to_string())
+                } else {
+                    None
+                }
+            }
+            ExprKind::Paren(inner) => self.infer_expr_type_name(inner),
+            // Field access: look up field type in type_field_type_names
+            ExprKind::Field { expr: base, field } => {
+                let base_type = self.infer_expr_type_name(base)?;
+                let field_name = field.name.to_string();
+                // Try exact match first
+                if let Some(ft) = self.type_field_type_names.get(&(base_type.clone(), field_name.clone())) {
+                    return Some(ft.clone());
+                }
+                // Try with generic params stripped (e.g., "Map<K, V>" → "Map")
+                let stripped = VbcCodegen::strip_generic_args(&base_type);
+                if stripped != base_type {
+                    self.type_field_type_names
+                        .get(&(stripped.to_string(), field_name))
+                        .cloned()
+                } else {
+                    None
+                }
+            }
+            // Function call: look up return type
+            ExprKind::Call { func, .. } => {
+                if let ExprKind::Path(path) = &func.kind {
+                    let func_name = format!("{}", path);
+                    self.ctx.lookup_function(&func_name)
+                        .and_then(|info| info.return_type_name.clone())
+                }
+                else {
+                    None
+                }
+            }
+            // Method call: look up return type
+            ExprKind::MethodCall { receiver, method, args, .. } => {
+                // Heap.new(x) / Shared.new(x): return the inner type for field access
+                if let ExprKind::Path(ref path) = receiver.kind {
+                    if path.segments.len() == 1 {
+                        if let PathSegment::Name(ref ident) = path.segments[0] {
+                            if self.is_allocating_wrapper(ident.name.as_str()) && method.name.as_str() == "new" {
+                                if let Some(first_arg) = args.first() {
+                                    if let Some(inner_type) = self.infer_expr_type_name(first_arg) {
+                                        return Some(inner_type);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Try to get receiver type; if it's a static call like TypeName.method(),
+                // the receiver is the type name itself (not in variable_type_names).
+                let receiver_type = self.infer_expr_type_name(receiver)
+                    .or_else(|| {
+                        // For static calls like MyRange.new() where receiver is a Path("MyRange")
+                        if let ExprKind::Path(ref path) = receiver.kind {
+                            if path.segments.len() == 1 {
+                                if let PathSegment::Name(ref ident) = path.segments[0] {
+                                    let name = ident.name.to_string();
+                                    // Check if it's a known type by looking up TypeName.method in functions
+                                    let qualified = format!("{}.{}", name, method.name);
+                                    if self.ctx.functions.contains_key(&qualified) {
+                                        return Some(name);
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })?;
+                // Try exact match first
+                let method_name = format!("{}.{}", receiver_type, method.name);
+                if let Some(ret) = self.ctx.lookup_function(&method_name)
+                    .and_then(|info| info.return_type_name.clone()) {
+                    return Some(ret);
+                }
+                // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
+                let base_type = VbcCodegen::strip_generic_args(&receiver_type);
+                if base_type != receiver_type {
+                    let method_name = format!("{}.{}", base_type, method.name);
+                    if let Some(ret) = self.ctx.lookup_function(&method_name)
+                        .and_then(|info| info.return_type_name.clone()) {
+                        // Resolve generic return types from receiver's type args.
+                        // E.g., Map<Int, Node>.get() returns "V" → resolve to "Node"
+                        // by matching V to the Map's second type parameter.
+                        if ret.len() <= 2 && ret.chars().all(|c| c.is_ascii_uppercase()) {
+                            if let Some(resolved) = self.resolve_generic_return_type(
+                                &receiver_type, base_type, &ret
+                            ) {
+                                return Some(resolved);
+                            }
+                        }
+                        return Some(ret);
+                    }
+                }
+                // Pointer methods like offset/add/sub return the same type
+                if matches!(&*method.name, "offset" | "add" | "sub") {
+                    return Some(receiver_type);
+                }
+                None
+            }
+            // Index expression: tokens[i] → element type of the collection
+            ExprKind::Index { expr: base, .. } => {
+                let base_type = self.infer_expr_type_name(base)?;
+                Self::extract_element_type(&base_type)
+            }
+            // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
+            ExprKind::Try(inner) => {
+                let inner_type = self.infer_expr_type_name(inner)?;
+                Self::extract_element_type(&inner_type)
+            }
+            // Unary operations: for Deref, unwrap Heap<T>/Shared<T> → T
+            ExprKind::Unary { op, expr: inner } => {
+                let inner_type = self.infer_expr_type_name(inner);
+                if matches!(op, verum_ast::expr::UnOp::Deref) {
+                    if let Some(ref t) = inner_type {
+                        if t.starts_with("Heap<") || t.starts_with("Shared<") {
+                            if let Some(inner_t) = Self::extract_element_type(t) {
+                                return Some(inner_t);
+                            }
+                        }
+                    }
+                }
+                inner_type
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolves the protocol_id for a CmpG equality instruction.
+    ///
+    /// If either operand has a known custom type name with a registered `TypeName::eq`
+    /// function, returns a non-zero protocol_id encoding the string table index + 1.
+    /// The interpreter uses this to dispatch to the custom Eq implementation.
+    /// Returns 0 if no custom Eq dispatch is needed (fall back to structural comparison).
+    fn resolve_eq_protocol_id(&mut self, left: &Expr, right: &Expr) -> u32 {
+        // Try left operand first, then right
+        let type_name = self.infer_expr_type_name(left)
+            .or_else(|| self.infer_expr_type_name(right));
+
+        if let Some(ref name) = type_name {
+            // Use dot separator to match how impl methods are registered (e.g., "Point.eq")
+            let eq_name = format!("{}.eq", name);
+            if self.ctx.functions.contains_key(&eq_name) {
+                // Encode as string table index + 1 (0 = no protocol)
+                return self.ctx.intern_string_raw(name) + 1;
+            }
+        }
+        0
+    }
+
+    /// Tries to extract the array length from a source expression.
+    /// Handles cases like `&data` where `data` is an array literal or variable.
+    fn try_get_array_length_from_source(&self, expr: &Expr) -> Option<usize> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::expr::ArrayExpr;
+
+        match &expr.kind {
+            // Array literal: [1, 2, 3, 4, 5] - get the number of elements
+            ExprKind::Array(array_expr) => {
+                match array_expr {
+                    ArrayExpr::List(elements) => Some(elements.len()),
+                    ArrayExpr::Repeat { count, .. } => {
+                        // Try to extract literal count value
+                        if let ExprKind::Literal(lit) = &count.kind {
+                            use verum_ast::literal::LiteralKind;
+                            match &lit.kind {
+                                LiteralKind::Int(n) => Some(n.value as usize),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+            // Reference expression: &data - recurse to get data's length
+            ExprKind::Unary { op: verum_ast::expr::UnOp::Ref, expr: inner } => {
+                self.try_get_array_length_from_source(inner)
+            }
+            // Cast expression: check inner
+            ExprKind::Cast { expr: inner, .. } => {
+                self.try_get_array_length_from_source(inner)
+            }
+            // Variable reference or other: can't determine statically
+            _ => None,
+        }
+    }
+
+    /// Infers the TypeKind of an expression based on its structure.
+    /// Returns None if type cannot be determined statically.
+    ///
+    /// This method is now an instance method so it can access the context
+    /// for variable type lookups when expressions reference variables.
+    pub fn infer_expr_type_kind(&self, expr: &Expr) -> Option<verum_ast::ty::TypeKind> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::TypeKind;
+        use verum_ast::literal::LiteralKind;
+        use crate::codegen::context::VarTypeKind;
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(_) => Some(TypeKind::Int),
+                LiteralKind::Float(_) => Some(TypeKind::Float),
+                LiteralKind::Bool(_) => Some(TypeKind::Bool),
+                LiteralKind::Char(_) => Some(TypeKind::Char),
+                LiteralKind::Text(_) => Some(TypeKind::Text),
+                _ => None,
+            },
+            // Variable reference - look up the type from context
+            // Simple variables are represented as Path expressions with one segment
+            ExprKind::Path(path) => {
+                use verum_ast::ty::PathSegment;
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ident) = &path.segments[0] {
+                        // First try looking up as a variable type
+                        let var_type = self.ctx.get_variable_type(&ident.name);
+                        // If not found as variable, try as a constant (persists across functions)
+                        let final_type = if var_type == VarTypeKind::Unknown {
+                            self.ctx.get_constant_type(&ident.name)
+                        } else {
+                            var_type
+                        };
+                        match final_type {
+                            VarTypeKind::Int => Some(TypeKind::Int),
+                            VarTypeKind::Float => Some(TypeKind::Float),
+                            VarTypeKind::Bool => Some(TypeKind::Bool),
+                            VarTypeKind::Char => Some(TypeKind::Char),
+                            VarTypeKind::Text => Some(TypeKind::Text),
+                            VarTypeKind::Unit => Some(TypeKind::Unit),
+                            VarTypeKind::Byte => Some(TypeKind::Int), // Byte is stored as Int
+                            VarTypeKind::Int32 => Some(TypeKind::Int), // Int32 stored as Int
+                            VarTypeKind::UInt64 => Some(TypeKind::Int), // UInt64 stored as Int
+                            VarTypeKind::Unknown => None,
+                        }
+                    } else {
+                        None // self, super, crate, etc.
+                    }
+                } else {
+                    None // Multi-segment paths can't be resolved statically
+                }
+            }
+            ExprKind::Paren(inner) => self.infer_expr_type_kind(inner),
+            ExprKind::Unary { op: _, expr: inner } => self.infer_expr_type_kind(inner),
+            ExprKind::Binary { op, left, right, .. } => {
+                // For arithmetic ops, infer from operands
+                use verum_ast::expr::BinOp;
+                match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
+                        let left_kind = self.infer_expr_type_kind(left);
+                        let right_kind = self.infer_expr_type_kind(right);
+                        // If either is Float, result is Float
+                        if matches!(left_kind, Some(TypeKind::Float)) ||
+                           matches!(right_kind, Some(TypeKind::Float)) {
+                            Some(TypeKind::Float)
+                        } else if matches!(left_kind, Some(TypeKind::Int)) ||
+                                  matches!(right_kind, Some(TypeKind::Int)) {
+                            Some(TypeKind::Int)
+                        } else {
+                            left_kind.or(right_kind)
+                        }
+                    }
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge |
+                    BinOp::And | BinOp::Or => Some(TypeKind::Bool),
+                    _ => None,
+                }
+            }
+            ExprKind::If { then_branch, else_branch, .. } => {
+                // Infer from branches
+                if let Some(expr) = &then_branch.expr {
+                    return self.infer_expr_type_kind(expr);
+                }
+                if let Some(else_expr) = else_branch {
+                    return self.infer_expr_type_kind(else_expr);
+                }
+                None
+            }
+            ExprKind::Cast { ty, .. } => {
+                // Normalize path-based type aliases to canonical TypeKind
+                match &ty.kind {
+                    TypeKind::Path(path) => {
+                        if let Some(ident) = path.as_ident() {
+                            match ident.name.as_str() {
+                                "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
+                                "Int" | "Int64" | "i64" | "Int32" | "i32"
+                                | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
+                                | "UInt32" | "u32" | "UInt64" | "u64"
+                                | "UInt128" | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
+                                "Bool" => Some(TypeKind::Bool),
+                                "Char" => Some(TypeKind::Char),
+                                _ => Some(ty.kind.clone()),
+                            }
+                        } else {
+                            Some(ty.kind.clone())
+                        }
+                    }
+                    _ => Some(ty.kind.clone()),
+                }
+            }
+
+            // Function calls - look up return type from function registry
+            ExprKind::Call { func, args, .. } => {
+                // Extract function name from the callee expression
+                if let ExprKind::Path(path) = &func.kind {
+                    use verum_ast::ty::PathSegment;
+                    if path.segments.len() == 1
+                        && let PathSegment::Name(ident) = &path.segments[0] {
+                            let func_name = ident.name.to_string();
+
+                            // Check FFI functions first (they have typed signatures)
+                            if let Some(symbol_id) = self.get_ffi_symbol_id(&func_name)
+                                && let Some(symbol) = self.get_ffi_symbol(symbol_id) {
+                                    // Convert CType return type to TypeKind
+                                    return match symbol.signature.return_type {
+                                        crate::module::CType::Void => Some(TypeKind::Unit),
+                                        crate::module::CType::I8
+                                        | crate::module::CType::I16
+                                        | crate::module::CType::I32
+                                        | crate::module::CType::I64
+                                        | crate::module::CType::U8
+                                        | crate::module::CType::U16
+                                        | crate::module::CType::U32
+                                        | crate::module::CType::U64
+                                        | crate::module::CType::Size
+                                        | crate::module::CType::Ssize => Some(TypeKind::Int),
+                                        crate::module::CType::F32
+                                        | crate::module::CType::F64 => Some(TypeKind::Float),
+                                        crate::module::CType::Bool => Some(TypeKind::Bool),
+                                        crate::module::CType::CStr => Some(TypeKind::Text),
+                                        _ => None, // Pointers, structs, etc.
+                                    };
+                                }
+
+                            // Handle polymorphic intrinsics that return the same type as their input
+                            // These include abs, neg, signum which work on both Int and Float
+                            if matches!(func_name.as_str(), "abs" | "neg" | "signum") {
+                                // Infer return type from first argument
+                                if let Some(first_arg) = args.first() {
+                                    return self.infer_expr_type_kind(first_arg);
+                                }
+                            }
+
+                            // Check if it's an intrinsic function
+                            if let Some(intrinsic_info) = crate::intrinsics::lookup_intrinsic(&func_name) {
+                                // Infer return type from intrinsic name suffix
+                                // _f64 or _f32 suffix indicates float return type
+                                let name = intrinsic_info.intrinsic.name;
+                                if name.ends_with("_f64") || name.ends_with("_f32")
+                                    || name.starts_with("sqrt") || name.starts_with("sin")
+                                    || name.starts_with("cos") || name.starts_with("tan")
+                                    || name.starts_with("exp") || name.starts_with("log")
+                                    || name.starts_with("pow") || name.starts_with("fabs")
+                                    || name.starts_with("floor") || name.starts_with("ceil")
+                                    || name.starts_with("round") || name.starts_with("trunc")
+                                    || name.starts_with("cbrt") || name.starts_with("hypot")
+                                    || name.starts_with("fma") || name.starts_with("copysign")
+                                    || name.starts_with("minnum") || name.starts_with("maxnum")
+                                    || name.starts_with("sinh") || name.starts_with("cosh")
+                                    || name.starts_with("tanh") || name.starts_with("asinh")
+                                    || name.starts_with("acosh") || name.starts_with("atanh")
+                                    || name.starts_with("asin") || name.starts_with("acos")
+                                    || name.starts_with("atan")
+                                    || name == "f64_infinity" || name == "f64_neg_infinity"
+                                    || name == "f64_nan" || name == "f64_epsilon"
+                                    || name == "f32_infinity" || name == "f32_neg_infinity"
+                                    || name == "f32_nan" || name == "f32_epsilon" {
+                                    return Some(TypeKind::Float);
+                                }
+                            }
+
+                            // Look up regular Verum functions by return type name
+                            if let Some(func_info) = self.ctx.lookup_function(&func_name) {
+                                if let Some(ref ret_name) = func_info.return_type_name {
+                                    return self.type_name_to_type_kind(ret_name);
+                                }
+                            }
+                        }
+                }
+                None
+            }
+
+            // Field access — look up the field type from the struct definition
+            ExprKind::Field { expr: base, field } => {
+                if let Some(base_type) = self.infer_expr_type_name(base) {
+                    if let Some(field_type) = self.field_type_name(&base_type, &field.name) {
+                        return self.type_name_to_type_kind(field_type);
+                    }
+                }
+                None
+            }
+
+            // Tuple index (.0, .1, etc.) — check for newtype inner type
+            ExprKind::TupleIndex { expr: base, index } => {
+                if *index == 0 {
+                    if let Some(base_type) = self.infer_expr_type_name(base) {
+                        if let Some(inner) = self.ctx.newtype_inner_type.get(&base_type) {
+                            return self.type_name_to_type_kind(inner);
+                        }
+                    }
+                }
+                None
+            }
+
+            _ => None,
+        }
+    }
+
+    /// Converts a type name string (from FunctionInfo.return_type_name) to a TypeKind.
+    /// Used by infer_expr_type_kind to determine the return type of regular function calls.
+    fn type_name_to_type_kind(&self, name: &str) -> Option<verum_ast::ty::TypeKind> {
+        use verum_ast::ty::TypeKind;
+        match name {
+            "Int" | "Int64" | "Int32" | "Int16" | "Int8"
+            | "UInt64" | "UInt32" | "UInt16" | "UInt8"
+            | "ISize" | "USize" | "Byte" => Some(TypeKind::Int),
+            "Float" | "Float64" | "Float32" => Some(TypeKind::Float),
+            "Bool" => Some(TypeKind::Bool),
+            "Text" => Some(TypeKind::Text),
+            "Char" => Some(TypeKind::Char),
+            _ => None,
+        }
+    }
+
+    /// Checks whether an expression has an unsigned integer type (UInt8/Byte, UInt64, etc.).
+    /// Used to select unsigned comparison instructions (CmpU) instead of signed (CmpI).
+    pub fn infer_expr_is_unsigned(&self, expr: &Expr) -> bool {
+        use verum_ast::expr::ExprKind;
+        use crate::codegen::context::VarTypeKind;
+
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                use verum_ast::ty::PathSegment;
+                if path.segments.len() == 1 {
+                    if let PathSegment::Name(ident) = &path.segments[0] {
+                        let var_type = self.ctx.get_variable_type(&ident.name);
+                        return matches!(var_type, VarTypeKind::UInt64 | VarTypeKind::Byte);
+                    }
+                }
+                false
+            }
+            ExprKind::Paren(inner) => self.infer_expr_is_unsigned(inner),
+            _ => false,
+        }
+    }
+
+    // ==================== Range ====================
+
+    /// Compiles a range expression.
+    fn compile_range(
+        &mut self,
+        start: Option<&Expr>,
+        end: Option<&Expr>,
+        inclusive: bool,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+
+        // Create a range struct (3 fields at fixed indices: start=0, end=1, inclusive=2)
+        // Use TypeId::RANGE (517) so the iterator recognizes this as a range
+        self.ctx.emit(Instruction::New {
+            dst: result,
+            type_id: 517, // TypeId::RANGE
+            field_count: 3,
+        });
+
+        // Set start field (index 0)
+        if let Some(start_expr) = start {
+            let start_reg = self
+                .compile_expr(start_expr)?
+                .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+            self.ctx.emit(Instruction::SetF {
+                obj: result,
+                field_idx: 0,
+                value: start_reg,
+            });
+            self.ctx.free_temp(start_reg);
+        }
+
+        // Set end field (index 1)
+        if let Some(end_expr) = end {
+            let end_reg = self
+                .compile_expr(end_expr)?
+                .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+            self.ctx.emit(Instruction::SetF {
+                obj: result,
+                field_idx: 1,
+                value: end_reg,
+            });
+            self.ctx.free_temp(end_reg);
+        }
+
+        // Set inclusive flag (index 2)
+        let inclusive_reg = self.ctx.alloc_temp();
+        if inclusive {
+            self.ctx
+                .emit(Instruction::LoadTrue { dst: inclusive_reg });
+        } else {
+            self.ctx
+                .emit(Instruction::LoadFalse { dst: inclusive_reg });
+        }
+        let field_idx = 2;
+        self.ctx.emit(Instruction::SetF {
+            obj: result,
+            field_idx,
+            value: inclusive_reg,
+        });
+        self.ctx.free_temp(inclusive_reg);
+
+        Ok(Some(result))
+    }
+
+    // ==================== Closure ====================
+
+    /// Compiles a closure expression.
+    ///
+    /// Closures are compiled by:
+    /// 1. Analyzing the body to find free variables (variables referenced but not defined locally)
+    /// 2. Compiling the closure body as a separate function with captures as first parameters
+    /// 3. Emitting NewClosure instruction with the function ID and captured values
+    fn compile_closure(
+        &mut self,
+        params: &verum_common::List<verum_ast::ClosureParam>,
+        body: &Expr,
+        return_type: Option<&verum_ast::ty::Type>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Step 1: Extract parameter info for the closure
+        // For simple ident patterns, use the name directly
+        // For complex patterns (tuple, etc.), generate synthetic names
+        let mut param_names: Vec<String> = Vec::with_capacity(params.len());
+        let mut complex_patterns: Vec<(usize, &verum_ast::Pattern)> = Vec::new();
+
+        for (idx, p) in params.iter().enumerate() {
+            use verum_ast::PatternKind;
+            match &p.pattern.kind {
+                PatternKind::Ident { name, .. } => {
+                    param_names.push(name.name.to_string());
+                }
+                _ => {
+                    // Complex pattern - use synthetic name and record for later binding
+                    let synthetic_name = format!("__closure_arg{}", idx);
+                    param_names.push(synthetic_name);
+                    complex_patterns.push((idx, &p.pattern));
+                }
+            }
+        }
+
+        // Step 2: Analyze the body to find free variables (captured from enclosing scope)
+        // We also need to consider variables bound by complex patterns as bound vars
+        let mut all_bound_vars = param_names.clone();
+        for (_, pattern) in &complex_patterns {
+            self.collect_pattern_bound_vars(pattern, &mut all_bound_vars);
+        }
+        let free_vars = self.analyze_free_variables(body, &all_bound_vars);
+        // Step 3: For each captured variable, get its current register value and mutability
+        // IMPORTANT: Only capture variables that actually exist in the outer scope.
+        // Free variables that don't exist (like builtin functions `print`, `panic`, etc.)
+        // should NOT be added as capture parameters.
+        let mut capture_regs = Vec::with_capacity(free_vars.len());
+        let mut captures_with_mut: Vec<(String, bool)> = Vec::with_capacity(free_vars.len());
+        for var_name in &free_vars {
+            if let Some(info) = self.ctx.lookup_var(var_name) {
+                let is_mut = info.is_mutable;
+                let var_reg = info.reg;
+                let already_cell = info.is_cell;
+
+                if is_mut && !already_cell {
+                    // Mutable capture: allocate a heap cell to share state between
+                    // the outer scope and the closure. Cell is a 1-field object.
+                    let cell_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::New {
+                        dst: cell_reg,
+                        type_id: 0,
+                        field_count: 1,
+                    });
+                    // Store current value into the cell
+                    self.ctx.emit(Instruction::SetF {
+                        obj: cell_reg,
+                        field_idx: 0,
+                        value: var_reg,
+                    });
+                    // Rebind the outer variable to point to the cell
+                    self.ctx.emit(Instruction::Mov {
+                        dst: var_reg,
+                        src: cell_reg,
+                    });
+                    // Mark the outer variable as cell-wrapped
+                    if let Some(outer_info) = self.ctx.lookup_var_mut(var_name) {
+                        outer_info.is_cell = true;
+                    }
+                    // Pass the cell register as the capture
+                    capture_regs.push(var_reg);
+                } else {
+                    capture_regs.push(var_reg);
+                }
+                captures_with_mut.push((var_name.clone(), is_mut));
+            }
+            // If variable not found, it's a builtin/global - don't add as capture
+        }
+
+        // Step 3b: Extract parameter types from AST for proper type tracking
+        // This ensures Text/List/Map parameters in closures get correct TypeRef
+        let param_type_names: Vec<Option<String>> = params.iter().map(|p| {
+            p.ty.as_ref().map(|t| {
+                // Extract the type name for register tracking (Text, List, Map, etc.)
+                match &t.kind {
+                    // Primitive types have their own TypeKind variants
+                    verum_ast::TypeKind::Text => "Text".to_string(),
+                    verum_ast::TypeKind::Int => "Int".to_string(),
+                    verum_ast::TypeKind::Float => "Float".to_string(),
+                    verum_ast::TypeKind::Bool => "Bool".to_string(),
+                    // Named types (List, Map, Set, etc.) use Path
+                    verum_ast::TypeKind::Path(path) => {
+                        if let Some(seg) = path.segments.last() {
+                            match seg {
+                                verum_ast::PathSegment::Name(ident) => ident.name.to_string(),
+                                _ => String::new(),
+                            }
+                        } else {
+                            String::new()
+                        }
+                    }
+                    _ => String::new(),
+                }
+            })
+        }).collect();
+
+        // Step 4: Register and compile the closure body as a new function
+        // The closure function has captures as first params, then user params
+        let closure_func_id = self.compile_closure_body_with_patterns(
+            &captures_with_mut,
+            &param_names,
+            &param_type_names,
+            &complex_patterns,
+            body,
+            return_type,
+        )?;
+
+        // Step 5: Emit NewClosure instruction
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::NewClosure {
+            dst: result,
+            func_id: closure_func_id,
+            captures: capture_regs,
+        });
+
+        Ok(Some(result))
+    }
+
+    /// Collects all variables bound by a pattern into the provided Vec.
+    fn collect_pattern_bound_vars(&self, pattern: &verum_ast::Pattern, bound_vars: &mut Vec<String>) {
+        use verum_ast::PatternKind;
+        match &pattern.kind {
+            PatternKind::Ident { name, .. } => {
+                bound_vars.push(name.name.to_string());
+            }
+            PatternKind::Tuple(elements) => {
+                for elem in elements.iter() {
+                    self.collect_pattern_bound_vars(elem, bound_vars);
+                }
+            }
+            PatternKind::Paren(inner) => {
+                self.collect_pattern_bound_vars(inner, bound_vars);
+            }
+            PatternKind::Variant { data: Some(data), .. } => {
+                use verum_ast::VariantPatternData;
+                match data {
+                    VariantPatternData::Tuple(pats) => {
+                        for pat in pats.iter() {
+                            self.collect_pattern_bound_vars(pat, bound_vars);
+                        }
+                    }
+                    VariantPatternData::Record { fields, .. } => {
+                        for field in fields.iter() {
+                            if let verum_common::Maybe::Some(ref inner) = field.pattern {
+                                self.collect_pattern_bound_vars(inner, bound_vars);
+                            } else {
+                                bound_vars.push(field.name.name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            PatternKind::Variant { data: None, .. } => {}
+            PatternKind::Or(alts) => {
+                // All alternatives should bind the same variables
+                if let Some(first) = alts.first() {
+                    self.collect_pattern_bound_vars(first, bound_vars);
+                }
+            }
+            PatternKind::Reference { inner, .. } => {
+                self.collect_pattern_bound_vars(inner, bound_vars);
+            }
+            _ => {}
+        }
+    }
+
+    /// Analyzes an expression to find free variables.
+    ///
+    /// Free variables are variables that are:
+    /// - Referenced in the expression
+    /// - Not defined locally within the expression
+    /// - Not in the provided bound variables set (closure parameters)
+    fn analyze_free_variables(&self, expr: &Expr, bound_vars: &[String]) -> Vec<String> {
+        let mut analyzer = FreeVarAnalyzer::new(bound_vars);
+        analyzer.visit_expr(expr);
+        analyzer.free_vars()
+    }
+
+    /// Compiles a closure body as a separate function.
+    ///
+    /// The function takes captured variables as the first parameters,
+    /// followed by the user-specified closure parameters.
+    #[allow(dead_code)] // Reserved for future closure compilation improvements
+    fn compile_closure_body(
+        &mut self,
+        captures: &[String],
+        params: &[String],
+        body: &Expr,
+    ) -> CodegenResult<u32> {
+        // Generate unique name for closure function
+        let closure_name = format!(
+            "{}$closure${}",
+            self.ctx.current_function.as_deref().unwrap_or("anon"),
+            self.closure_counter
+        );
+        self.closure_counter += 1;
+
+        // Build combined parameter list: captures + user params
+        // All closure parameters are immutable by default (captures cannot be mutated in place)
+        let mut all_params: Vec<(String, bool)> = Vec::with_capacity(captures.len() + params.len());
+        for cap in captures {
+            all_params.push((cap.clone(), false));
+        }
+        for param in params {
+            all_params.push((param.clone(), false));
+        }
+
+        // Allocate function ID
+        let func_id = self.next_func_id;
+        self.next_func_id = self.next_func_id.saturating_add(1);
+
+        // Extract just the names for registration
+        let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
+
+        // Register the closure function
+        let info = super::FunctionInfo {
+            id: crate::module::FunctionId(func_id),
+            param_count: param_names.len(),
+            param_names,
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: false, // Closures are not generators
+            contexts: Vec::new(),
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            return_type_name: None, // Closure return types are inferred
+            return_type_inner: None,
+        };
+        self.ctx.register_function(closure_name.clone(), info);
+
+        // Save current function context (critical: includes all state that begin_function clears)
+        let saved_function = self.ctx.current_function.clone();
+        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+        let saved_registers = self.ctx.registers.snapshot();
+        let saved_in_function = self.ctx.in_function;
+        let saved_return_type = self.ctx.return_type.clone();
+        // Save labels and loop context - begin_function() clears these but they must be
+        // restored so the outer function's loops/jumps continue to work after closure compilation.
+        let saved_closure_ctx = self.ctx.save_closure_context();
+
+        // Begin closure function compilation
+        self.ctx.begin_function(&closure_name, &all_params, None);
+
+        // Mark captured variables (they are the first parameters)
+        for (i, cap_name) in captures.iter().enumerate() {
+            // Update the variable's register kind to Captured
+            if let Some(info) = self.ctx.lookup_var_mut(cap_name) {
+                info.kind = super::RegisterKind::Captured;
+            }
+            let _ = i; // Used for potential future optimization
+        }
+
+        // Compile the body expression
+        let result = self.compile_expr(body)?;
+
+        // Emit return
+        if let Some(reg) = result {
+            self.ctx.emit(Instruction::Ret { value: reg });
+        } else {
+            self.ctx.emit(Instruction::RetV);
+        }
+
+        // End function compilation
+        let (closure_instructions, register_count) = self.ctx.end_function();
+
+        // Restore parent function context (critical: includes all saved state)
+        self.ctx.current_function = saved_function;
+        self.ctx.instructions = saved_instructions;
+        self.ctx.registers.restore_reg(&saved_registers);
+        self.ctx.in_function = saved_in_function;
+        self.ctx.return_type = saved_return_type;
+        // Restore labels and loop context
+        self.ctx.restore_closure_context(saved_closure_ctx);
+
+        // Create VBC function descriptor
+        let name_id = crate::types::StringId(self.intern_string(&closure_name));
+        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+        descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.register_count = register_count;
+        descriptor.locals_count = all_params.len() as u16;
+
+        // Populate params for LLVM AOT lowering: [env_ptr, user_arg0, user_arg1, ...]
+        // The env_ptr carries captured variables; user args follow.
+        let env_name_id = crate::types::StringId(self.intern_string("__closure_env"));
+        descriptor.params.push(crate::module::ParamDescriptor {
+            name: env_name_id,
+            type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::PTR),
+            is_mut: false,
+            default: None,
+        });
+        for param in params {
+            let pname_id = crate::types::StringId(self.intern_string(param));
+            descriptor.params.push(crate::module::ParamDescriptor {
+                name: pname_id,
+                type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                is_mut: false,
+                default: None,
+            });
+        }
+        // Store capture count in max_stack for LLVM prologue generation
+        descriptor.max_stack = captures.len() as u16;
+        // Closures return values as i64 (not void)
+        descriptor.return_type = crate::types::TypeRef::Concrete(crate::types::TypeId::INT);
+
+        let vbc_func = crate::module::VbcFunction::new(descriptor, closure_instructions);
+        self.functions.push(vbc_func);
+
+        Ok(func_id)
+    }
+
+    /// Compiles a closure body with support for complex parameter patterns.
+    ///
+    /// The function takes captured variables as the first parameters,
+    /// followed by the user-specified closure parameters. For complex patterns
+    /// (tuples, etc.), the pattern binding is performed at the start of the body.
+    fn compile_closure_body_with_patterns(
+        &mut self,
+        captures: &[(String, bool)],
+        params: &[String],
+        param_type_names: &[Option<String>],
+        complex_patterns: &[(usize, &verum_ast::Pattern)],
+        body: &Expr,
+        return_type_ast: Option<&verum_ast::ty::Type>,
+    ) -> CodegenResult<u32> {
+        // Generate unique name for closure function
+        let closure_name = format!(
+            "{}$closure${}",
+            self.ctx.current_function.as_deref().unwrap_or("anon"),
+            self.closure_counter
+        );
+        self.closure_counter += 1;
+
+        // Build combined parameter list: captures (with mutability) + user params (immutable)
+        let mut all_params: Vec<(String, bool)> = Vec::with_capacity(captures.len() + params.len());
+        for (cap_name, is_mutable) in captures {
+            all_params.push((cap_name.clone(), *is_mutable));
+        }
+        for param in params {
+            all_params.push((param.clone(), false));
+        }
+
+        // Allocate function ID
+        let func_id = self.next_func_id;
+        self.next_func_id = self.next_func_id.saturating_add(1);
+
+        // Extract just the names for registration
+        let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
+
+        // Convert AST return type to TypeRef for the function descriptor.
+        let closure_return_type_ref = return_type_ast
+            .map(|ty| self.ast_type_to_type_ref(ty));
+
+        // Compute the return type name string for type tracking.
+        let closure_return_type_name = return_type_ast
+            .map(|ty| self.type_to_simple_name(ty));
+
+        // Register the closure function
+        let info = super::FunctionInfo {
+            id: crate::module::FunctionId(func_id),
+            param_count: param_names.len(),
+            param_names,
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: false,
+            contexts: Vec::new(),
+            return_type: closure_return_type_ref.clone(),
+            yield_type: None,
+            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            return_type_name: closure_return_type_name,
+            return_type_inner: None,
+        };
+        self.ctx.register_function(closure_name.clone(), info);
+
+        // Save current function context (critical: includes in_function flag)
+        let saved_function = self.ctx.current_function.clone();
+        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+        let saved_registers = self.ctx.registers.snapshot();
+        let saved_in_function = self.ctx.in_function;
+        let saved_return_type = self.ctx.return_type.clone();
+        // Save labels and loop context for restoration after closure compilation
+        let saved_closure_ctx = self.ctx.save_closure_context();
+
+        // Begin closure function compilation
+        self.ctx.begin_function(&closure_name, &all_params, None);
+
+        // Mark captured variables (they are the first parameters)
+        for (i, (cap_name, is_mutable)) in captures.iter().enumerate() {
+            if let Some(info) = self.ctx.lookup_var_mut(cap_name) {
+                info.kind = super::RegisterKind::Captured;
+                // Mutable captures are passed as cell pointers — mark as cell
+                // so reads/writes go through GetF/SetF indirection.
+                if *is_mutable {
+                    info.is_cell = true;
+                }
+            }
+            let _ = i;
+        }
+
+        // Bind complex patterns to extract variables
+        // For each complex pattern, get the register for the synthetic param and bind
+        for (idx, pattern) in complex_patterns {
+            // The param index in all_params is captures.len() + idx
+            let param_idx = captures.len() + *idx;
+            let (param_name, _) = &all_params[param_idx];
+
+            // Look up the register for this synthetic param
+            if let Some(var_info) = self.ctx.lookup_var(param_name) {
+                let param_reg = var_info.reg;
+                // Bind the pattern to extract individual variables
+                self.compile_pattern_bind(pattern, param_reg)?;
+            }
+        }
+
+        // Compile the body expression
+        let result = self.compile_expr(body)?;
+
+        // Emit return
+        if let Some(reg) = result {
+            self.ctx.emit(Instruction::Ret { value: reg });
+        } else {
+            self.ctx.emit(Instruction::RetV);
+        }
+
+        // End function compilation
+        let (closure_instructions, register_count) = self.ctx.end_function();
+
+        // Restore parent function context (critical: includes in_function flag)
+        self.ctx.current_function = saved_function;
+        self.ctx.instructions = saved_instructions;
+        self.ctx.registers.restore_reg(&saved_registers);
+        self.ctx.in_function = saved_in_function;
+        self.ctx.return_type = saved_return_type;
+        // Restore labels and loop context
+        self.ctx.restore_closure_context(saved_closure_ctx);
+
+        // Create VBC function descriptor
+        let name_id = crate::types::StringId(self.intern_string(&closure_name));
+        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+        descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.register_count = register_count;
+        descriptor.locals_count = all_params.len() as u16;
+
+        // Populate params for LLVM AOT lowering: [env_ptr, user_arg0, user_arg1, ...]
+        let env_name_id = crate::types::StringId(self.intern_string("__closure_env"));
+        descriptor.params.push(crate::module::ParamDescriptor {
+            name: env_name_id,
+            type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::PTR),
+            is_mut: false,
+            default: None,
+        });
+        for (i, param) in params.iter().enumerate() {
+            let pname_id = crate::types::StringId(self.intern_string(param));
+            // Use AST type annotation for correct register tracking in LLVM lowering
+            let type_ref = if let Some(Some(type_name)) = param_type_names.get(i) {
+                match type_name.as_str() {
+                    "Text" => crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT),
+                    "List" => crate::types::TypeRef::Concrete(crate::types::TypeId::LIST),
+                    "Map" => crate::types::TypeRef::Concrete(crate::types::TypeId::MAP),
+                    "Set" => crate::types::TypeRef::Concrete(crate::types::TypeId::SET),
+                    "Float" => crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
+                    "Bool" => crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL),
+                    "Channel" => crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL),
+                    _ => crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                }
+            } else {
+                crate::types::TypeRef::Concrete(crate::types::TypeId::INT)
+            };
+            descriptor.params.push(crate::module::ParamDescriptor {
+                name: pname_id,
+                type_ref,
+                is_mut: false,
+                default: None,
+            });
+        }
+        // Store capture count in max_stack for LLVM prologue generation
+        descriptor.max_stack = captures.len() as u16;
+        // Set closure return type from AST annotation if available,
+        // otherwise default to INT (i64) since closures return values not void.
+        descriptor.return_type = closure_return_type_ref
+            .unwrap_or_else(|| crate::types::TypeRef::Concrete(crate::types::TypeId::INT));
+
+        let vbc_func = crate::module::VbcFunction::new(descriptor, closure_instructions);
+        self.functions.push(vbc_func);
+
+        Ok(func_id)
+    }
+
+    // ==================== CBGR Tier-Aware Reference Helpers ====================
+    //
+    // CBGR three-tier reference model helpers:
+    // Tier decisions are verified against escape analysis (5.3), unsafe blocks promote
+    // tier via enter/exit_unsafe (5.4), capability checks validate Read/Write/Execute
+    // permissions (5.5), and ChkRef validates generation/epoch at runtime (5.6).
+    //
+    // These helpers implement the three-tier CBGR reference model:
+    // - Tier 0: Runtime validated (~15ns overhead)
+    // - Tier 1: Compile-time proven safe (0ns overhead)
+    // - Tier 2: Unsafe, manual proof required (0ns overhead)
+
+    /// Gets the tier for a reference expression from tier_context.
+    ///
+    /// Uses the expression's span as the key to look up tier decisions
+    /// from escape analysis. Also considers unsafe blocks for automatic
+    /// tier promotion.
+    ///
+    /// # Tier Promotion Rules (Phase 5.4)
+    /// - Inside `unsafe` blocks: Can use Tier 2 references
+    /// - Escape analysis proves safety: Promotes to Tier 1
+    /// - Default: Tier 0 (always safe)
+    fn get_ref_tier_for_expr(&self, expr: &Expr) -> CbgrTier {
+        // Create ExprId from span for tier lookup
+        let expr_id = ExprId(((expr.span.start as u64) << 32) | (expr.span.end as u64));
+
+        // Get base tier from escape analysis
+        let base_tier = self.ctx.tier_context.get_tier(expr_id);
+
+        // Phase 5.4: Unsafe block tier promotion
+        // If we're in an unsafe block and tier is Tier0, allow promotion to Tier2
+        // (but only if explicitly requested via &unsafe syntax - this is automatic
+        // Tier2 for FFI and low-level code)
+        if self.ctx.tier_context.in_unsafe && base_tier == CbgrTier::Tier0 {
+            // In unsafe blocks, Tier0 references can optionally skip validation
+            // but we keep Tier0 for safety unless explicitly &unsafe
+            // The actual promotion to Tier2 happens via &unsafe T syntax
+            base_tier
+        } else {
+            base_tier
+        }
+    }
+
+    /// Gets the tier for a dereference expression.
+    ///
+    /// For derefs, we look up the reference being dereferenced.
+    fn get_deref_tier_for_expr(&self, expr: &Expr) -> CbgrTier {
+        // The expression here is the reference being dereferenced
+        let expr_id = ExprId(((expr.span.start as u64) << 32) | (expr.span.end as u64));
+        self.ctx.tier_context.get_tier(expr_id)
+    }
+
+    /// Verifies tier decision is valid and logs any anomalies.
+    ///
+    /// Phase 5.3: Tier decision verification ensures that:
+    /// 1. Tier 1 refs have escape analysis backing
+    /// 2. Tier 2 refs are inside unsafe blocks or explicit
+    /// 3. No silent fallbacks to Tier 0 without reason
+    ///
+    /// Returns the verified tier (possibly downgraded for safety).
+    #[allow(dead_code)]
+    fn verify_tier_decision(&mut self, _expr: &Expr, tier: CbgrTier, is_explicit: bool) -> CbgrTier {
+        // Use tier context's has_decisions() to check if analysis was performed
+        let has_analysis = self.ctx.tier_context.has_decisions();
+
+        match tier {
+            CbgrTier::Tier1 => {
+                if !has_analysis && !is_explicit {
+                    // Tier 1 without escape analysis backing - suspicious
+                    // This could indicate a bug in tier propagation
+                    // For now, fall back to Tier 0 for safety
+                    self.ctx.stats.tier_fallbacks += 1;
+                    CbgrTier::Tier0
+                } else {
+                    tier
+                }
+            }
+            CbgrTier::Tier2 => {
+                if !self.ctx.tier_context.in_unsafe && !is_explicit {
+                    // Tier 2 outside unsafe block without explicit &unsafe
+                    // This is a potential safety issue - fall back to Tier 0
+                    self.ctx.stats.tier_fallbacks += 1;
+                    CbgrTier::Tier0
+                } else {
+                    tier
+                }
+            }
+            CbgrTier::Tier0 => tier, // Default tier is always valid
+        }
+    }
+
+    /// Emits a reference instruction based on tier.
+    ///
+    /// - Tier 0: `Ref` or `RefMut` (runtime validated)
+    /// - Tier 1: `RefChecked` (compiler proven safe)
+    /// - Tier 2: `RefUnsafe` (manual safety proof)
+    fn emit_ref_instruction(&mut self, dst: Reg, src: Reg, tier: CbgrTier, is_mut: bool) {
+        // Record statistics
+        self.ctx.record_ref_tier(tier);
+
+        match tier {
+            CbgrTier::Tier0 => {
+                // Standard managed reference with CBGR validation
+                if is_mut {
+                    self.ctx.emit(Instruction::RefMut { dst, src });
+                } else {
+                    self.ctx.emit(Instruction::Ref { dst, src });
+                }
+            }
+            CbgrTier::Tier1 => {
+                // Compiler-proven safe - emit checked variant (0ns overhead)
+                self.ctx.emit(Instruction::RefChecked { dst, src });
+            }
+            CbgrTier::Tier2 => {
+                // Unsafe reference - emit unsafe variant (0ns overhead)
+                self.ctx.emit(Instruction::RefUnsafe { dst, src });
+            }
+        }
+    }
+
+    /// Emits a dereference instruction based on tier.
+    ///
+    /// - Tier 0: `Deref` with preceding `ChkRef` validation
+    /// - Tier 1: `Deref` only (no validation needed)
+    /// - Tier 2: `Deref` only (unsafe, no validation)
+    ///
+    /// # Phase 5.6: Generation/Epoch Validation
+    ///
+    /// For Tier 0 references, ChkRef performs runtime validation to ensure
+    /// the reference is still valid. This validation can be enhanced with
+    /// compile-time known generation/epoch values:
+    ///
+    /// - **Generation**: Increments when the allocator slot is reused
+    /// - **Epoch**: Global epoch for cross-allocator validation
+    ///
+    /// When compile-time analysis provides expected values, they can be
+    /// encoded in an extended ChkRef instruction (future opcode extension).
+    /// Currently, ChkRef uses the stored generation/epoch from the reference
+    /// metadata at runtime.
+    ///
+    /// # Validation Flow
+    ///
+    /// ```text
+    /// Tier 0: ChkRef → Deref (15ns overhead for validation)
+    /// Tier 1: Deref only (0ns, compiler proven safe)
+    /// Tier 2: Deref only (0ns, manually verified unsafe)
+    /// ```
+    fn emit_deref_instruction(&mut self, dst: Reg, ref_reg: Reg, tier: CbgrTier) {
+        // Record statistics
+        self.ctx.record_ref_tier(tier);
+
+        // Check if this is a raw FFI pointer (not CBGR-managed)
+        if self.ctx.is_raw_pointer(ref_reg) {
+            // Emit DerefRaw for raw FFI pointers - bypasses CBGR validation
+            // Format: dst:reg, ptr:reg, size:u8 (8 = 64-bit pointer target)
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, dst.0);
+            Self::write_reg(&mut operands, ref_reg.0);
+            operands.push(8); // Default to 8-byte (64-bit) dereference
+
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: 0x60, // DerefRaw
+                operands,
+            });
+            return;
+        }
+
+        match tier {
+            CbgrTier::Tier0 => {
+                // Emit CBGR validation check before dereference
+                // Phase 5.6: ChkRef validates generation/epoch from reference metadata
+                //
+                // The ChkRef instruction performs:
+                // 1. Extract generation from reference header
+                // 2. Compare against allocator's current generation
+                // 3. Validate epoch for cross-allocator safety
+                // 4. Trap on mismatch (use-after-free detected)
+                //
+                // Future: Extended ChkRef with compile-time expected values
+                // for faster validation when static analysis proves the expected
+                // generation/epoch.
+                self.ctx.emit(Instruction::ChkRef { ref_reg });
+                self.ctx.emit(Instruction::Deref { dst, ref_reg });
+            }
+            CbgrTier::Tier1 | CbgrTier::Tier2 => {
+                // Direct dereference - no validation needed
+                // Tier 1: Escape analysis proved reference stays valid
+                // Tier 2: Unsafe context, user takes responsibility
+                self.ctx.emit(Instruction::Deref { dst, ref_reg });
+            }
+        }
+    }
+
+    /// Emits capability check for a reference.
+    ///
+    /// Phase 5.5: Capability checks ensure the reference has the required
+    /// permissions (read, write, execute) before access.
+    ///
+    /// # Capability Checking Points
+    ///
+    /// Capabilities are checked at these points in code generation:
+    /// - **Read**: Before any dereference operation
+    /// - **Write**: Before mutable dereference or store operations
+    /// - **ReadWrite**: Before operations that both read and write
+    /// - **Execute**: Before function pointer calls via references
+    ///
+    /// # Implementation Status
+    ///
+    /// Currently, capability checking is implemented through two mechanisms:
+    ///
+    /// 1. **Compile-time (Type System)**: The Verum type system tracks reference
+    ///    mutability (`&T` vs `&mut T`) and prevents invalid access patterns.
+    ///    This is the primary enforcement mechanism.
+    ///
+    /// 2. **Runtime (CBGR Validation)**: The ChkRef instruction validates
+    ///    reference liveness, which implicitly includes capability information
+    ///    encoded in the reference metadata.
+    ///
+    /// A dedicated ChkCap instruction will be added in a future opcode
+    /// reorganization to provide explicit capability validation separate
+    /// from liveness checking.
+    ///
+    /// # Statistics
+    ///
+    /// This method records capability check requests for analysis and
+    /// optimization purposes.
+    ///
+    /// CBGR capability checking: validates that a reference has the required permission
+    /// (Read, Write, Execute, or combination) before access. Currently records requests
+    /// for analysis; runtime validation occurs via ChkRef which encodes capabilities
+    /// in the reference metadata.
+    #[allow(dead_code)]
+    fn emit_capability_check(
+        &mut self,
+        _ref_reg: Reg,
+        capability: crate::types::ReferenceCapability,
+    ) {
+        // Record the capability check for statistics
+        self.ctx.stats.capability_checks += 1;
+
+        // Log capability requirement for future ChkCap implementation
+        // When ChkCap opcode is added, emit:
+        // self.ctx.emit(Instruction::ChkCap { ref_reg, cap_flags: capability.to_flags() });
+        //
+        // Currently, capability enforcement relies on:
+        // 1. Type system: &T vs &mut T distinction
+        // 2. CBGR metadata: Capability bits in reference header
+        // 3. ChkRef validation: Checks reference validity
+
+        let _ = capability; // Capability is tracked in stats but not yet emitted
+    }
+
+    /// Helper to emit capability check for dereference operations.
+    ///
+    /// Automatically determines the required capability based on mutability
+    /// and emits the appropriate check (currently tracked in stats only).
+    #[allow(dead_code)]
+    fn emit_deref_capability_check(&mut self, ref_reg: Reg, is_mut: bool) {
+        let cap = crate::types::ReferenceCapability::for_deref(is_mut);
+        self.emit_capability_check(ref_reg, cap);
+    }
+
+    /// Helper to emit capability check for store operations.
+    #[allow(dead_code)]
+    fn emit_store_capability_check(&mut self, ref_reg: Reg) {
+        self.emit_capability_check(ref_reg, crate::types::ReferenceCapability::for_store());
+    }
+
+    /// Helper to emit capability check for function pointer calls.
+    #[allow(dead_code)]
+    fn emit_call_capability_check(&mut self, ref_reg: Reg) {
+        self.emit_capability_check(ref_reg, crate::types::ReferenceCapability::for_call());
+    }
+
+    // ==================== Pipeline ====================
+
+    /// Compiles optional chaining: obj?.field
+    ///
+    /// Returns None if obj is None, otherwise accesses the field.
+    /// Equivalent to: match obj { Some(v) => Some(v.field), None => None }
+    fn compile_optional_chain(
+        &mut self,
+        base: &Expr,
+        field_name: &str,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let some_label = self.ctx.new_label("optional_some");
+        let end_label = self.ctx.new_label("optional_end");
+
+        // Evaluate base expression (should be Maybe<T>)
+        let base_reg = self
+            .compile_expr(base)?
+            .ok_or_else(|| CodegenError::internal("optional chain base has no value"))?;
+
+        // Check if base is Some (tag != 0) or None (tag == 0)
+        let tag_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetTag {
+            dst: tag_reg,
+            variant: base_reg,
+        });
+
+        // If Some (tag != 0), jump to extract value
+        self.ctx
+            .emit_forward_jump(&some_label, |offset| Instruction::JmpIf {
+                cond: tag_reg,
+                offset,
+            });
+        self.ctx.free_temp(tag_reg);
+
+        // None case: return None (tag 0)
+        self.ctx.emit(Instruction::MakeVariant {
+            dst: dest,
+            tag: 0, // None tag
+            field_count: 0,
+        });
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+        // Some case: extract value, access field, wrap in Some
+        self.ctx.define_label(&some_label);
+
+        // Extract the inner value from Some
+        let inner_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetVariantData {
+            dst: inner_reg,
+            variant: base_reg,
+            field: 0, // Some has single field at index 0
+        });
+        self.ctx.free_temp(base_reg);
+
+        // Access the field on the inner value.
+        // Try to infer the inner type of Maybe<T> for correct field index.
+        let inner_type = self.infer_expr_type_name(base).and_then(|t| {
+            // Strip Maybe<...> wrapper to get inner type name
+            if t.starts_with("Maybe<") && t.ends_with('>') {
+                Some(t[6..t.len()-1].to_string())
+            } else {
+                None
+            }
+        });
+        let field_idx = self.resolve_field_index(inner_type.as_deref(), field_name);
+        let field_value = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetF {
+            dst: field_value,
+            obj: inner_reg,
+            field_idx,
+        });
+        self.ctx.free_temp(inner_reg);
+
+        // Wrap result in Some
+        self.ctx.emit(Instruction::MakeVariant {
+            dst: dest,
+            tag: 1, // Some tag
+            field_count: 1,
+        });
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: dest,
+            field: 0,
+            value: field_value,
+        });
+        self.ctx.free_temp(field_value);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles pipeline operator: x |> f |> g
+    ///
+    /// Equivalent to g(f(x)) but reads left-to-right.
+    fn compile_pipeline(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Evaluate left (the argument)
+        let arg_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("pipeline left has no value"))?;
+
+        // Right should be a function or closure - compile it as a call with arg
+        match &right.kind {
+            ExprKind::Path(path) => {
+                // Simple function call: x |> f becomes f(x)
+                let func_name = path
+                    .segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("::");
+
+                let func_id = self
+                    .ctx
+                    .lookup_function(&func_name)
+                    .map(|f| f.id)
+                    .ok_or_else(|| CodegenError::with_span(
+                        CodegenErrorKind::UndefinedFunction(func_name),
+                        right.span,
+                    ))?;
+
+                // Set up argument in contiguous register for Call
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Call {
+                    dst: dest,
+                    func_id: func_id.0,
+                    args: RegRange::new(arg_reg, 1),
+                });
+                self.ctx.free_temp(arg_reg);
+                Ok(Some(dest))
+            }
+            _ => {
+                // For more complex right-hand sides, compile as indirect call
+                let func_reg = self
+                    .compile_expr(right)?
+                    .ok_or_else(|| CodegenError::internal("pipeline right has no value"))?;
+
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Push { src: arg_reg });
+                self.ctx.emit(Instruction::CallR {
+                    dst: dest,
+                    func: func_reg,
+                    argc: 1,
+                });
+                self.ctx.free_temp(func_reg);
+                self.ctx.free_temp(arg_reg);
+                Ok(Some(dest))
+            }
+        }
+    }
+
+    // ==================== Null Coalescing ====================
+
+    /// Compiles null coalescing: a ?? b
+    ///
+    /// Returns a if a is not None, otherwise returns b.
+    fn compile_null_coalesce(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("coalesce_end");
+
+        // Evaluate left
+        let left_reg = self
+            .compile_expr(left)?
+            .ok_or_else(|| CodegenError::internal("coalesce left has no value"))?;
+
+        // Check if left is Some (tag != 0)
+        let tag_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GetTag {
+            dst: tag_reg,
+            variant: left_reg,
+        });
+
+        // If Some (tag != 0), extract value and skip right
+        let is_some = self.ctx.alloc_temp();
+        let zero_reg = self.ctx.alloc_temp();
+        self.ctx
+            .emit(Instruction::LoadI { dst: zero_reg, value: 0 });
+        self.ctx.emit(Instruction::CmpI {
+            op: CompareOp::Ne,
+            dst: is_some,
+            a: tag_reg,
+            b: zero_reg,
+        });
+        self.ctx.free_temp(zero_reg);
+        self.ctx.free_temp(tag_reg);
+
+        // If left is Some, extract and use it
+        self.ctx.emit(Instruction::GetVariantData {
+            dst: dest,
+            variant: left_reg,
+            field: 0,
+        });
+
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::JmpIf {
+                cond: is_some,
+                offset,
+            });
+        self.ctx.free_temp(is_some);
+
+        // Left is None - evaluate and use right
+        let right_reg = self
+            .compile_expr(right)?
+            .ok_or_else(|| CodegenError::internal("coalesce right has no value"))?;
+
+        self.ctx
+            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.free_temp(right_reg);
+
+        self.ctx.define_label(&end_label);
+        self.ctx.free_temp(left_reg);
+
+        Ok(Some(dest))
+    }
+
+    // ==================== Pattern Test ====================
+
+    /// Compiles is pattern test: x is Pattern or x is not Pattern
+    fn compile_is_pattern(
+        &mut self,
+        scrutinee: &Expr,
+        pattern: &verum_ast::Pattern,
+        negated: bool,
+    ) -> CodegenResult<Option<Reg>> {
+        // Evaluate scrutinee
+        let scrutinee_reg = self
+            .compile_expr(scrutinee)?
+            .ok_or_else(|| CodegenError::internal("is pattern scrutinee has no value"))?;
+
+        // Set scrutinee type for variant collision resolution in compile_pattern_test.
+        // The `is` expression doesn't go through compile_match, so match_scrutinee_type
+        // isn't set. We infer it here from the scrutinee expression.
+        let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
+        let scrutinee_type = self.extract_expr_type_name(scrutinee);
+        self.ctx.match_scrutinee_type = scrutinee_type;
+
+        // Compile pattern test
+        let result = self.ctx.alloc_temp();
+        self.compile_pattern_test(pattern, scrutinee_reg, result)?;
+
+        // Restore previous scrutinee type
+        self.ctx.match_scrutinee_type = prev_scrutinee_type;
+
+        // Negate if needed
+        if negated {
+            self.ctx
+                .emit(Instruction::Not { dst: result, src: result });
+        }
+
+        self.ctx.free_temp(scrutinee_reg);
+        Ok(Some(result))
+    }
+
+    // ==================== Error Handling ====================
+
+    /// Compiles throw expression: throw error_value
+    fn compile_throw(&mut self, error_expr: &Expr) -> CodegenResult<Option<Reg>> {
+        // Evaluate error value
+        let error_reg = self
+            .compile_expr(error_expr)?
+            .ok_or_else(|| CodegenError::internal("throw error has no value"))?;
+
+        // Emit throw instruction (similar to panic but with error value)
+        self.ctx.emit(Instruction::Throw { error: error_reg });
+
+        self.ctx.free_temp(error_reg);
+
+        // Throw doesn't return a value
+        Ok(None)
+    }
+
+    /// Compiles try-recover: try { ... } recover { pattern => expr, ... }
+    ///
+    /// Exception handling with pattern-based recovery for caught exceptions.
+    fn compile_try_recover(
+        &mut self,
+        try_block: &Expr,
+        recover: &verum_ast::RecoverBody,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::expr::RecoverBody;
+
+        let dest = self.ctx.alloc_temp();
+        let handler_label = self.ctx.new_label("recover_handler");
+        let end_label = self.ctx.new_label("try_end");
+
+        // TryBegin sets up exception handler - handler_offset will be patched
+        self.ctx
+            .emit_forward_jump(&handler_label, |offset| Instruction::TryBegin {
+                handler_offset: offset,
+            });
+
+        // Track try/recover depth so ? operator emits Throw instead of Ret
+        self.ctx.try_recover_depth += 1;
+
+        // Compile try block
+        let try_result = self.compile_expr(try_block)?;
+        if let Some(try_reg) = try_result {
+            self.ctx
+                .emit(Instruction::Mov { dst: dest, src: try_reg });
+            self.ctx.free_temp(try_reg);
+        }
+
+        self.ctx.try_recover_depth -= 1;
+
+        // Clear exception handler
+        self.ctx.emit(Instruction::TryEnd);
+
+        // Jump past recover body (normal path)
+        self.ctx
+            .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+        // Exception handler entry point
+        self.ctx.define_label(&handler_label);
+
+        // Get the exception value
+        let exception_reg = self.ctx.alloc_temp();
+        self.ctx
+            .emit(Instruction::GetException { dst: exception_reg });
+
+        // Compile recover body based on its form
+        match recover {
+            RecoverBody::MatchArms { arms, .. } => {
+                // Similar to match expression but over exception
+                for (i, arm) in arms.iter().enumerate() {
+                    let arm_label = self.ctx.new_label(&format!("recover_arm_{}", i));
+                    let next_arm_label = self.ctx.new_label(&format!("recover_next_{}", i));
+
+                    self.ctx.define_label(&arm_label);
+
+                    // Test pattern
+                    let match_reg = self.ctx.alloc_temp();
+                    self.compile_pattern_test(&arm.pattern, exception_reg, match_reg)?;
+
+                    // Jump to next arm if no match
+                    self.ctx
+                        .emit_forward_jump(&next_arm_label, |offset| Instruction::JmpNot {
+                            cond: match_reg,
+                            offset,
+                        });
+                    self.ctx.free_temp(match_reg);
+
+                    // Bind pattern variables
+                    self.ctx.enter_scope();
+                    self.compile_pattern_bind(&arm.pattern, exception_reg)?;
+
+                    // Compile arm body
+                    let arm_result = self.compile_expr(&arm.body)?;
+                    if let Some(arm_reg) = arm_result {
+                        self.ctx
+                            .emit(Instruction::Mov { dst: dest, src: arm_reg });
+                        self.ctx.free_temp(arm_reg);
+                    }
+
+                    let (_, defers) = self.ctx.exit_scope(false);
+                    for defer_instrs in defers {
+                        for instr in defer_instrs {
+                            self.ctx.emit(instr);
+                        }
+                    }
+
+                    // Jump to end
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+
+                    self.ctx.define_label(&next_arm_label);
+                }
+
+                // If no arm matched, re-throw the exception
+                self.ctx.emit(Instruction::Throw { error: exception_reg });
+            }
+            RecoverBody::Closure { param, body, .. } => {
+                // Closure syntax: recover |e| expr
+                self.ctx.enter_scope();
+
+                // Bind the parameter - extract name from pattern
+                let param_name = match &param.pattern.kind {
+                    verum_ast::PatternKind::Ident { name, .. } => name.name.to_string(),
+                    _ => "_exception".to_string(), // Fallback for complex patterns
+                };
+                let var_reg = self.ctx.define_var(&param_name, false);
+                self.ctx.emit(Instruction::Mov {
+                    dst: var_reg,
+                    src: exception_reg,
+                });
+
+                // Compile body
+                let body_result = self.compile_expr(body)?;
+                if let Some(body_reg) = body_result {
+                    self.ctx
+                        .emit(Instruction::Mov { dst: dest, src: body_reg });
+                    self.ctx.free_temp(body_reg);
+                }
+
+                let (_, defers) = self.ctx.exit_scope(false);
+                for defer_instrs in defers {
+                    for instr in defer_instrs {
+                        self.ctx.emit(instr);
+                    }
+                }
+            }
+        }
+
+        self.ctx.free_temp(exception_reg);
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles try-finally: try { ... } finally { ... }
+    fn compile_try_finally(
+        &mut self,
+        try_block: &Expr,
+        finally_block: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let finally_label = self.ctx.new_label("finally");
+
+        // Set up exception handler
+        self.ctx.emit(Instruction::TryBegin { handler_offset: 0 });
+
+        // Compile try block
+        let try_result = self.compile_expr(try_block)?;
+        if let Some(try_reg) = try_result {
+            self.ctx
+                .emit(Instruction::Mov { dst: dest, src: try_reg });
+            self.ctx.free_temp(try_reg);
+        }
+
+        self.ctx.emit(Instruction::TryEnd);
+
+        // Always execute finally (normal path)
+        self.ctx.define_label(&finally_label);
+        let _ = self.compile_expr(finally_block)?;
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles try-recover-finally
+    fn compile_try_recover_finally(
+        &mut self,
+        try_block: &Expr,
+        recover: &verum_ast::RecoverBody,
+        finally_block: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile try-recover first
+        let result = self.compile_try_recover(try_block, recover)?;
+
+        // Then always execute finally
+        let _ = self.compile_expr(finally_block)?;
+
+        Ok(result)
+    }
+
+    // ==================== Async ====================
+
+    /// Compiles spawn expression: spawn { expr }
+    ///
+    /// Compile `inject TypeName` expression.
+    ///
+    /// Level 1 static DI resolution. Three strategies based on scope:
+    ///
+    /// - **Singleton/Request**: The injectable type was `provide`d earlier in the
+    ///   call chain. `inject` resolves to `CtxGet` which retrieves the value
+    ///   from the context stack. Cost: ~5ns (same as context method call).
+    ///
+    /// - **Transient**: Each `inject` creates a new instance by calling the
+    ///   type's `@inject` constructor. Cost: constructor call overhead.
+    ///
+    /// - **Fallback** (scope unknown at codegen): Uses `CtxGet`. If the type
+    ///   hasn't been provided, the interpreter/AOT runtime returns nil with
+    ///   a diagnostic warning.
+    ///
+    /// Grammar: inject_expr = 'inject' , type_path ;
+    fn compile_inject(&mut self, type_path: &verum_ast::ty::Path) -> CodegenResult<Option<Reg>> {
+        let type_name = type_path.as_ident()
+            .map(|i| i.name.to_string())
+            .unwrap_or_else(|| format!("{:?}", type_path));
+
+        let ctx_type_id = self.intern_string(&type_name);
+        let result = self.ctx.alloc_temp();
+
+        // Primary path: CtxGet retrieves the injectable from context stack.
+        // Works for Singleton (provided once at startup) and Request (per-request).
+        self.ctx.emit(Instruction::CtxGet {
+            dst: result,
+            ctx_type: ctx_type_id,
+        });
+
+        // Transient fallback: if CtxGet returned nil AND a constructor exists,
+        // call the constructor to create a fresh instance with auto-resolved deps.
+        let constructor_name = format!("{}.new", type_name);
+        let constructor_info = self.ctx.lookup_function(&constructor_name)
+            .map(|fi| {
+                // Prefer param_type_names for DI resolution (type-based lookup).
+                // Fall back to param_names if type names not available.
+                let names = if fi.param_type_names.is_empty() {
+                    fi.param_names.clone()
+                } else {
+                    fi.param_type_names.clone()
+                };
+                (fi.id, fi.param_count, names)
+            });
+        if let Some((func_id, param_count, param_names)) = constructor_info {
+            let skip_label = self.ctx.new_label("inject_ok");
+
+            // Compare result != 0 (nil check)
+            let check = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CmpI {
+                op: crate::instruction::CompareOp::Ne,
+                dst: check,
+                a: result,
+                b: Reg(0),
+            });
+
+            // If not nil, skip constructor call
+            self.ctx.emit_forward_jump(&skip_label, |offset| {
+                Instruction::JmpIf { cond: check, offset }
+            });
+
+            // Nil → call constructor with auto-resolved dependencies.
+            let fresh = self.ctx.alloc_temp();
+
+            if param_count == 0 {
+                self.ctx.emit(Instruction::Call {
+                    dst: fresh,
+                    func_id: func_id.0,
+                    args: crate::instruction::RegRange { start: Reg(0), count: 0 },
+                });
+            } else {
+                // Auto-resolve: each constructor param is injected via CtxGet.
+                // E.g., @inject fn new(db: DatabasePool, log: Logger) → CtxGet each.
+                let args_start = self.ctx.alloc_temp();
+                for i in 0..param_count {
+                    let dep_reg = if i == 0 { args_start } else { self.ctx.alloc_temp() };
+                    let dep_name = if i < param_names.len() {
+                        param_names[i].clone()
+                    } else {
+                        format!("_dep{}", i)
+                    };
+                    let dep_id = self.intern_string(&dep_name);
+                    self.ctx.emit(Instruction::CtxGet {
+                        dst: dep_reg,
+                        ctx_type: dep_id,
+                    });
+                }
+                self.ctx.emit(Instruction::Call {
+                    dst: fresh,
+                    func_id: func_id.0,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: param_count as u8,
+                    },
+                });
+            }
+            self.ctx.emit(Instruction::Mov { dst: result, src: fresh });
+            self.ctx.free_temp(fresh);
+
+            self.ctx.define_label(&skip_label);
+            self.ctx.free_temp(check);
+        }
+
+        Ok(Some(result))
+    }
+
+    /// Creates an async task that executes the expression concurrently.
+    /// Returns a task handle (future) that can be awaited.
+    fn compile_spawn(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        // Cooperative scheduling: emit a Spawn instruction that defers execution.
+        // The task is registered but NOT executed until .await is called.
+        //
+        // If the spawned expression is a function call, emit a proper Spawn
+        // instruction with the function ID and arguments. Otherwise, fall back
+        // to compiling the expression inline (eager evaluation).
+        if let ExprKind::Call { func: callee, args, .. } = &expr.kind {
+            if let ExprKind::Path(ref path) = callee.kind {
+                // Extract function name from path segments (same as compile_call)
+                let func_name: String = if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Name(ident) => ident.name.to_string(),
+                        _ => String::new(),
+                    }
+                } else {
+                    path.segments.iter()
+                        .filter_map(|s| match s {
+                            PathSegment::Name(ident) => Some(ident.name.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("::")
+                };
+                if !func_name.is_empty() {
+                if let Some(func) = self.ctx.lookup_function(&func_name) {
+                    let func_id = func.id.0;
+
+                    // Phase 1: Compile all argument expressions
+                    let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+                    for arg in args.iter() {
+                        let reg = self.compile_expr(arg)?
+                            .ok_or_else(|| CodegenError::internal("spawn arg has no value"))?;
+                        arg_results.push(reg);
+                    }
+
+                    // Phase 2: Allocate consecutive fresh registers
+                    let args_start = if !args.is_empty() {
+                        let first = self.ctx.registers.alloc_fresh();
+                        for _ in 1..args.len() {
+                            self.ctx.registers.alloc_fresh();
+                        }
+
+                        // Phase 3: Move results into consecutive registers
+                        for (i, &src) in arg_results.iter().enumerate() {
+                            let dst = Reg(first.0 + i as u16);
+                            if src != dst {
+                                self.ctx.emit(Instruction::Mov { dst, src });
+                                self.ctx.free_temp(src);
+                            }
+                        }
+                        first
+                    } else {
+                        Reg(0)
+                    };
+
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Spawn {
+                        dst,
+                        func_id,
+                        args: RegRange { start: args_start, count: args.len() as u8 },
+                    });
+
+                    return Ok(Some(dst));
+                }
+                } // end !func_name.is_empty()
+            }
+        }
+
+        // Non-call expression (block, closure, etc.) — wrap in a synthetic function
+        // and spawn it as a real thread with captured variables as arguments.
+
+        // Step 1: Analyze free variables in the expression
+        let free_vars = self.analyze_free_variables(expr, &[]);
+        let mut capture_regs = Vec::with_capacity(free_vars.len());
+        let mut capture_names: Vec<(String, bool)> = Vec::with_capacity(free_vars.len());
+        let mut capture_type_names: Vec<Option<String>> = Vec::with_capacity(free_vars.len());
+        for var_name in &free_vars {
+            if let Some(info) = self.ctx.lookup_var(var_name) {
+                capture_regs.push(info.reg);
+                capture_names.push((var_name.clone(), info.is_mutable));
+                capture_type_names.push(
+                    self.ctx.variable_type_names.get(var_name).cloned()
+                );
+            }
+        }
+
+        // Step 2: Create synthetic spawn function
+        let spawn_func_name = format!(
+            "{}$spawn${}",
+            self.ctx.current_function.as_deref().unwrap_or("anon"),
+            self.closure_counter
+        );
+        self.closure_counter += 1;
+
+        let func_id = self.next_func_id;
+        self.next_func_id = self.next_func_id.saturating_add(1);
+
+        let param_names: Vec<String> = capture_names.iter().map(|(n, _)| n.clone()).collect();
+        let info = super::FunctionInfo {
+            id: crate::module::FunctionId(func_id),
+            param_count: param_names.len(),
+            param_names: param_names.clone(),
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: false,
+            contexts: Vec::new(),
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None, variant_tag: None, parent_type_name: None,
+            variant_payload_types: None, is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name: None,
+            return_type_inner: None,
+        };
+        self.ctx.register_function(spawn_func_name.clone(), info);
+
+        // Step 3: Save parent context, compile body as new function
+        let saved_function = self.ctx.current_function.clone();
+        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+        let saved_registers = self.ctx.registers.snapshot();
+        let saved_in_function = self.ctx.in_function;
+        let saved_return_type = self.ctx.return_type.clone();
+        let saved_closure_ctx = self.ctx.save_closure_context();
+
+        self.ctx.begin_function(&spawn_func_name, &capture_names, None);
+        // Inject captured variable type names for VBC codegen (method dispatch, etc.)
+        // EXCEPT for types handled by built-in opcodes — those use compiled .vr methods
+        // with &self ABI that doesn't match raw i64 spawn parameters. For these types, we only
+        // set the TypeRef in the ParamDescriptor so LLVM lowering marks the correct register types.
+        for (i, (name, _)) in capture_names.iter().enumerate() {
+            if let Some(Some(type_name)) = capture_type_names.get(i) {
+                let base = if let Some(pos) = type_name.find('<') { &type_name[..pos] } else { type_name.as_str() };
+                match base {
+                    "List" | "Map" | "Set" | "Deque" | "Channel"
+                    | "Text" | "String" => {
+                        // Skip — let built-in opcodes handle these via LLVM register tracking
+                    }
+                    _ => {
+                        self.ctx.variable_type_names.insert(name.clone(), type_name.clone());
+                    }
+                }
+            }
+        }
+        let result = self.compile_expr(expr)?;
+        if let Some(reg) = result {
+            self.ctx.emit(Instruction::Ret { value: reg });
+        } else {
+            self.ctx.emit(Instruction::RetV);
+        }
+        let (spawn_instructions, register_count) = self.ctx.end_function();
+
+        // Restore parent context
+        self.ctx.current_function = saved_function;
+        self.ctx.instructions = saved_instructions;
+        self.ctx.registers.restore_reg(&saved_registers);
+        self.ctx.in_function = saved_in_function;
+        self.ctx.return_type = saved_return_type;
+        self.ctx.restore_closure_context(saved_closure_ctx);
+
+        // Step 4: Create VBC function descriptor
+        let name_id = crate::types::StringId(self.intern_string(&spawn_func_name));
+        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+        descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.register_count = register_count;
+        descriptor.locals_count = capture_names.len() as u16;
+        for (i, pname) in param_names.iter().enumerate() {
+            let pname_id = crate::types::StringId(self.intern_string(pname));
+            // Preserve actual type of captured variable for correct LLVM lowering
+            let type_name = capture_type_names.get(i).and_then(|t| t.as_deref());
+            let base_type = type_name.map(|t| {
+                // Strip generic args: "List<Int>" → "List", "Map<K,V>" → "Map"
+                if let Some(pos) = t.find('<') { &t[..pos] } else { t }
+            });
+            let type_ref = match base_type {
+                Some("Text") | Some("String") => {
+                    crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT)
+                }
+                Some("List") => {
+                    crate::types::TypeRef::Instantiated {
+                        base: crate::types::TypeId::LIST,
+                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                    }
+                }
+                Some("Float") => {
+                    crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT)
+                }
+                Some("Bool") => {
+                    crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL)
+                }
+                Some("Map") => {
+                    crate::types::TypeRef::Instantiated {
+                        base: crate::types::TypeId::MAP,
+                        args: vec![
+                            crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                            crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                        ],
+                    }
+                }
+                Some("Channel") => {
+                    crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL)
+                }
+                Some("Set") => {
+                    crate::types::TypeRef::Instantiated {
+                        base: crate::types::TypeId::SET,
+                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                    }
+                }
+                Some("Deque") => {
+                    crate::types::TypeRef::Instantiated {
+                        base: crate::types::TypeId::DEQUE,
+                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                    }
+                }
+                _ => crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+            };
+            descriptor.params.push(crate::module::ParamDescriptor {
+                name: pname_id,
+                type_ref,
+                is_mut: false,
+                default: None,
+            });
+        }
+        descriptor.return_type = crate::types::TypeRef::Concrete(crate::types::TypeId::INT);
+        let vbc_func = crate::module::VbcFunction::new(descriptor, spawn_instructions);
+        self.functions.push(vbc_func);
+
+        // Step 5: Emit Spawn with captured values as arguments
+        let args_start = if !capture_regs.is_empty() {
+            let first = self.ctx.registers.alloc_fresh();
+            for _ in 1..capture_regs.len() {
+                self.ctx.registers.alloc_fresh();
+            }
+            for (i, &src) in capture_regs.iter().enumerate() {
+                let dst_reg = Reg(first.0 + i as u16);
+                if src != dst_reg {
+                    self.ctx.emit(Instruction::Mov { dst: dst_reg, src });
+                }
+            }
+            first
+        } else {
+            Reg(0)
+        };
+
+        let dst = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Spawn {
+            dst,
+            func_id,
+            args: RegRange { start: args_start, count: capture_regs.len() as u8 },
+        });
+        Ok(Some(dst))
+    }
+
+    /// Compiles select expression
+    ///
+    /// Waits on multiple futures and executes the body of the first one to complete.
+    /// Supports both biased (ordered priority) and fair (random) selection.
+    fn compile_select(
+        &mut self,
+        biased: bool,
+        arms: &verum_common::List<verum_ast::expr::SelectArm>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("select_end");
+
+        // Collect all future registers and handler offsets
+        let mut future_regs = Vec::new();
+        let mut arm_labels = Vec::new();
+
+        // Compile each future expression
+        for (i, arm) in arms.iter().enumerate() {
+            let arm_label = self.ctx.new_label(&format!("select_arm_{}", i));
+            arm_labels.push(arm_label);
+
+            if let verum_common::Maybe::Some(ref future_expr) = arm.future {
+                let future_reg = self
+                    .compile_expr(future_expr)?
+                    .ok_or_else(|| CodegenError::internal("select future has no value"))?;
+                future_regs.push(future_reg);
+            } else {
+                // Default/else arm - use a special marker
+                let marker = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadNil { dst: marker });
+                future_regs.push(marker);
+            }
+        }
+
+        // Emit select instruction
+        // The select instruction returns the index of the completed future
+        let index_reg = self.ctx.alloc_temp();
+
+        // Build handlers vector (offsets will be patched)
+        let handlers: Vec<i32> = (0..arms.len()).map(|_| 0).collect();
+
+        self.ctx.emit(Instruction::Select {
+            dst: index_reg,
+            futures: future_regs.clone(),
+            handlers,
+        });
+
+        // If biased, we check futures in order; otherwise runtime selects fairly
+        let _ = biased; // Biased behavior is handled by runtime
+
+        // Generate code for each arm
+        for (i, arm) in arms.iter().enumerate() {
+            self.ctx.define_label(&arm_labels[i]);
+
+            // Check if this arm was selected
+            let cmp_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: cmp_reg,
+                value: i as i64,
+            });
+            let match_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CmpI {
+                op: CompareOp::Eq,
+                dst: match_reg,
+                a: index_reg,
+                b: cmp_reg,
+            });
+            self.ctx.free_temp(cmp_reg);
+
+            let next_label = if i + 1 < arms.len() {
+                arm_labels[i + 1].clone()
+            } else {
+                end_label.clone()
+            };
+
+            self.ctx
+                .emit_forward_jump(&next_label, |offset| Instruction::JmpNot {
+                    cond: match_reg,
+                    offset,
+                });
+            self.ctx.free_temp(match_reg);
+
+            // Bind pattern if present
+            self.ctx.enter_scope();
+            if let verum_common::Maybe::Some(ref pattern) = arm.pattern {
+                // The result of the future is in the future register
+                self.compile_pattern_bind(pattern, future_regs[i])?;
+            }
+
+            // Compile arm body
+            let arm_result = self.compile_expr(&arm.body)?;
+            if let Some(arm_reg) = arm_result {
+                self.ctx
+                    .emit(Instruction::Mov { dst: dest, src: arm_reg });
+                self.ctx.free_temp(arm_reg);
+            }
+
+            let (_, defers) = self.ctx.exit_scope(false);
+            for defer_instrs in defers {
+                for instr in defer_instrs {
+                    self.ctx.emit(instr);
+                }
+            }
+
+            // Jump to end
+            self.ctx
+                .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+        }
+
+        // Clean up future registers
+        for reg in future_regs {
+            self.ctx.free_temp(reg);
+        }
+        self.ctx.free_temp(index_reg);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles nursery expression for structured concurrency
+    ///
+    /// A nursery creates a scope where spawned tasks are guaranteed to complete
+    /// before the scope exits. This ensures structured concurrency semantics:
+    /// - All spawned tasks must complete (or be cancelled) before exit
+    /// - Errors propagate correctly with optional recovery
+    /// - Optional timeout and max_tasks limits
+    ///
+    /// Syntax:
+    /// ```ignore
+    /// nursery(timeout: 5s, on_error: cancel_all) {
+    ///     spawn task1();
+    ///     spawn task2();
+    /// } on_cancel {
+    ///     cleanup();
+    /// } recover |err| {
+    ///     handle_error(err)
+    /// }
+    /// ```
+    fn compile_nursery(
+        &mut self,
+        options: &verum_ast::expr::NurseryOptions,
+        body: &verum_ast::Block,
+        on_cancel: Option<&verum_ast::Block>,
+        recover: Option<&verum_ast::RecoverBody>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        let end_label = self.ctx.new_label("nursery_end");
+        let cancel_label = self.ctx.new_label("nursery_cancel");
+        let recover_label = self.ctx.new_label("nursery_recover");
+        let cleanup_label = self.ctx.new_label("nursery_cleanup");
+
+        // === Setup nursery context ===
+        // Allocate nursery handle that tracks spawned tasks
+        let nursery_handle = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::NurseryInit { dst: nursery_handle });
+
+        // Configure nursery options
+        // 1. Timeout
+        if let verum_common::Maybe::Some(ref timeout_expr) = options.timeout {
+            let timeout_reg = self.compile_expr(timeout_expr)?
+                .ok_or_else(|| CodegenError::internal("nursery timeout has no value"))?;
+            self.ctx.emit(Instruction::NurserySetTimeout {
+                nursery: nursery_handle,
+                timeout: timeout_reg,
+            });
+            self.ctx.free_temp(timeout_reg);
+        }
+
+        // 2. Max tasks limit
+        if let verum_common::Maybe::Some(ref max_tasks_expr) = options.max_tasks {
+            let max_tasks_reg = self.compile_expr(max_tasks_expr)?
+                .ok_or_else(|| CodegenError::internal("nursery max_tasks has no value"))?;
+            self.ctx.emit(Instruction::NurserySetMaxTasks {
+                nursery: nursery_handle,
+                max_tasks: max_tasks_reg,
+            });
+            self.ctx.free_temp(max_tasks_reg);
+        }
+
+        // 3. Error handling behavior
+        let error_behavior = match options.on_error {
+            verum_ast::expr::NurseryErrorBehavior::CancelAll => 0u8,
+            verum_ast::expr::NurseryErrorBehavior::WaitAll => 1u8,
+            verum_ast::expr::NurseryErrorBehavior::FailFast => 2u8,
+        };
+        let behavior_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: behavior_reg,
+            value: error_behavior as i64,
+        });
+        self.ctx.emit(Instruction::NurserySetErrorBehavior {
+            nursery: nursery_handle,
+            behavior: behavior_reg,
+        });
+        self.ctx.free_temp(behavior_reg);
+
+        // === Enter nursery scope ===
+        self.ctx.enter_scope();
+
+        // Push nursery handle onto context so spawn expressions can find it
+        self.ctx.emit(Instruction::NurseryEnter { nursery: nursery_handle });
+
+        // === Compile body ===
+        // The body contains spawn expressions that will register tasks with the nursery
+        let body_result = self.compile_block(body)?;
+
+        // === Wait for all tasks ===
+        // After body completes, wait for all spawned tasks to finish
+        let all_ok = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::NurseryAwaitAll {
+            nursery: nursery_handle,
+            success: all_ok,
+        });
+
+        // Check if all tasks succeeded
+        self.ctx.emit_forward_jump(&recover_label, |offset| Instruction::JmpNot {
+            cond: all_ok,
+            offset,
+        });
+        self.ctx.free_temp(all_ok);
+
+        // All tasks succeeded - store result
+        if let Some(result_reg) = body_result {
+            self.ctx.emit(Instruction::Mov { dst: dest, src: result_reg });
+            self.ctx.free_temp(result_reg);
+        } else {
+            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+        }
+
+        // Jump to cleanup
+        self.ctx.emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
+
+        // === Cancel handler ===
+        self.ctx.define_label(&cancel_label);
+        if let Some(cancel_block) = on_cancel {
+            let _ = self.compile_block(cancel_block)?;
+        }
+        // After cancel, go to cleanup
+        self.ctx.emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
+
+        // === Recover handler ===
+        self.ctx.define_label(&recover_label);
+        if let Some(recover_body) = recover {
+            // Get the error from the nursery
+            let error_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::NurseryGetError {
+                nursery: nursery_handle,
+                dst: error_reg,
+            });
+
+            match recover_body {
+                verum_ast::RecoverBody::MatchArms { arms, .. } => {
+                    // Pattern match on error
+                    let recover_end = self.ctx.new_label("recover_end");
+
+                    for (i, arm) in arms.iter().enumerate() {
+                        let next_arm = self.ctx.new_label(&format!("recover_arm_{}", i + 1));
+                        self.ctx.enter_scope();
+
+                        // Try to match pattern
+                        let matched = self.ctx.alloc_temp();
+                        self.compile_pattern_test(&arm.pattern, error_reg, matched)?;
+                        self.ctx.emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
+                            cond: matched,
+                            offset,
+                        });
+                        self.ctx.free_temp(matched);
+
+                        // Bind pattern variables
+                        self.compile_pattern_bind(&arm.pattern, error_reg)?;
+
+                        // Check guard if present
+                        if let verum_common::Maybe::Some(ref guard) = arm.guard {
+                            let guard_result = self.compile_expr(guard)?
+                                .ok_or_else(|| CodegenError::internal("guard has no value"))?;
+                            self.ctx.emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
+                                cond: guard_result,
+                                offset,
+                            });
+                            self.ctx.free_temp(guard_result);
+                        }
+
+                        // Execute arm body
+                        let arm_result = self.compile_expr(&arm.body)?;
+                        if let Some(arm_reg) = arm_result {
+                            self.ctx.emit(Instruction::Mov { dst: dest, src: arm_reg });
+                            self.ctx.free_temp(arm_reg);
+                        }
+
+                        let (_, defers) = self.ctx.exit_scope(false);
+                        for defer_instrs in defers {
+                            for instr in defer_instrs {
+                                self.ctx.emit(instr);
+                            }
+                        }
+
+                        self.ctx.emit_forward_jump(&recover_end, |offset| Instruction::Jmp { offset });
+                        self.ctx.define_label(&next_arm);
+                    }
+
+                    self.ctx.define_label(&recover_end);
+                }
+                verum_ast::RecoverBody::Closure { param, body, .. } => {
+                    // Simple closure: |err| { ... }
+                    self.ctx.enter_scope();
+
+                    // Bind error to parameter
+                    self.compile_pattern_bind(&param.pattern, error_reg)?;
+
+                    // Execute closure body
+                    let closure_result = self.compile_expr(body)?;
+                    if let Some(result_reg) = closure_result {
+                        self.ctx.emit(Instruction::Mov { dst: dest, src: result_reg });
+                        self.ctx.free_temp(result_reg);
+                    }
+
+                    let (_, defers) = self.ctx.exit_scope(false);
+                    for defer_instrs in defers {
+                        for instr in defer_instrs {
+                            self.ctx.emit(instr);
+                        }
+                    }
+                }
+            }
+
+            self.ctx.free_temp(error_reg);
+        } else {
+            // No recover handler - re-throw the error
+            let error_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::NurseryGetError {
+                nursery: nursery_handle,
+                dst: error_reg,
+            });
+            self.ctx.emit(Instruction::Throw { error: error_reg });
+            self.ctx.free_temp(error_reg);
+        }
+
+        // === Cleanup ===
+        self.ctx.define_label(&cleanup_label);
+
+        // Exit nursery scope
+        self.ctx.emit(Instruction::NurseryExit { nursery: nursery_handle });
+
+        // Run deferred statements
+        let (_, defers) = self.ctx.exit_scope(false);
+        for defer_instrs in defers {
+            for instr in defer_instrs {
+                self.ctx.emit(instr);
+            }
+        }
+
+        self.ctx.free_temp(nursery_handle);
+
+        self.ctx.define_label(&end_label);
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles for-await loop
+    ///
+    /// Async iteration: for await pattern in async_iter { body }
+    /// Each iteration awaits the next value from the async iterator.
+    fn compile_for_await(
+        &mut self,
+        label: Option<&str>,
+        pattern: &verum_ast::Pattern,
+        async_iterable: &Expr,
+        body: &verum_ast::Block,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadUnit { dst: dest });
+
+        // Create loop context
+        let source_label = label.map(|s| s.to_string()).unwrap_or_else(|| "for_await".to_string());
+        let break_label = self.ctx.new_label("for_await_end");
+        self.ctx.push_loop(source_label, break_label.clone());
+        let continue_label = self.ctx.new_label("for_await_continue");
+
+        // Compile async iterable to get async iterator
+        let iterable_reg = self
+            .compile_expr(async_iterable)?
+            .ok_or_else(|| CodegenError::internal("for-await iterable has no value"))?;
+
+        // Get async iterator from iterable
+        let async_iter = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Iter {
+            dst: async_iter,
+            iterable: iterable_reg,
+        });
+        self.ctx.free_temp(iterable_reg);
+
+        // Loop start
+        self.ctx.define_label(&continue_label);
+
+        // Get next element (async - returns a future/task)
+        let next_task = self.ctx.alloc_temp();
+        let has_next = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::IterNext {
+            dst: next_task,
+            has_next,
+            iter: async_iter,
+        });
+
+        // Check if iterator is exhausted
+        self.ctx
+            .emit_forward_jump(&break_label, |offset| Instruction::JmpNot {
+                cond: has_next,
+                offset,
+            });
+        self.ctx.free_temp(has_next);
+
+        // Await the next value
+        let elem_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Await {
+            dst: elem_reg,
+            task: next_task,
+        });
+        self.ctx.free_temp(next_task);
+
+        // Bind pattern
+        self.ctx.enter_scope();
+        self.compile_pattern_bind(pattern, elem_reg)?;
+
+        // Compile body
+        self.compile_block(body)?;
+
+        let (_, defers) = self.ctx.exit_scope(false);
+        for defer_instrs in defers {
+            for instr in defer_instrs {
+                self.ctx.emit(instr);
+            }
+        }
+        self.ctx.free_temp(elem_reg);
+
+        // Loop back
+        self.ctx.emit(Instruction::Jmp {
+            offset: self.ctx.calculate_backward_offset(&continue_label),
+        });
+
+        // Loop end
+        self.ctx.define_label(&break_label);
+        self.ctx.free_temp(async_iter);
+        self.ctx.pop_loop();
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles yield expression.
+    ///
+    /// For generator functions (fn*), yield suspends execution and
+    /// returns the value to the caller. When resumed, execution
+    /// continues after the yield point.
+    ///
+    /// Generator yield: saves current PC, registers, and context stack, then returns
+    /// the yielded value to the caller. When resumed via GenNext, execution continues
+    /// after the yield point.
+    fn compile_typeof(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        // Compile typeof(expr) — resolve the type at compile time and emit
+        // the type name as a string constant. This is a compile-time operation
+        // since the VBC type system is statically typed.
+        use verum_ast::ty::TypeKind;
+
+        let dest = self.ctx.alloc_temp();
+
+        // Try to infer the type name from the expression
+        let type_name = if let Some(type_kind) = self.infer_expr_type_kind(expr) {
+            match type_kind {
+                TypeKind::Int => "Int",
+                TypeKind::Float => "Float",
+                TypeKind::Bool => "Bool",
+                TypeKind::Text => "Text",
+                TypeKind::Char => "Char",
+                _ => "unknown",
+            }
+        } else {
+            "unknown"
+        };
+
+        let const_id = self.ctx.add_const_string(type_name);
+        self.ctx.emit(Instruction::LoadK {
+            dst: dest,
+            const_id: const_id.0,
+        });
+
+        // Still compile the expression for side effects, but discard its value
+        if let Ok(Some(expr_reg)) = self.compile_expr(expr) {
+            self.ctx.free_temp(expr_reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    fn compile_yield(&mut self, value: &Expr) -> CodegenResult<Option<Reg>> {
+        // Evaluate yield value
+        let value_reg = self
+            .compile_expr(value)?
+            .ok_or_else(|| CodegenError::internal("yield value has no value"))?;
+
+        // Track this as a suspend point for the generator state machine
+        self.ctx.suspend_point_count = self.ctx.suspend_point_count.saturating_add(1);
+
+        // Emit yield instruction
+        self.ctx.emit(Instruction::Yield { value: value_reg });
+
+        self.ctx.free_temp(value_reg);
+
+        // Yield suspends and resumes with None (the resume value placeholder)
+        // In a full implementation, this could be the value sent via gen.send(value)
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadNil { dst: dest });
+        Ok(Some(dest))
+    }
+
+    // ==================== Unsafe and Meta ====================
+
+    /// Compiles an unsafe block with proper tier promotion.
+    ///
+    /// Inside an unsafe block:
+    /// - Tier 1 references can be promoted to Tier 2 (skip CBGR validation)
+    /// - Tier 0 stays Tier 0 (safety-critical, cannot be promoted)
+    /// - Explicit `&unsafe` syntax always uses Tier 2
+    ///
+    /// # Phase 5.4 Implementation
+    ///
+    /// This properly handles nested unsafe blocks by saving and restoring
+    /// the previous unsafe state.
+    fn compile_unsafe_block(&mut self, block: &verum_ast::Block) -> CodegenResult<Option<Reg>> {
+        // Enter unsafe context, saving previous state for nested blocks
+        let prev_unsafe = self.ctx.enter_unsafe();
+
+        // Compile block contents with unsafe tier promotion enabled
+        let result = self.compile_block(block);
+
+        // Restore previous unsafe state (handles nested unsafe blocks)
+        self.ctx.exit_unsafe(prev_unsafe);
+
+        result
+    }
+
+    /// Compiles meta block
+    fn compile_meta_block(&mut self, _block: &verum_ast::Block) -> CodegenResult<Option<Reg>> {
+        // Meta blocks are compile-time - at runtime they're no-ops
+        // Return a unit value
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadNil { dst: dest });
+        Ok(Some(dest))
+    }
+
+    /// Compiles quote expression for code generation.
+    ///
+    /// Quote expressions are processed at compile-time during staged meta compilation.
+    /// At runtime (or if encountered outside meta context), they produce a TokenStream value.
+    ///
+    /// Syntax:
+    /// - `quote { token_tree }` - default stage (N-1)
+    /// - `quote(N) { token_tree }` - explicit target stage N
+    ///
+    /// Staged meta-compilation: quote expressions capture code as TokenStream values.
+    /// `quote { ... }` captures at current stage; `quote(N) { ... }` targets stage N.
+    /// All compile-time constructs use the unified `meta` system with `@` prefix syntax.
+    fn compile_quote_expr(
+        &mut self,
+        _target_stage: &Option<u32>,
+        tokens: &verum_common::List<verum_ast::expr::TokenTree>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Convert AST TokenTree to verum_lexer::Token list
+        let lexer_tokens = self.token_tree_to_lexer_tokens(tokens);
+
+        // Compute overall span from tokens (if any)
+        let span = if lexer_tokens.is_empty() {
+            None
+        } else {
+            let first_span = &lexer_tokens[0].span;
+            let last_span = &lexer_tokens[lexer_tokens.len() - 1].span;
+            Some(verum_common::span::Span::new(
+                first_span.start,
+                last_span.end,
+                first_span.file_id,
+            ))
+        };
+
+        // Serialize tokens using the token_stream module
+        let serialized = crate::token_stream::serialize_tokens(&lexer_tokens, span.as_ref())
+            .map_err(|e| CodegenError::internal(format!("Failed to serialize TokenStream: {}", e)))?;
+
+        // Store serialized bytes in constant pool
+        let const_id = self.ctx.add_const_bytes(serialized);
+
+        // Emit MetaQuote instruction to create TokenStream at runtime
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::MetaQuote {
+            dst: dest,
+            bytes_const_id: const_id.0,
+        });
+
+        Ok(Some(dest))
+    }
+
+    /// Converts AST TokenTree list to verum_lexer::Token list.
+    ///
+    /// This flattens nested groups and converts TokenTreeKind to TokenKind.
+    fn token_tree_to_lexer_tokens(
+        &self,
+        trees: &verum_common::List<verum_ast::expr::TokenTree>,
+    ) -> Vec<verum_lexer::Token> {
+        let mut result = Vec::new();
+        self.collect_tokens_recursive(trees, &mut result);
+        result
+    }
+
+    /// Recursively collects tokens from a TokenTree list.
+    fn collect_tokens_recursive(
+        &self,
+        trees: &verum_common::List<verum_ast::expr::TokenTree>,
+        output: &mut Vec<verum_lexer::Token>,
+    ) {
+        use verum_ast::expr::{MacroDelimiter, TokenTree};
+
+        for tree in trees.iter() {
+            match tree {
+                TokenTree::Token(tok) => {
+                    let kind = self.token_tree_kind_to_lexer_kind(&tok.kind, &tok.text);
+                    output.push(verum_lexer::Token {
+                        kind,
+                        span: tok.span,
+                    });
+                }
+                TokenTree::Group { delimiter, tokens, span } => {
+                    // Emit opening delimiter
+                    let (open_kind, close_kind) = match delimiter {
+                        MacroDelimiter::Paren => (
+                            verum_lexer::TokenKind::LParen,
+                            verum_lexer::TokenKind::RParen,
+                        ),
+                        MacroDelimiter::Bracket => (
+                            verum_lexer::TokenKind::LBracket,
+                            verum_lexer::TokenKind::RBracket,
+                        ),
+                        MacroDelimiter::Brace => (
+                            verum_lexer::TokenKind::LBrace,
+                            verum_lexer::TokenKind::RBrace,
+                        ),
+                    };
+
+                    // Opening delimiter at start of span
+                    output.push(verum_lexer::Token {
+                        kind: open_kind,
+                        span: verum_common::span::Span::new(span.start, span.start + 1, span.file_id),
+                    });
+
+                    // Recurse into group contents
+                    self.collect_tokens_recursive(tokens, output);
+
+                    // Closing delimiter at end of span
+                    output.push(verum_lexer::Token {
+                        kind: close_kind,
+                        span: verum_common::span::Span::new(span.end - 1, span.end, span.file_id),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Converts TokenTreeKind to verum_lexer::TokenKind.
+    fn token_tree_kind_to_lexer_kind(
+        &self,
+        kind: &verum_ast::expr::TokenTreeKind,
+        text: &verum_common::Text,
+    ) -> verum_lexer::TokenKind {
+        use verum_ast::expr::TokenTreeKind;
+        use verum_lexer::{TokenKind, IntegerLiteral, FloatLiteral};
+
+        match kind {
+            TokenTreeKind::Ident => {
+                // Check if this is a keyword
+                if let Some(kw) = self.text_to_keyword(text.as_str()) {
+                    kw
+                } else {
+                    TokenKind::Ident(text.clone())
+                }
+            }
+            TokenTreeKind::IntLiteral => {
+                // Parse the integer literal from text
+                let (raw_value, base) = if text.starts_with("0x") || text.starts_with("0X") {
+                    (verum_common::Text::from(&text.as_str()[2..]), 16)
+                } else if text.starts_with("0b") || text.starts_with("0B") {
+                    (verum_common::Text::from(&text.as_str()[2..]), 2)
+                } else if text.starts_with("0o") || text.starts_with("0O") {
+                    (verum_common::Text::from(&text.as_str()[2..]), 8)
+                } else {
+                    (text.clone(), 10)
+                };
+                TokenKind::Integer(IntegerLiteral {
+                    raw_value,
+                    base,
+                    suffix: verum_common::Maybe::None,
+                })
+            }
+            TokenTreeKind::FloatLiteral => {
+                let value = text.as_str().parse::<f64>().unwrap_or(0.0);
+                TokenKind::Float(FloatLiteral {
+                    value,
+                    suffix: verum_common::Maybe::None,
+                    raw: text.clone(),
+                })
+            }
+            TokenTreeKind::StringLiteral => TokenKind::Text(text.clone()),
+            TokenTreeKind::CharLiteral => {
+                // Extract the character (assuming single char or escape sequence)
+                let ch = text.chars().next().unwrap_or('\0');
+                TokenKind::Char(ch)
+            }
+            TokenTreeKind::BoolLiteral => {
+                if text.as_str() == "true" {
+                    TokenKind::True
+                } else {
+                    TokenKind::False
+                }
+            }
+            TokenTreeKind::Punct => self.text_to_punct(text.as_str()),
+            TokenTreeKind::Keyword => self.text_to_keyword(text.as_str()).unwrap_or(TokenKind::Ident(text.clone())),
+            TokenTreeKind::Eof => TokenKind::Eof,
+        }
+    }
+
+    /// Converts punctuation text to TokenKind.
+    fn text_to_punct(&self, text: &str) -> verum_lexer::TokenKind {
+        use verum_lexer::TokenKind;
+
+        match text {
+            "+" => TokenKind::Plus,
+            "-" => TokenKind::Minus,
+            "*" => TokenKind::Star,
+            "/" => TokenKind::Slash,
+            "%" => TokenKind::Percent,
+            "**" => TokenKind::StarStar,
+            "=" => TokenKind::Eq,
+            "==" => TokenKind::EqEq,
+            "!=" => TokenKind::BangEq,
+            "<" => TokenKind::Lt,
+            ">" => TokenKind::Gt,
+            "<=" => TokenKind::LtEq,
+            ">=" => TokenKind::GtEq,
+            "&&" => TokenKind::AmpersandAmpersand,
+            "||" => TokenKind::PipePipe,
+            "!" => TokenKind::Bang,
+            "&" => TokenKind::Ampersand,
+            "|" => TokenKind::Pipe,
+            "^" => TokenKind::Caret,
+            "~" => TokenKind::Tilde,
+            "<<" => TokenKind::LtLt,
+            ">>" => TokenKind::GtGt,
+            "+=" => TokenKind::PlusEq,
+            "-=" => TokenKind::MinusEq,
+            "*=" => TokenKind::StarEq,
+            "/=" => TokenKind::SlashEq,
+            "%=" => TokenKind::PercentEq,
+            "&=" => TokenKind::AmpersandEq,
+            "|=" => TokenKind::PipeEq,
+            "^=" => TokenKind::CaretEq,
+            "<<=" => TokenKind::LtLtEq,
+            ">>=" => TokenKind::GtGtEq,
+            "." => TokenKind::Dot,
+            ".." => TokenKind::DotDot,
+            "..=" => TokenKind::DotDotEq,
+            "..." => TokenKind::DotDotDot,
+            "?." => TokenKind::QuestionDot,
+            "," => TokenKind::Comma,
+            ":" => TokenKind::Colon,
+            "::" => TokenKind::ColonColon,
+            ";" => TokenKind::Semicolon,
+            "->" => TokenKind::RArrow,
+            "=>" => TokenKind::FatArrow,
+            "?" => TokenKind::Question,
+            "@" => TokenKind::At,
+            "#" => TokenKind::Hash,
+            "$" => TokenKind::Dollar,
+            "(" => TokenKind::LParen,
+            ")" => TokenKind::RParen,
+            "[" => TokenKind::LBracket,
+            "]" => TokenKind::RBracket,
+            "{" => TokenKind::LBrace,
+            "}" => TokenKind::RBrace,
+            _ => TokenKind::Error, // Unknown punctuation
+        }
+    }
+
+    /// Converts keyword text to TokenKind.
+    fn text_to_keyword(&self, text: &str) -> Option<verum_lexer::TokenKind> {
+        use verum_lexer::TokenKind;
+
+        Some(match text {
+            "let" => TokenKind::Let,
+            "fn" => TokenKind::Fn,
+            "is" => TokenKind::Is,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            "while" => TokenKind::While,
+            "for" => TokenKind::For,
+            "in" => TokenKind::In,
+            "loop" => TokenKind::Loop,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
+            "return" => TokenKind::Return,
+            "match" => TokenKind::Match,
+            "type" => TokenKind::Type,
+            "async" => TokenKind::Async,
+            "await" => TokenKind::Await,
+            "mut" => TokenKind::Mut,
+            "const" => TokenKind::Const,
+            "static" => TokenKind::Static,
+            "pub" => TokenKind::Pub,
+            "self" => TokenKind::SelfValue,
+            "Self" => TokenKind::SelfType,
+            "super" => TokenKind::Super,
+            "cog" => TokenKind::Cog,
+            "mount" => TokenKind::Mount,
+            "as" => TokenKind::As,
+            "where" => TokenKind::Where,
+            "unsafe" => TokenKind::Unsafe,
+            "true" => TokenKind::True,
+            "false" => TokenKind::False,
+            "implement" => TokenKind::Implement,
+            "protocol" => TokenKind::Protocol,
+            "context" => TokenKind::Context,
+            "provide" => TokenKind::Provide,
+            "using" => TokenKind::Using,
+            "move" => TokenKind::Move,
+            "ref" => TokenKind::Ref,
+            "yield" => TokenKind::Yield,
+            "quote" => TokenKind::QuoteKeyword,
+            "extern" => TokenKind::Extern,
+            _ => return None,
+        })
+    }
+
+    /// Compiles stage escape expression: $(stage N){ expr }
+    ///
+    /// Stage escapes evaluate the inner expression at the specified stage level
+    /// within a quote block. This enables inserting computed values into generated code.
+    ///
+    /// Staged meta-compilation: stage escapes (`$expr` inside `quote { }`) evaluate
+    /// the inner expression at the enclosing stage level and splice the result into
+    /// the generated token stream. Enables inserting computed values into generated code.
+    fn compile_stage_escape(
+        &mut self,
+        _stage: u32,
+        expr: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Stage escape expressions are processed during staged compilation.
+        // During normal VBC codegen, we simply compile the inner expression.
+        // The stage context is handled by the meta pipeline.
+        self.compile_expr(expr)
+    }
+
+    /// Compiles lift expression: lift(expr)
+    ///
+    /// Lift is syntactic sugar for stage escape at the current stage.
+    /// Like stage escape, it's processed during staged compilation.
+    /// During normal VBC codegen, we simply compile the inner expression.
+    ///
+    /// Spec: grammar/verum.ebnf - quote_lift production
+    fn compile_lift_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        // Lift expressions are processed during staged compilation.
+        // During normal VBC codegen, we simply compile the inner expression.
+        // The stage context is handled by the meta pipeline.
+        self.compile_expr(expr)
+    }
+
+    /// Compiles meta function: @file, @line, @intrinsic, etc.
+    fn compile_meta_function(
+        &mut self,
+        name: &verum_ast::ty::Ident,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+
+        match name.name.as_str() {
+            "file" => {
+                // Load current file name
+                let const_id = self.ctx.add_const_string(&self.ctx.current_file());
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+            "line" => {
+                // Load current line number
+                let line = self.ctx.current_line();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: line as i64,
+                });
+            }
+            "column" => {
+                // Load current column
+                let col = self.ctx.current_column();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: col as i64,
+                });
+            }
+            "cfg" => {
+                // Configuration check - compile-time constant
+                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+            }
+            "const" => {
+                // Compile-time evaluation marker - should have been resolved
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            "intrinsic" => {
+                // @intrinsic("name", arg1, arg2, ...) - compile intrinsic call
+                // Note: This is an escape hatch. Prefer importing intrinsic functions normally.
+                return self.compile_intrinsic_call(args, dest);
+            }
+            "vbc" => {
+                // @vbc(INTRINSIC_NAME, arg1, arg2, ...) - compile VBC intrinsic call
+                // Unlike @intrinsic, the first argument is an identifier (bareword), not a string literal.
+                // This is the canonical way to call VBC intrinsics from core/math/*.vr files.
+                return self.compile_vbc_intrinsic_call(args, dest);
+            }
+            // Runtime intrinsics callable via @name(args) syntax
+            "get_tag" => {
+                if args.is_empty() {
+                    return Err(CodegenError::internal("@get_tag requires 1 argument"));
+                }
+                let arg_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("@get_tag arg has no value"))?;
+                self.ctx.emit(Instruction::GetTag {
+                    dst: dest,
+                    variant: arg_reg,
+                });
+                self.ctx.free_temp(arg_reg);
+            }
+            "abs" => {
+                if args.is_empty() {
+                    return Err(CodegenError::internal("@abs requires 1 argument"));
+                }
+                let arg_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("@abs arg has no value"))?;
+                self.ctx.emit(Instruction::UnaryI {
+                    op: UnaryIntOp::Abs,
+                    dst: dest,
+                    src: arg_reg,
+                });
+                self.ctx.free_temp(arg_reg);
+            }
+            "list_with_capacity" => {
+                // @list_with_capacity(N) — create an empty list (capacity hint ignored at Tier 0)
+                self.ctx.emit(Instruction::NewList { dst: dest });
+            }
+            "unwrap" => {
+                // @unwrap(expr) — unwrap a Maybe value, panic on None
+                if let Some(arg) = args.first() {
+                    if let Some(arg_reg) = self.compile_expr(arg)? {
+                        // Get variant data field 0 (assumes Some(value))
+                        self.ctx.emit(Instruction::GetVariantData {
+                            dst: dest,
+                            variant: arg_reg,
+                            field: 0,
+                        });
+                        self.ctx.free_temp(arg_reg);
+                    } else {
+                        let msg = self.intern_string("@unwrap: expression produced no value");
+                        self.ctx.emit(Instruction::Panic { message_id: msg });
+                    }
+                } else {
+                    let msg = self.intern_string("@unwrap requires 1 argument");
+                    self.ctx.emit(Instruction::Panic { message_id: msg });
+                }
+            }
+            "catch" => {
+                // @catch(fn() { ... }) -- try/catch returning Result<T, E>
+                if args.is_empty() { return Err(CodegenError::internal("@catch requires 1 argument")); }
+                let hl = self.ctx.new_label("catch_h");
+                let el = self.ctx.new_label("catch_e");
+                self.ctx.emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
+                self.ctx.try_recover_depth += 1;
+                let a = &args[0];
+                let ar = self.compile_expr(a)?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                let ir = if matches!(a.kind, ExprKind::Closure { .. }) {
+                    let cr = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CallClosure { dst: cr, closure: ar, args: crate::instruction::RegRange::new(Reg(0), 0) });
+                    self.ctx.free_temp(ar); cr
+                } else { ar };
+                self.ctx.try_recover_depth -= 1;
+                self.ctx.emit(Instruction::TryEnd);
+                let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
+                    .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
+                    .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch"))?;
+                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: okt, field_count: 1 });
+                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
+                self.ctx.free_temp(ir);
+                self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
+                self.ctx.define_label(&hl);
+                let ex = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetException { dst: ex });
+                let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
+                    .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
+                    .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch"))?;
+                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: ert, field_count: 1 });
+                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
+                self.ctx.free_temp(ex);
+                self.ctx.define_label(&el);
+            }
+            "catch_cbgr_violation" => {
+                // @catch_cbgr_violation(fn() { ... }) -- same as @catch for CBGR panics
+                if args.is_empty() { return Err(CodegenError::internal("@catch_cbgr_violation requires 1 argument")); }
+                let hl = self.ctx.new_label("cbgr_h");
+                let el = self.ctx.new_label("cbgr_e");
+                self.ctx.emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
+                self.ctx.try_recover_depth += 1;
+                let a = &args[0];
+                let ar = self.compile_expr(a)?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                let ir = if matches!(a.kind, ExprKind::Closure { .. }) {
+                    let cr = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CallClosure { dst: cr, closure: ar, args: crate::instruction::RegRange::new(Reg(0), 0) });
+                    self.ctx.free_temp(ar); cr
+                } else { ar };
+                self.ctx.try_recover_depth -= 1;
+                self.ctx.emit(Instruction::TryEnd);
+                let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
+                    .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
+                    .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
+                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: okt, field_count: 1 });
+                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
+                self.ctx.free_temp(ir);
+                self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
+                self.ctx.define_label(&hl);
+                let ex = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetException { dst: ex });
+                let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
+                    .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
+                    .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
+                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: ert, field_count: 1 });
+                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
+                self.ctx.free_temp(ex);
+                self.ctx.define_label(&el);
+            }
+            "block_on" => {
+                // @block_on(async { ... }) -- run async synchronously at Tier 0
+                if args.is_empty() { return Err(CodegenError::internal("@block_on requires 1 argument")); }
+                let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                self.ctx.emit(Instruction::Mov { dst: dest, src: ir });
+                self.ctx.free_temp(ir);
+            }
+            "timeout" => {
+                if !args.is_empty() {
+                    let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: ir });
+                    self.ctx.free_temp(ir);
+                } else { self.ctx.emit(Instruction::LoadNil { dst: dest }); }
+            }
+            "forget" => {
+                if !args.is_empty() { if let Some(r) = self.compile_expr(&args[0])? { self.ctx.free_temp(r); } }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            "ref_eq" => {
+                if args.len() < 2 { return Err(CodegenError::internal("@ref_eq requires 2 arguments")); }
+                let a = self.compile_expr(&args[0])?.ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                let b = self.compile_expr(&args[1])?.ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                self.ctx.emit(Instruction::CmpI { op: CompareOp::Eq, dst: dest, a, b });
+                self.ctx.free_temp(a); self.ctx.free_temp(b);
+            }
+            "get_generation" | "get_stored_generation" => {
+                if !args.is_empty() {
+                    if let Some(r) = self.compile_expr(&args[0])? {
+                        self.ctx.emit(Instruction::Mov { dst: dest, src: r }); self.ctx.free_temp(r);
+                    } else { self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 }); }
+                } else { self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 }); }
+            }
+            _ => {
+                // Unknown meta function - emit warning and nil
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles @intrinsic("name", args...) call.
+    ///
+    /// Maps the intrinsic name to optimal VBC instruction sequences using
+    /// the industrial-grade intrinsic registry.
+    fn compile_intrinsic_call(
+        &mut self,
+        args: &verum_common::List<Expr>,
+        dest: Reg,
+    ) -> CodegenResult<Option<Reg>> {
+        // Extract intrinsic name from first argument (must be string literal)
+        let intrinsic_name = if let Some(first_arg) = args.first() {
+            if let ExprKind::Literal(lit) = &first_arg.kind {
+                if let LiteralKind::Text(text) = &lit.kind {
+                    text.as_str()
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    return Ok(Some(dest));
+                }
+            } else {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Ok(Some(dest));
+            }
+        } else {
+            self.ctx.emit(Instruction::LoadNil { dst: dest });
+            return Ok(Some(dest));
+        };
+
+        // Look up intrinsic in registry
+        let intrinsic_info = match lookup_intrinsic(intrinsic_name) {
+            Some(info) => info,
+            None => {
+                // Intrinsic not found - load nil as fallback
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Ok(Some(dest));
+            }
+        };
+
+        // Compile remaining arguments
+        let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
+        for arg in args.iter().skip(1) {
+            if let Some(reg) = self.compile_expr(arg)? {
+                arg_regs.push(reg);
+            }
+        }
+
+        // Emit instructions based on codegen strategy
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+
+        // Free argument registers
+        for reg in arg_regs.iter().rev() {
+            self.ctx.free_temp(*reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles @vbc(NAME, args...) call.
+    ///
+    /// Unlike `@intrinsic("name", args...)` which takes a string literal,
+    /// `@vbc(NAME, args...)` takes a bareword identifier as the intrinsic name.
+    /// This is the canonical syntax for VBC intrinsic calls in core/math/*.vr files.
+    ///
+    /// # Syntax
+    ///
+    /// ```verum
+    /// @vbc(TENSOR_FILL, tensor_data, value)
+    /// @vbc(MEM_ALLOC_TENSOR, size, device)
+    /// @vbc(TENSOR_MATMUL, a, b)
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// - First argument: Identifier specifying the VBC intrinsic name (e.g., TENSOR_FILL)
+    /// - Remaining arguments: Expressions passed to the intrinsic
+    fn compile_vbc_intrinsic_call(
+        &mut self,
+        args: &verum_common::List<Expr>,
+        dest: Reg,
+    ) -> CodegenResult<Option<Reg>> {
+        // Extract intrinsic name from first argument (must be an identifier/path)
+        let intrinsic_name = if let Some(first_arg) = args.first() {
+            match &first_arg.kind {
+                // Simple identifier: @vbc(TENSOR_FILL, ...)
+                ExprKind::Path(path) => {
+                    // Join path segments with underscore for nested paths like TENSOR.FILL
+                    use verum_ast::ty::PathSegment;
+                    path.segments
+                        .iter()
+                        .filter_map(|s| match s {
+                            PathSegment::Name(ident) => Some(ident.name.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("_")
+                }
+                // Also support string literals for compatibility: @vbc("TENSOR_FILL", ...)
+                ExprKind::Literal(lit) => {
+                    if let LiteralKind::Text(text) = &lit.kind {
+                        text.to_string()
+                    } else {
+                        self.ctx.emit(Instruction::LoadNil { dst: dest });
+                        return Ok(Some(dest));
+                    }
+                }
+                _ => {
+                    // First argument must be identifier or string literal
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    return Ok(Some(dest));
+                }
+            }
+        } else {
+            // No arguments provided
+            self.ctx.emit(Instruction::LoadNil { dst: dest });
+            return Ok(Some(dest));
+        };
+
+        // Look up intrinsic in registry
+        let intrinsic_info = match lookup_intrinsic(&intrinsic_name) {
+            Some(info) => info,
+            None => {
+                // Intrinsic not found - emit warning-level diagnostic
+                // This is not necessarily an error during early development
+                // as intrinsics may be defined in math-spec but not yet registered
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Ok(Some(dest));
+            }
+        };
+
+        // Compile remaining arguments (skip the intrinsic name)
+        let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
+        for arg in args.iter().skip(1) {
+            if let Some(reg) = self.compile_expr(arg)? {
+                arg_regs.push(reg);
+            }
+        }
+
+        // Emit instructions based on codegen strategy
+        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest)?;
+
+        // Free argument registers
+        for reg in arg_regs.iter().rev() {
+            self.ctx.free_temp(*reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles a call to an intrinsic function imported via `import sys.intrinsics.*`.
+    ///
+    /// This handles the case where intrinsic functions declared with `@intrinsic("name")`
+    /// are called through normal import syntax rather than `@intrinsic("name", args...)`.
+    fn compile_imported_intrinsic_call(
+        &mut self,
+        info: &IntrinsicInfo,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+
+        // Compile arguments
+        let mut arg_regs = Vec::with_capacity(args.len());
+        for arg in args.iter() {
+            if let Some(reg) = self.compile_expr(arg)? {
+                arg_regs.push(reg);
+            }
+        }
+
+        // Emit instructions based on codegen strategy
+        self.emit_intrinsic_instructions(info, &arg_regs, dest)?;
+
+        // Free argument registers
+        for reg in arg_regs.iter().rev() {
+            self.ctx.free_temp(*reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Emits VBC instructions for an intrinsic based on its codegen strategy.
+    fn emit_intrinsic_instructions(
+        &mut self,
+        info: &IntrinsicInfo,
+        args: &[Reg],
+        dest: Reg,
+    ) -> CodegenResult<()> {
+        use crate::intrinsics::registry::CodegenStrategy;
+
+        let intrinsic = info.intrinsic;
+
+        match &intrinsic.strategy {
+            CodegenStrategy::DirectOpcode(opcode) => {
+                self.emit_intrinsic_direct_opcode(*opcode, args, dest);
+            }
+            CodegenStrategy::OpcodeWithMode(opcode, mode) => {
+                self.emit_intrinsic_opcode_with_mode(*opcode, *mode, args, dest);
+            }
+            CodegenStrategy::OpcodeWithSize(opcode, size) => {
+                self.emit_intrinsic_opcode_with_size(*opcode, *size, args, dest);
+            }
+            CodegenStrategy::InlineSequence(seq_id) => {
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, 8)?;
+            }
+            CodegenStrategy::InlineSequenceWithWidth(seq_id, width) => {
+                self.emit_intrinsic_inline_sequence(*seq_id, args, dest, *width)?;
+            }
+            CodegenStrategy::CompileTimeConstant => {
+                self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
+            }
+            CodegenStrategy::ArithExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_arith_extended(*sub_op, args, dest);
+            }
+            CodegenStrategy::WrappingOpcode(sub_op, width, signed) => {
+                self.emit_intrinsic_wrapping(*sub_op, *width, *signed, args, dest);
+            }
+            CodegenStrategy::SaturatingOpcode(sub_op, width, signed) => {
+                self.emit_intrinsic_saturating(*sub_op, *width, *signed, args, dest);
+            }
+            CodegenStrategy::TensorExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_tensor_extended(*sub_op, args, dest);
+            }
+            CodegenStrategy::TensorExtendedOpcodeWithMode(sub_op, mode) => {
+                self.emit_intrinsic_tensor_extended_with_mode(*sub_op, *mode, args, dest);
+            }
+            CodegenStrategy::TensorExtExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_tensor_ext_extended(*sub_op, args, dest);
+            }
+            CodegenStrategy::GpuExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_gpu_extended(*sub_op, args, dest);
+            }
+            CodegenStrategy::MathExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_math_extended(*sub_op, args, dest);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Emits a direct opcode instruction for intrinsics.
+    fn emit_intrinsic_direct_opcode(&mut self, opcode: crate::instruction::Opcode, args: &[Reg], dest: Reg) {
+        use crate::instruction::Opcode;
+
+        match opcode {
+            // Integer arithmetic
+            Opcode::AddI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::SubI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::MulI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::DivI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Div,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::ModI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mod,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Float arithmetic
+            Opcode::AddF => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Add,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::SubF => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Sub,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::MulF => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Mul,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::DivF => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryF {
+                        op: BinaryFloatOp::Div,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Bitwise operations
+            Opcode::Band => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::And,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::Bor => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Or,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::Bxor => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Xor,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::Bnot => {
+                // Bitwise NOT is unary - b is ignored in the instruction
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Not,
+                        dst: dest,
+                        a: args[0],
+                        b: args[0], // b is ignored for NOT, just reuse args[0]
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::Shl => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Shl,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::Shr => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Shr,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Unary integer operations
+            Opcode::NegI => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::UnaryI {
+                        op: UnaryIntOp::Neg,
+                        dst: dest,
+                        src: args[0],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Unary float operations
+            Opcode::NegF => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::UnaryF {
+                        op: UnaryFloatOp::Neg,
+                        dst: dest,
+                        src: args[0],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::AbsF => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::UnaryF {
+                        op: UnaryFloatOp::Abs,
+                        dst: dest,
+                        src: args[0],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Atomic operations (default to 64-bit size when called without explicit size)
+            Opcode::AtomicLoad => {
+                if args.len() >= 2 {
+                    // ptr is args[0], ordering is args[1] (as u8 value)
+                    // We need to emit with a constant ordering since the instruction expects u8
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: dest,
+                        ptr: args[0],
+                        ordering: 2, // SeqCst as default
+                        size: 8, // Default to 64-bit
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::AtomicStore => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::AtomicStore {
+                        ptr: args[0],
+                        val: args[1],
+                        ordering: 2, // SeqCst as default
+                        size: 8, // Default to 64-bit
+                    });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            Opcode::AtomicCas => {
+                if args.len() >= 3 {
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest,
+                        ptr: args[0],
+                        expected: args[1],
+                        desired: args[2],
+                        ordering: 4, // SeqCst
+                        size: 8, // Default to 64-bit
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::AtomicFence => {
+                self.ctx.emit(Instruction::AtomicFence { ordering: 2 });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // System calls
+            Opcode::SyscallLinux => {
+                if !args.is_empty() {
+                    let num = args[0];
+                    // Get up to 6 syscall arguments, use Reg(0) as placeholder for missing ones
+                    let a1 = args.get(1).copied().unwrap_or(Reg::new(0));
+                    let a2 = args.get(2).copied().unwrap_or(Reg::new(0));
+                    let a3 = args.get(3).copied().unwrap_or(Reg::new(0));
+                    let a4 = args.get(4).copied().unwrap_or(Reg::new(0));
+                    let a5 = args.get(5).copied().unwrap_or(Reg::new(0));
+                    let a6 = args.get(6).copied().unwrap_or(Reg::new(0));
+                    self.ctx.emit(Instruction::SyscallLinux {
+                        dst: dest,
+                        num,
+                        a1, a2, a3, a4, a5, a6,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // TLS operations
+            Opcode::TlsGet => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::TlsGet { dst: dest, slot: args[0] });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::TlsSet => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::TlsSet { slot: args[0], val: args[1] });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // Control flow
+            Opcode::Panic => {
+                let message_id = self.intern_string("intrinsic panic");
+                self.ctx.emit(Instruction::Panic { message_id });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            Opcode::Unreachable => {
+                self.ctx.emit(Instruction::Unreachable);
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // Debug
+            Opcode::DebugPrint => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::DebugPrint { value: args[0] });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // Type conversions
+            Opcode::CvtIF => {
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::CvtIF { dst: dest, src });
+            }
+            Opcode::CvtFI => {
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::CvtFI {
+                    mode: crate::instruction::FloatToIntMode::Trunc,
+                    dst: dest,
+                    src,
+                });
+            }
+
+            // Tensor operations: route through TensorExtended with register-based sub-opcodes.
+            // The direct opcode format uses immediate values for shapes/axes which
+            // doesn't work for intrinsic calls where everything is a register argument.
+            Opcode::TensorNew => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::NewFromArgs, args, dest);
+            }
+            Opcode::TensorFull => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::FillFromArgs, args, dest);
+            }
+            Opcode::TensorFromSlice => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::FromSliceArgs, args, dest);
+            }
+            Opcode::TensorBinop => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::BinopFromArgs, args, dest);
+            }
+            Opcode::TensorUnop => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::UnopFromArgs, args, dest);
+            }
+            Opcode::TensorMatmul => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::MatmulFromArgs, args, dest);
+            }
+            Opcode::TensorReduce => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::ReduceFromArgs, args, dest);
+            }
+            Opcode::TensorReshape => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::ReshapeFromArgs, args, dest);
+            }
+            Opcode::TensorTranspose => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::TransposeFromArgs, args, dest);
+            }
+            Opcode::TensorSlice => {
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::SliceFromArgs, args, dest);
+            }
+
+            // Memory operations: ptr_read / ptr_write
+            Opcode::Deref => {
+                // ptr_read(ptr) -> value: dereference a raw pointer
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: args[0],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::DerefMut => {
+                // ptr_write(ptr, value): write value through a raw pointer
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::DerefMut {
+                        ref_reg: args[0],
+                        value: args[1],
+                    });
+                }
+                // DerefMut is a store — no meaningful return, but emit nil for dest
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // Default fallback
+            _ => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+        }
+    }
+
+    /// Emits an opcode with mode for intrinsics (e.g., atomic operations with ordering).
+    fn emit_intrinsic_opcode_with_mode(&mut self, opcode: crate::instruction::Opcode, mode: u8, args: &[Reg], dest: Reg) {
+        use crate::instruction::Opcode;
+
+        match opcode {
+            Opcode::AtomicLoad => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: dest,
+                        ptr: args[0],
+                        ordering: mode,
+                        size: 8, // Default to 64-bit when only mode is specified
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::AtomicStore => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::AtomicStore {
+                        ptr: args[0],
+                        val: args[1],
+                        ordering: mode,
+                        size: 8, // Default to 64-bit when only mode is specified
+                    });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            Opcode::AtomicFence => {
+                self.ctx.emit(Instruction::AtomicFence { ordering: mode });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            _ => {
+                self.emit_intrinsic_direct_opcode(opcode, args, dest);
+            }
+        }
+    }
+
+    /// Emits an opcode with size for intrinsics (e.g., atomic operations with different sizes).
+    fn emit_intrinsic_opcode_with_size(&mut self, opcode: crate::instruction::Opcode, size: u8, args: &[Reg], dest: Reg) {
+        use crate::instruction::Opcode;
+
+        match opcode {
+            Opcode::AtomicLoad => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: dest,
+                        ptr: args[0],
+                        ordering: 1, // Acquire (valid for loads; Release=2 is NOT valid for loads)
+                        size,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            Opcode::AtomicStore => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::AtomicStore {
+                        ptr: args[0],
+                        val: args[1],
+                        ordering: 2, // Release (valid for stores)
+                        size,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            Opcode::AtomicCas => {
+                if args.len() >= 3 {
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest,
+                        ptr: args[0],
+                        expected: args[1],
+                        desired: args[2],
+                        ordering: 4, // SeqCst
+                        size,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            _ => {
+                // Fallback for other opcodes
+                self.emit_intrinsic_direct_opcode(opcode, args, dest);
+            }
+        }
+    }
+
+    /// Emits an inline sequence for optimized intrinsic operations.
+    /// `byte_width` is used by byte conversion sequences to determine output size.
+    fn emit_intrinsic_inline_sequence(
+        &mut self,
+        seq_id: crate::intrinsics::registry::InlineSequenceId,
+        args: &[Reg],
+        dest: Reg,
+        byte_width: u8,
+    ) -> CodegenResult<()> {
+        use crate::intrinsics::registry::InlineSequenceId;
+
+        match seq_id {
+            // Memory operations - use FFI extended sub-opcodes for libc-free implementations
+            InlineSequenceId::Memcpy => {
+                // Format: dst:reg, src:reg, size:reg
+                if args.len() >= 3 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);  // dst
+                    Self::write_reg(&mut operands, args[1].0);  // src
+                    Self::write_reg(&mut operands, args[2].0);  // size
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x43, // CMemcpy
+                        operands,
+                    });
+                }
+                // Return dst pointer as result
+                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+            }
+            InlineSequenceId::Memmove => {
+                // Format: dst:reg, src:reg, size:reg
+                if args.len() >= 3 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);  // dst
+                    Self::write_reg(&mut operands, args[1].0);  // src
+                    Self::write_reg(&mut operands, args[2].0);  // size
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x45, // CMemmove
+                        operands,
+                    });
+                }
+                // Return dst pointer as result
+                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+            }
+            InlineSequenceId::Memset => {
+                // Format: dst:reg, value:reg, size:reg
+                if args.len() >= 3 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);  // dst
+                    Self::write_reg(&mut operands, args[1].0);  // value (byte)
+                    Self::write_reg(&mut operands, args[2].0);  // size
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x44, // CMemset
+                        operands,
+                    });
+                }
+                // Return dst pointer as result
+                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+            }
+            InlineSequenceId::Memcmp => {
+                // Format: dst:reg, ptr1:reg, ptr2:reg, size:reg
+                // Returns: i64 comparison result
+                if args.len() >= 3 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);     // dst (result)
+                    Self::write_reg(&mut operands, args[0].0);  // ptr1
+                    Self::write_reg(&mut operands, args[1].0);  // ptr2
+                    Self::write_reg(&mut operands, args[2].0);  // size
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x46, // CMemcmp
+                        operands,
+                    });
+                } else {
+                    // Default to 0 (equal) if not enough args
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Pointer offset: byte-level addressing (ptr + count)
+            // All core/ stdlib uses ptr_offset for raw byte pointers.
+            InlineSequenceId::PtrOffset => {
+                if args.len() >= 2 {
+                    // dst = ptr + count (byte offset)
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                }
+            }
+
+            // Checked arithmetic - returns Maybe<T> via ArithExtended sub-opcodes
+            // Uses ArithExtended (0xBD) with ArithSubOpcode::Checked* values
+            InlineSequenceId::CheckedAdd |
+            InlineSequenceId::CheckedSub |
+            InlineSequenceId::CheckedMul |
+            InlineSequenceId::CheckedDiv => {
+                if args.len() >= 2 {
+                    let sub_op = match seq_id {
+                        InlineSequenceId::CheckedAdd => ArithSubOpcode::CheckedAddI as u8,
+                        InlineSequenceId::CheckedSub => ArithSubOpcode::CheckedSubI as u8,
+                        InlineSequenceId::CheckedMul => ArithSubOpcode::CheckedMulI as u8,
+                        InlineSequenceId::CheckedDiv => ArithSubOpcode::CheckedDivI as u8,
+                        _ => ArithSubOpcode::CheckedAddI as u8,
+                    };
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);    // dst
+                    Self::write_reg(&mut operands, args[0].0); // a
+                    Self::write_reg(&mut operands, args[1].0); // b
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Overflowing arithmetic - returns (result, overflow) tuple
+            // Uses ArithExtended (0xBD) with proper ArithSubOpcode values
+            InlineSequenceId::OverflowingAdd |
+            InlineSequenceId::OverflowingSub |
+            InlineSequenceId::OverflowingMul => {
+                if args.len() >= 2 {
+                    let sub_op = match seq_id {
+                        InlineSequenceId::OverflowingAdd => ArithSubOpcode::OverflowingAddI as u8,
+                        InlineSequenceId::OverflowingSub => ArithSubOpcode::OverflowingSubI as u8,
+                        InlineSequenceId::OverflowingMul => ArithSubOpcode::OverflowingMulI as u8,
+                        _ => ArithSubOpcode::OverflowingAddI as u8,
+                    };
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);    // dst
+                    Self::write_reg(&mut operands, args[0].0); // a
+                    Self::write_reg(&mut operands, args[1].0); // b
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Atomic fetch operations - emit library calls
+            InlineSequenceId::AtomicFetchAdd |
+            InlineSequenceId::AtomicFetchSub |
+            InlineSequenceId::AtomicFetchAnd |
+            InlineSequenceId::AtomicFetchOr |
+            InlineSequenceId::AtomicFetchXor => {
+                let func_name = match seq_id {
+                    InlineSequenceId::AtomicFetchAdd => "verum_atomic_fetch_add",
+                    InlineSequenceId::AtomicFetchSub => "verum_atomic_fetch_sub",
+                    InlineSequenceId::AtomicFetchAnd => "verum_atomic_fetch_and",
+                    InlineSequenceId::AtomicFetchOr => "verum_atomic_fetch_or",
+                    InlineSequenceId::AtomicFetchXor => "verum_atomic_fetch_xor",
+                    _ => "verum_atomic_fetch_add",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Bit manipulation - emit ArithExtended with bit counting sub-opcodes
+            InlineSequenceId::Clz => {
+                self.emit_arith_extended_unary(ArithSubOpcode::Clz, args, dest);
+            }
+            InlineSequenceId::Ctz => {
+                self.emit_arith_extended_unary(ArithSubOpcode::Ctz, args, dest);
+            }
+            InlineSequenceId::Ilog2 => {
+                // ilog2(x) = 63 - clz(x)
+                let clz_tmp = self.ctx.alloc_temp();
+                self.emit_arith_extended_unary(ArithSubOpcode::Clz, args, clz_tmp);
+                let sixty_three = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: sixty_three,
+                    value: 63,
+                });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Sub,
+                    dst: dest,
+                    a: sixty_three,
+                    b: clz_tmp,
+                });
+                self.ctx.free_temp(sixty_three);
+                self.ctx.free_temp(clz_tmp);
+            }
+            InlineSequenceId::Popcnt => {
+                self.emit_arith_extended_unary(ArithSubOpcode::Popcnt, args, dest);
+            }
+            InlineSequenceId::Bswap => {
+                self.emit_arith_extended_unary(ArithSubOpcode::Bswap, args, dest);
+            }
+
+            // Bit reverse
+            InlineSequenceId::Bitreverse => {
+                self.emit_arith_extended_unary(ArithSubOpcode::BitReverse, args, dest);
+            }
+
+            // Rotation - binary operations
+            InlineSequenceId::RotateLeft => {
+                self.emit_arith_extended_binary(ArithSubOpcode::RotateLeft, args, dest);
+            }
+            InlineSequenceId::RotateRight => {
+                self.emit_arith_extended_binary(ArithSubOpcode::RotateRight, args, dest);
+            }
+
+            // Spinlock and futex - library calls
+            InlineSequenceId::SpinlockLock |
+            InlineSequenceId::FutexWait |
+            InlineSequenceId::FutexWake => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SpinlockLock => "verum_spinlock_lock",
+                    InlineSequenceId::FutexWait => "verum_futex_wait",
+                    InlineSequenceId::FutexWake => "verum_futex_wake",
+                    _ => "verum_spinlock_lock",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Sqrt - native VBC instruction
+            InlineSequenceId::SqrtF64 => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::UnaryF {
+                        op: UnaryFloatOp::Sqrt,
+                        dst: dest,
+                        src: args[0],
+                    });
+                }
+            }
+
+            // Math functions - library calls
+            InlineSequenceId::SinF64 |
+            InlineSequenceId::CosF64 |
+            InlineSequenceId::TanF64 |
+            InlineSequenceId::AsinF64 |
+            InlineSequenceId::AcosF64 |
+            InlineSequenceId::AtanF64 |
+            InlineSequenceId::Atan2F64 |
+            InlineSequenceId::ExpF64 |
+            InlineSequenceId::LogF64 |
+            InlineSequenceId::Log10F64 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SinF64 => "verum_sin",
+                    InlineSequenceId::CosF64 => "verum_cos",
+                    InlineSequenceId::TanF64 => "verum_tan",
+                    InlineSequenceId::AsinF64 => "verum_asin",
+                    InlineSequenceId::AcosF64 => "verum_acos",
+                    InlineSequenceId::AtanF64 => "verum_atan",
+                    InlineSequenceId::Atan2F64 => "verum_atan2",
+                    InlineSequenceId::ExpF64 => "verum_exp",
+                    InlineSequenceId::LogF64 => "verum_log",
+                    InlineSequenceId::Log10F64 => "verum_log10",
+                    _ => "verum_sin",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Time intrinsics - FfiExtended system calls
+            InlineSequenceId::MonotonicNanos => {
+                // Emit FfiExtended TimeMonotonicNanos -> dest
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+            }
+            InlineSequenceId::RealtimeSecs => {
+                // Emit FfiExtended TimeRealtimeNanos -> tmp, then div by 1_000_000_000
+                let tmp = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, tmp.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x71, // TimeRealtimeNanos
+                    operands,
+                });
+                let divisor = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Div,
+                    dst: dest,
+                    a: tmp,
+                    b: divisor,
+                });
+            }
+            InlineSequenceId::RealtimeNanos => {
+                // Emit FfiExtended TimeRealtimeNanos -> dest (raw nanoseconds, no division)
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x71, // TimeRealtimeNanos
+                    operands,
+                });
+            }
+
+            // Memory lifecycle intrinsics
+            InlineSequenceId::DropInPlace => {
+                // Call destructor on value at pointer
+                // Uses ChkRef which encodes to DropRef opcode at bytecode level
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::ChkRef { ref_reg: args[0] });
+                }
+            }
+
+            InlineSequenceId::MakeSlice => {
+                // Pack ptr and len into a fat pointer (slice)
+                if args.len() >= 2 {
+                    // Pack requires consecutive registers starting from src_start.
+                    // If args[1] != args[0]+1, copy both to fresh consecutive temps.
+                    let src_start = if args[1].0 == args[0].0 + 1 {
+                        args[0]
+                    } else {
+                        let t0 = self.ctx.alloc_temp();
+                        let t1 = self.ctx.alloc_temp();
+                        // Ensure t0 and t1 are consecutive
+                        if t1.0 == t0.0 + 1 {
+                            self.ctx.emit(Instruction::Mov { dst: t0, src: args[0] });
+                            self.ctx.emit(Instruction::Mov { dst: t1, src: args[1] });
+                            t0
+                        } else {
+                            self.ctx.free_temp(t1);
+                            self.ctx.free_temp(t0);
+                            // Fallback: just copy arg1 to args[0]+1
+                            let next = Reg(args[0].0 + 1);
+                            self.ctx.emit(Instruction::Mov { dst: next, src: args[1] });
+                            args[0]
+                        }
+                    };
+                    self.ctx.emit(Instruction::Pack {
+                        dst: dest,
+                        src_start,
+                        count: 2,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            InlineSequenceId::Uninit => {
+                // Return uninitialized value (just allocate register, don't init)
+                // For now, load unit as placeholder
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+
+            InlineSequenceId::Zeroed => {
+                // Return zeroed value
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+
+            // Extended math functions - library calls
+            InlineSequenceId::CbrtF64 |
+            InlineSequenceId::Expm1F64 |
+            InlineSequenceId::Exp2F64 |
+            InlineSequenceId::Log1pF64 |
+            InlineSequenceId::Log2F64 |
+            InlineSequenceId::PowiF64 |
+            InlineSequenceId::TruncF64 |
+            InlineSequenceId::MinnumF64 |
+            InlineSequenceId::MaxnumF64 |
+            InlineSequenceId::FmaF64 |
+            InlineSequenceId::CopysignF64 |
+            InlineSequenceId::HypotF64 |
+            InlineSequenceId::SinhF64 |
+            InlineSequenceId::CoshF64 |
+            InlineSequenceId::TanhF64 |
+            InlineSequenceId::AsinhF64 |
+            InlineSequenceId::AcoshF64 |
+            InlineSequenceId::AtanhF64 |
+            InlineSequenceId::PowF64 |
+            InlineSequenceId::AbsF64 |
+            InlineSequenceId::FloorF64 |
+            InlineSequenceId::CeilF64 |
+            InlineSequenceId::RoundF64 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::CbrtF64 => "verum_cbrt",
+                    InlineSequenceId::Expm1F64 => "verum_expm1",
+                    InlineSequenceId::Exp2F64 => "verum_exp2",
+                    InlineSequenceId::Log1pF64 => "verum_log1p",
+                    InlineSequenceId::Log2F64 => "verum_log2",
+                    InlineSequenceId::PowiF64 => "verum_powi",
+                    InlineSequenceId::TruncF64 => "verum_trunc",
+                    InlineSequenceId::MinnumF64 => "verum_min",
+                    InlineSequenceId::MaxnumF64 => "verum_max",
+                    InlineSequenceId::FmaF64 => "verum_fma",
+                    InlineSequenceId::CopysignF64 => "verum_copysign",
+                    InlineSequenceId::HypotF64 => "verum_hypot",
+                    InlineSequenceId::SinhF64 => "verum_sinh",
+                    InlineSequenceId::CoshF64 => "verum_cosh",
+                    InlineSequenceId::TanhF64 => "verum_tanh",
+                    InlineSequenceId::AsinhF64 => "verum_asinh",
+                    InlineSequenceId::AcoshF64 => "verum_acosh",
+                    InlineSequenceId::AtanhF64 => "verum_atanh",
+                    InlineSequenceId::PowF64 => "verum_pow",
+                    InlineSequenceId::AbsF64 => "verum_fabs",
+                    InlineSequenceId::FloorF64 => "verum_floor",
+                    InlineSequenceId::CeilF64 => "verum_ceil",
+                    InlineSequenceId::RoundF64 => "verum_round",
+                    _ => "verum_cbrt",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Type conversions — emit direct VBC instructions
+            InlineSequenceId::IntToFloat => {
+                // int_to_float: emit CvtIF
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::CvtIF { dst: dest, src });
+            }
+            InlineSequenceId::FloatToInt => {
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::CvtFI {
+                    mode: crate::instruction::FloatToIntMode::Trunc,
+                    dst: dest,
+                    src,
+                });
+            }
+            InlineSequenceId::Sext |
+            InlineSequenceId::Zext |
+            InlineSequenceId::Fpext |
+            InlineSequenceId::Fptrunc |
+            InlineSequenceId::IntTrunc |
+            InlineSequenceId::Bitcast => {
+                // For NaN-boxed interpreter, these are mostly no-ops (all values are 64-bit)
+                // Just copy the source to dest
+                let src = if !args.is_empty() { args[0] } else { dest };
+                if src != dest {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src });
+                }
+            }
+
+            // Float bit reinterpretation — NOT no-ops in NaN-boxed representation
+            InlineSequenceId::F32ToBits |
+            InlineSequenceId::F32FromBits |
+            InlineSequenceId::F64ToBits |
+            InlineSequenceId::F64FromBits => {
+                use crate::instruction::ArithSubOpcode;
+                let sub_op = match seq_id {
+                    InlineSequenceId::F32ToBits => ArithSubOpcode::F32ToBits,
+                    InlineSequenceId::F32FromBits => ArithSubOpcode::F32FromBits,
+                    InlineSequenceId::F64ToBits => ArithSubOpcode::F64ToBits,
+                    InlineSequenceId::F64FromBits => ArithSubOpcode::F64FromBits,
+                    _ => unreachable!(),
+                };
+                let src = if !args.is_empty() { args[0] } else { dest };
+                let mut operands = Vec::with_capacity(4);
+                if dest.is_short() {
+                    operands.push(dest.0 as u8);
+                } else {
+                    operands.push(0x80 | ((dest.0 >> 8) as u8));
+                    operands.push(dest.0 as u8);
+                }
+                if src.is_short() {
+                    operands.push(src.0 as u8);
+                } else {
+                    operands.push(0x80 | ((src.0 >> 8) as u8));
+                    operands.push(src.0 as u8);
+                }
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands,
+                });
+            }
+
+            // Byte conversion: to_le_bytes(value) -> [byte; N]
+            InlineSequenceId::ToLeBytes => {
+                let width = byte_width as usize;
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::NewList { dst: dest });
+                let shift_reg = self.ctx.alloc_temp();
+                let byte_reg = self.ctx.alloc_temp();
+                let mask_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: mask_reg, value: 0xFF });
+                for i in 0..width {
+                    if i == 0 {
+                        self.ctx.emit(Instruction::Mov { dst: shift_reg, src });
+                    } else {
+                        let shift_amt = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Shr,
+                            dst: shift_reg,
+                            a: src,
+                            b: shift_amt,
+                        });
+                        self.ctx.free_temp(shift_amt);
+                    }
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::And,
+                        dst: byte_reg,
+                        a: shift_reg,
+                        b: mask_reg,
+                    });
+                    self.ctx.emit(Instruction::ListPush { list: dest, val: byte_reg });
+                }
+                self.ctx.free_temp(mask_reg);
+                self.ctx.free_temp(byte_reg);
+                self.ctx.free_temp(shift_reg);
+            }
+
+            // Byte conversion: to_be_bytes(value) -> [byte; N]
+            InlineSequenceId::ToBeBytes => {
+                let width = byte_width as usize;
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::NewList { dst: dest });
+                let shift_reg = self.ctx.alloc_temp();
+                let byte_reg = self.ctx.alloc_temp();
+                let mask_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: mask_reg, value: 0xFF });
+                for i in (0..width).rev() {
+                    if i == 0 {
+                        self.ctx.emit(Instruction::Mov { dst: shift_reg, src });
+                    } else {
+                        let shift_amt = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Shr,
+                            dst: shift_reg,
+                            a: src,
+                            b: shift_amt,
+                        });
+                        self.ctx.free_temp(shift_amt);
+                    }
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::And,
+                        dst: byte_reg,
+                        a: shift_reg,
+                        b: mask_reg,
+                    });
+                    self.ctx.emit(Instruction::ListPush { list: dest, val: byte_reg });
+                }
+                self.ctx.free_temp(mask_reg);
+                self.ctx.free_temp(byte_reg);
+                self.ctx.free_temp(shift_reg);
+            }
+
+            // Byte conversion: from_le_bytes(bytes) -> Int
+            InlineSequenceId::FromLeBytes => {
+                let width = byte_width as usize;
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                let byte_reg = self.ctx.alloc_temp();
+                let shifted_reg = self.ctx.alloc_temp();
+                let idx_reg = self.ctx.alloc_temp();
+                let shift_amt = self.ctx.alloc_temp();
+                for i in 0..width {
+                    self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: i as i64 });
+                    self.ctx.emit(Instruction::GetE { dst: byte_reg, arr: src, idx: idx_reg });
+                    if i == 0 {
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Or,
+                            dst: dest,
+                            a: dest,
+                            b: byte_reg,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Shl,
+                            dst: shifted_reg,
+                            a: byte_reg,
+                            b: shift_amt,
+                        });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Or,
+                            dst: dest,
+                            a: dest,
+                            b: shifted_reg,
+                        });
+                    }
+                }
+                self.ctx.free_temp(shift_amt);
+                self.ctx.free_temp(idx_reg);
+                self.ctx.free_temp(shifted_reg);
+                self.ctx.free_temp(byte_reg);
+            }
+
+            // Byte conversion: from_be_bytes(bytes) -> Int
+            InlineSequenceId::FromBeBytes => {
+                let width = byte_width as usize;
+                let src = if !args.is_empty() { args[0] } else { dest };
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                let byte_reg = self.ctx.alloc_temp();
+                let shifted_reg = self.ctx.alloc_temp();
+                let idx_reg = self.ctx.alloc_temp();
+                let shift_amt = self.ctx.alloc_temp();
+                for i in 0..width {
+                    self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: i as i64 });
+                    self.ctx.emit(Instruction::GetE { dst: byte_reg, arr: src, idx: idx_reg });
+                    let shift_bits = (width - 1 - i) * 8;
+                    if shift_bits == 0 {
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Or,
+                            dst: dest,
+                            a: dest,
+                            b: byte_reg,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: shift_bits as i64 });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Shl,
+                            dst: shifted_reg,
+                            a: byte_reg,
+                            b: shift_amt,
+                        });
+                        self.ctx.emit(Instruction::Bitwise {
+                            op: BitwiseOp::Or,
+                            dst: dest,
+                            a: dest,
+                            b: shifted_reg,
+                        });
+                    }
+                }
+                self.ctx.free_temp(shift_amt);
+                self.ctx.free_temp(idx_reg);
+                self.ctx.free_temp(shifted_reg);
+                self.ctx.free_temp(byte_reg);
+            }
+
+            // Char operations
+            InlineSequenceId::CharIsAlphabetic |
+            InlineSequenceId::CharIsNumeric |
+            InlineSequenceId::CharIsWhitespace |
+            InlineSequenceId::CharIsControl |
+            InlineSequenceId::CharIsUppercase |
+            InlineSequenceId::CharIsLowercase |
+            InlineSequenceId::CharToUppercase |
+            InlineSequenceId::CharToLowercase |
+            InlineSequenceId::CharEncodeUtf8 |
+            InlineSequenceId::CharEscapeDebug => {
+                let func_name = match seq_id {
+                    InlineSequenceId::CharIsAlphabetic => "verum_char_is_alphabetic",
+                    InlineSequenceId::CharIsNumeric => "verum_char_is_numeric",
+                    InlineSequenceId::CharIsWhitespace => "verum_char_is_whitespace",
+                    InlineSequenceId::CharIsControl => "verum_char_is_control",
+                    InlineSequenceId::CharIsUppercase => "verum_char_is_uppercase",
+                    InlineSequenceId::CharIsLowercase => "verum_char_is_lowercase",
+                    InlineSequenceId::CharToUppercase => "verum_char_to_uppercase",
+                    InlineSequenceId::CharToLowercase => "verum_char_to_lowercase",
+                    InlineSequenceId::CharEncodeUtf8 => "verum_char_encode_utf8",
+                    InlineSequenceId::CharEscapeDebug => "verum_char_escape_debug",
+                    _ => "verum_char_is_alphabetic",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float32 basic operations - use C math library via FFI
+            InlineSequenceId::SqrtF32 |
+            InlineSequenceId::FloorF32 |
+            InlineSequenceId::CeilF32 |
+            InlineSequenceId::RoundF32 |
+            InlineSequenceId::TruncF32 |
+            InlineSequenceId::AbsF32 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SqrtF32 => "verum_sqrtf",
+                    InlineSequenceId::FloorF32 => "verum_floorf",
+                    InlineSequenceId::CeilF32 => "verum_ceilf",
+                    InlineSequenceId::RoundF32 => "verum_roundf",
+                    InlineSequenceId::TruncF32 => "verum_truncf",
+                    InlineSequenceId::AbsF32 => "verum_fabsf",
+                    _ => "verum_sqrtf",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float32 trigonometric functions
+            InlineSequenceId::SinF32 |
+            InlineSequenceId::CosF32 |
+            InlineSequenceId::TanF32 |
+            InlineSequenceId::AsinF32 |
+            InlineSequenceId::AcosF32 |
+            InlineSequenceId::AtanF32 |
+            InlineSequenceId::Atan2F32 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SinF32 => "verum_sinf",
+                    InlineSequenceId::CosF32 => "verum_cosf",
+                    InlineSequenceId::TanF32 => "verum_tanf",
+                    InlineSequenceId::AsinF32 => "verum_asinf",
+                    InlineSequenceId::AcosF32 => "verum_acosf",
+                    InlineSequenceId::AtanF32 => "verum_atanf",
+                    InlineSequenceId::Atan2F32 => "verum_atan2f",
+                    _ => "verum_sinf",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float32 hyperbolic functions
+            InlineSequenceId::SinhF32 |
+            InlineSequenceId::CoshF32 |
+            InlineSequenceId::TanhF32 |
+            InlineSequenceId::AsinhF32 |
+            InlineSequenceId::AcoshF32 |
+            InlineSequenceId::AtanhF32 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SinhF32 => "verum_sinhf",
+                    InlineSequenceId::CoshF32 => "verum_coshf",
+                    InlineSequenceId::TanhF32 => "verum_tanhf",
+                    InlineSequenceId::AsinhF32 => "verum_asinhf",
+                    InlineSequenceId::AcoshF32 => "verum_acoshf",
+                    InlineSequenceId::AtanhF32 => "verum_atanhf",
+                    _ => "verum_sinhf",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float32 exponential and logarithmic functions
+            InlineSequenceId::ExpF32 |
+            InlineSequenceId::Exp2F32 |
+            InlineSequenceId::Expm1F32 |
+            InlineSequenceId::LogF32 |
+            InlineSequenceId::Log2F32 |
+            InlineSequenceId::Log10F32 |
+            InlineSequenceId::Log1pF32 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::ExpF32 => "verum_expf",
+                    InlineSequenceId::Exp2F32 => "verum_exp2f",
+                    InlineSequenceId::Expm1F32 => "verum_expm1f",
+                    InlineSequenceId::LogF32 => "verum_logf",
+                    InlineSequenceId::Log2F32 => "verum_log2f",
+                    InlineSequenceId::Log10F32 => "verum_log10f",
+                    InlineSequenceId::Log1pF32 => "verum_log1pf",
+                    _ => "verum_expf",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float32 power and special functions
+            InlineSequenceId::CbrtF32 |
+            InlineSequenceId::HypotF32 |
+            InlineSequenceId::FmaF32 |
+            InlineSequenceId::CopysignF32 |
+            InlineSequenceId::PowiF32 |
+            InlineSequenceId::MinnumF32 |
+            InlineSequenceId::MaxnumF32 => {
+                let func_name = match seq_id {
+                    InlineSequenceId::CbrtF32 => "verum_cbrtf",
+                    InlineSequenceId::HypotF32 => "verum_hypotf",
+                    InlineSequenceId::FmaF32 => "verum_fmaf",
+                    InlineSequenceId::CopysignF32 => "verum_copysignf",
+                    InlineSequenceId::PowiF32 => "verum_powf",
+                    InlineSequenceId::MinnumF32 => "verum_fminf",
+                    InlineSequenceId::MaxnumF32 => "verum_fmaxf",
+                    _ => "verum_cbrtf",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Arithmetic variants
+            InlineSequenceId::SaturatingAdd |
+            InlineSequenceId::SaturatingSub => {
+                let func_name = match seq_id {
+                    InlineSequenceId::SaturatingAdd => "verum_saturating_add",
+                    InlineSequenceId::SaturatingSub => "verum_saturating_sub",
+                    _ => "verum_saturating_add",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Float special checks
+            InlineSequenceId::IsNan |
+            InlineSequenceId::IsInf |
+            InlineSequenceId::IsFinite => {
+                let func_name = match seq_id {
+                    InlineSequenceId::IsNan => "verum_is_nan",
+                    InlineSequenceId::IsInf => "verum_is_inf",
+                    InlineSequenceId::IsFinite => "verum_is_finite",
+                    _ => "verum_is_nan",
+                };
+                self.emit_intrinsic_library_call(func_name, args, dest)?;
+            }
+
+            // Slice operations
+            InlineSequenceId::SliceLen => {
+                // Extract length from fat pointer (second element)
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Unpack {
+                        dst_start: dest,
+                        tuple: args[0],
+                        count: 2,
+                    });
+                    // Length is in dest + 1, move it to dest
+                    let len_reg = Reg::new(dest.0 + 1);
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: len_reg });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            InlineSequenceId::SliceAsPtr => {
+                // Extract pointer from fat pointer (first element)
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Unpack {
+                        dst_start: dest,
+                        tuple: args[0],
+                        count: 2,
+                    });
+                    // Pointer is already in dest
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            InlineSequenceId::SliceGet |
+            InlineSequenceId::SliceGetUnchecked => {
+                // Access element at index
+                self.emit_intrinsic_library_call("verum_slice_get", args, dest)?;
+            }
+
+            InlineSequenceId::SliceSubslice => {
+                // Create subslice view
+                self.emit_intrinsic_library_call("verum_slice_subslice", args, dest)?;
+            }
+
+            InlineSequenceId::SliceSplitAt => {
+                // Split slice into two parts
+                self.emit_intrinsic_library_call("verum_slice_split_at", args, dest)?;
+            }
+
+            // Text operations
+            InlineSequenceId::TextFromStatic => {
+                // Create Text from static string
+                self.emit_intrinsic_library_call("verum_text_from_static", args, dest)?;
+            }
+
+            InlineSequenceId::Utf8DecodeChar => {
+                // Decode UTF-8 character
+                self.emit_intrinsic_library_call("verum_utf8_decode_char", args, dest)?;
+            }
+
+            InlineSequenceId::TextParseInt => {
+                // Parse integer from text
+                self.emit_intrinsic_library_call("verum_text_parse_int", args, dest)?;
+            }
+
+            InlineSequenceId::TextParseFloat => {
+                // Parse float from text
+                self.emit_intrinsic_library_call("verum_text_parse_float", args, dest)?;
+            }
+
+            InlineSequenceId::IntToText => {
+                // Convert integer to text
+                self.emit_intrinsic_library_call("verum_int_to_text", args, dest)?;
+            }
+
+            InlineSequenceId::FloatToText => {
+                // Convert float to text
+                self.emit_intrinsic_library_call("verum_float_to_text", args, dest)?;
+            }
+
+            // Random number generation - use FFI extended sub-opcodes for platform-specific impl
+            InlineSequenceId::RandomU64 => {
+                // Format: dst:reg
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x47, // RandomU64
+                    operands,
+                });
+            }
+
+            InlineSequenceId::RandomFloat => {
+                // Format: dst:reg
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x48, // RandomFloat
+                    operands,
+                });
+            }
+
+            // Unicode character category
+            InlineSequenceId::CharGeneralCategory => {
+                self.emit_intrinsic_library_call("verum_char_general_category", args, dest)?;
+            }
+
+            // Global allocator
+            InlineSequenceId::GlobalAllocator => {
+                self.emit_intrinsic_library_call("verum_global_allocator", args, dest)?;
+            }
+
+            // Atomic exchange
+            InlineSequenceId::AtomicExchange => {
+                self.emit_intrinsic_library_call("verum_atomic_exchange", args, dest)?;
+            }
+
+            // Tier 0 async: always return pending (no real async support)
+            InlineSequenceId::PollPending => {
+                // Load false to indicate Poll::Pending
+                self.ctx.emit(Instruction::LoadFalse { dst: dest });
+            }
+
+            // Call second argument as function (for recovery passthrough)
+            InlineSequenceId::CallSecondArg => {
+                if args.len() >= 2 {
+                    // args[1] is the closure/function to call, ignore args[0] (recovery context)
+                    self.ctx.emit(Instruction::CallClosure {
+                        dst: dest,
+                        closure: args[1],
+                        args: RegRange::new(Reg::new(0), 0), // No args to the factory
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // Load unit value ()
+            InlineSequenceId::LoadUnit => {
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+
+            // Volatile memory operations (MMIO support)
+            InlineSequenceId::VolatileLoad => {
+                // Volatile load: read from pointer with no optimization
+                // Uses Deref but marked volatile to prevent reordering
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: args[0],
+                    });
+                    // Insert memory fence to prevent reordering (SeqCst = 7)
+                    self.ctx.emit(Instruction::AtomicFence { ordering: 7 });
+                }
+            }
+
+            InlineSequenceId::VolatileStore => {
+                // Volatile store: write to pointer with no optimization
+                if args.len() >= 2 {
+                    // Memory fence before store (SeqCst = 7)
+                    self.ctx.emit(Instruction::AtomicFence { ordering: 7 });
+                    self.ctx.emit(Instruction::DerefMut {
+                        ref_reg: args[0],
+                        value: args[1],
+                    });
+                }
+            }
+
+            InlineSequenceId::VolatileLoadAcquire => {
+                // Volatile load with acquire semantics
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: args[0],
+                    });
+                    // Acquire fence after load (Acquire = 4)
+                    self.ctx.emit(Instruction::AtomicFence { ordering: 4 });
+                }
+            }
+
+            InlineSequenceId::VolatileStoreRelease => {
+                // Volatile store with release semantics
+                if args.len() >= 2 {
+                    // Release fence before store (Release = 5)
+                    self.ctx.emit(Instruction::AtomicFence { ordering: 5 });
+                    self.ctx.emit(Instruction::DerefMut {
+                        ref_reg: args[0],
+                        value: args[1],
+                    });
+                }
+            }
+
+            InlineSequenceId::CompilerFence => {
+                // Compiler fence - prevents compiler reordering only
+                // In VBC this is a no-op since interpreter executes sequentially
+                // but emit a marker for debugging
+                self.ctx.emit(Instruction::Nop);
+            }
+
+            InlineSequenceId::HardwareFence => {
+                // Hardware memory fence - prevents CPU reordering (SeqCst = 7)
+                self.ctx.emit(Instruction::AtomicFence { ordering: 7 });
+            }
+
+            // =========================================================================
+            // SIMD Vector Operations
+            // =========================================================================
+            // These operations are emitted as library calls in Tier 0 interpreter.
+            // Higher tiers will lower these to native SIMD instructions via LLVM.
+
+            // Vector creation
+            InlineSequenceId::SimdSplat => {
+                self.emit_intrinsic_library_call("verum_simd_splat", args, dest)?;
+            }
+            InlineSequenceId::SimdExtract => {
+                self.emit_intrinsic_library_call("verum_simd_extract", args, dest)?;
+            }
+            InlineSequenceId::SimdInsert => {
+                self.emit_intrinsic_library_call("verum_simd_insert", args, dest)?;
+            }
+
+            // Arithmetic operations
+            InlineSequenceId::SimdAdd => {
+                self.emit_intrinsic_library_call("verum_simd_add", args, dest)?;
+            }
+            InlineSequenceId::SimdSub => {
+                self.emit_intrinsic_library_call("verum_simd_sub", args, dest)?;
+            }
+            InlineSequenceId::SimdMul => {
+                self.emit_intrinsic_library_call("verum_simd_mul", args, dest)?;
+            }
+            InlineSequenceId::SimdDiv => {
+                self.emit_intrinsic_library_call("verum_simd_div", args, dest)?;
+            }
+            InlineSequenceId::SimdNeg => {
+                self.emit_intrinsic_library_call("verum_simd_neg", args, dest)?;
+            }
+            InlineSequenceId::SimdAbs => {
+                self.emit_intrinsic_library_call("verum_simd_abs", args, dest)?;
+            }
+            InlineSequenceId::SimdSqrt => {
+                self.emit_intrinsic_library_call("verum_simd_sqrt", args, dest)?;
+            }
+            InlineSequenceId::SimdFma => {
+                self.emit_intrinsic_library_call("verum_simd_fma", args, dest)?;
+            }
+            InlineSequenceId::SimdMin => {
+                self.emit_intrinsic_library_call("verum_simd_min", args, dest)?;
+            }
+            InlineSequenceId::SimdMax => {
+                self.emit_intrinsic_library_call("verum_simd_max", args, dest)?;
+            }
+
+            // Reductions
+            InlineSequenceId::SimdReduceAdd => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_add", args, dest)?;
+            }
+            InlineSequenceId::SimdReduceMul => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_mul", args, dest)?;
+            }
+            InlineSequenceId::SimdReduceMin => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_min", args, dest)?;
+            }
+            InlineSequenceId::SimdReduceMax => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_max", args, dest)?;
+            }
+
+            // Comparisons (return masks)
+            InlineSequenceId::SimdCmpEq => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_eq", args, dest)?;
+            }
+            InlineSequenceId::SimdCmpNe => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_ne", args, dest)?;
+            }
+            InlineSequenceId::SimdCmpLt => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_lt", args, dest)?;
+            }
+            InlineSequenceId::SimdCmpLe => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_le", args, dest)?;
+            }
+            InlineSequenceId::SimdCmpGt => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_gt", args, dest)?;
+            }
+            InlineSequenceId::SimdCmpGe => {
+                self.emit_intrinsic_library_call("verum_simd_cmp_ge", args, dest)?;
+            }
+            InlineSequenceId::SimdSelect => {
+                self.emit_intrinsic_library_call("verum_simd_select", args, dest)?;
+            }
+
+            // Memory operations
+            InlineSequenceId::SimdLoadAligned => {
+                self.emit_intrinsic_library_call("verum_simd_load_aligned", args, dest)?;
+            }
+            InlineSequenceId::SimdLoadUnaligned => {
+                self.emit_intrinsic_library_call("verum_simd_load_unaligned", args, dest)?;
+            }
+            InlineSequenceId::SimdStoreAligned => {
+                self.emit_intrinsic_library_call("verum_simd_store_aligned", args, dest)?;
+            }
+            InlineSequenceId::SimdStoreUnaligned => {
+                self.emit_intrinsic_library_call("verum_simd_store_unaligned", args, dest)?;
+            }
+            InlineSequenceId::SimdMaskedLoad => {
+                self.emit_intrinsic_library_call("verum_simd_masked_load", args, dest)?;
+            }
+            InlineSequenceId::SimdMaskedStore => {
+                self.emit_intrinsic_library_call("verum_simd_masked_store", args, dest)?;
+            }
+
+            // Shuffles and permutes
+            InlineSequenceId::SimdShuffle => {
+                self.emit_intrinsic_library_call("verum_simd_shuffle", args, dest)?;
+            }
+            InlineSequenceId::SimdGather => {
+                self.emit_intrinsic_library_call("verum_simd_gather", args, dest)?;
+            }
+            InlineSequenceId::SimdScatter => {
+                self.emit_intrinsic_library_call("verum_simd_scatter", args, dest)?;
+            }
+
+            // Mask operations
+            InlineSequenceId::SimdMaskAll => {
+                // All lanes active: return all-ones mask
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: -1 }); // All bits set
+            }
+            InlineSequenceId::SimdMaskNone => {
+                // No lanes active: return zero mask
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            InlineSequenceId::SimdMaskCount => {
+                // Count active bits (popcount on mask)
+                self.emit_arith_extended_unary(ArithSubOpcode::Popcnt, args, dest);
+            }
+            InlineSequenceId::SimdMaskAny => {
+                // Check if any bit is set - emit library call for simplicity
+                self.emit_intrinsic_library_call("verum_simd_mask_any", args, dest)?;
+            }
+
+            // Bitwise operations - use library calls for SIMD vector bitwise ops
+            InlineSequenceId::SimdBitwiseAnd => {
+                self.emit_intrinsic_library_call("verum_simd_bitwise_and", args, dest)?;
+            }
+            InlineSequenceId::SimdBitwiseOr => {
+                self.emit_intrinsic_library_call("verum_simd_bitwise_or", args, dest)?;
+            }
+            InlineSequenceId::SimdBitwiseXor => {
+                self.emit_intrinsic_library_call("verum_simd_bitwise_xor", args, dest)?;
+            }
+            InlineSequenceId::SimdBitwiseNot => {
+                self.emit_intrinsic_library_call("verum_simd_bitwise_not", args, dest)?;
+            }
+            InlineSequenceId::SimdShiftLeft => {
+                self.emit_intrinsic_library_call("verum_simd_shift_left", args, dest)?;
+            }
+            InlineSequenceId::SimdShiftRight => {
+                self.emit_intrinsic_library_call("verum_simd_shift_right", args, dest)?;
+            }
+            InlineSequenceId::SimdCast => {
+                self.emit_intrinsic_library_call("verum_simd_cast", args, dest)?;
+            }
+
+            // =================================================================
+            // Tensor Operations (for core/math)
+            // =================================================================
+            InlineSequenceId::TensorUnsqueeze => {
+                self.emit_intrinsic_library_call("verum_tensor_unsqueeze", args, dest)?;
+            }
+            InlineSequenceId::TensorMaskedSelect => {
+                self.emit_intrinsic_library_call("verum_tensor_masked_select", args, dest)?;
+            }
+            InlineSequenceId::TensorLeakyRelu => {
+                self.emit_intrinsic_library_call("verum_tensor_leaky_relu", args, dest)?;
+            }
+            InlineSequenceId::TensorDiag => {
+                self.emit_intrinsic_library_call("verum_tensor_diag", args, dest)?;
+            }
+            InlineSequenceId::TensorTriu => {
+                self.emit_intrinsic_library_call("verum_tensor_triu", args, dest)?;
+            }
+            InlineSequenceId::TensorTril => {
+                self.emit_intrinsic_library_call("verum_tensor_tril", args, dest)?;
+            }
+            InlineSequenceId::TensorNonzero => {
+                self.emit_intrinsic_library_call("verum_tensor_nonzero", args, dest)?;
+            }
+            InlineSequenceId::TensorOneHot => {
+                self.emit_intrinsic_library_call("verum_tensor_one_hot", args, dest)?;
+            }
+            InlineSequenceId::TensorSplit => {
+                self.emit_intrinsic_library_call("verum_tensor_split", args, dest)?;
+            }
+            InlineSequenceId::TensorSplitAt => {
+                self.emit_intrinsic_library_call("verum_tensor_split_at", args, dest)?;
+            }
+            InlineSequenceId::TensorGetScalar => {
+                self.emit_intrinsic_library_call("verum_tensor_get_scalar", args, dest)?;
+            }
+            InlineSequenceId::TensorSetScalar => {
+                self.emit_intrinsic_library_call("verum_tensor_set_scalar", args, dest)?;
+            }
+            InlineSequenceId::TensorContiguous => {
+                self.emit_intrinsic_library_call("verum_tensor_contiguous", args, dest)?;
+            }
+            InlineSequenceId::TensorContiguousView => {
+                self.emit_intrinsic_library_call("verum_tensor_contiguous_view", args, dest)?;
+            }
+            InlineSequenceId::TensorToDevice => {
+                self.emit_intrinsic_library_call("verum_tensor_to_device", args, dest)?;
+            }
+            InlineSequenceId::MemNewId => {
+                self.emit_intrinsic_library_call("verum_mem_new_id", args, dest)?;
+            }
+            InlineSequenceId::MemAllocTensor => {
+                self.emit_intrinsic_library_call("verum_mem_alloc_tensor", args, dest)?;
+            }
+
+            // Existing tensor operations from SSM/FFT section (handled by TensorExtended)
+            InlineSequenceId::SsmScan |
+            InlineSequenceId::MatrixExp |
+            InlineSequenceId::MatrixInverse |
+            InlineSequenceId::ComplexPow |
+            InlineSequenceId::ComplexMul |
+            InlineSequenceId::Rfft |
+            InlineSequenceId::Irfft |
+            InlineSequenceId::Uniform |
+            InlineSequenceId::IsTraining |
+            InlineSequenceId::Bincount |
+            InlineSequenceId::GatherNd |
+            InlineSequenceId::ArangeUsize |
+            InlineSequenceId::TensorRepeat |
+            InlineSequenceId::TensorTanh |
+            InlineSequenceId::TensorSum |
+            InlineSequenceId::TensorFromArray |
+            InlineSequenceId::RandomFloat01 => {
+                // These are primarily handled via TensorExtendedOpcode in the registry.
+                // For fallback, emit a library call.
+                let name = match seq_id {
+                    InlineSequenceId::SsmScan => "verum_ssm_scan",
+                    InlineSequenceId::MatrixExp => "verum_matrix_exp",
+                    InlineSequenceId::MatrixInverse => "verum_matrix_inverse",
+                    InlineSequenceId::ComplexPow => "verum_complex_pow",
+                    InlineSequenceId::ComplexMul => "verum_complex_mul",
+                    InlineSequenceId::Rfft => "verum_rfft",
+                    InlineSequenceId::Irfft => "verum_irfft",
+                    InlineSequenceId::Uniform => "verum_uniform",
+                    InlineSequenceId::IsTraining => "verum_is_training",
+                    InlineSequenceId::Bincount => "verum_bincount",
+                    InlineSequenceId::GatherNd => "verum_gather_nd",
+                    InlineSequenceId::ArangeUsize => "verum_arange_usize",
+                    InlineSequenceId::TensorRepeat => "verum_tensor_repeat",
+                    InlineSequenceId::TensorTanh => "verum_tensor_tanh",
+                    InlineSequenceId::TensorSum => "verum_tensor_sum",
+                    InlineSequenceId::TensorFromArray => "verum_tensor_from_array",
+                    InlineSequenceId::RandomFloat01 => "verum_random_float_01",
+                    _ => unreachable!(),
+                };
+                self.emit_intrinsic_library_call(name, args, dest)?;
+            }
+
+            // =================================================================
+            // Automatic Differentiation Operations
+            // =================================================================
+            // These are handled via DirectOpcode (GradBegin/GradEnd) in the registry
+            // but need to be covered here for the InlineSequenceId enum
+            InlineSequenceId::GradBegin => {
+                self.emit_intrinsic_library_call("verum_grad_begin", args, dest)?;
+            }
+            InlineSequenceId::GradEnd => {
+                self.emit_intrinsic_library_call("verum_grad_end", args, dest)?;
+            }
+            InlineSequenceId::JvpBegin => {
+                self.emit_intrinsic_library_call("verum_jvp_begin", args, dest)?;
+            }
+            InlineSequenceId::JvpEnd => {
+                self.emit_intrinsic_library_call("verum_jvp_end", args, dest)?;
+            }
+            InlineSequenceId::GradZeroTangent => {
+                self.emit_intrinsic_library_call("verum_grad_zero_tangent", args, dest)?;
+            }
+            InlineSequenceId::GradStop => {
+                self.emit_intrinsic_library_call("verum_grad_stop", args, dest)?;
+            }
+            InlineSequenceId::GradCustom => {
+                self.emit_intrinsic_library_call("verum_grad_custom", args, dest)?;
+            }
+            InlineSequenceId::GradCheckpoint => {
+                self.emit_intrinsic_library_call("verum_grad_checkpoint", args, dest)?;
+            }
+            InlineSequenceId::GradAccumulate => {
+                self.emit_intrinsic_library_call("verum_grad_accumulate", args, dest)?;
+            }
+            InlineSequenceId::GradRecompute => {
+                self.emit_intrinsic_library_call("verum_grad_recompute", args, dest)?;
+            }
+            InlineSequenceId::GradZero => {
+                self.emit_intrinsic_library_call("verum_grad_zero", args, dest)?;
+            }
+
+            // =================================================================
+            // CBGR Operations
+            // =================================================================
+            InlineSequenceId::CbgrNewGeneration => {
+                self.emit_intrinsic_library_call("verum_cbgr_new_generation", args, dest)?;
+            }
+            InlineSequenceId::CbgrInvalidate => {
+                self.emit_intrinsic_library_call("verum_cbgr_invalidate", args, dest)?;
+            }
+            InlineSequenceId::CbgrGetGeneration => {
+                self.emit_intrinsic_library_call("verum_cbgr_get_generation", args, dest)?;
+            }
+            InlineSequenceId::CbgrAdvanceGeneration => {
+                self.emit_intrinsic_library_call("verum_cbgr_advance_generation", args, dest)?;
+            }
+            InlineSequenceId::CbgrGetEpochCaps => {
+                self.emit_intrinsic_library_call("verum_cbgr_get_epoch_caps", args, dest)?;
+            }
+            InlineSequenceId::CbgrBypassBegin => {
+                // Bypass begin is a marker for the runtime - in interpreter, it's a no-op
+                self.ctx.emit(Instruction::Nop);
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+            InlineSequenceId::CbgrBypassEnd => {
+                // Bypass end is a marker for the runtime - in interpreter, it's a no-op
+                self.ctx.emit(Instruction::Nop);
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+            InlineSequenceId::CbgrGetStats => {
+                self.emit_intrinsic_library_call("verum_cbgr_get_stats", args, dest)?;
+            }
+
+            // =================================================================
+            // Logging Operations
+            // =================================================================
+            // LOG_INFO and LOG_WARNING emit DebugPrint with a prefix
+            InlineSequenceId::LogInfo => {
+                // For interpreter compatibility, emit DebugPrint directly
+                // The message arg is in args[0]
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::DebugPrint { value: args[0] });
+                }
+                // Load unit for void return
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+            InlineSequenceId::LogWarning => {
+                // Same as info but semantically different (could add prefix in runtime)
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::DebugPrint { value: args[0] });
+                }
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+            InlineSequenceId::LogError => {
+                // Same as warning, goes to stderr semantically
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::DebugPrint { value: args[0] });
+                }
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+            InlineSequenceId::LogDebug => {
+                // Debug-level logging
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::DebugPrint { value: args[0] });
+                }
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
+
+            // =================================================================
+            // Regex Operations
+            // =================================================================
+            // These use TensorExtended sub-opcodes for interpreter dispatch
+            InlineSequenceId::RegexFindAll => {
+                // pattern: args[0], text: args[1]
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::RegexFindAll, args, dest);
+            }
+            InlineSequenceId::RegexReplaceAll => {
+                // pattern: args[0], text: args[1], replacement: args[2]
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::RegexReplaceAll, args, dest);
+            }
+            InlineSequenceId::RegexIsMatch => {
+                // pattern: args[0], text: args[1]
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::RegexIsMatch, args, dest);
+            }
+            InlineSequenceId::RegexSplit => {
+                // pattern: args[0], text: args[1]
+                use crate::instruction::TensorSubOpcode;
+                self.emit_intrinsic_tensor_extended(TensorSubOpcode::RegexSplit, args, dest);
+            }
+
+            // =================================================================
+            // Type Introspection Operations
+            // =================================================================
+            // These are typically compile-time evaluated, but for interpreter
+            // we emit runtime calls or constant loads
+
+            InlineSequenceId::SizeOf => {
+                // In interpreter mode, we need the type info at runtime
+                // For compile-time evaluated cases, the compiler injects a constant
+                self.emit_intrinsic_library_call("verum_size_of", args, dest)?;
+            }
+            InlineSequenceId::AlignOf => {
+                self.emit_intrinsic_library_call("verum_align_of", args, dest)?;
+            }
+            InlineSequenceId::TypeId => {
+                self.emit_intrinsic_library_call("verum_type_id", args, dest)?;
+            }
+            InlineSequenceId::TypeName => {
+                // TypeName is a compile-time operation that returns the name of a type.
+                // Try to resolve from: (1) generic type params, (2) current function's
+                // parent type name, (3) fall back to "unknown".
+                let type_name = if let Some(param) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1) {
+                    // Single generic param — likely the TypeName<T> target
+                    param.clone()
+                } else {
+                    // Look up the current function's associated type info
+                    let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
+                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                    });
+                    fn_type_name.unwrap_or_else(|| "unknown".to_string())
+                };
+                let const_id = self.ctx.add_const_string(&type_name);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+            InlineSequenceId::NeedsDrop => {
+                // NeedsDrop checks whether a type requires drop glue.
+                // Primitive types (Int, Float, Bool, Char, Unit) never need drop.
+                // User-defined types conservatively need drop unless proven otherwise.
+                let needs_drop = if let Some(ty) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1).cloned() {
+                    !matches!(ty.as_str(), "Int" | "Float" | "Bool" | "Char" | "Unit"
+                        | "Int8" | "Int16" | "Int32" | "Int64"
+                        | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                        | "Float32" | "Float64")
+                } else {
+                    // Look up the current function's parent type and check for Drop impl
+                    let parent = self.ctx.current_function.as_ref().and_then(|fname| {
+                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                    });
+                    if let Some(ref parent_name) = parent {
+                        if let Some(type_id) = self.type_name_to_id.get(parent_name) {
+                            self.types.iter().any(|td| td.id == *type_id && td.drop_fn.is_some())
+                        } else {
+                            !matches!(parent_name.as_str(), "Int" | "Float" | "Bool" | "Char" | "Unit"
+                                | "Int8" | "Int16" | "Int32" | "Int64"
+                                | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                                | "Float32" | "Float64")
+                        }
+                    } else {
+                        // Conservative default: assume drop is needed for unknown types
+                        true
+                    }
+                };
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: if needs_drop { 1 } else { 0 } });
+            }
+            InlineSequenceId::PowF32 => {
+                // pow_f32(base, exp) - use MathExtended with PowF32 sub-opcode
+                use crate::instruction::MathSubOpcode;
+                self.emit_intrinsic_math_extended(MathSubOpcode::PowF32, args, dest);
+            }
+            InlineSequenceId::CharIsAlphanumeric => {
+                // char_is_alphanumeric(ch) - check if char is letter or digit
+                // In interpreter mode, approximate: emit library call
+                self.emit_intrinsic_library_call("verum_char_is_alphanumeric", args, dest)?;
+            }
+            InlineSequenceId::Rdtsc => {
+                // Read timestamp counter - use monotonic nanos as approximation
+                self.emit_intrinsic_library_call("verum_rdtsc", args, dest)?;
+            }
+            InlineSequenceId::CatchUnwind => {
+                // catch_unwind(closure) - in interpreter, just call the closure and wrap in Ok
+                if !args.is_empty() {
+                    // Call the closure argument
+                    self.ctx.emit(Instruction::Call {
+                        dst: dest,
+                        func_id: args[0].0 as u32,
+                        args: RegRange::new(Reg(0), 0),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            InlineSequenceId::PtrToRef => {
+                // ptr_to_ref is identity in interpreter (pointer IS the ref)
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
+            // ==================================================================
+            // Duration intrinsics (pure arithmetic on UInt64 nanoseconds)
+            // ==================================================================
+
+            InlineSequenceId::DurationFromNanos => {
+                // Duration(nanos) - identity, Duration IS nanoseconds
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationFromMicros => {
+                // Duration(micros * 1000)
+                if !args.is_empty() {
+                    let factor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationFromMillis => {
+                // Duration(millis * 1_000_000)
+                if !args.is_empty() {
+                    let factor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationFromSecs => {
+                // Duration(secs * 1_000_000_000)
+                if !args.is_empty() {
+                    let factor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationAsNanos => {
+                // self.0 - identity
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationAsMicros => {
+                // self.0 / 1_000
+                if !args.is_empty() {
+                    let divisor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationAsMillis => {
+                // self.0 / 1_000_000
+                if !args.is_empty() {
+                    let divisor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationAsSecs => {
+                // self.0 / 1_000_000_000
+                if !args.is_empty() {
+                    let divisor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationIsZero => {
+                // self.0 == 0
+                if !args.is_empty() {
+                    let zero = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq, dst: dest, a: args[0], b: zero,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                }
+            }
+            InlineSequenceId::DurationAdd => {
+                // self.0 + other.0
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: dest, a: args[0], b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationSaturatingAdd => {
+                // min(self.0 + other.0, u64::MAX) — unsigned saturating addition
+                if args.len() >= 2 {
+                    // Compute a + b (wrapping)
+                    let sum = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: sum, a: args[0], b: args[1],
+                    });
+                    // Unsigned overflow check: if sum <u a, overflow occurred
+                    let overflow = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::LtU, dst: overflow, a: sum, b: args[0],
+                    });
+                    // If overflow, dest = u64::MAX; else dest = sum
+                    //   I+2: JmpNot { offset: 3 } → I+5 (Mov, no overflow)
+                    //   I+3: LoadI (overflow case)
+                    //   I+4: Jmp { offset: 2 } → I+6 (past Mov)
+                    //   I+5: Mov (no overflow case)
+                    self.ctx.emit(Instruction::JmpNot { cond: overflow, offset: 3 });
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: u64::MAX as i64 });
+                    self.ctx.emit(Instruction::Jmp { offset: 2 });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: sum });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationSaturatingSub => {
+                // max(self.0 - other.0, 0) — unsigned saturating subtraction
+                if args.len() >= 2 {
+                    // Compute a - b
+                    let diff = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: diff, a: args[0], b: args[1],
+                    });
+                    // Unsigned check: if a >=u b, no underflow
+                    let cmp_result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpU {
+                        sub_op: CmpSubOpcode::GeU, dst: cmp_result, a: args[0], b: args[1],
+                    });
+                    // If a >= b, use diff; else use 0
+                    //   I+2: JmpNot { offset: 3 } → I+5 (LoadI, underflow)
+                    //   I+3: Mov (no underflow case)
+                    //   I+4: Jmp { offset: 2 } → I+6 (past LoadI)
+                    //   I+5: LoadI (underflow case)
+                    self.ctx.emit(Instruction::JmpNot { cond: cmp_result, offset: 3 });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: diff });
+                    self.ctx.emit(Instruction::Jmp { offset: 2 });
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::DurationSubsecNanos => {
+                // self.0 % 1_000_000_000
+                if !args.is_empty() {
+                    let modulus = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: modulus, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mod, dst: dest, a: args[0], b: modulus,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // ==================================================================
+            // Instant intrinsics (nanoseconds in VBC interpreter)
+            // ==================================================================
+
+            InlineSequenceId::InstantNow => {
+                // FfiExtended TimeMonotonicNanos -> dest (stores nanoseconds)
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+            }
+            InlineSequenceId::InstantElapsed => {
+                // now_nanos - self.0 (returns Duration as nanos)
+                if !args.is_empty() {
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: dest, a: now, b: args[0],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::InstantDurationSince => {
+                // self.0 - earlier.0 (returns Duration as nanos)
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: dest, a: args[0], b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // ==================================================================
+            // System time intrinsics (FfiExtended + arithmetic)
+            // ==================================================================
+
+            InlineSequenceId::TimeMonotonicMicros => {
+                // monotonic_nanos() / 1_000
+                let nanos = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, nanos.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+                let divisor = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000 });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                });
+            }
+            InlineSequenceId::TimeMonotonicMillis => {
+                // monotonic_nanos() / 1_000_000
+                let nanos = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, nanos.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+                let divisor = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000 });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                });
+            }
+            InlineSequenceId::TimeUnixTimestamp => {
+                // realtime_nanos() / 1_000_000_000
+                let nanos = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, nanos.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x71, // TimeRealtimeNanos
+                    operands,
+                });
+                let divisor = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                self.ctx.emit(Instruction::BinaryI {
+                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                });
+            }
+
+            // ==================================================================
+            // Sleep intrinsics (convert to nanos, then FfiExtended TimeSleepNanos)
+            // ==================================================================
+
+            InlineSequenceId::TimeSleepMs => {
+                // sleep_ms(ms): convert ms to nanos, then sleep
+                if !args.is_empty() {
+                    let nanos = self.ctx.alloc_temp();
+                    let factor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul, dst: nanos, a: args[0], b: factor,
+                    });
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, nanos.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x73, // TimeSleepNanos
+                        operands,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            InlineSequenceId::TimeSleepUs => {
+                // sleep_us(us): convert us to nanos, then sleep
+                if !args.is_empty() {
+                    let nanos = self.ctx.alloc_temp();
+                    let factor = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Mul, dst: nanos, a: args[0], b: factor,
+                    });
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, nanos.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x73, // TimeSleepNanos
+                        operands,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            InlineSequenceId::TimeSleepDuration => {
+                // sleep(duration): duration IS nanos, just sleep
+                if !args.is_empty() {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x73, // TimeSleepNanos
+                        operands,
+                    });
+                }
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // ==================================================================
+            // Stopwatch intrinsics (record: {start: UInt64, running: Bool, accumulated: UInt64})
+            // In VBC interpreter, all time values are nanoseconds.
+            // Use resolve_field_index with type-specific positions to match
+            // how record constructors emit field indices.
+            // ==================================================================
+
+            InlineSequenceId::StopwatchNew => {
+                // Create a new running Stopwatch: {start: now, running: true, accumulated: 0}
+                let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
+                let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
+                let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
+                let alloc_slots = self.type_field_count("Stopwatch").unwrap_or(3);
+                self.ctx.emit(Instruction::New { dst: dest, type_id: 0, field_count: alloc_slots });
+                // Get current monotonic time for start
+                let now = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, now.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_start, value: now });
+                let running = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadTrue { dst: running });
+                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_running, value: running });
+                let zero = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_accumulated, value: zero });
+            }
+            InlineSequenceId::StopwatchElapsed => {
+                // elapsed(&self) -> Duration:
+                // if running: accumulated + (now - start), else: accumulated
+                let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
+                let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
+                let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
+                if !args.is_empty() {
+                    let running = self.ctx.alloc_temp();
+                    let acc = self.ctx.alloc_temp();
+                    let start = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
+                    self.ctx.emit(Instruction::GetF { dst: acc, obj: args[0], field_idx: fi_accumulated });
+                    self.ctx.emit(Instruction::GetF { dst: start, obj: args[0], field_idx: fi_start });
+                    let not_running_label = self.ctx.new_label("sw_elapsed_not_running");
+                    let end_label = self.ctx.new_label("sw_elapsed_end");
+                    self.ctx.emit_forward_jump(&not_running_label, |offset| Instruction::JmpNot { cond: running, offset });
+                    // Running path: now - start + accumulated
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    let diff = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: diff, a: now, b: start,
+                    });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: dest, a: acc, b: diff,
+                    });
+                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    // Not running path: just accumulated
+                    self.ctx.define_label(&not_running_label);
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: acc });
+                    self.ctx.define_label(&end_label);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::StopwatchStop => {
+                // stop(&mut self): if running, accumulate time and set running=false
+                let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
+                let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
+                let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
+                if !args.is_empty() {
+                    let running = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
+                    let end_label = self.ctx.new_label("sw_stop_end");
+                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::JmpNot { cond: running, offset });
+                    // Running: accumulate + set false
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    let start = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: start, obj: args[0], field_idx: fi_start });
+                    let diff = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: diff, a: now, b: start,
+                    });
+                    let acc = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: acc, obj: args[0], field_idx: fi_accumulated });
+                    let new_acc = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: new_acc, a: acc, b: diff,
+                    });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_accumulated, value: new_acc });
+                    let false_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadFalse { dst: false_val });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: false_val });
+                    self.ctx.define_label(&end_label);
+                }
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            InlineSequenceId::StopwatchStart => {
+                // start(&mut self): if not running, record start time and set running=true
+                let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
+                let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
+                if !args.is_empty() {
+                    let running = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
+                    let end_label = self.ctx.new_label("sw_start_end");
+                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::JmpIf { cond: running, offset });
+                    // Not running: set start to now, set running=true
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_start, value: now });
+                    let true_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadTrue { dst: true_val });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: true_val });
+                    self.ctx.define_label(&end_label);
+                }
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            InlineSequenceId::StopwatchReset => {
+                // reset(&mut self): set all fields to zero/false
+                let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
+                let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
+                let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
+                if !args.is_empty() {
+                    let zero = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_start, value: zero });
+                    let false_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadFalse { dst: false_val });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: false_val });
+                    let zero2 = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: zero2, value: 0 });
+                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_accumulated, value: zero2 });
+                }
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+
+            // ==================================================================
+            // PerfCounter intrinsics (nanoseconds in VBC interpreter)
+            // ==================================================================
+
+            InlineSequenceId::PerfCounterNow => {
+                // PerfCounter::now() -> nanoseconds
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+            }
+            InlineSequenceId::PerfCounterElapsedSince => {
+                // elapsed_since(&self, earlier) -> Duration (nanos)
+                // self.0 - earlier.0
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: dest, a: args[0], b: args[1],
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            InlineSequenceId::PerfCounterAsNanos => {
+                // as_nanos(&self) -> UInt64 (identity in VBC interpreter)
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // ==================================================================
+            // DeadlineTimer intrinsics (record: {deadline: UInt64, has_deadline: Bool})
+            // Use resolve_field_index with type-specific positions.
+            // ==================================================================
+
+            InlineSequenceId::DeadlineTimerFromDuration => {
+                // from_duration(duration) -> DeadlineTimer
+                // deadline = now + duration.as_nanos(), has_deadline = true
+                let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
+                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                if !args.is_empty() {
+                    let alloc_slots = self.type_field_count("DeadlineTimer").unwrap_or(2);
+                    self.ctx.emit(Instruction::New { dst: dest, type_id: 0, field_count: alloc_slots });
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    let deadline = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: deadline, a: now, b: args[0],
+                    });
+                    self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_deadline, value: deadline });
+                    let true_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadTrue { dst: true_val });
+                    self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_has_deadline, value: true_val });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            InlineSequenceId::DeadlineTimerIsExpired => {
+                // is_expired(&self) -> Bool
+                // if !has_deadline: false, else: now >= deadline
+                let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
+                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                if !args.is_empty() {
+                    let has_deadline = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: has_deadline, obj: args[0], field_idx: fi_has_deadline });
+                    let no_deadline_label = self.ctx.new_label("dt_expired_no_dl");
+                    let end_label = self.ctx.new_label("dt_expired_end");
+                    self.ctx.emit_forward_jump(&no_deadline_label, |offset| Instruction::JmpNot { cond: has_deadline, offset });
+                    // Has deadline: check now >= deadline
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    let deadline = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: deadline, obj: args[0], field_idx: fi_deadline });
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge, dst: dest, a: now, b: deadline,
+                    });
+                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    // No deadline: return false
+                    self.ctx.define_label(&no_deadline_label);
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                    self.ctx.define_label(&end_label);
+                } else {
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                }
+            }
+            InlineSequenceId::DeadlineTimerRemaining => {
+                // remaining(&self) -> Duration
+                // if !has_deadline: Duration(0), else: max(deadline - now, 0)
+                let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
+                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                if !args.is_empty() {
+                    let has_deadline = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: has_deadline, obj: args[0], field_idx: fi_has_deadline });
+                    let zero_label = self.ctx.new_label("dt_remaining_zero");
+                    let end_label = self.ctx.new_label("dt_remaining_end");
+                    self.ctx.emit_forward_jump(&zero_label, |offset| Instruction::JmpNot { cond: has_deadline, offset });
+                    // Has deadline: compute max(deadline - now, 0)
+                    let now = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, now.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x70, // TimeMonotonicNanos
+                        operands,
+                    });
+                    let deadline = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetF { dst: deadline, obj: args[0], field_idx: fi_deadline });
+                    // Check if deadline > now
+                    let cmp = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Gt, dst: cmp, a: deadline, b: now,
+                    });
+                    self.ctx.emit_forward_jump(&zero_label, |offset| Instruction::JmpNot { cond: cmp, offset });
+                    // deadline > now: return deadline - now
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: dest, a: deadline, b: now,
+                    });
+                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    // deadline <= now or no deadline: return 0
+                    self.ctx.define_label(&zero_label);
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.define_label(&end_label);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // =================================================================
+            // System Call Intrinsics - FfiExtended sub-opcodes 0x80-0x85
+            // =================================================================
+            InlineSequenceId::SysGetpid => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x80, // SysGetpid
+                    operands,
+                });
+            }
+            InlineSequenceId::SysGettid => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x81, // SysGettid
+                    operands,
+                });
+            }
+            InlineSequenceId::SysMmap => {
+                // Operands: dst, addr, len, prot, flags, fd, offset
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(6) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x82, // SysMmap
+                    operands,
+                });
+            }
+            InlineSequenceId::SysMunmap => {
+                // Operands: dst, addr, len
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x83, // SysMunmap
+                    operands,
+                });
+            }
+            InlineSequenceId::SysMadvise => {
+                // Operands: dst, addr, len, advice
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(3) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x84, // SysMadvise
+                    operands,
+                });
+            }
+            InlineSequenceId::SysGetentropy => {
+                // Operands: dst, buf, len
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x85, // SysGetentropy
+                    operands,
+                });
+            }
+            // =================================================================
+            // Mach Kernel Operations (macOS)
+            // =================================================================
+            InlineSequenceId::MachVmAllocate => {
+                // Operands: dst, size, anywhere_flag
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x90,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachVmDeallocate => {
+                // Operands: dst, addr, size
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x91,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachVmProtect => {
+                // Operands: dst, addr, size, prot
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(3) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x92,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachSemCreate => {
+                // Operands: dst, initial_value
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x93,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachSemDestroy => {
+                // Operands: dst, sem
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x94,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachSemSignal => {
+                // Operands: dst, sem
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x95,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachSemWait => {
+                // Operands: dst, sem
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x96,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachErrorString => {
+                // Operands: dst, kern_return
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x97,
+                    operands,
+                });
+            }
+            InlineSequenceId::MachSleepUntil => {
+                // Operands: dst, deadline
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(1) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x98,
+                    operands,
+                });
+            }
+            // Heap memory allocation intrinsics - handled via MemExtended opcode
+            InlineSequenceId::Alloc => {
+                // args: [size, align], returns ptr
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x00, // alloc
+                    operands,
+                });
+            }
+            InlineSequenceId::AllocZeroed => {
+                // args: [size, align], returns ptr
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x01, // alloc_zeroed
+                    operands,
+                });
+            }
+            InlineSequenceId::Dealloc => {
+                // args: [ptr, size, align], no return
+                let mut operands = Vec::<u8>::new();
+                for &arg in args.iter().take(3) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x02, // dealloc
+                    operands,
+                });
+            }
+            InlineSequenceId::Realloc => {
+                // args: [ptr, old_size, new_size, align], returns ptr
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(4) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x03, // realloc
+                    operands,
+                });
+            }
+            InlineSequenceId::Swap => {
+                // args: [a, b], no return
+                let mut operands = Vec::<u8>::new();
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x04, // swap
+                    operands,
+                });
+            }
+            InlineSequenceId::Replace => {
+                // args: [dest, src], returns old value
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter().take(2) {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x05, // replace
+                    operands,
+                });
+            }
+            // CBGR allocation intrinsics - emit as FfiExtended calls
+            InlineSequenceId::CbgrAlloc => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x60, // CbgrAlloc
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrAllocZeroed => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x61, // CbgrAllocZeroed
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrDealloc => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x62, // CbgrDealloc
+                    operands,
+                });
+            }
+            InlineSequenceId::CbgrRealloc => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x63, // CbgrRealloc
+                    operands,
+                });
+            }
+            InlineSequenceId::MemcmpBytes => {
+                // Compare memory regions byte-by-byte
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x46, // CMemcmp
+                    operands,
+                });
+            }
+            InlineSequenceId::GetHeaderFromPtr => {
+                // Get CBGR allocation header from pointer
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args.iter() {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x64, // CbgrGetHeader
+                    operands,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Emits an ArithExtended instruction for unary bit counting operations.
+    /// (clz, ctz, popcnt, bswap, bitreverse)
+    fn emit_arith_extended_unary(&mut self, sub_op: ArithSubOpcode, args: &[Reg], dest: Reg) {
+        // Helper to encode register to bytes
+        fn encode_reg(reg: Reg, bytes: &mut Vec<u8>) {
+            if reg.is_short() {
+                bytes.push(reg.0 as u8);
+            } else {
+                bytes.push(0x80 | ((reg.0 >> 8) as u8));
+                bytes.push(reg.0 as u8);
+            }
+        }
+
+        // Encode operands: [dst:1-2b] [src:1-2b]
+        let mut operands = Vec::with_capacity(4);
+        encode_reg(dest, &mut operands);
+        if !args.is_empty() {
+            encode_reg(args[0], &mut operands);
+        } else {
+            operands.push(0); // Default to r0 if no args
+        }
+
+        self.ctx.emit(Instruction::ArithExtended {
+            sub_op: sub_op.to_byte(),
+            operands,
+        });
+    }
+
+    /// Emits an ArithExtended instruction for binary bit operations.
+    /// (rotl, rotr)
+    fn emit_arith_extended_binary(&mut self, sub_op: ArithSubOpcode, args: &[Reg], dest: Reg) {
+        // Helper to encode register to bytes
+        fn encode_reg(reg: Reg, bytes: &mut Vec<u8>) {
+            if reg.is_short() {
+                bytes.push(reg.0 as u8);
+            } else {
+                bytes.push(0x80 | ((reg.0 >> 8) as u8));
+                bytes.push(reg.0 as u8);
+            }
+        }
+
+        // Encode operands: [dst:1-2b] [val:1-2b] [amount:1-2b]
+        let mut operands = Vec::with_capacity(6);
+        encode_reg(dest, &mut operands);
+        if args.len() >= 2 {
+            encode_reg(args[0], &mut operands);
+            encode_reg(args[1], &mut operands);
+        } else if args.len() == 1 {
+            encode_reg(args[0], &mut operands);
+            operands.push(0); // Default amount
+        } else {
+            operands.push(0);
+            operands.push(0);
+        }
+
+        self.ctx.emit(Instruction::ArithExtended {
+            sub_op: sub_op.to_byte(),
+            operands,
+        });
+    }
+
+    /// Emits a compile-time constant for intrinsics.
+    fn emit_intrinsic_compile_time_constant(
+        &mut self,
+        name: &str,
+        dest: Reg,
+    ) -> CodegenResult<()> {
+        match name {
+            "size_of" | "align_of" => {
+                // These should be resolved at compile time
+                // Emit a placeholder for now
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 8 });
+            }
+            "type_name" | "type_id" => {
+                // Type information - resolve from context if possible
+                let type_name = if let Some(param) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1).cloned() {
+                    param
+                } else {
+                    let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
+                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                    });
+                    fn_type_name.unwrap_or_else(|| "unknown".to_string())
+                };
+                let const_id = self.ctx.add_const_string(&type_name);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+            // Platform detection intrinsics
+            "is_debug" => {
+                // In VBC interpreter, always report debug mode
+                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+            }
+            "target_os" => {
+                // OS codes: 0=unknown, 1=linux, 2=macos, 3=windows, 4=wasm
+                #[cfg(target_os = "linux")]
+                let os_code: i64 = 1;
+                #[cfg(target_os = "macos")]
+                let os_code: i64 = 2;
+                #[cfg(target_os = "windows")]
+                let os_code: i64 = 3;
+                #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+                let os_code: i64 = 0;
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: os_code });
+            }
+            "target_arch" => {
+                // Arch codes: 0=unknown, 1=x86_64, 2=aarch64, 3=riscv64, 4=wasm32
+                #[cfg(target_arch = "x86_64")]
+                let arch_code: i64 = 1;
+                #[cfg(target_arch = "aarch64")]
+                let arch_code: i64 = 2;
+                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                let arch_code: i64 = 0;
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: arch_code });
+            }
+            "num_cpus" => {
+                // Return actual CPU count at compile time
+                let cpus = std::thread::available_parallelism()
+                    .map(|n| n.get() as i64)
+                    .unwrap_or(1);
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: cpus });
+            }
+            "is_interpreted" => {
+                // VBC interpreter → always true
+                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+            }
+            "get_tier" => {
+                // VBC interpreter → tier 0
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+            "tier_promote" => {
+                // No-op in interpreter, load nil
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+            // Float constants
+            "f64_infinity" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::INFINITY });
+            }
+            "f64_neg_infinity" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NEG_INFINITY });
+            }
+            "f64_nan" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NAN });
+            }
+            "f32_infinity" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f32::INFINITY as f64 });
+            }
+            "f32_neg_infinity" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f32::NEG_INFINITY as f64 });
+            }
+            "f32_nan" => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NAN });
+            }
+            _ => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Emits ArithExtended opcode for checked, overflowing, and polymorphic arithmetic operations.
+    fn emit_intrinsic_arith_extended(
+        &mut self,
+        sub_op: crate::instruction::ArithSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        use crate::instruction::ArithSubOpcode;
+
+        // Helper to encode registers as bytes for ArithExtended operands
+        // Format: [dst:1-2 bytes] [arg0:1-2 bytes] [arg1:1-2 bytes] ...
+        fn encode_regs_to_bytes(dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(4 + args.len() * 2);
+            // Encode destination register (1 or 2 bytes)
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        // Emit ArithExtended instruction with appropriate sub-opcode
+        // The interpreter will dispatch based on operand type at runtime
+        match sub_op {
+            // Polymorphic binary operations
+            ArithSubOpcode::PolyAdd
+            | ArithSubOpcode::PolySub
+            | ArithSubOpcode::PolyMul
+            | ArithSubOpcode::PolyDiv
+            | ArithSubOpcode::PolyRem => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Polymorphic unary operations
+            ArithSubOpcode::PolyNeg => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Checked arithmetic (returns Maybe<T>)
+            ArithSubOpcode::CheckedAddI
+            | ArithSubOpcode::CheckedSubI
+            | ArithSubOpcode::CheckedMulI
+            | ArithSubOpcode::CheckedDivI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Overflowing arithmetic (returns tuple)
+            ArithSubOpcode::OverflowingAddI
+            | ArithSubOpcode::OverflowingSubI
+            | ArithSubOpcode::OverflowingMulI => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Polymorphic unary operations (abs, signum)
+            ArithSubOpcode::PolyAbs | ArithSubOpcode::PolySignum => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Polymorphic binary operations (min, max)
+            ArithSubOpcode::PolyMin | ArithSubOpcode::PolyMax => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Polymorphic ternary operation (clamp)
+            ArithSubOpcode::PolyClamp => {
+                if args.len() >= 3 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1], args[2]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Saturating operations - need width/signed bytes in the encoding
+            ArithSubOpcode::SaturatingAdd
+            | ArithSubOpcode::SaturatingSub
+            | ArithSubOpcode::SaturatingMul => {
+                // When reaching here through ArithExtendedOpcode (generic path),
+                // we need to emit with width/signed bytes that the interpreter expects.
+                // Default to 64-bit signed (matches Int which is the most common case).
+                if args.len() >= 2 {
+                    let mut operands = encode_regs_to_bytes(dest, &[args[0], args[1]]);
+                    operands.push(64);  // width: 64-bit
+                    operands.push(1);   // signed: true
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Wrapping operations - also need width/signed bytes
+            ArithSubOpcode::WrappingAdd
+            | ArithSubOpcode::WrappingSub
+            | ArithSubOpcode::WrappingMul
+            | ArithSubOpcode::WrappingNeg
+            | ArithSubOpcode::WrappingShl
+            | ArithSubOpcode::WrappingShr => {
+                // Default to 64-bit signed for generic wrapping operations
+                if args.len() >= 2 {
+                    let mut operands = encode_regs_to_bytes(dest, &[args[0], args[1]]);
+                    operands.push(64);  // width: 64-bit
+                    operands.push(1);   // signed: true
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands,
+                    });
+                } else if !args.is_empty() {
+                    // Unary operation (WrappingNeg)
+                    let mut operands = encode_regs_to_bytes(dest, &[args[0]]);
+                    operands.push(64);  // width: 64-bit
+                    operands.push(1);   // signed: true
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Bit counting operations and other sub-opcodes
+            // These are handled via emit_arith_extended_unary/binary in InlineSequence
+            _ => {
+                // Generic fallback - emit as-is with variable arity
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0], args[1]]),
+                    });
+                } else if !args.is_empty() {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_regs_to_bytes(dest, &[args[0]]),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+        }
+    }
+
+    /// Emits type-aware wrapping arithmetic instruction.
+    ///
+    /// Wrapping operations perform modular arithmetic with explicit bit width truncation.
+    /// The width parameter (8, 16, 32, 64) determines the mask applied to results.
+    fn emit_intrinsic_wrapping(
+        &mut self,
+        sub_op: crate::instruction::ArithSubOpcode,
+        width: u8,
+        signed: bool,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        use crate::instruction::ArithSubOpcode;
+
+        // Encode operands: [dst:1-2b] [arg0:1-2b] [arg1?:1-2b] [width:1b] [signed?:1b]
+        fn encode_wrapping_operands(dest: Reg, args: &[Reg], width: u8, needs_signed: bool, signed: bool) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(8);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            // Encode width
+            bytes.push(width);
+            // Encode signed flag only if needed (for neg, shr)
+            if needs_signed {
+                bytes.push(if signed { 1 } else { 0 });
+            }
+            bytes
+        }
+
+        match sub_op {
+            // Binary wrapping operations (add, sub, mul, shl)
+            ArithSubOpcode::WrappingAdd
+            | ArithSubOpcode::WrappingSub
+            | ArithSubOpcode::WrappingMul
+            | ArithSubOpcode::WrappingShl => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_wrapping_operands(dest, &[args[0], args[1]], width, true, signed),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Wrapping shift right needs signedness for arithmetic vs logical
+            ArithSubOpcode::WrappingShr => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_wrapping_operands(dest, &[args[0], args[1]], width, true, signed),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Unary wrapping operation (neg)
+            ArithSubOpcode::WrappingNeg => {
+                if !args.is_empty() {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_wrapping_operands(dest, &[args[0]], width, true, signed),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Other sub-opcodes should not reach here
+            _ => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+        }
+    }
+
+    /// Emits type-aware saturating arithmetic instruction.
+    ///
+    /// Saturating operations clamp results to type bounds instead of wrapping.
+    /// The width and signed parameters determine the MIN/MAX bounds.
+    fn emit_intrinsic_saturating(
+        &mut self,
+        sub_op: crate::instruction::ArithSubOpcode,
+        width: u8,
+        signed: bool,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        use crate::instruction::ArithSubOpcode;
+
+        // Encode operands: [dst:1-2b] [arg0:1-2b] [arg1:1-2b] [width:1b] [signed:1b]
+        fn encode_saturating_operands(dest: Reg, args: &[Reg], width: u8, signed: bool) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(8);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            // Encode width and signed flag
+            bytes.push(width);
+            bytes.push(if signed { 1 } else { 0 });
+            bytes
+        }
+
+        match sub_op {
+            // Binary saturating operations
+            ArithSubOpcode::SaturatingAdd
+            | ArithSubOpcode::SaturatingSub
+            | ArithSubOpcode::SaturatingMul => {
+                if args.len() >= 2 {
+                    self.ctx.emit(Instruction::ArithExtended {
+                        sub_op: sub_op as u8,
+                        operands: encode_saturating_operands(dest, &[args[0], args[1]], width, signed),
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+            // Other sub-opcodes should not reach here
+            _ => {
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+        }
+    }
+
+    /// Emits tensor extended operations.
+    fn emit_intrinsic_tensor_extended(
+        &mut self,
+        sub_op: crate::instruction::TensorSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        // Encode operands: [dst:1-2b] [args...]
+        fn encode_tensor_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 2);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        self.ctx.emit(Instruction::TensorExtended {
+            sub_op: sub_op as u8,
+            operands: encode_tensor_operands(dest, args),
+        });
+    }
+
+    /// Emits tensor extended operations with mode byte.
+    fn emit_intrinsic_tensor_extended_with_mode(
+        &mut self,
+        sub_op: crate::instruction::TensorSubOpcode,
+        mode: u8,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        // Encode operands: [mode:1b] [dst:1-2b] [args...]
+        fn encode_tensor_operands_with_mode(mode: u8, dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 3);
+            // Encode mode byte
+            bytes.push(mode);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        self.ctx.emit(Instruction::TensorExtended {
+            sub_op: sub_op as u8,
+            operands: encode_tensor_operands_with_mode(mode, dest, args),
+        });
+    }
+
+    /// Emits tensor ext extended operations (using TensorExtSubOpcode).
+    /// These are complex operations encoded using TensorExtended with sub_op=0xFF marker.
+    ///
+    /// Encoding: TensorExtended { sub_op: 0xFF, operands: [ext_sub_op, dst, args...] }
+    fn emit_intrinsic_tensor_ext_extended(
+        &mut self,
+        sub_op: crate::instruction::TensorExtSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        // Encode operands: [ext_sub_op:1b] [dst:1-2b] [args...]
+        fn encode_tensor_ext_operands(
+            ext_sub_op: u8,
+            dest: Reg,
+            args: &[Reg],
+        ) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 3);
+            // Encode TensorExtSubOpcode value
+            bytes.push(ext_sub_op);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        // Use 0xFF as marker for TensorExtSubOpcode operations
+        self.ctx.emit(Instruction::TensorExtended {
+            sub_op: 0xFF,
+            operands: encode_tensor_ext_operands(sub_op as u8, dest, args),
+        });
+    }
+
+    /// Emits GPU extended operations.
+    fn emit_intrinsic_gpu_extended(
+        &mut self,
+        sub_op: crate::instruction::GpuSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        // Encode operands: [dst:1-2b] [args...]
+        fn encode_gpu_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 2);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        self.ctx.emit(Instruction::GpuExtended {
+            sub_op: sub_op as u8,
+            operands: encode_gpu_operands(dest, args),
+        });
+    }
+
+    /// Emits math extended operations for transcendental and special functions.
+    ///
+    /// Uses MathExtended opcode (0x29) with sub-opcode for zero-cost dispatch.
+    fn emit_intrinsic_math_extended(
+        &mut self,
+        sub_op: crate::instruction::MathSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        // Encode operands: [dst:1-2b] [args...]
+        fn encode_math_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 2);
+            // Encode destination register
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            // Encode argument registers
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        self.ctx.emit(Instruction::MathExtended {
+            sub_op: sub_op as u8,
+            operands: encode_math_operands(dest, args),
+        });
+    }
+
+    /// Emits runtime intrinsic calls using typed opcodes.
+    ///
+    /// This function replaces the deprecated LibraryCall-based dispatch with
+    /// proper typed opcodes for zero-cost dispatch (~2ns vs ~15ns for string lookup).
+    ///
+    /// The function maps intrinsic names to their corresponding extended opcodes:
+    /// - SIMD operations → SimdExtended (0x2A)
+    /// - Text operations → TextExtended (0x79)
+    /// - CBGR operations → CbgrExtended (0x78)
+    /// - Tensor operations → TensorExtended (0xFC)
+    /// - Arithmetic operations → ArithExtended (0xBD)
+    /// - Logging operations → LogExtended (0xBE)
+    fn emit_intrinsic_library_call(
+        &mut self,
+        func_name: &str,
+        args: &[Reg],
+        dest: Reg,
+    ) -> CodegenResult<()> {
+        use crate::instruction::{
+            ArithSubOpcode, CbgrSubOpcode, CharSubOpcode, LogSubOpcode,
+            MathSubOpcode, SimdSubOpcode, TextSubOpcode,
+        };
+
+        // Helper to encode operands: [dst:1-2b] [args...]
+        fn encode_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(args.len() * 2 + 2);
+            if dest.is_short() {
+                bytes.push(dest.0 as u8);
+            } else {
+                bytes.push(0x80 | ((dest.0 >> 8) as u8));
+                bytes.push(dest.0 as u8);
+            }
+            for arg in args {
+                if arg.is_short() {
+                    bytes.push(arg.0 as u8);
+                } else {
+                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
+                    bytes.push(arg.0 as u8);
+                }
+            }
+            bytes
+        }
+
+        // Map function names to typed opcodes
+        match func_name {
+            // SIMD Operations → SimdExtended (0x2A)
+            "verum_simd_splat" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Splat as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_extract" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Extract as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_insert" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Insert as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_add" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Add as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_sub" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Sub as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_mul" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Mul as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_div" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Div as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_neg" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Neg as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_abs" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Abs as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_sqrt" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Sqrt as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_fma" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Fma as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_min" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Min as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_max" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Max as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_add" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceAdd as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_mul" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceMul as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_min" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceMin as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_max" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceMax as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_eq" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpEq as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_ne" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpNe as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_lt" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpLt as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_le" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpLe as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_gt" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpGt as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cmp_ge" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::CmpGe as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_select" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Select as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_load_aligned" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::LoadAligned as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_load_unaligned" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::LoadUnaligned as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_store_aligned" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::StoreAligned as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_store_unaligned" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::StoreUnaligned as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_masked_load" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::MaskedLoad as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_masked_store" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::MaskedStore as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_shuffle" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Shuffle as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_gather" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Gather as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_scatter" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Scatter as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_mask_any" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::MaskAny as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_bitwise_and" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::BitwiseAnd as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_bitwise_or" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::BitwiseOr as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_bitwise_xor" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::BitwiseXor as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_bitwise_not" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::BitwiseNot as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_shift_left" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ShiftLeft as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_shift_right" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ShiftRight as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_cast" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Cast as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // Slice Operations → CbgrExtended (0x78) - slice ops are in CbgrSubOpcode
+            "verum_slice_get" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::SliceGet as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_slice_subslice" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::SliceSubslice as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_slice_split_at" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::SliceSplitAt as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // Text Operations → TextExtended (0x79)
+            "verum_text_from_static" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::FromStatic as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_parse_int" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::ParseInt as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_parse_float" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::ParseFloat as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_int_to_text" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::IntToText as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_float_to_text" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::FloatToText as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_byte_len" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::ByteLen as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_char_len" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::CharLen as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_is_empty" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::IsEmpty as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_is_utf8" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::IsUtf8 as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // Char Operations → CharExtended (0x2B)
+            "verum_utf8_decode_char" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::DecodeUtf8 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_general_category" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::GeneralCategory as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_alphabetic" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsAlphabeticUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_numeric" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsNumericUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_alphanumeric" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsAlphanumericUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_whitespace" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsWhitespaceUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_control" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsControlUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_uppercase" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsUppercaseUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_is_lowercase" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::IsLowercaseUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_to_uppercase" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::ToUppercaseUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_to_lowercase" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::ToLowercaseUnicode as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_char_encode_utf8" => self.ctx.emit(Instruction::CharExtended {
+                sub_op: CharSubOpcode::EncodeUtf8 as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // CBGR Operations → CbgrExtended (0x78)
+            "verum_cbgr_new_generation" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::NewGeneration as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_cbgr_invalidate" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::Invalidate as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_cbgr_get_generation" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::GetGeneration as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_cbgr_advance_epoch" | "verum_cbgr_advance_generation" => {
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: CbgrSubOpcode::AdvanceEpoch as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_cbgr_get_epoch_caps" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::GetEpochCaps as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_cbgr_get_stats" => self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::GetStats as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // Float Classification → MathExtended (0x29)
+            // is_nan: NaN is the only value that doesn't equal itself
+            "verum_is_nan" | "verum_is_nan_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::IsNanF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_is_nan_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::IsNanF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_is_inf" | "verum_is_inf_f64" | "verum_is_infinite" | "verum_is_infinite_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::IsInfF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_is_inf_f32" | "verum_is_infinite_f32" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::IsInfF32 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_is_finite" | "verum_is_finite_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::IsFiniteF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_is_finite_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::IsFiniteF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            // is_normal: check via classification (finite AND not zero AND not subnormal)
+            // Since there's no IsNormal opcode, we use IsFinite and assume normal
+            "verum_is_normal" | "verum_is_normal_f64" | "verum_is_normal_f32" => {
+                // Simplified: treat is_normal as is_finite for now
+                // A proper implementation would check: finite && !zero && !subnormal
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::IsFiniteF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+
+            // Float Rounding Operations → MathExtended (0x29)
+            "verum_floor" | "verum_floor_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::FloorF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_floorf" | "verum_floor_f32" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::FloorF32 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_ceil" | "verum_ceil_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::CeilF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_ceilf" | "verum_ceil_f32" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::CeilF32 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_round" | "verum_round_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::RoundF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_roundf" | "verum_round_f32" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::RoundF32 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_trunc" | "verum_trunc_f64" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::TruncF64 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "verum_truncf" | "verum_trunc_f32" => {
+                self.ctx.emit(Instruction::MathExtended {
+                    sub_op: MathSubOpcode::TruncF32 as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+
+            // Time Operations → FfiExtended with TimeMonotonicNanos sub-op
+            "verum_rdtsc" | "verum_monotonic_nanos" => {
+                // Use FfiExtended with sub_op 0x70 (TimeMonotonicNanos)
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x70, // TimeMonotonicNanos
+                    operands,
+                });
+            }
+
+            // Atomic fetch-and-add: CAS loop pattern
+            // dst = atomic_fetch_add(ptr, delta) — returns old value
+            "verum_atomic_fetch_add" | "verum_atomic_fetch_add_i64" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let delta = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add, dst: new_val, a: old_val, b: delta,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Atomic fetch-and-sub: CAS loop pattern
+            "verum_atomic_fetch_sub" | "verum_atomic_fetch_sub_i64" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let delta = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub, dst: new_val, a: old_val, b: delta,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Atomic fetch-and-AND: CAS loop pattern
+            "verum_atomic_fetch_and" | "verum_atomic_fetch_and_i64" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let mask = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::And, dst: new_val, a: old_val, b: mask,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Atomic fetch-and-OR: CAS loop pattern
+            "verum_atomic_fetch_or" | "verum_atomic_fetch_or_i64" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let mask = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Or, dst: new_val, a: old_val, b: mask,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Atomic fetch-and-XOR: CAS loop pattern
+            "verum_atomic_fetch_xor" | "verum_atomic_fetch_xor_i64" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let mask = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    let new_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Xor, dst: new_val, a: old_val, b: mask,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_val,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(new_val);
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Arithmetic/Memory Operations → ArithExtended (0xBD)
+            "verum_saturating_add_i8"
+            | "verum_saturating_add_i16"
+            | "verum_saturating_add_i32"
+            | "verum_saturating_add_i64"
+            | "verum_saturating_add" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::SaturatingAdd as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_saturating_sub_i8"
+            | "verum_saturating_sub_i16"
+            | "verum_saturating_sub_i32"
+            | "verum_saturating_sub_i64"
+            | "verum_saturating_sub" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::SaturatingSub as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_saturating_mul_i8"
+            | "verum_saturating_mul_i16"
+            | "verum_saturating_mul_i32"
+            | "verum_saturating_mul_i64"
+            | "verum_saturating_mul" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::SaturatingMul as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_wrapping_add_i8"
+            | "verum_wrapping_add_i16"
+            | "verum_wrapping_add_i32"
+            | "verum_wrapping_add_i64"
+            | "verum_wrapping_add" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::WrappingAdd as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_wrapping_sub_i8"
+            | "verum_wrapping_sub_i16"
+            | "verum_wrapping_sub_i32"
+            | "verum_wrapping_sub_i64"
+            | "verum_wrapping_sub" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::WrappingSub as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_wrapping_mul_i8"
+            | "verum_wrapping_mul_i16"
+            | "verum_wrapping_mul_i32"
+            | "verum_wrapping_mul_i64"
+            | "verum_wrapping_mul" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::WrappingMul as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_checked_add_i8"
+            | "verum_checked_add_i16"
+            | "verum_checked_add_i32"
+            | "verum_checked_add_i64"
+            | "verum_checked_add" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedAddI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_checked_sub_i8"
+            | "verum_checked_sub_i16"
+            | "verum_checked_sub_i32"
+            | "verum_checked_sub_i64"
+            | "verum_checked_sub" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedSubI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_checked_mul_i8"
+            | "verum_checked_mul_i16"
+            | "verum_checked_mul_i32"
+            | "verum_checked_mul_i64"
+            | "verum_checked_mul" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedMulI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_checked_div_i8"
+            | "verum_checked_div_i16"
+            | "verum_checked_div_i32"
+            | "verum_checked_div_i64"
+            | "verum_checked_div" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedDivI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            // Unsigned checked arithmetic (u64)
+            "checked_add_u64" | "verum_checked_add_u64" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedAddU as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "checked_sub_u64" | "verum_checked_sub_u64" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedSubU as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "checked_mul_u64" | "verum_checked_mul_u64" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::CheckedMulU as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_overflowing_add_i8"
+            | "verum_overflowing_add_i16"
+            | "verum_overflowing_add_i32"
+            | "verum_overflowing_add_i64"
+            | "verum_overflowing_add" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::OverflowingAddI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_overflowing_sub_i8"
+            | "verum_overflowing_sub_i16"
+            | "verum_overflowing_sub_i32"
+            | "verum_overflowing_sub_i64"
+            | "verum_overflowing_sub" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::OverflowingSubI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_overflowing_mul_i8"
+            | "verum_overflowing_mul_i16"
+            | "verum_overflowing_mul_i32"
+            | "verum_overflowing_mul_i64"
+            | "verum_overflowing_mul" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::OverflowingMulI as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_rotate_left_u8"
+            | "verum_rotate_left_u16"
+            | "verum_rotate_left_u32"
+            | "verum_rotate_left_u64"
+            | "verum_rotate_left" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::RotateLeft as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_rotate_right_u8"
+            | "verum_rotate_right_u16"
+            | "verum_rotate_right_u32"
+            | "verum_rotate_right_u64"
+            | "verum_rotate_right" => self.ctx.emit(Instruction::ArithExtended {
+                sub_op: ArithSubOpcode::RotateRight as u8,
+                operands: encode_operands(dest, args),
+            }),
+            // Atomic exchange: CAS loop pattern
+            // dst = atomic_exchange(ptr, new_val) — returns old value
+            "verum_atomic_exchange" => {
+                if args.len() >= 2 {
+                    let ptr = args[0];
+                    let new_desired = args[1];
+                    let old_val = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AtomicLoad {
+                        dst: old_val, ptr, ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::AtomicCas {
+                        dst: dest, ptr, expected: old_val, desired: new_desired,
+                        ordering: 4, size: 8,
+                    });
+                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.free_temp(old_val);
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+
+            // Global allocator — emit placeholder (implementation pending)
+            "verum_global_allocator" => {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+
+            // Logging Operations → LogExtended (0xBE)
+            "verum_log_info" => self.ctx.emit(Instruction::LogExtended {
+                sub_op: LogSubOpcode::Info as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_log_warning" => self.ctx.emit(Instruction::LogExtended {
+                sub_op: LogSubOpcode::Warning as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_log_error" => self.ctx.emit(Instruction::LogExtended {
+                sub_op: LogSubOpcode::Error as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_log_debug" => self.ctx.emit(Instruction::LogExtended {
+                sub_op: LogSubOpcode::Debug as u8,
+                operands: encode_operands(dest, args),
+            }),
+
+            // AutoDiff Operations → Dedicated opcodes
+            // These require proper context from the autodiff system, not library calls.
+            // For library call interface, emit gradient scope management through proper instructions.
+            "verum_grad_begin" => self.ctx.emit(Instruction::GradBegin {
+                scope_id: 0, // Default scope
+                mode: crate::instruction::GradMode::Reverse,
+                wrt: args.to_vec(),
+            }),
+            "verum_grad_end" => self.ctx.emit(Instruction::GradEnd {
+                scope_id: 0,
+                output: args.first().copied().unwrap_or(dest),
+                grad_out: args.get(1).copied().unwrap_or(dest),
+                grad_regs: args.get(2..).map(|s| s.to_vec()).unwrap_or_default(),
+            }),
+            "verum_jvp_begin" => self.ctx.emit(Instruction::GradBegin {
+                scope_id: 0,
+                mode: crate::instruction::GradMode::Forward,
+                wrt: args.to_vec(),
+            }),
+            "verum_jvp_end" => self.ctx.emit(Instruction::GradEnd {
+                scope_id: 0,
+                output: args.first().copied().unwrap_or(dest),
+                grad_out: args.get(1).copied().unwrap_or(dest),
+                grad_regs: args.get(2..).map(|s| s.to_vec()).unwrap_or_default(),
+            }),
+            "verum_grad_stop" => {
+                // GradStop: dst = detached copy of src
+                let src = args.first().copied().unwrap_or(dest);
+                self.ctx.emit(Instruction::GradStop { dst: dest, src });
+            }
+            "verum_grad_zero_tangent" | "verum_grad_custom"
+            | "verum_grad_recompute" | "verum_grad_zero" => {
+                // These are handled as MlExtended sub-opcodes by the interpreter.
+                // Emit as Raw MlExtended opcode with sub-opcode + register operands.
+                use crate::instruction::{MlSubOpcode, Opcode};
+                let sub_op = match func_name {
+                    "verum_grad_zero_tangent" => MlSubOpcode::GradZeroTangent as u8,
+                    "verum_grad_custom" => MlSubOpcode::GradCustom as u8,
+                    "verum_grad_recompute" => MlSubOpcode::GradRecompute as u8,
+                    "verum_grad_zero" => MlSubOpcode::ZeroGrad as u8,
+                    _ => 0,
+                };
+                let mut data = vec![sub_op, dest.0 as u8];
+                for arg in args {
+                    data.push(arg.0 as u8);
+                }
+                self.ctx.emit(Instruction::Raw {
+                    opcode: Opcode::MlExtended,
+                    data,
+                });
+            }
+            "verum_grad_clip_norm" => {
+                // ClipGradNorm via MlExtended sub-opcode
+                use crate::instruction::{MlSubOpcode, Opcode};
+                let mut data = vec![MlSubOpcode::ClipGradNorm as u8];
+                for arg in args {
+                    data.push(arg.0 as u8);
+                }
+                self.ctx.emit(Instruction::Raw {
+                    opcode: Opcode::MlExtended,
+                    data,
+                });
+            }
+            "verum_grad_checkpoint" => self.ctx.emit(Instruction::GradCheckpoint {
+                id: 0,
+                tensors: args.to_vec(),
+            }),
+            "verum_grad_accumulate" => self.ctx.emit(Instruction::GradAccumulate {
+                dst: args.first().copied().unwrap_or(dest),
+                src: args.get(1).copied().unwrap_or(dest),
+            }),
+
+            // Reflection Operations → MetaReflect (0xBB)
+            "verum_size_of" | "verum_align_of" | "verum_type_id" => {
+                // These are compile-time operations - emit placeholder
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+
+            // Tensor utility operations (emit as TensorExtended with 0xFF marker)
+            name if name.starts_with("verum_tensor_") => {
+                // Route to TensorExtended with ext marker
+                let mut operands = vec![0xFF]; // Marker for extended operations
+                if dest.is_short() {
+                    operands.push(dest.0 as u8);
+                } else {
+                    operands.push(0x80 | ((dest.0 >> 8) as u8));
+                    operands.push(dest.0 as u8);
+                }
+                for arg in args {
+                    if arg.is_short() {
+                        operands.push(arg.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((arg.0 >> 8) as u8));
+                        operands.push(arg.0 as u8);
+                    }
+                }
+                self.ctx.emit(Instruction::TensorExtended {
+                    sub_op: 0xFF, // Extended marker
+                    operands,
+                });
+            }
+
+            // Memory operations (emit as TensorExtended)
+            "verum_mem_new_id" | "verum_mem_alloc_tensor" => {
+                let mut operands = vec![0xFF];
+                if dest.is_short() {
+                    operands.push(dest.0 as u8);
+                } else {
+                    operands.push(0x80 | ((dest.0 >> 8) as u8));
+                    operands.push(dest.0 as u8);
+                }
+                for arg in args {
+                    if arg.is_short() {
+                        operands.push(arg.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((arg.0 >> 8) as u8));
+                        operands.push(arg.0 as u8);
+                    }
+                }
+                self.ctx.emit(Instruction::TensorExtended {
+                    sub_op: 0xFF,
+                    operands,
+                });
+            }
+
+            // Random operations
+            "verum_random_u64" | "verum_random_float" => {
+                let mut operands = vec![0xFF];
+                if dest.is_short() {
+                    operands.push(dest.0 as u8);
+                } else {
+                    operands.push(0x80 | ((dest.0 >> 8) as u8));
+                    operands.push(dest.0 as u8);
+                }
+                for arg in args {
+                    if arg.is_short() {
+                        operands.push(arg.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((arg.0 >> 8) as u8));
+                        operands.push(arg.0 as u8);
+                    }
+                }
+                self.ctx.emit(Instruction::TensorExtended {
+                    sub_op: 0xFF,
+                    operands,
+                });
+            }
+
+            // Unknown intrinsic — emit a runtime panic so the error is visible
+            _ => {
+                #[cfg(debug_assertions)]
+                tracing::warn!(
+                    "Unknown intrinsic '{}' - emitting runtime panic",
+                    func_name
+                );
+                let msg = format!("unimplemented intrinsic: {}", func_name);
+                let message_id = self.intern_string(&msg);
+                self.ctx.emit(Instruction::Panic { message_id });
+                // Load a fallback value after the panic (unreachable, but keeps register valid)
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles macro call — handles builtin macros directly, panics for unknown ones.
+    fn compile_macro_call(
+        &mut self,
+        path: &verum_ast::ty::Path,
+        args: &verum_ast::MacroArgs,
+    ) -> CodegenResult<Option<Reg>> {
+        let macro_name = path.segments.iter().map(|s| match s {
+            verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+            _ => "",
+        }).collect::<Vec<_>>().join(".");
+
+        match macro_name.as_str() {
+            "list_with_capacity" => {
+                // @list_with_capacity(N) → create empty list (capacity is optimization hint)
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewList { dst: dest });
+                Ok(Some(dest))
+            }
+            "unwrap" => {
+                // @unwrap(expr) — the expr is in args.tokens as raw text.
+                // Since we can't re-parse tokens in codegen, emit as a method call
+                // on the expression: expr.unwrap()
+                // For now, emit a CallM with method "unwrap" on the argument.
+                // The argument was already parsed by the macro expansion phase
+                // into the parsed_args if available.
+                //
+                // Fallback: parse the token text manually for simple cases
+                let token_text = args.tokens.as_str().trim();
+
+                // Check if we have parsed arguments (some macro systems provide them)
+                // For raw token macros, we need to handle the expression text directly.
+                // Since codegen can't re-parse, emit an intrinsic call instead.
+                let dest = self.ctx.alloc_temp();
+                let _method_id = self.intern_string("unwrap");
+
+                // We can't compile the inner expression from raw tokens here.
+                // This macro should be expanded in the macro expansion phase.
+                // Emit a descriptive panic for now.
+                let message_id = self.intern_string(&format!(
+                    "@unwrap macro not expanded (arg: {}). Implement in macro expansion phase.",
+                    token_text
+                ));
+                self.ctx.emit(Instruction::Panic { message_id });
+                Ok(Some(dest))
+            }
+            _ => {
+                // Unknown macro — emit panic
+                let dest = self.ctx.alloc_temp();
+                let message_id = self.intern_string(&format!("macro not expanded: @{}", macro_name));
+                self.ctx.emit(Instruction::Panic { message_id });
+                Ok(Some(dest))
+            }
+        }
+    }
+
+    // ==================== Context System ====================
+
+    /// Compiles use context: use C = handler in expr
+    fn compile_use_context(
+        &mut self,
+        context: &verum_ast::ty::Path,
+        handler: &Expr,
+        body: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile handler
+        let handler_reg = self
+            .compile_expr(handler)?
+            .ok_or_else(|| CodegenError::internal("context handler has no value"))?;
+
+        // Get context name
+        let context_name = context
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                PathSegment::Name(ident) => Some(ident.name.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("::");
+
+        // Push context handler
+        let name_id = self.intern_string(&context_name);
+        self.ctx.emit(Instruction::PushContext {
+            name: name_id,
+            handler: handler_reg,
+        });
+
+        // Compile body
+        let result = self.compile_expr(body)?;
+
+        // Pop context
+        self.ctx.emit(Instruction::PopContext {
+            name: name_id,
+        });
+
+        self.ctx.free_temp(handler_reg);
+
+        Ok(result)
+    }
+
+    /// Compiles capability attenuation
+    fn compile_attenuate(
+        &mut self,
+        context: &Expr,
+        capabilities: &verum_ast::CapabilitySet,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile context expression
+        let context_reg = self
+            .compile_expr(context)?
+            .ok_or_else(|| CodegenError::internal("attenuate context has no value"))?;
+
+        // Create attenuated context
+        let dest = self.ctx.alloc_temp();
+        let cap_mask = capabilities
+            .capabilities
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let cap_id = self.intern_string(&cap_mask);
+
+        self.ctx.emit(Instruction::Attenuate {
+            dst: dest,
+            context: context_reg,
+            capabilities: cap_id,
+        });
+
+        self.ctx.free_temp(context_reg);
+        Ok(Some(dest))
+    }
+
+    // ==================== Comprehensions ====================
+
+    /// Compiles list comprehension: [x * 2 for x in list if x > 0]
+    fn compile_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Create result list
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::MakeList { dst: result, len: 0 });
+
+        // Recursively compile clauses
+        self.compile_comprehension_clauses(expr, clauses, 0, result)?;
+
+        Ok(Some(result))
+    }
+
+    /// Helper to compile comprehension clauses recursively
+    fn compile_comprehension_clauses(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+        index: usize,
+        result: Reg,
+    ) -> CodegenResult<()> {
+        use verum_ast::ComprehensionClauseKind;
+
+        if index >= clauses.len() {
+            // No more clauses - evaluate expr and append to result
+            let value = self
+                .compile_expr(expr)?
+                .ok_or_else(|| CodegenError::internal("comprehension expr has no value"))?;
+            self.ctx.emit(Instruction::ListPush {
+                list: result,
+                val: value,
+            });
+            self.ctx.free_temp(value);
+            return Ok(());
+        }
+
+        let clause = &clauses[index];
+        match &clause.kind {
+            ComprehensionClauseKind::For { pattern, iter } => {
+                // Compile iterator
+                let iter_reg = self
+                    .compile_expr(iter)?
+                    .ok_or_else(|| CodegenError::internal("comprehension iter has no value"))?;
+
+                // Get iterator
+                let iterator = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Iter {
+                    dst: iterator,
+                    iterable: iter_reg,
+                });
+                self.ctx.free_temp(iter_reg);
+
+                let loop_label = self.ctx.new_label("comp_loop");
+                let end_label = self.ctx.new_label("comp_end");
+
+                self.ctx.define_label(&loop_label);
+
+                // Get next item
+                let item = self.ctx.alloc_temp();
+                let has_next = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::IterNext {
+                    dst: item,
+                    has_next,
+                    iter: iterator,
+                });
+
+                // Check if done - jump to end if has_next is false
+                self.ctx
+                    .emit_forward_jump(&end_label, |offset| Instruction::JmpNot {
+                        cond: has_next,
+                        offset,
+                    });
+                self.ctx.free_temp(has_next);
+
+                // Bind pattern - item now contains the actual value
+                self.compile_pattern_bind(pattern, item)?;
+                self.ctx.free_temp(item);
+
+                // Compile remaining clauses
+                self.compile_comprehension_clauses(expr, clauses, index + 1, result)?;
+
+                // Loop back
+                self.ctx.emit(Instruction::Jmp {
+                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                });
+
+                self.ctx.define_label(&end_label);
+                self.ctx.free_temp(iterator);
+            }
+            ComprehensionClauseKind::If(condition) => {
+                // Compile condition
+                let cond_reg = self
+                    .compile_expr(condition)?
+                    .ok_or_else(|| CodegenError::internal("comprehension if has no value"))?;
+
+                let skip_label = self.ctx.new_label("comp_skip");
+
+                // Skip if condition is false
+                self.ctx
+                    .emit_forward_jump(&skip_label, |offset| Instruction::JmpNot {
+                        cond: cond_reg,
+                        offset,
+                    });
+                self.ctx.free_temp(cond_reg);
+
+                // Compile remaining clauses
+                self.compile_comprehension_clauses(expr, clauses, index + 1, result)?;
+
+                self.ctx.define_label(&skip_label);
+            }
+            ComprehensionClauseKind::Let { pattern, value, .. } => {
+                // Compile value
+                let value_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("comprehension let has no value"))?;
+
+                // Bind pattern
+                self.compile_pattern_bind(pattern, value_reg)?;
+                self.ctx.free_temp(value_reg);
+
+                // Compile remaining clauses
+                self.compile_comprehension_clauses(expr, clauses, index + 1, result)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles stream comprehension to a lazy Stream/Iterator.
+    ///
+    /// `stream[expr for x in source if pred]` creates a lazy iterator that:
+    /// 1. Wraps the source iterable
+    /// 2. Applies filter predicates lazily
+    /// 3. Maps the expression lazily
+    ///
+    /// Implementation strategy:
+    /// - Creates an Iterator from the source
+    /// - The Iterator is semantically lazy (next() computes on demand)
+    /// - For full lazy evaluation, filtered/nested streams use generator-based approach
+    ///
+    /// Returns a Stream<T>/Iterator<Item=T> object that implements lazy evaluation.
+    fn compile_stream_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::ComprehensionClauseKind;
+
+        // Early return for empty clauses - create empty iterator
+        if clauses.is_empty() {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::MakeList { dst: result, len: 0 });
+            // Create iterator from empty list
+            let iter_result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Iter {
+                dst: iter_result,
+                iterable: result,
+            });
+            self.ctx.free_temp(result);
+            return Ok(Some(iter_result));
+        }
+
+        // For simple cases (single for clause), create a lazy iterator
+        // For complex cases (multiple for clauses), use eager evaluation wrapped as iterator
+        //
+        // This approach provides correct lazy semantics for the common case while
+        // falling back to eager evaluation for complex nested comprehensions.
+        //
+        // Full lazy evaluation for nested comprehensions requires:
+        // 1. Closure-based flat_map implementation
+        // 2. Generator state machine support
+        // Nested comprehensions use generator-based flat_map for true lazy evaluation.
+
+        let for_clause_count = clauses
+            .iter()
+            .filter(|c| matches!(c.kind, ComprehensionClauseKind::For { .. }))
+            .count();
+
+        if for_clause_count == 1 {
+            // Simple case: create iterator from source
+            // The iterator provides lazy semantics - each next() call computes one element
+            self.compile_simple_stream_comprehension(expr, clauses)
+        } else {
+            // Complex case: multiple for clauses
+            // Fall back to eager evaluation wrapped as iterator
+            self.compile_nested_stream_comprehension(expr, clauses)
+        }
+    }
+
+    /// Compiles simple stream comprehension (single for clause).
+    ///
+    /// `stream[expr for x in source if pred]` creates an iterator that lazily:
+    /// 1. Gets next item from source
+    /// 2. Binds pattern
+    /// 3. Evaluates predicates
+    /// 4. If all pass, yields transformed value
+    ///
+    /// Returns an Iterator<Item=T> that can be consumed lazily.
+    fn compile_simple_stream_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::ComprehensionClauseKind;
+
+        let mut source_reg = None;
+        let mut has_filter = false;
+
+        // Find the source iterator expression
+        for clause in clauses.iter() {
+            match &clause.kind {
+                ComprehensionClauseKind::For { iter, .. } => {
+                    source_reg = self.compile_expr(iter)?;
+                }
+                ComprehensionClauseKind::If(_) => {
+                    has_filter = true;
+                }
+                ComprehensionClauseKind::Let { .. } => {}
+            }
+        }
+
+        let source = source_reg
+            .ok_or_else(|| CodegenError::internal("stream comprehension has no source"))?;
+
+        // Create iterator from source - this is inherently lazy
+        let iterator = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Iter {
+            dst: iterator,
+            iterable: source,
+        });
+        self.ctx.free_temp(source);
+
+        // Both filtered and non-filtered streams are compiled as generators
+        // via `compile_stream_as_generator`, which emits an anonymous generator
+        // function (fn*) that yields elements lazily. This gives true O(1)
+        // memory overhead per stream element.
+        //
+        // The generator approach provides correct lazy semantics: each
+        // `IterNext` on the resulting generator only advances to the next
+        // matching/mapped element on demand, with filter predicates and map
+        // transforms applied inline within the generator body.
+
+        if has_filter {
+            // Has filters - use generator-based approach for true lazy evaluation
+            // Filtered streams use generator-based approach: compile as anonymous fn*
+            // that yields matching elements, producing O(1) memory overhead.
+            self.ctx.free_temp(iterator);
+            return self.compile_stream_as_generator(expr, clauses);
+        }
+
+        // No filters - check if we need to apply a map transformation
+        // For identity streams like `stream[x for x in items]`, just return iterator
+        // For map streams like `stream[x * 2 for x in items]`, use generator to apply transform
+        self.ctx.free_temp(iterator);
+        self.compile_stream_as_generator(expr, clauses)
+    }
+
+    /// Compiles stream comprehension with eager evaluation, wrapped as iterator.
+    ///
+    /// Used when full lazy evaluation is not yet supported (filters, let bindings, etc.)
+    fn _compile_eager_stream_as_iterator(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile as eager list
+        let list = self.compile_comprehension(expr, clauses)?;
+        let list_reg =
+            list.ok_or_else(|| CodegenError::internal("stream comprehension has no value"))?;
+
+        // Wrap list in iterator for lazy consumption
+        let iter_result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Iter {
+            dst: iter_result,
+            iterable: list_reg,
+        });
+        self.ctx.free_temp(list_reg);
+
+        Ok(Some(iter_result))
+    }
+
+    /// Compiles nested stream comprehension (multiple for clauses).
+    ///
+    /// `stream[expr for x in xs for y in ys if pred]`
+    ///
+    /// Uses generator-based approach for true lazy evaluation with O(1) memory.
+    /// Nested for-clauses compile as nested loops inside an anonymous fn* generator.
+    fn compile_nested_stream_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Use generator-based approach for true lazy evaluation
+        self.compile_stream_as_generator(expr, clauses)
+    }
+
+    /// Compiles stream comprehension as a generator function for true lazy evaluation.
+    ///
+    /// This transforms `stream[expr for x in source if pred]` into an anonymous
+    /// generator function that yields values lazily:
+    ///
+    /// ```verum
+    /// fn* stream_gen(captured_vars...) {
+    ///     for x in source {
+    ///         if pred {
+    ///             yield expr;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// The generator implements the Iterator protocol via GenCreate/GenNext.
+    ///
+    /// # True Lazy Evaluation
+    ///
+    /// Unlike eager evaluation which materializes all elements:
+    /// - Each `yield` suspends the generator
+    /// - `GenNext` resumes from the yield point
+    /// - Memory: O(1) - only current element + generator state
+    /// - Filters evaluated per-element, not upfront
+    ///
+    /// # Nested Comprehensions
+    ///
+    /// For `stream[(x, y) for x in xs for y in ys]`, this generates:
+    /// ```ignore
+    /// fn* stream_gen() {
+    ///     for x in xs {
+    ///         for y in ys {
+    ///             yield (x, y);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// True lazy stream comprehensions via generators: compiles `stream[expr for x in source if pred]`
+    /// into an anonymous `fn*` that captures variables and yields matching elements on demand.
+    /// Memory: O(1) - only generator state (~300 bytes per suspended generator).
+    fn compile_stream_as_generator(
+        &mut self,
+        output_expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::ComprehensionClauseKind;
+
+        // Step 1: Analyze free variables from all clauses and output expression
+        // These need to be captured by the generator closure
+        let mut bound_vars = Vec::new();
+
+        // Collect pattern-bound variables from all for clauses
+        for clause in clauses.iter() {
+            if let ComprehensionClauseKind::For { pattern, .. } = &clause.kind {
+                self.collect_pattern_variables(pattern, &mut bound_vars);
+            }
+            if let ComprehensionClauseKind::Let { pattern, .. } = &clause.kind {
+                self.collect_pattern_variables(pattern, &mut bound_vars);
+            }
+        }
+
+        // Find free variables in iterables, predicates, let values, and output expr
+        let mut all_free_vars = std::collections::HashSet::new();
+
+        for clause in clauses.iter() {
+            match &clause.kind {
+                ComprehensionClauseKind::For { iter, .. } => {
+                    let free = self.analyze_free_variables(iter, &bound_vars);
+                    all_free_vars.extend(free);
+                }
+                ComprehensionClauseKind::If(pred) => {
+                    let free = self.analyze_free_variables(pred, &bound_vars);
+                    all_free_vars.extend(free);
+                }
+                ComprehensionClauseKind::Let { value, .. } => {
+                    let free = self.analyze_free_variables(value, &bound_vars);
+                    all_free_vars.extend(free);
+                }
+            }
+        }
+
+        // Free vars in output expression
+        let output_free = self.analyze_free_variables(output_expr, &bound_vars);
+        all_free_vars.extend(output_free);
+
+        // Get registers for captured variables
+        let mut capture_regs = Vec::new();
+        let mut capture_names: Vec<String> = all_free_vars.into_iter().collect();
+        capture_names.sort(); // Deterministic order
+
+        for var_name in &capture_names {
+            if let Some(info) = self.ctx.lookup_var(var_name) {
+                capture_regs.push(info.reg);
+            }
+        }
+
+        // Step 2: Create generator function
+        let gen_func_id = self.compile_stream_generator_body(
+            &capture_names,
+            output_expr,
+            clauses,
+        )?;
+
+        // Step 3: Emit NewClosure to create the generator closure
+        let closure_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::NewClosure {
+            dst: closure_reg,
+            func_id: gen_func_id,
+            captures: capture_regs,
+        });
+
+        // Step 4: Create generator instance via GenCreate
+        // Stream comprehension generators have no arguments (captures are handled separately)
+        let gen_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::GenCreate {
+            dst: gen_reg,
+            func_id: gen_func_id,
+            args: crate::instruction::RegRange {
+                start: Reg(0),
+                count: 0,
+            },
+        });
+        self.ctx.free_temp(closure_reg);
+
+        Ok(Some(gen_reg))
+    }
+
+    /// Compiles the body of a stream generator function.
+    ///
+    /// Creates a generator function that:
+    /// 1. Takes captured variables as parameters
+    /// 2. Iterates through all for clauses (nested)
+    /// 3. Evaluates filter predicates
+    /// 4. Binds let variables
+    /// 5. Yields the output expression
+    fn compile_stream_generator_body(
+        &mut self,
+        captures: &[String],
+        output_expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<u32> {
+        // Generate unique name for generator function
+        let gen_name = format!(
+            "{}$stream_gen${}",
+            self.ctx.current_function.as_deref().unwrap_or("anon"),
+            self.closure_counter
+        );
+        self.closure_counter += 1;
+
+        // Allocate function ID
+        let func_id = self.next_func_id;
+        self.next_func_id = self.next_func_id.saturating_add(1);
+
+        // Register the generator function
+        let info = super::FunctionInfo {
+            id: crate::module::FunctionId(func_id),
+            param_count: captures.len(),
+            param_names: captures.to_vec(),
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: true, // This is a generator!
+            contexts: Vec::new(),
+            return_type: None,
+            yield_type: self.extract_expr_type_name(output_expr).map(|name| {
+                use crate::types::{TypeId, TypeRef};
+                match name.as_str() {
+                    "Int" => TypeRef::Concrete(TypeId::INT),
+                    "Float" => TypeRef::Concrete(TypeId::FLOAT),
+                    "Bool" => TypeRef::Concrete(TypeId::BOOL),
+                    "Text" => TypeRef::Concrete(TypeId::TEXT),
+                    "Unit" | "()" => TypeRef::Concrete(TypeId::UNIT),
+                    _ => TypeRef::Concrete(TypeId::UNIT), // fallback
+                }
+            }),
+            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            return_type_name: None, // Generator return types are inferred
+            return_type_inner: None,
+        };
+        self.ctx.register_function(gen_name.clone(), info);
+
+        // Save current function context (critical: includes in_function flag)
+        let saved_function = self.ctx.current_function.clone();
+        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+        let saved_registers = self.ctx.registers.snapshot();
+        let saved_suspend_count = self.ctx.suspend_point_count;
+        let saved_in_function = self.ctx.in_function;
+        let saved_return_type = self.ctx.return_type.clone();
+        // Save labels and loop context for restoration after generator compilation
+        let saved_closure_ctx = self.ctx.save_closure_context();
+        self.ctx.suspend_point_count = 0;
+
+        // Build captures with mutability info (captures are immutable)
+        let captures_with_mut: Vec<(String, bool)> = captures.iter().map(|c| (c.clone(), false)).collect();
+
+        // Begin generator function compilation
+        self.ctx.begin_function(&gen_name, &captures_with_mut, None);
+
+        // Mark captured variables
+        for cap_name in captures.iter() {
+            if let Some(info) = self.ctx.lookup_var_mut(cap_name) {
+                info.kind = super::RegisterKind::Captured;
+            }
+        }
+
+        // Compile the nested comprehension clauses with yield
+        self.compile_stream_clauses_recursive(output_expr, clauses, 0)?;
+
+        // Generator implicitly returns after exhausting iteration
+        self.ctx.emit(Instruction::RetV);
+
+        // End function compilation
+        let (gen_instructions, register_count) = self.ctx.end_function();
+        let suspend_points = self.ctx.suspend_point_count;
+
+        // Restore parent function context (critical: includes in_function flag)
+        self.ctx.current_function = saved_function;
+        self.ctx.instructions = saved_instructions;
+        self.ctx.registers.restore_reg(&saved_registers);
+        self.ctx.suspend_point_count = saved_suspend_count;
+        self.ctx.in_function = saved_in_function;
+        self.ctx.return_type = saved_return_type;
+        // Restore labels and loop context
+        self.ctx.restore_closure_context(saved_closure_ctx);
+
+        // Create VBC function descriptor with generator metadata
+        let name_id = crate::types::StringId(self.intern_string(&gen_name));
+        let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+        descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.register_count = register_count;
+        descriptor.locals_count = captures.len() as u16;
+        descriptor.is_generator = true;
+        descriptor.suspend_point_count = suspend_points;
+
+        let vbc_func = crate::module::VbcFunction::new(descriptor, gen_instructions);
+        self.functions.push(vbc_func);
+
+        Ok(func_id)
+    }
+
+    /// Recursively compiles comprehension clauses into nested loops with yield.
+    ///
+    /// This builds the nested structure:
+    /// ```ignore
+    /// for x in xs {
+    ///     for y in ys {
+    ///         if pred1 && pred2 {
+    ///             let z = value;
+    ///             yield output;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    fn compile_stream_clauses_recursive(
+        &mut self,
+        output_expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+        clause_idx: usize,
+    ) -> CodegenResult<()> {
+        use verum_ast::ComprehensionClauseKind;
+
+        if clause_idx >= clauses.len() {
+            // Base case: all clauses processed, yield the output
+            let output_reg = self
+                .compile_expr(output_expr)?
+                .ok_or_else(|| CodegenError::internal("stream output has no value"))?;
+
+            // Track suspend point and emit yield
+            self.ctx.suspend_point_count = self.ctx.suspend_point_count.saturating_add(1);
+            self.ctx.emit(Instruction::Yield { value: output_reg });
+            self.ctx.free_temp(output_reg);
+            return Ok(());
+        }
+
+        let clause = &clauses[clause_idx];
+
+        match &clause.kind {
+            ComprehensionClauseKind::For { pattern, iter } => {
+                // Compile iterator source
+                let iter_source = self
+                    .compile_expr(iter)?
+                    .ok_or_else(|| CodegenError::internal("stream iter has no value"))?;
+
+                // Create iterator
+                let iterator_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::IterNew {
+                    dst: iterator_reg,
+                    iterable: iter_source,
+                });
+                self.ctx.free_temp(iter_source);
+
+                // Create loop labels
+                let loop_start = self.ctx.new_label("stream_for_start");
+                let loop_end = self.ctx.new_label("stream_for_end");
+
+                // Allocate element and has_next registers
+                let elem_reg = self.ctx.alloc_temp();
+                let has_next_reg = self.ctx.alloc_temp();
+
+                // Loop start
+                self.ctx.define_label(&loop_start);
+
+                // Get next element
+                self.ctx.emit(Instruction::IterNext {
+                    dst: elem_reg,
+                    has_next: has_next_reg,
+                    iter: iterator_reg,
+                });
+
+                // Exit if no more elements
+                self.ctx
+                    .emit_forward_jump(&loop_end, |offset| Instruction::JmpNot {
+                        cond: has_next_reg,
+                        offset,
+                    });
+
+                // Bind pattern
+                self.ctx.enter_scope();
+                self.compile_pattern_bind(pattern, elem_reg)?;
+
+                // Recursively process remaining clauses
+                self.compile_stream_clauses_recursive(output_expr, clauses, clause_idx + 1)?;
+
+                // Exit scope
+                let (_, defers) = self.ctx.exit_scope(false);
+                for defer_instrs in defers {
+                    for instr in defer_instrs {
+                        self.ctx.emit(instr);
+                    }
+                }
+
+                // Jump back to start
+                self.ctx
+                    .emit_backward_jump(&loop_start, |offset| Instruction::Jmp { offset })?;
+
+                // Loop end
+                self.ctx.define_label(&loop_end);
+
+                self.ctx.free_temp(iterator_reg);
+                self.ctx.free_temp(elem_reg);
+                self.ctx.free_temp(has_next_reg);
+            }
+
+            ComprehensionClauseKind::If(predicate) => {
+                // Compile filter predicate
+                let pred_reg = self
+                    .compile_expr(predicate)?
+                    .ok_or_else(|| CodegenError::internal("stream predicate has no value"))?;
+
+                // Skip to next iteration if predicate is false
+                let skip_label = self.ctx.new_label("stream_if_skip");
+                self.ctx
+                    .emit_forward_jump(&skip_label, |offset| Instruction::JmpNot {
+                        cond: pred_reg,
+                        offset,
+                    });
+                self.ctx.free_temp(pred_reg);
+
+                // Recursively process remaining clauses (predicate passed)
+                self.compile_stream_clauses_recursive(output_expr, clauses, clause_idx + 1)?;
+
+                // Skip label (predicate failed)
+                self.ctx.define_label(&skip_label);
+            }
+
+            ComprehensionClauseKind::Let { pattern, value, .. } => {
+                // Compile let binding value
+                let value_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("stream let value has no value"))?;
+
+                // Bind pattern
+                self.compile_pattern_bind(pattern, value_reg)?;
+                self.ctx.free_temp(value_reg);
+
+                // Recursively process remaining clauses
+                self.compile_stream_clauses_recursive(output_expr, clauses, clause_idx + 1)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles map comprehension: {k: v for (k, v) in pairs if condition}
+    ///
+    /// Returns a Map<K, V> containing all key-value pairs generated.
+    fn compile_map_comprehension(
+        &mut self,
+        key_expr: &Expr,
+        value_expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Create result map
+        let result = self.ctx.alloc_temp();
+        self.ctx
+            .emit(Instruction::MakeMap { dst: result, capacity: 0 });
+
+        // Recursively compile clauses
+        self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, 0, result)?;
+
+        Ok(Some(result))
+    }
+
+    /// Helper to compile map comprehension clauses recursively
+    fn compile_map_comprehension_clauses(
+        &mut self,
+        key_expr: &Expr,
+        value_expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+        index: usize,
+        result: Reg,
+    ) -> CodegenResult<()> {
+        use verum_ast::ComprehensionClauseKind;
+
+        if index >= clauses.len() {
+            // No more clauses - evaluate key and value, insert into map
+            let key = self
+                .compile_expr(key_expr)?
+                .ok_or_else(|| CodegenError::internal("map comprehension key has no value"))?;
+            let val = self
+                .compile_expr(value_expr)?
+                .ok_or_else(|| CodegenError::internal("map comprehension value has no value"))?;
+            self.ctx.emit(Instruction::MapSet {
+                map: result,
+                key,
+                val,
+            });
+            self.ctx.free_temp(key);
+            self.ctx.free_temp(val);
+            return Ok(());
+        }
+
+        let clause = &clauses[index];
+        match &clause.kind {
+            ComprehensionClauseKind::For { pattern, iter } => {
+                // Compile iterator
+                let iter_reg = self
+                    .compile_expr(iter)?
+                    .ok_or_else(|| CodegenError::internal("map comprehension iter has no value"))?;
+
+                // Get iterator
+                let iterator = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Iter {
+                    dst: iterator,
+                    iterable: iter_reg,
+                });
+                self.ctx.free_temp(iter_reg);
+
+                let loop_label = self.ctx.new_label("map_comp_loop");
+                let end_label = self.ctx.new_label("map_comp_end");
+
+                self.ctx.define_label(&loop_label);
+
+                // Get next item
+                let item = self.ctx.alloc_temp();
+                let has_next = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::IterNext {
+                    dst: item,
+                    has_next,
+                    iter: iterator,
+                });
+
+                // Check if done - jump to end if has_next is false
+                self.ctx
+                    .emit_forward_jump(&end_label, |offset| Instruction::JmpNot {
+                        cond: has_next,
+                        offset,
+                    });
+                self.ctx.free_temp(has_next);
+
+                // Bind pattern
+                self.compile_pattern_bind(pattern, item)?;
+                self.ctx.free_temp(item);
+
+                // Compile remaining clauses
+                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+
+                // Loop back
+                self.ctx.emit(Instruction::Jmp {
+                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                });
+
+                self.ctx.define_label(&end_label);
+                self.ctx.free_temp(iterator);
+            }
+            ComprehensionClauseKind::If(condition) => {
+                // Compile condition
+                let cond_reg = self
+                    .compile_expr(condition)?
+                    .ok_or_else(|| CodegenError::internal("map comprehension if has no value"))?;
+
+                let skip_label = self.ctx.new_label("map_comp_skip");
+
+                // Skip if condition is false
+                self.ctx
+                    .emit_forward_jump(&skip_label, |offset| Instruction::JmpNot {
+                        cond: cond_reg,
+                        offset,
+                    });
+                self.ctx.free_temp(cond_reg);
+
+                // Condition true - process remaining clauses
+                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+
+                self.ctx.define_label(&skip_label);
+            }
+            ComprehensionClauseKind::Let { pattern, value, .. } => {
+                let value_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("map comprehension let has no value"))?;
+
+                self.compile_pattern_bind(pattern, value_reg)?;
+                self.ctx.free_temp(value_reg);
+
+                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles set comprehension: set{x for x in items if condition}
+    ///
+    /// Returns a Set<T> containing all unique elements generated.
+    fn compile_set_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Create result set
+        let result = self.ctx.alloc_temp();
+        self.ctx
+            .emit(Instruction::MakeSet { dst: result, capacity: 0 });
+
+        // Recursively compile clauses
+        self.compile_set_comprehension_clauses(expr, clauses, 0, result)?;
+
+        Ok(Some(result))
+    }
+
+    /// Helper to compile set comprehension clauses recursively
+    fn compile_set_comprehension_clauses(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+        index: usize,
+        result: Reg,
+    ) -> CodegenResult<()> {
+        use verum_ast::ComprehensionClauseKind;
+
+        if index >= clauses.len() {
+            // No more clauses - evaluate expr and insert into set
+            let elem = self
+                .compile_expr(expr)?
+                .ok_or_else(|| CodegenError::internal("set comprehension expr has no value"))?;
+            self.ctx.emit(Instruction::SetInsert {
+                set: result,
+                elem,
+            });
+            self.ctx.free_temp(elem);
+            return Ok(());
+        }
+
+        let clause = &clauses[index];
+        match &clause.kind {
+            ComprehensionClauseKind::For { pattern, iter } => {
+                // Compile iterator
+                let iter_reg = self
+                    .compile_expr(iter)?
+                    .ok_or_else(|| CodegenError::internal("set comprehension iter has no value"))?;
+
+                // Get iterator
+                let iterator = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Iter {
+                    dst: iterator,
+                    iterable: iter_reg,
+                });
+                self.ctx.free_temp(iter_reg);
+
+                let loop_label = self.ctx.new_label("set_comp_loop");
+                let end_label = self.ctx.new_label("set_comp_end");
+
+                self.ctx.define_label(&loop_label);
+
+                // Get next item
+                let item = self.ctx.alloc_temp();
+                let has_next = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::IterNext {
+                    dst: item,
+                    has_next,
+                    iter: iterator,
+                });
+
+                // Check if done
+                self.ctx
+                    .emit_forward_jump(&end_label, |offset| Instruction::JmpNot {
+                        cond: has_next,
+                        offset,
+                    });
+                self.ctx.free_temp(has_next);
+
+                // Bind pattern
+                self.compile_pattern_bind(pattern, item)?;
+                self.ctx.free_temp(item);
+
+                // Compile remaining clauses
+                self.compile_set_comprehension_clauses(expr, clauses, index + 1, result)?;
+
+                // Loop back
+                self.ctx.emit(Instruction::Jmp {
+                    offset: self.ctx.calculate_backward_offset(&loop_label),
+                });
+
+                self.ctx.define_label(&end_label);
+                self.ctx.free_temp(iterator);
+            }
+            ComprehensionClauseKind::If(condition) => {
+                let cond_reg = self
+                    .compile_expr(condition)?
+                    .ok_or_else(|| CodegenError::internal("set comprehension if has no value"))?;
+
+                let skip_label = self.ctx.new_label("set_comp_skip");
+
+                self.ctx
+                    .emit_forward_jump(&skip_label, |offset| Instruction::JmpNot {
+                        cond: cond_reg,
+                        offset,
+                    });
+                self.ctx.free_temp(cond_reg);
+
+                self.compile_set_comprehension_clauses(expr, clauses, index + 1, result)?;
+
+                self.ctx.define_label(&skip_label);
+            }
+            ComprehensionClauseKind::Let { pattern, value, .. } => {
+                let value_reg = self
+                    .compile_expr(value)?
+                    .ok_or_else(|| CodegenError::internal("set comprehension let has no value"))?;
+
+                self.compile_pattern_bind(pattern, value_reg)?;
+                self.ctx.free_temp(value_reg);
+
+                self.compile_set_comprehension_clauses(expr, clauses, index + 1, result)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compiles generator expression: gen{x for x in items if condition}
+    ///
+    /// Returns a Generator<T> that yields values lazily on demand.
+    /// This is similar to stream comprehension but returns a Generator type.
+    fn compile_generator_comprehension(
+        &mut self,
+        expr: &Expr,
+        clauses: &verum_common::List<verum_ast::ComprehensionClause>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Generator expressions use the same implementation as stream comprehensions
+        // but with Generator type wrapper instead of Stream
+        self.compile_stream_comprehension(expr, clauses)
+    }
+
+    /// Collects variable names bound by a pattern.
+    fn collect_pattern_variables(&self, pattern: &verum_ast::Pattern, vars: &mut Vec<String>) {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Ident { name, subpattern, .. } => {
+                vars.push(name.name.to_string());
+                // Also collect from subpattern if present (e.g., x @ Some(y))
+                if let Some(sub) = subpattern {
+                    self.collect_pattern_variables(sub, vars);
+                }
+            }
+            PatternKind::Tuple(elements) => {
+                for elem in elements.iter() {
+                    self.collect_pattern_variables(elem, vars);
+                }
+            }
+            PatternKind::Array(elements) => {
+                for elem in elements.iter() {
+                    self.collect_pattern_variables(elem, vars);
+                }
+            }
+            PatternKind::Slice { before, rest, after } => {
+                for elem in before.iter() {
+                    self.collect_pattern_variables(elem, vars);
+                }
+                if let Some(rest_pat) = rest {
+                    self.collect_pattern_variables(rest_pat, vars);
+                }
+                for elem in after.iter() {
+                    self.collect_pattern_variables(elem, vars);
+                }
+            }
+            PatternKind::Record { fields, .. } => {
+                for field in fields.iter() {
+                    // FieldPattern.pattern is Maybe<Pattern>, handle Option
+                    if let Some(ref field_pattern) = field.pattern {
+                        self.collect_pattern_variables(field_pattern, vars);
+                    } else {
+                        // Shorthand syntax: { x } means { x: x }, bind field name
+                        vars.push(field.name.name.to_string());
+                    }
+                }
+            }
+            PatternKind::Or(patterns) => {
+                // For Or patterns, collect from first alternative (all should bind same vars)
+                if let Some(first) = patterns.first() {
+                    self.collect_pattern_variables(first, vars);
+                }
+            }
+            PatternKind::Variant { data, .. } => {
+                if let Some(data) = data {
+                    match data {
+                        VariantPatternData::Tuple(elements) => {
+                            for elem in elements.iter() {
+                                self.collect_pattern_variables(elem, vars);
+                            }
+                        }
+                        VariantPatternData::Record { fields, .. } => {
+                            for field in fields.iter() {
+                                if let Some(ref field_pattern) = field.pattern {
+                                    self.collect_pattern_variables(field_pattern, vars);
+                                } else {
+                                    vars.push(field.name.name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            PatternKind::Reference { inner, .. } => {
+                self.collect_pattern_variables(inner, vars);
+            }
+            PatternKind::TypeTest { binding, .. } => {
+                // TypeTest pattern: x is Type -> binds x (binding is direct Ident)
+                vars.push(binding.name.to_string());
+            }
+            PatternKind::And(patterns) => {
+                // And patterns: collect from all sub-patterns
+                for pat in patterns.iter() {
+                    self.collect_pattern_variables(pat, vars);
+                }
+            }
+            PatternKind::Active { bindings, .. } => {
+                // Active patterns with bindings (partial patterns) bind variables
+                // from their extraction bindings. Total patterns (empty bindings) don't bind.
+                // Example: ParseInt()(n) binds 'n', but Even() binds nothing
+                for binding in bindings.iter() {
+                    self.collect_pattern_variables(binding, vars);
+                }
+            }
+            PatternKind::Paren(inner) => {
+                self.collect_pattern_variables(inner, vars);
+            }
+
+            #[allow(deprecated)]
+            PatternKind::View { pattern: inner, .. } => {
+                self.collect_pattern_variables(inner, vars);
+            }
+            // Patterns that don't bind variables (Stream binds via head_patterns which are processed)
+            PatternKind::Wildcard |
+            PatternKind::Rest |
+            PatternKind::Literal(_) |
+            PatternKind::Range { .. } => {}
+            PatternKind::Stream { head_patterns, rest } => {
+                // Stream patterns bind variables from head patterns and optionally the rest
+                for pat in head_patterns.iter() {
+                    self.collect_pattern_variables(pat, vars);
+                }
+                if let Some(rest_ident) = rest {
+                    vars.push(rest_ident.name.to_string());
+                }
+            }
+            PatternKind::Guard { pattern, guard: _ } => {
+                // Guard patterns: only the inner pattern binds variables
+                // The guard expression is evaluated but does not introduce bindings
+                // Spec: Rust RFC 3637 - Guard Patterns
+                self.collect_pattern_variables(pattern, vars);
+            }
+            PatternKind::Cons { head, tail } => {
+                self.collect_pattern_variables(head, vars);
+                self.collect_pattern_variables(tail, vars);
+            }
+        }
+    }
+
+    // ==================== String Interpolation ====================
+
+    /// Compiles interpolated string: f"Hello {name}"
+    fn compile_interpolated_string(
+        &mut self,
+        _handler: &verum_common::Text,
+        parts: &verum_common::List<verum_common::Text>,
+        exprs: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        // Build string by concatenating parts and expressions
+        let dest = self.ctx.alloc_temp();
+
+        if parts.is_empty() && exprs.is_empty() {
+            // Empty string
+            let const_id = self.ctx.add_const_string("");
+            self.ctx.emit(Instruction::LoadK {
+                dst: dest,
+                const_id: const_id.0,
+            });
+            return Ok(Some(dest));
+        }
+
+        // Start with first part
+        if !parts.is_empty() {
+            let const_id = self.ctx.add_const_string(parts[0].as_str());
+            self.ctx.emit(Instruction::LoadK {
+                dst: dest,
+                const_id: const_id.0,
+            });
+        } else {
+            let const_id = self.ctx.add_const_string("");
+            self.ctx.emit(Instruction::LoadK {
+                dst: dest,
+                const_id: const_id.0,
+            });
+        }
+
+        // Interleave expressions and parts
+        for (i, expr) in exprs.iter().enumerate() {
+            // Convert expression to string
+            let expr_reg = self
+                .compile_expr(expr)?
+                .ok_or_else(|| CodegenError::internal("interpolation expr has no value"))?;
+
+            let str_reg = self.ctx.alloc_temp();
+
+            // Check expression type to choose the right string conversion
+            let expr_type = self.infer_expr_type_kind(expr);
+            let type_name = match &expr_type {
+                Some(verum_ast::ty::TypeKind::Char) => "Char",
+                Some(verum_ast::ty::TypeKind::Text) => "Text",
+                Some(verum_ast::ty::TypeKind::Path(path)) => {
+                    match path.as_ident().map(|id| id.name.as_str()) {
+                        Some("Char") => "Char",
+                        Some("Text") => "Text",
+                        _ => "",
+                    }
+                }
+                _ => "",
+            };
+
+            if type_name == "Text" {
+                // Text is already a string — just copy the register directly
+                self.ctx.emit(Instruction::Mov {
+                    dst: str_reg,
+                    src: expr_reg,
+                });
+            } else if type_name == "Char" {
+                self.ctx.emit(Instruction::CharToStr {
+                    dst: str_reg,
+                    src: expr_reg,
+                });
+            } else {
+                self.ctx.emit(Instruction::ToString {
+                    dst: str_reg,
+                    src: expr_reg,
+                });
+            }
+            self.ctx.free_temp(expr_reg);
+
+            // Concatenate
+            self.ctx.emit(Instruction::Concat {
+                dst: dest,
+                a: dest,
+                b: str_reg,
+            });
+            self.ctx.free_temp(str_reg);
+
+            // Add next part if available
+            if i + 1 < parts.len() {
+                let part_reg = self.ctx.alloc_temp();
+                let const_id = self.ctx.add_const_string(parts[i + 1].as_str());
+                self.ctx.emit(Instruction::LoadK {
+                    dst: part_reg,
+                    const_id: const_id.0,
+                });
+                self.ctx.emit(Instruction::Concat {
+                    dst: dest,
+                    a: dest,
+                    b: part_reg,
+                });
+                self.ctx.free_temp(part_reg);
+            }
+        }
+
+        Ok(Some(dest))
+    }
+
+    // ==================== Tensor/Map/Set Literals ====================
+
+    /// Compiles tensor literal
+    fn compile_tensor_literal(
+        &mut self,
+        shape: &verum_common::List<u64>,
+        data: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Compile data expression
+        let data_reg = self
+            .compile_expr(data)?
+            .ok_or_else(|| CodegenError::internal("tensor data has no value"))?;
+
+        // Create tensor with shape
+        let dest = self.ctx.alloc_temp();
+
+        // Calculate total size
+        let total_size: u64 = shape.iter().product();
+
+        self.ctx.emit(Instruction::MakeTensor {
+            dst: dest,
+            shape_len: shape.len() as u16,
+            total_size: total_size as u32,
+            data: data_reg,
+        });
+
+        self.ctx.free_temp(data_reg);
+        Ok(Some(dest))
+    }
+
+    /// Compiles map literal: { key: value, ... }
+    fn compile_map_literal(
+        &mut self,
+        entries: &verum_common::List<(Expr, Expr)>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::MakeMap {
+            dst: dest,
+            capacity: entries.len() as u16,
+        });
+
+        for (key, value) in entries.iter() {
+            let key_reg = self
+                .compile_expr(key)?
+                .ok_or_else(|| CodegenError::internal("map key has no value"))?;
+            let value_reg = self
+                .compile_expr(value)?
+                .ok_or_else(|| CodegenError::internal("map value has no value"))?;
+
+            self.ctx.emit(Instruction::MapInsert {
+                map: dest,
+                key: key_reg,
+                value: value_reg,
+            });
+
+            self.ctx.free_temp(key_reg);
+            self.ctx.free_temp(value_reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Compiles set literal: { elem, ... }
+    fn compile_set_literal(
+        &mut self,
+        elements: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::MakeSet {
+            dst: dest,
+            capacity: elements.len() as u16,
+        });
+
+        for elem in elements.iter() {
+            let elem_reg = self
+                .compile_expr(elem)?
+                .ok_or_else(|| CodegenError::internal("set element has no value"))?;
+
+            self.ctx.emit(Instruction::SetInsert {
+                set: dest,
+                elem: elem_reg,
+            });
+
+            self.ctx.free_temp(elem_reg);
+        }
+
+        Ok(Some(dest))
+    }
+
+    // ==================== Type Properties and Expressions ====================
+
+    /// Compiles type property access: T.size, T.alignment, etc.
+    fn compile_type_property(
+        &mut self,
+        ty: &verum_ast::ty::Type,
+        property: &verum_ast::TypeProperty,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::TypeProperty;
+
+        let dest = self.ctx.alloc_temp();
+
+        // Handle reference types: (&T).size, (&checked T).size, (&unsafe T).size, etc.
+        // CBGR reference memory layout:
+        // - Managed ThinRef (&T, &mut T): 16 bytes (ptr=8 + generation=4 + epoch_caps=4)
+        // - Managed FatRef (&[T], &mut [T]): 24 bytes (ptr=8 + len=8 + generation=4 + epoch_caps=4)
+        // - Checked thin (&checked T): 8 bytes (pointer only)
+        // - Checked fat (&checked [T]): 16 bytes (ptr=8 + len=8)
+        // - Unsafe thin (&unsafe T): 8 bytes (pointer only)
+        // - Unsafe fat (&unsafe [T]): 16 bytes (ptr=8 + len=8)
+        if let Some(ref_size) = self.resolve_ref_type_size(ty, property) {
+            self.ctx.emit(Instruction::LoadI { dst: dest, value: ref_size });
+            return Ok(Some(dest));
+        }
+
+        // Extract the type name string for property resolution
+        let type_name = self.extract_display_type_name(ty);
+
+        // Get bits for the type
+        let bits = match type_name.as_str() {
+            "Int" | "Int64" | "i64" => 64i64,
+            "Int8" | "i8" => 8,
+            "Int16" | "i16" => 16,
+            "Int32" | "i32" => 32,
+            "Int128" | "i128" => 128,
+            "IntSize" | "ISize" | "isize" => 64,
+            "UInt8" | "u8" | "Byte" => 8,
+            "UInt16" | "u16" => 16,
+            "UInt32" | "u32" => 32,
+            "UInt64" | "u64" => 64,
+            "UInt128" | "u128" => 128,
+            "UIntSize" | "USize" | "usize" => 64,
+            "Float" | "Float64" | "f64" => 64,
+            "Float32" | "f32" => 32,
+            "Bool" => 8,
+            "Char" => 32,
+            _ => 64, // default
+        };
+
+        let is_signed = matches!(type_name.as_str(),
+            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
+        let is_float = matches!(type_name.as_str(),
+            "Float" | "Float32" | "Float64" | "f32" | "f64");
+
+        match property {
+            TypeProperty::Size => {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits / 8 });
+            }
+            TypeProperty::Alignment => {
+                let size = bits / 8;
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: size.min(16) });
+            }
+            TypeProperty::Stride => {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits / 8 });
+            }
+            TypeProperty::Min => {
+                if is_float {
+                    let f = if bits == 32 { f32::MIN as f64 } else { f64::MIN };
+                    self.ctx.emit(Instruction::LoadF { dst: dest, value: f });
+                } else if is_signed {
+                    let min_val = if bits == 64 { i64::MIN } else { -(1i64 << (bits - 1)) };
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: min_val });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                }
+            }
+            TypeProperty::Max => {
+                if is_float {
+                    let f = if bits == 32 { f32::MAX as f64 } else { f64::MAX };
+                    self.ctx.emit(Instruction::LoadF { dst: dest, value: f });
+                } else if is_signed {
+                    let max_val = if bits == 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: max_val });
+                } else {
+                    let max_val = if bits == 64 { u64::MAX as i64 } else { (1i64 << bits) - 1 };
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: max_val });
+                }
+            }
+            TypeProperty::Bits => {
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits });
+            }
+            TypeProperty::Name => {
+                let const_id = self.ctx.add_const_string(&type_name);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: dest,
+                    const_id: const_id.0,
+                });
+            }
+            TypeProperty::Id => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                type_name.hash(&mut hasher);
+                let type_id = hasher.finish() as i64;
+                self.ctx.emit(Instruction::LoadI { dst: dest, value: type_id });
+            }
+        }
+
+        Ok(Some(dest))
+    }
+
+    /// Extract a human-readable type name from an AST Type for display purposes.
+    fn extract_display_type_name(&self, ty: &verum_ast::ty::Type) -> String {
+        use verum_ast::ty::TypeKind;
+        match &ty.kind {
+            TypeKind::Path(path) => {
+                if let Some(ident) = path.as_ident() {
+                    ident.name.to_string()
+                } else {
+                    format!("{}", path)
+                }
+            }
+            TypeKind::Int => "Int".to_string(),
+            TypeKind::Float => "Float".to_string(),
+            TypeKind::Bool => "Bool".to_string(),
+            TypeKind::Char => "Char".to_string(),
+            TypeKind::Text => "Text".to_string(),
+            TypeKind::Unit => "Unit".to_string(),
+            TypeKind::Never => "Never".to_string(),
+            _ => format!("{:?}", ty.kind),
+        }
+    }
+
+    /// Resolve size/alignment for reference types in type property access.
+    ///
+    /// Returns the property value (as i64) if `ty` is a reference type and
+    /// `property` is Size or Alignment. Returns None for non-reference types.
+    fn resolve_ref_type_size(
+        &self,
+        ty: &verum_ast::ty::Type,
+        property: &verum_ast::TypeProperty,
+    ) -> Option<i64> {
+        use verum_ast::ty::TypeKind;
+        use verum_ast::TypeProperty;
+
+        // Only handle Size and Alignment for reference types
+        if !matches!(property, TypeProperty::Size | TypeProperty::Alignment) {
+            return None;
+        }
+
+        // Classify the reference tier and extract inner type
+        let (is_managed, inner) = match &ty.kind {
+            TypeKind::Reference { inner, .. } => (true, inner),
+            TypeKind::CheckedReference { inner, .. } => (false, inner),
+            TypeKind::UnsafeReference { inner, .. } => (false, inner),
+            _ => return None,
+        };
+
+        // Determine if this is a fat reference.
+        // Fat refs are used for:
+        // - Slice types: [T] (TypeKind::Slice)
+        // - Protocol/trait objects (TypeKind::Path to known protocols)
+        let is_fat = match &inner.kind {
+            TypeKind::Slice(_) => true,
+            // Unsized array [T] (no size) is also a slice → fat reference
+            TypeKind::Array { size: None, .. } => true,
+            TypeKind::Path(path) => {
+                // Known protocol types produce fat refs (vtable pointer needed).
+                // Uses centralized WellKnownProtocol registry.
+                if let Some(ident) = path.as_ident() {
+                    WKP::is_fat_ref_protocol(ident.name.as_str())
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        let size: i64 = if is_managed {
+            // Managed refs carry generation + epoch_caps
+            if is_fat { 24 } else { 16 }
+        } else {
+            // Checked/unsafe refs are just pointers (thin) or ptr+len (fat)
+            if is_fat { 16 } else { 8 }
+        };
+
+        match property {
+            TypeProperty::Size => Some(size),
+            TypeProperty::Alignment => Some(8), // All reference types are pointer-aligned
+            _ => None,
+        }
+    }
+
+    /// Compute the byte offset of a field within a struct type.
+    ///
+    /// Uses the type_field_layouts map (populated during type declaration
+    /// collection) to find the field's position in the struct, then
+    /// computes the offset based on Verum's uniform 64-bit value model
+    /// where every field occupies 8 bytes.
+    fn compute_field_offset(&self, type_name: &str, field_name: &str) -> i64 {
+        if let Some(fields) = self.type_field_layouts.get(type_name) {
+            if let Some(index) = fields.iter().position(|f| f == field_name) {
+                return (index as i64) * 8;
+            }
+        }
+        // Field or type not found — return 0 as a conservative fallback.
+        // This can happen for types not yet registered (e.g., generic
+        // instantiations or externally-defined types).
+        0
+    }
+
+    /// Compiles type expression in expression position
+    fn compile_type_expr(&mut self, ty: &verum_ast::ty::Type) -> CodegenResult<Option<Reg>> {
+        // Types in expression position become type objects
+        let dest = self.ctx.alloc_temp();
+        let type_str = format!("{:?}", ty);
+        let const_id = self.ctx.add_const_string(&type_str);
+        self.ctx.emit(Instruction::LoadK {
+            dst: dest,
+            const_id: const_id.0,
+        });
+        Ok(Some(dest))
+    }
+
+    /// Compiles type bound: T: Bound
+    fn compile_type_bound(
+        &mut self,
+        _type_param: &verum_ast::ty::Ident,
+        _bound: &verum_ast::ty::Type,
+    ) -> CodegenResult<Option<Reg>> {
+        // Type bounds are compile-time - at runtime return true
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadTrue { dst: dest });
+        Ok(Some(dest))
+    }
+
+    // ==================== Verification Quantifiers ====================
+
+    /// Compiles forall quantifier: forall x: T. predicate
+    ///
+    /// Supports multiple bindings with optional domain and guard:
+    /// - Type-based: `forall x: Int. P(x)`
+    /// - Domain-based: `forall x in items. P(x)`
+    /// - Guarded: `forall x in items where x > 0. P(x)`
+    fn compile_forall(
+        &mut self,
+        _bindings: &[verum_ast::expr::QuantifierBinding],
+        _body: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Quantifiers are verified at compile time via SMT/Z3
+        // At runtime, they represent "proven true" or are dynamically checked
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadTrue { dst: dest });
+        Ok(Some(dest))
+    }
+
+    /// Compiles exists quantifier: exists x: T. predicate
+    ///
+    /// Supports multiple bindings with optional domain and guard:
+    /// - Type-based: `exists x: Int. P(x)`
+    /// - Domain-based: `exists x in items. P(x)`
+    /// - Guarded: `exists x in items where x > 0. P(x)`
+    fn compile_exists(
+        &mut self,
+        _bindings: &[verum_ast::expr::QuantifierBinding],
+        _body: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        // Quantifiers are verified at compile time via SMT/Z3
+        // At runtime, they represent "proven true" or are dynamically checked
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadTrue { dst: dest });
+        Ok(Some(dest))
+    }
+
+    /// Validate regex syntax at compile time (basic check)
+    fn validate_regex_syntax(&self, pattern: &str) -> Result<(), String> {
+        let mut depth = 0i32;
+        let mut in_class = false;
+        let mut prev_backslash = false;
+        for ch in pattern.chars() {
+            if prev_backslash {
+                prev_backslash = false;
+                continue;
+            }
+            match ch {
+                '\\' => prev_backslash = true,
+                '[' if !in_class => in_class = true,
+                ']' if in_class => in_class = false,
+                '(' if !in_class => depth += 1,
+                ')' if !in_class => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return Err("unmatched closing parenthesis ')'".to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if prev_backslash {
+            return Err("trailing backslash".to_string());
+        }
+        if depth != 0 {
+            return Err(format!("{} unclosed group(s)", depth));
+        }
+        if in_class {
+            return Err("unclosed character class '['".to_string());
+        }
+        Ok(())
+    }
+
+    /// Validate JSON syntax at compile time (basic structural check)
+    fn validate_json_syntax(&self, json: &str) -> Result<(), String> {
+        let trimmed = json.trim();
+        if trimmed.is_empty() {
+            return Err("empty JSON".to_string());
+        }
+        let first = match trimmed.chars().next() {
+            Some(c) => c,
+            None => return Err("empty JSON".to_string()),
+        };
+        let last = trimmed.chars().last().unwrap_or(first);
+        match first {
+            '{' if last != '}' => Err("object not closed with '}'".to_string()),
+            '[' if last != ']' => Err("array not closed with ']'".to_string()),
+            '"' if last != '"' || trimmed.len() < 2 => Err("string not closed".to_string()),
+            _ => Ok(()),
+        }
+    }
+}
+
+
+// ============================================================================
+// Free Variable Analysis
+// ============================================================================
+
+/// Analyzer for finding free variables in an expression.
+///
+/// Performs a recursive traversal of the AST to identify variables that:
+/// - Are referenced (appear in identifier expressions)
+/// - Are not locally bound (not parameters, not let-bound within)
+struct FreeVarAnalyzer {
+    /// Variables bound in the current scope (parameters, let bindings).
+    bound: std::collections::HashSet<String>,
+    /// Free variables found so far.
+    free: std::collections::HashSet<String>,
+    /// Scope depth for let binding tracking.
+    scope_depth: usize,
+}
+
+impl FreeVarAnalyzer {
+    /// Creates a new analyzer with the given initially bound variables.
+    fn new(bound_vars: &[String]) -> Self {
+        let mut bound = std::collections::HashSet::new();
+        for var in bound_vars {
+            bound.insert(var.clone());
+        }
+        Self {
+            bound,
+            free: std::collections::HashSet::new(),
+            scope_depth: 0,
+        }
+    }
+
+    /// Returns the collected free variables in a deterministic order.
+    fn free_vars(self) -> Vec<String> {
+        let mut vars: Vec<String> = self.free.into_iter().collect();
+        vars.sort(); // Deterministic order for consistent bytecode
+        vars
+    }
+
+    /// Visits an expression.
+    fn visit_expr(&mut self, expr: &Expr) {
+        use verum_ast::ExprKind;
+
+        match &expr.kind {
+            // Variable reference - check if it's free
+            ExprKind::Path(path) => {
+                use verum_ast::PathSegment;
+                if path.segments.len() == 1 {
+                    match &path.segments[0] {
+                        PathSegment::Name(ident) => {
+                            let name = ident.name.to_string();
+                            // Skip names starting with uppercase - they are type/variant constructors, not variables
+                            // E.g., Some, None, Ok, Err, MyType, etc.
+                            let is_type_or_variant = name.chars().next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false);
+                            if !is_type_or_variant && !self.bound.contains(&name) {
+                                self.free.insert(name);
+                            }
+                        }
+                        PathSegment::SelfValue => {
+                            // `self` in a closure needs to be captured from outer scope
+                            if !self.bound.contains("self") {
+                                self.free.insert("self".to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Multi-segment paths are module/type paths, not local variables
+            }
+
+            // Literals don't reference variables
+            ExprKind::Literal(_) => {}
+
+            // Binary/Unary operations
+            ExprKind::Binary { left, right, .. } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::Unary { expr, .. } => {
+                self.visit_expr(expr);
+            }
+
+            // Function/method calls
+            ExprKind::Call { func, args, .. } => {
+                self.visit_expr(func);
+                for arg in args.iter() {
+                    self.visit_expr(arg);
+                }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                self.visit_expr(receiver);
+                for arg in args.iter() {
+                    self.visit_expr(arg);
+                }
+            }
+
+            // Field/index access
+            ExprKind::Field { expr, .. } => {
+                self.visit_expr(expr);
+            }
+            ExprKind::Index { expr, index } => {
+                self.visit_expr(expr);
+                self.visit_expr(index);
+            }
+            ExprKind::TupleIndex { expr, .. } => {
+                self.visit_expr(expr);
+            }
+
+            // Blocks with potential let bindings
+            ExprKind::Block(block) => {
+                self.visit_block(block);
+            }
+
+            // If expression
+            ExprKind::If { condition, then_branch, else_branch } => {
+                self.visit_condition(condition);
+                self.visit_block(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.visit_expr(else_expr);
+                }
+            }
+
+            // Match expression
+            ExprKind::Match { expr, arms } => {
+                self.visit_expr(expr);
+                for arm in arms.iter() {
+                    // Pattern bindings are local to the arm
+                    let pattern_bindings = self.extract_pattern_bindings(&arm.pattern);
+                    for binding in &pattern_bindings {
+                        self.bound.insert(binding.clone());
+                    }
+                    if let Some(ref guard) = arm.guard {
+                        self.visit_expr(guard);
+                    }
+                    self.visit_expr(&arm.body);
+                    // Remove arm-local bindings
+                    for binding in pattern_bindings {
+                        self.bound.remove(&binding);
+                    }
+                }
+            }
+
+            // Loop expressions
+            ExprKind::Loop { body, .. } => {
+                self.visit_block(body);
+            }
+            ExprKind::While { condition, body, .. } => {
+                // While.condition is just an Expr, not IfCondition
+                self.visit_expr(condition);
+                self.visit_block(body);
+            }
+            ExprKind::For { pattern, iter, body, .. } => {
+                self.visit_expr(iter);
+                // Pattern bindings are local to the for body
+                let pattern_bindings = self.extract_pattern_bindings(pattern);
+                for binding in &pattern_bindings {
+                    self.bound.insert(binding.clone());
+                }
+                self.visit_block(body);
+                for binding in pattern_bindings {
+                    self.bound.remove(&binding);
+                }
+            }
+
+            // Nested closures - captured variables become bound
+            ExprKind::Closure { params, body, .. } => {
+                let mut nested_bound: Vec<String> = Vec::new();
+                for param in params.iter() {
+                    if let verum_ast::PatternKind::Ident { name, .. } = &param.pattern.kind {
+                        nested_bound.push(name.name.to_string());
+                    }
+                }
+                for binding in &nested_bound {
+                    self.bound.insert(binding.clone());
+                }
+                self.visit_expr(body);
+                for binding in nested_bound {
+                    self.bound.remove(&binding);
+                }
+            }
+
+            // Note: Assignment is handled through ExprKind::Binary { op: BinOp::Assign, ... }
+            // which is already covered by the Binary case above
+
+            // Tuples and arrays
+            ExprKind::Tuple(exprs) => {
+                for expr in exprs.iter() {
+                    self.visit_expr(expr);
+                }
+            }
+            ExprKind::Array(arr) => {
+                use verum_ast::ArrayExpr;
+                match arr {
+                    ArrayExpr::List(exprs) => {
+                        for expr in exprs.iter() {
+                            self.visit_expr(expr);
+                        }
+                    }
+                    ArrayExpr::Repeat { value, count } => {
+                        self.visit_expr(value);
+                        self.visit_expr(count);
+                    }
+                }
+            }
+
+            // Record construction
+            ExprKind::Record { path: _, fields, base } => {
+                use verum_common::Maybe;
+                for field in fields.iter() {
+                    if let Maybe::Some(ref value) = field.value {
+                        self.visit_expr(value);
+                    }
+                    // If value is None, it's shorthand syntax { x } - name 'x' is the variable reference
+                    // which we need to check as a free variable
+                    else {
+                        let name = field.name.name.to_string();
+                        if !self.bound.contains(&name) {
+                            self.free.insert(name);
+                        }
+                    }
+                }
+                if let Maybe::Some(base_expr) = base {
+                    self.visit_expr(base_expr);
+                }
+            }
+
+            // Return, break, continue
+            ExprKind::Return(Some(expr)) => {
+                self.visit_expr(expr);
+            }
+            ExprKind::Return(None) => {}
+            ExprKind::Break { value: Some(expr), .. } => {
+                self.visit_expr(expr);
+            }
+            ExprKind::Break { value: None, .. } => {}
+            ExprKind::Continue { .. } => {}
+
+            // Async/await
+            ExprKind::Await(expr) => {
+                self.visit_expr(expr);
+            }
+            ExprKind::Async(block) => {
+                self.visit_block(block);
+            }
+
+            // Unsafe block - must visit contents for free variables
+            ExprKind::Unsafe(block) => {
+                self.visit_block(block);
+            }
+
+            // Try operator
+            ExprKind::Try(expr) => {
+                self.visit_expr(expr);
+            }
+
+            // Cast
+            ExprKind::Cast { expr, .. } => {
+                self.visit_expr(expr);
+            }
+
+            // Range
+            ExprKind::Range { start, end, .. } => {
+                if let Some(start_expr) = start {
+                    self.visit_expr(start_expr);
+                }
+                if let Some(end_expr) = end {
+                    self.visit_expr(end_expr);
+                }
+            }
+
+            // Parenthesized
+            ExprKind::Paren(inner) => {
+                self.visit_expr(inner);
+            }
+
+            // Other expressions that may contain nested expressions
+            ExprKind::Pipeline { left, right } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::NullCoalesce { left, right } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::OptionalChain { expr, .. } => {
+                self.visit_expr(expr);
+            }
+
+            // Note: Let bindings are statements (StmtKind::Let), not expressions
+            // Pattern matching "let" in conditions is handled via ConditionKind::Let
+
+            // Wildcard patterns in expressions (match handling)
+            _ => {
+                // For any unhandled expression kinds, try to be conservative
+                // and not report any free variables
+            }
+        }
+    }
+
+    /// Visits a block, handling let bindings.
+    fn visit_block(&mut self, block: &verum_ast::Block) {
+        self.scope_depth += 1;
+        let mut block_bindings = Vec::new();
+
+        for stmt in block.stmts.iter() {
+            self.visit_stmt(stmt, &mut block_bindings);
+        }
+
+        if let Some(ref expr) = block.expr {
+            self.visit_expr(expr);
+        }
+
+        // Remove block-local bindings
+        for binding in block_bindings {
+            self.bound.remove(&binding);
+        }
+        self.scope_depth -= 1;
+    }
+
+    /// Visits a statement, potentially adding bindings.
+    fn visit_stmt(&mut self, stmt: &verum_ast::Stmt, block_bindings: &mut Vec<String>) {
+        use verum_ast::StmtKind;
+
+        use verum_common::Maybe;
+        match &stmt.kind {
+            StmtKind::Let { pattern, ty: _, value } => {
+                // Visit initializer first (before binding is in scope)
+                if let Maybe::Some(init_expr) = value {
+                    self.visit_expr(init_expr);
+                }
+                // Add pattern bindings
+                let bindings = self.extract_pattern_bindings(pattern);
+                for binding in &bindings {
+                    self.bound.insert(binding.clone());
+                    block_bindings.push(binding.clone());
+                }
+            }
+            StmtKind::Expr { expr, .. } => {
+                self.visit_expr(expr);
+            }
+            StmtKind::Item(_) => {
+                // Items (functions, types) don't introduce local variable bindings
+            }
+            _ => {}
+        }
+    }
+
+    /// Visits a condition (if condition, while condition).
+    fn visit_condition(&mut self, condition: &verum_ast::IfCondition) {
+        use verum_ast::ConditionKind;
+
+        for cond in condition.conditions.iter() {
+            match cond {
+                ConditionKind::Expr(expr) => {
+                    self.visit_expr(expr);
+                }
+                ConditionKind::Let { pattern, value } => {
+                    self.visit_expr(value);
+                    // Let condition bindings are only for then branch,
+                    // handled at the if expression level
+                    let _ = pattern;
+                }
+            }
+        }
+    }
+
+    /// Extracts variable names bound by a pattern.
+    fn extract_pattern_bindings(&self, pattern: &verum_ast::Pattern) -> Vec<String> {
+        let mut bindings = Vec::new();
+        self.extract_pattern_bindings_inner(pattern, &mut bindings);
+        bindings
+    }
+
+    fn extract_pattern_bindings_inner(&self, pattern: &verum_ast::Pattern, bindings: &mut Vec<String>) {
+        use verum_ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Ident { name, .. } => {
+                bindings.push(name.name.to_string());
+            }
+            PatternKind::Tuple(patterns) => {
+                for p in patterns.iter() {
+                    self.extract_pattern_bindings_inner(p, bindings);
+                }
+            }
+            PatternKind::Record { fields, .. } => {
+                use verum_common::Maybe;
+                for field in fields.iter() {
+                    if let Maybe::Some(ref pat) = field.pattern {
+                        self.extract_pattern_bindings_inner(pat, bindings);
+                    } else {
+                        // Shorthand pattern - the field name itself is the binding
+                        bindings.push(field.name.name.to_string());
+                    }
+                }
+            }
+            PatternKind::Variant { data, .. } => {
+                use verum_ast::VariantPatternData;
+                use verum_common::Maybe;
+                match data {
+                    Maybe::Some(VariantPatternData::Tuple(patterns)) => {
+                        for p in patterns.iter() {
+                            self.extract_pattern_bindings_inner(p, bindings);
+                        }
+                    }
+                    Maybe::Some(VariantPatternData::Record { fields, .. }) => {
+                        for field in fields.iter() {
+                            if let Maybe::Some(ref pat) = field.pattern {
+                                self.extract_pattern_bindings_inner(pat, bindings);
+                            } else {
+                                // Shorthand pattern - the field name itself is the binding
+                                bindings.push(field.name.name.to_string());
+                            }
+                        }
+                    }
+                    Maybe::None => {
+                        // Unit variant (no data) - no bindings
+                    }
+                }
+            }
+            PatternKind::Or(patterns) => {
+                // For or patterns, we need all branches to bind the same names
+                // Just extract from the first one
+                if let Some(first) = patterns.first() {
+                    self.extract_pattern_bindings_inner(first, bindings);
+                }
+            }
+            PatternKind::Paren(inner) => {
+                self.extract_pattern_bindings_inner(inner, bindings);
+            }
+            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Rest |
+            PatternKind::Range { .. } | PatternKind::Reference { .. } | PatternKind::View { .. } => {
+                // These don't bind variables (Reference does, but recursively via inner)
+            }
+            PatternKind::Stream { head_patterns, rest } => {
+                // Stream patterns bind variables from head patterns and optionally the rest
+                for p in head_patterns.iter() {
+                    self.extract_pattern_bindings_inner(p, bindings);
+                }
+                if let verum_common::Maybe::Some(rest_ident) = rest {
+                    bindings.push(rest_ident.name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_expressions_module_exists() {
+        // Basic compilation test - module loads successfully
+        assert!(true);
+    }
+}

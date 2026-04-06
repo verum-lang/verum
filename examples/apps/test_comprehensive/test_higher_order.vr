@@ -1,0 +1,43 @@
+// Test higher-order functions (functions that take functions as parameters)
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn add_one(x: Int) -> Int {
+    x + 1
+}
+
+fn triple(n: Int) -> Int {
+    n * 3
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn add_ten(n: Int) -> Int {
+    n + 10
+}
+
+fn main() -> Int {
+    // Test 1: apply_twice
+    let result1 = apply_twice(add_one, 5);  // add_one(add_one(5)) = 7
+    
+    // Test 2: compose
+    let result2 = compose(triple, add_ten, 5);  // triple(add_ten(5)) = triple(15) = 45
+    
+    // Test 3: Nested higher-order calls
+    let result3 = apply_twice(triple, 2);  // triple(triple(2)) = triple(6) = 18
+    
+    // Verify results
+    if result1 != 7 {
+        0 // FAIL
+    } else if result2 != 45 {
+        0 // FAIL
+    } else if result3 != 18 {
+        0 // FAIL  
+    } else {
+        1 // SUCCESS - all tests passed
+    }
+}

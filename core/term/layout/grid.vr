@@ -1,0 +1,195 @@
+// =============================================================================
+// layout/grid.vr - CSS Grid Layout for Terminals
+// =============================================================================
+// Layer: 4 (Layout Engine)
+// Dependencies: rect.vr
+// =============================================================================
+//
+// CSS Grid Level 1 adapted for terminal cell grids. Supports fixed, fractional
+// (fr), min-max, and auto track sizing. Column and row gaps are supported.
+//
+// Usage:
+// ```verum
+// let grid = GridLayout.new(
+//     [GridTrack.Fixed(20), GridTrack.Fr(1.0), GridTrack.Fixed(30)],
+//     [GridTrack.Fixed(3), GridTrack.Fr(1.0), GridTrack.Fixed(1)],
+// ).column_gap(1).row_gap(1);
+// let cells = grid.compute(&area);
+// // cells[row][col] is the Rect for that grid cell
+// ```
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
+// =============================================================================
+
+module grid;
+
+mount super.rect.Rect;
+
+// =============================================================================
+// GridTrack — track sizing
+// =============================================================================
+
+/// Grid track sizing, analogous to CSS grid-template-columns/rows values.
+public type GridTrack is
+    | Fixed(Int)            // Fixed number of cells
+    | Fr(Float)             // Fractional unit (like CSS fr)
+    | MinMax(Int, Int)      // Minimum and maximum cell count
+    | Auto;                 // Size to content (treated as Fr(1.0) in layout)
+
+// =============================================================================
+// GridLayout
+// =============================================================================
+
+/// CSS Grid layout engine for terminal cell grids.
+/// Computes a 2D array of Rect values from column/row track definitions.
+public type GridLayout is {
+    columns: List<GridTrack>,
+    rows: List<GridTrack>,
+    column_gap: Int,
+    row_gap: Int,
+};
+
+// =============================================================================
+// Constructors & Builder
+// =============================================================================
+
+implement GridLayout {
+    /// Create a new grid layout with column and row definitions.
+    public fn new(columns: List<GridTrack>, rows: List<GridTrack>) -> GridLayout {
+        GridLayout {
+            columns: columns,
+            rows: rows,
+            column_gap: 0,
+            row_gap: 0,
+        }
+    }
+
+    /// Set the gap between columns.
+    public fn column_gap(self, gap: Int) -> GridLayout {
+        GridLayout { column_gap: gap.max(0), ..self }
+    }
+
+    /// Set the gap between rows.
+    public fn row_gap(self, gap: Int) -> GridLayout {
+        GridLayout { row_gap: gap.max(0), ..self }
+    }
+
+    /// Set both column and row gaps.
+    public fn gap(self, gap: Int) -> GridLayout {
+        GridLayout { column_gap: gap.max(0), row_gap: gap.max(0), ..self }
+    }
+
+    // =========================================================================
+    // Layout Computation
+    // =========================================================================
+
+    /// Compute the grid layout, returning a 2D list of Rects.
+    /// Result is indexed as result[row_index][col_index].
+    public fn compute(&self, area: &Rect) -> List<List<Rect>> {
+        let col_sizes = resolve_tracks(&self.columns, area.width, self.column_gap);
+        let row_sizes = resolve_tracks(&self.rows, area.height, self.row_gap);
+
+        let mut result = List.new();
+        let mut y = area.y;
+
+        let mut ri = 0;
+        while ri < row_sizes.len() {
+            let mut row = List.new();
+            let mut x = area.x;
+            let mut ci = 0;
+            while ci < col_sizes.len() {
+                row.push(Rect.new(x, y, col_sizes[ci], row_sizes[ri]));
+                x = x + col_sizes[ci] + self.column_gap;
+                ci = ci + 1;
+            }
+            result.push(row);
+            y = y + row_sizes[ri] + self.row_gap;
+            ri = ri + 1;
+        }
+
+        result
+    }
+}
+
+// =============================================================================
+// Track Resolution Algorithm
+// =============================================================================
+
+/// Resolve track sizes for a given available space and gap.
+///
+/// Algorithm:
+/// 1. Subtract total gap space from available space.
+/// 2. Allocate fixed tracks and MinMax minimum sizes.
+/// 3. Distribute remaining space among Fr and Auto tracks.
+/// 4. Clamp MinMax tracks to their maximum.
+fn resolve_tracks(tracks: &List<GridTrack>, available: Int, gap: Int) -> List<Int> {
+    let n = tracks.len();
+    if n == 0 { return List.new(); }
+
+    // Total gap space
+    let total_gap = if n > 1 { gap * (n - 1) } else { 0 };
+    let usable = (available - total_gap).max(0);
+
+    let mut sizes = List.new();
+    let mut remaining = usable;
+    let mut total_fr = 0.0;
+
+    // Pass 1: allocate fixed sizes, collect fr totals
+    let mut i = 0;
+    while i < n {
+        match tracks[i] {
+            GridTrack.Fixed(s) => {
+                let clamped = s.min(remaining).max(0);
+                sizes.push(clamped);
+                remaining = remaining - clamped;
+            },
+            GridTrack.MinMax(min_val, _max_val) => {
+                let clamped = min_val.min(remaining).max(0);
+                sizes.push(clamped);
+                remaining = remaining - clamped;
+            },
+            GridTrack.Fr(f) => {
+                total_fr = total_fr + f;
+                sizes.push(0);  // placeholder
+            },
+            GridTrack.Auto => {
+                total_fr = total_fr + 1.0;
+                sizes.push(0);  // placeholder
+            },
+        }
+        i = i + 1;
+    }
+
+    // Pass 2: distribute remaining space to Fr and Auto tracks
+    if total_fr > 0.0 && remaining > 0 {
+        let mut i = 0;
+        while i < n {
+            match tracks[i] {
+                GridTrack.Fr(f) => {
+                    let alloc = ((remaining as Float) * f / total_fr) as Int;
+                    sizes[i] = alloc;
+                },
+                GridTrack.Auto => {
+                    let alloc = ((remaining as Float) * 1.0 / total_fr) as Int;
+                    sizes[i] = alloc;
+                },
+                _ => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    // Pass 3: clamp MinMax tracks to maximum
+    let mut i = 0;
+    while i < n {
+        match tracks[i] {
+            GridTrack.MinMax(_min_val, max_val) => {
+                if sizes[i] > max_val { sizes[i] = max_val; }
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    sizes
+}

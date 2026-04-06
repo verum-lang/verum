@@ -1,0 +1,26 @@
+// Test type aliases
+type Point is (Float, Float);
+type UserId is Int;
+type Name is Text;
+
+fn distance(p1: Point, p2: Point) -> Float {
+    let (x1, y1) = p1
+    let (x2, y2) = p2
+    let dx = x2 - x1
+    let dy = y2 - y1
+    dx * dx + dy * dy
+}
+
+fn main() {
+    let p1: Point = (0.0, 0.0)
+    let p2: Point = (3.0, 4.0)
+    
+    let d = distance(p1, p2)
+    print(f"Distance squared: {d}")
+    
+    let id: UserId = 12345
+    print(f"User ID: {id}")
+    
+    let username: Name = "alice"
+    print(f"Username: {username}")
+}

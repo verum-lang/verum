@@ -1,0 +1,1679 @@
+// =============================================================================
+// mem/allocator.vr - CBGR-Aware Memory Allocator
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/{platform}/mem, sys/common, mem/header, mem/capability
+// =============================================================================
+//
+// This module implements a high-performance, CBGR-integrated memory allocator
+// without libc dependencies. It uses direct syscalls via the sys/ layer.
+//
+// # Architecture
+//
+// ```
+// ┌────────────────────────────────────────────────────────────────────┐
+// │ LAYER 3: User API                                                  │
+// │   cbgr_alloc<T>() -> Result<ThinRef<T>, AllocError>                │
+// │   cbgr_dealloc(ref: ThinRef<T>)                                    │
+// └──────────────────────────────────────────────────────────────────┬─┘
+//                                                                    │
+// ┌──────────────────────────────────────────────────────────────────▼─┐
+// │ LAYER 2: Thread-Local Heap (no locks on fast path)                 │
+// │   LocalHeap { pages: [PagePtr; SIZE_CLASSES], cache, stats }       │
+// └──────────────────────────────────────────────────────────────────┬─┘
+//                                                                    │
+// ┌──────────────────────────────────────────────────────────────────▼─┐
+// │ LAYER 1: Page Manager (64KB pages, slab allocation)                │
+// │   PageHeader { generation, epoch, slots[], free_list }             │
+// └──────────────────────────────────────────────────────────────────┬─┘
+//                                                                    │
+// ┌──────────────────────────────────────────────────────────────────▼─┐
+// │ LAYER 0: OS Backend (mmap/VirtualAlloc)                            │
+// │   2MB chunks aligned to huge pages                                 │
+// └────────────────────────────────────────────────────────────────────┘
+// ```
+//
+// # Dual-Mode CBGR
+//
+// - **Small Objects (≤2KB)**: Page-level generation with per-slot delta
+// - **Large Objects (>2KB)**: Inline 32-byte AllocationHeader
+//
+// # Performance Targets
+//
+// - Alloc fast path: ~20ns (thread-local, no locks)
+// - Dealloc fast path: ~15ns (same thread)
+// - CBGR validation: ~5ns (page-level mode)
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6
+// =============================================================================
+
+module core.mem.allocator;
+mount super.header.{AllocationHeader, HEADER_SIZE, GEN_INITIAL};
+mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
+mount super.epoch.{GLOBAL_EPOCH};
+
+// Import intrinsics as functions
+mount core.intrinsics.{
+    ptr_read, ptr_write, ptr_offset,
+    slice_from_raw_parts, slice_from_raw_parts_mut,
+    atomic_load_u32, atomic_load_i32,
+    atomic_store_u32, atomic_exchange_i32,
+    atomic_compare_exchange_u32, atomic_compare_exchange_i32,
+    spin_hint, memset, memcpy,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+};
+
+// Platform-specific memory operations
+@cfg(target_os = "linux")
+mount sys.linux.mem.{mmap, munmap, mprotect, madvise, PROT_READ, PROT_WRITE, PROT_NONE, MAP_PRIVATE, MAP_ANONYMOUS, MAP_HUGETLB, MADV_HUGEPAGE};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{mmap_ffi as mmap, munmap, mprotect, madvise, PROT_READ, PROT_WRITE, PROT_NONE, MAP_PRIVATE, MAP_ANON, MADV_HUGEPAGE};
+
+@cfg(target_os = "windows")
+mount sys.windows.kernel32.{VirtualAlloc, VirtualFree};
+
+@cfg(target_os = "windows")
+mount sys.windows.ntdll.{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, MEM_LARGE_PAGES, PAGE_READWRITE, PAGE_NOACCESS};
+
+mount sys.common.OSError;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Size classes for slab allocation (covers ~95% of allocations)
+public const SIZE_CLASSES: [Int; 11] = [16, 32, 48, 64, 80, 96, 128, 256, 512, 1024, 2048];
+
+/// Number of size classes
+public const SIZE_CLASS_COUNT: Int = 11;
+
+/// Page size (64KB - 16 4KB OS pages)
+public const PAGE_SIZE: Int = 65536;
+
+/// Chunk size for bulk allocation (2MB - aligns with huge pages)
+public const CHUNK_SIZE: Int = 2097152;
+
+/// Large allocation threshold (use direct mmap above this)
+public const LARGE_THRESHOLD: Int = 2048;
+
+/// Maximum slots per page
+public const MAX_SLOTS_PER_PAGE: Int = 512;
+
+/// Guard page size
+public const GUARD_PAGE_SIZE: Int = 4096;
+
+// =============================================================================
+// Allocation Errors
+// =============================================================================
+
+/// Error type for allocation failures
+public type AllocError is
+    | OutOfMemory { requested: Int }
+    | InvalidSize { size: Int }
+    | InvalidAlignment { alignment: Int }
+    | MmapFailed { code: Int }
+    | MunmapFailed { code: Int }
+    | PageExhausted
+    | InvalidPointer
+    ;
+
+implement AllocError {
+    public fn message(&self) -> Text {
+        match self {
+            OutOfMemory { requested } => f"out of memory: requested {requested} bytes",
+            InvalidSize { size } => f"invalid allocation size: {size}",
+            InvalidAlignment { alignment } => f"invalid alignment: {alignment}",
+            MmapFailed { code } => f"mmap failed with code {code}",
+            MunmapFailed { code } => f"munmap failed with code {code}",
+            PageExhausted => "page exhausted, need new page",
+            InvalidPointer => "invalid pointer for deallocation",
+        }
+    }
+}
+
+implement Debug for AllocError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message())
+    }
+}
+
+implement Display for AllocError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message())
+    }
+}
+
+// =============================================================================
+// Memory Layout
+// =============================================================================
+
+/// Describes the memory layout requirements for a type.
+///
+/// Layout captures the size and alignment needed to allocate memory for a type.
+/// It is used by allocators to properly align and size memory allocations.
+public type Layout is {
+    /// Size in bytes required for the type.
+    size_: Int,
+    /// Alignment in bytes required for the type (must be power of 2).
+    align_: Int,
+};
+
+implement Layout {
+    /// Create a layout for a type T.
+    ///
+    /// Uses compile-time type properties to determine size and alignment.
+    public fn new<T>() -> Layout {
+        Layout {
+            size_: T.size,
+            align_: T.alignment,
+        }
+    }
+
+    /// Create a layout from explicit size and alignment.
+    ///
+    /// ## Panics
+    /// Panics if alignment is not a power of 2.
+    public fn from_size_align(size: Int, align: Int) -> Layout {
+        // Verify alignment is power of 2
+        if align <= 0 || (align & (align - 1)) != 0 {
+            panic("alignment must be a power of 2");
+        }
+        Layout { size_: size, align_: align }
+    }
+
+    /// Create a layout from size with natural alignment.
+    ///
+    /// Natural alignment is the largest power of 2 that divides size,
+    /// clamped to a maximum of 16 (typical cache line consideration).
+    public fn from_size(size: Int) -> Layout {
+        // Natural alignment: largest power of 2 dividing size, max 16
+        let mut align = 1;
+        while align < 16 && (size & align) == 0 && align < size {
+            align = align * 2;
+        }
+        if align > 16 {
+            align = 16;
+        }
+        Layout { size_: size, align_: align }
+    }
+
+    /// Get the size in bytes.
+    public fn size(&self) -> Int {
+        self.size_
+    }
+
+    /// Get the alignment in bytes.
+    public fn align(&self) -> Int {
+        self.align_
+    }
+
+    /// Calculate layout for an array of n elements.
+    public fn repeat(&self, n: Int) -> Layout {
+        Layout {
+            size_: self.size_ * n,
+            align_: self.align_,
+        }
+    }
+
+    /// Extend this layout with another, returning combined layout.
+    ///
+    /// The second layout is placed after the first with proper padding.
+    public fn extend(&self, other: Layout) -> Layout {
+        let padded_size = align_up(self.size_, other.align_);
+        Layout {
+            size_: padded_size + other.size_,
+            align_: if self.align_ > other.align_ { self.align_ } else { other.align_ },
+        }
+    }
+
+    /// Pad to alignment, returning layout with size adjusted.
+    public fn pad_to_align(&self) -> Layout {
+        Layout {
+            size_: align_up(self.size_, self.align_),
+            align_: self.align_,
+        }
+    }
+}
+
+/// Align a value up to the next multiple of alignment.
+public fn align_up(value: Int, align: Int) -> Int {
+    (value + align - 1) & !(align - 1)
+}
+
+/// Align a value down to the previous multiple of alignment.
+public fn align_down(value: Int, align: Int) -> Int {
+    value & !(align - 1)
+}
+
+/// Allocator protocol for memory allocation.
+///
+/// This is an alias for the Allocator protocol for compatibility.
+public type Alloc is protocol {
+    fn alloc(&mut self, layout: Layout) -> Result<*mut Byte, AllocError>;
+    fn dealloc(&mut self, ptr: *mut Byte, layout: Layout);
+    fn realloc(
+        &mut self,
+        ptr: *mut Byte,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<*mut Byte, AllocError>;
+};
+
+// =============================================================================
+// Size Class Utilities
+// =============================================================================
+
+/// Get size class index for an allocation size.
+/// Returns None for large allocations (> LARGE_THRESHOLD).
+@inline
+public fn size_class_index(size: Int) -> Maybe<Int> {
+    // Unrolled for performance
+    if size <= 16 { return Some(0); }
+    if size <= 32 { return Some(1); }
+    if size <= 48 { return Some(2); }
+    if size <= 64 { return Some(3); }
+    if size <= 80 { return Some(4); }
+    if size <= 96 { return Some(5); }
+    if size <= 128 { return Some(6); }
+    if size <= 256 { return Some(7); }
+    if size <= 512 { return Some(8); }
+    if size <= 1024 { return Some(9); }
+    if size <= 2048 { return Some(10); }
+    None
+}
+
+/// Get actual allocation size for a size class.
+@inline
+public fn size_class_to_size(class_idx: Int) -> Int {
+    SIZE_CLASSES[class_idx]
+}
+
+/// Calculate slots per page for a size class.
+@inline
+fn slots_per_page(class_idx: Int) -> Int {
+    let slot_size = SIZE_CLASSES[class_idx];
+    let header_size = PageHeader.SIZE;
+    let usable = PAGE_SIZE - header_size;
+    // Account for slot metadata (1 byte per slot)
+    // slots * slot_size + slots * 1 <= usable
+    // slots * (slot_size + 1) <= usable
+    let slots = usable / (slot_size + 1);
+    if slots > MAX_SLOTS_PER_PAGE {
+        MAX_SLOTS_PER_PAGE
+    } else {
+        slots
+    }
+}
+
+// =============================================================================
+// Page Header (64 bytes, cache-line aligned)
+// =============================================================================
+
+/// Page header for slab-allocated pages.
+/// Contains page-level CBGR tracking and slot management.
+@repr(C, align(64))
+public type PageHeader is {
+    /// Size class index (into SIZE_CLASSES array)
+    size_class: UInt16,
+
+    /// Total number of slots in this page
+    slot_count: UInt16,
+
+    /// Number of currently allocated slots
+    used_count: UInt16,
+
+    /// Index of first free slot (-1 if none)
+    free_list_head: Int16,
+
+    /// Page-level generation (atomic, base for slot generations)
+    generation: UInt32,
+
+    /// Global epoch when page was created
+    epoch: UInt16,
+
+    /// Page state flags
+    flags: UInt16,
+
+    /// Thread ID of owning thread (for remote free detection)
+    thread_id: UInt32,
+
+    /// Remote free list head (for cross-thread deallocation)
+    remote_free_head: Int32,
+
+    /// Next page in linked list
+    next_page: &unsafe PageHeader,
+
+    /// Previous page in linked list
+    prev_page: &unsafe PageHeader,
+
+    /// Reserved for alignment (pad to 64 bytes)
+    reserved: [UInt32; 4],
+};
+
+/// Page header size
+public const PAGE_HEADER_SIZE: Int = 64;
+
+implement PageHeader {
+    /// Size constant for compile-time use
+    public const SIZE: Int = 64;
+
+    /// Set next page pointer
+    public fn set_next(&mut self, next: &unsafe PageHeader) {
+        self.next_page = next;
+    }
+
+    /// Initialize a new page header
+    public fn init(
+        &mut self,
+        size_class: Int,
+        thread_id: UInt32,
+        epoch: UInt16,
+    ) {
+        let slots = slots_per_page(size_class);
+
+        self.size_class = size_class as UInt16;
+        self.slot_count = slots as UInt16;
+        self.used_count = 0;
+        self.free_list_head = 0;  // First free slot is 0
+        self.generation = GEN_INITIAL;
+        self.epoch = epoch;
+        self.flags = 0;
+        self.thread_id = thread_id;
+        self.remote_free_head = -1;
+        self.next_page = 0 as &unsafe PageHeader;
+        self.prev_page = 0 as &unsafe PageHeader;
+        self.reserved = [0, 0, 0, 0];
+
+        // Initialize free list: each slot points to next
+        let metadata = self.slot_metadata_mut();
+        for i in 0..(slots - 1) {
+            // Store next free index in the slot data
+            // Slot metadata byte: generation delta (starts at 0)
+            metadata[i] = 0;
+        }
+        metadata[slots - 1] = 0;  // Last slot
+
+        // Initialize free list pointers in slot data
+        for i in 0..(slots - 1) {
+            let slot_ptr = self.slot_ptr(i) as &mut Int16;
+            unsafe { ptr_write(slot_ptr, (i + 1) as Int16) };
+        }
+        // Last slot has -1 (no next)
+        let last_slot = self.slot_ptr(slots - 1) as &mut Int16;
+        unsafe { ptr_write(last_slot, -1 as Int16) };
+    }
+
+    /// Get pointer to slot metadata array (1 byte per slot)
+    @inline
+    public fn slot_metadata(&self) -> &[UInt8] {
+        let base = self as &unsafe Byte;
+        let offset = PAGE_HEADER_SIZE;
+        unsafe {
+            let ptr = ptr_offset(base, offset);
+            slice_from_raw_parts(ptr as &unsafe UInt8, self.slot_count as Int)
+        }
+    }
+
+    /// Get mutable pointer to slot metadata
+    @inline
+    public fn slot_metadata_mut(&mut self) -> &mut [UInt8] {
+        let base = self as &unsafe Byte;
+        let offset = PAGE_HEADER_SIZE;
+        unsafe {
+            let ptr = ptr_offset(base, offset);
+            slice_from_raw_parts_mut(ptr as &unsafe UInt8, self.slot_count as Int)
+        }
+    }
+
+    /// Calculate offset to slot data area
+    @inline
+    fn slot_data_offset(&self) -> Int {
+        // Header + metadata (aligned to 64 bytes)
+        let metadata_size = self.slot_count as Int;
+        let aligned_metadata = (metadata_size + 63) & !63;
+        PAGE_HEADER_SIZE + aligned_metadata
+    }
+
+    /// Get pointer to a specific slot's data
+    @inline
+    public fn slot_ptr(&self, index: Int) -> &unsafe Byte {
+        let base = self as &unsafe Byte;
+        let data_offset = self.slot_data_offset();
+        let slot_size = SIZE_CLASSES[self.size_class as Int];
+        let offset = data_offset + index * slot_size;
+        unsafe { ptr_offset(base, offset) }
+    }
+
+    /// Get slot index from a user pointer
+    @inline
+    public fn slot_index_from_ptr(&self, ptr: &unsafe Byte) -> Int {
+        let base = self as &unsafe Byte;
+        let data_offset = self.slot_data_offset();
+        let data_start = unsafe { ptr_offset(base, data_offset) };
+        let offset = (ptr as Int) - (data_start as Int);
+        let slot_size = SIZE_CLASSES[self.size_class as Int];
+        offset / slot_size
+    }
+
+    /// Allocate a slot from this page.
+    /// Returns (slot_index, generation) or None if page is full.
+    @inline
+    public fn alloc_slot(&mut self) -> Maybe<(Int, UInt32)> {
+        if self.free_list_head < 0 {
+            return None;
+        }
+
+        let index = self.free_list_head as Int;
+
+        // Pop from free list
+        let slot_data = self.slot_ptr(index) as &Int16;
+        let next_free = unsafe { ptr_read(slot_data) };
+        self.free_list_head = next_free;
+        self.used_count = self.used_count + 1;
+
+        // Calculate full generation
+        let page_gen = atomic_load_u32(&self.generation, "acquire");
+        let metadata = self.slot_metadata();
+        let slot_delta = metadata[index] as UInt32;
+        let full_gen = page_gen + slot_delta;
+
+        Some((index, full_gen))
+    }
+
+    /// Deallocate a slot in this page.
+    /// Increments slot generation delta (CBGR invalidation).
+    @inline
+    public fn dealloc_slot(&mut self, index: Int) {
+        let metadata = self.slot_metadata_mut();
+
+        // INCREMENT SLOT GENERATION - this is the key CBGR operation!
+        // Wraps at 256, but combined with page generation provides full range
+        metadata[index] = ((metadata[index] as Int + 1) % 256) as UInt8;
+
+        // Push to free list
+        let slot_data = self.slot_ptr(index) as &mut Int16;
+        unsafe { ptr_write(slot_data, self.free_list_head) };
+        self.free_list_head = index as Int16;
+        self.used_count = self.used_count - 1;
+    }
+
+    /// Add to remote free list (cross-thread deallocation).
+    /// Uses atomic CAS for thread safety.
+    public fn add_to_remote_free(&mut self, index: Int) {
+        loop {
+            let old_head = atomic_load_i32(&self.remote_free_head, "acquire");
+
+            // Store old head in slot data
+            let slot_data = self.slot_ptr(index) as &mut Int32;
+            unsafe { ptr_write(slot_data, old_head) };
+
+            // CAS to update remote_free_head
+            let result = atomic_compare_exchange_i32(
+                &self.remote_free_head,
+                old_head,
+                index as Int32,
+                "acq_rel",
+                "acquire"
+            );
+
+            if result.1 {
+                break;  // Success
+            }
+            // Retry on failure
+        }
+    }
+
+    /// Process remote free list (called by owning thread).
+    public fn process_remote_frees(&mut self) {
+        // Atomically swap remote list to local processing
+        let head = atomic_exchange_i32(&self.remote_free_head, -1, "acq_rel");
+
+        let mut current = head;
+        while current >= 0 {
+            let slot_data = self.slot_ptr(current as Int) as &Int32;
+            let next = unsafe { ptr_read(slot_data) };
+
+            self.dealloc_slot(current as Int);
+            current = next;
+        }
+    }
+
+    /// Check if page is empty (can be released).
+    @inline
+    public fn is_empty(&self) -> Bool {
+        self.used_count == 0
+    }
+
+    /// Check if page is full.
+    @inline
+    public fn is_full(&self) -> Bool {
+        self.free_list_head < 0
+    }
+
+    /// Validate a reference against this page.
+    @inline
+    public fn validate_reference(&self, slot_index: Int, expected_gen: UInt32) -> Bool {
+        let page_gen = atomic_load_u32(&self.generation, "acquire");
+        let metadata = self.slot_metadata();
+        let slot_delta = metadata[slot_index] as UInt32;
+        let actual_gen = page_gen + slot_delta;
+        expected_gen == actual_gen
+    }
+}
+
+// =============================================================================
+// Large Allocation Header
+// =============================================================================
+
+/// Header for large allocations (direct mmap).
+/// Uses inline AllocationHeader (32 bytes).
+@repr(C, align(32))
+public type LargeAllocHeader is {
+    /// Standard CBGR header
+    header: AllocationHeader,
+
+    /// Total mapped size (including header)
+    mapped_size: Int,
+
+    /// Original requested size
+    requested_size: Int,
+};
+
+implement LargeAllocHeader {
+    public const SIZE: Int = 64;  // 32 (header) + 16 (sizes) + 16 (padding)
+}
+
+// =============================================================================
+// Thread-Local Heap
+// =============================================================================
+
+/// Thread-local heap structure for fast allocation.
+public type LocalHeap is {
+    /// Active page for each size class
+    pages: [&mut PageHeader; 11],
+
+    /// Thread ID
+    thread_id: UInt32,
+
+    /// Statistics
+    alloc_count: UInt64,
+    dealloc_count: UInt64,
+    large_alloc_count: UInt64,
+    bytes_allocated: UInt64,
+};
+
+implement LocalHeap {
+    /// Create a new thread-local heap.
+    public fn new(thread_id: UInt32) -> LocalHeap {
+        LocalHeap {
+            pages: [0 as &mut PageHeader; 11],
+            thread_id: thread_id,
+            alloc_count: 0,
+            dealloc_count: 0,
+            large_alloc_count: 0,
+            bytes_allocated: 0,
+        }
+    }
+
+    /// Allocate memory of given size and alignment.
+    @inline
+    public fn alloc(&mut self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        // Check for large allocation
+        let class_idx = match size_class_index(size) {
+            Some(idx) => idx,
+            None => return self.alloc_large(size, align),
+        };
+
+        // Try to allocate from current page
+        let page = self.pages[class_idx];
+        if (page as Int) != 0 {
+            if let Some((slot_idx, gen)) = page.alloc_slot() {
+                let ptr = page.slot_ptr(slot_idx);
+                let epoch = page.epoch;
+                self.alloc_count = self.alloc_count + 1;
+                self.bytes_allocated = self.bytes_allocated + SIZE_CLASSES[class_idx] as UInt64;
+                return Ok((ptr, gen, epoch));
+            }
+        }
+
+        // Need a new page
+        self.alloc_slow_path(class_idx)
+    }
+
+    /// Slow path: allocate a new page.
+    @cold
+    fn alloc_slow_path(&mut self, class_idx: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        // Request new page from global manager
+        let new_page = request_new_page(class_idx, self.thread_id)?;
+
+        self.pages[class_idx] = new_page;
+
+        let (slot_idx, gen) = new_page.alloc_slot().ok_or(AllocError.PageExhausted)?;
+        let ptr = new_page.slot_ptr(slot_idx);
+        let epoch = new_page.epoch;
+
+        self.alloc_count = self.alloc_count + 1;
+        self.bytes_allocated = self.bytes_allocated + SIZE_CLASSES[class_idx] as UInt64;
+
+        Ok((ptr, gen, epoch))
+    }
+
+    /// Large allocation via direct mmap.
+    fn alloc_large(&mut self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        // Calculate total size with header
+        let total_size = LargeAllocHeader.SIZE + size;
+        let aligned_size = (total_size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+
+        // Allocate via mmap
+        let ptr = os_mmap(aligned_size)?;
+
+        // Write header
+        let header = ptr as &mut LargeAllocHeader;
+        let epoch = GLOBAL_EPOCH.current_epoch() as UInt16;
+        let gen = GLOBAL_EPOCH.increment_epoch() as UInt32;
+
+        header.header = AllocationHeader.new(
+            size as UInt32,
+            align as UInt32,
+            0,  // type_id
+            CAP_OWNED,
+        );
+        header.header.store_generation(gen);
+        header.header.store_epoch(epoch);
+        header.mapped_size = aligned_size;
+        header.requested_size = size;
+
+        // User pointer is after header
+        let user_ptr = unsafe { ptr_offset(ptr, LargeAllocHeader.SIZE) };
+
+        self.large_alloc_count = self.large_alloc_count + 1;
+        self.bytes_allocated = self.bytes_allocated + aligned_size as UInt64;
+
+        Ok((user_ptr, gen, epoch))
+    }
+
+    /// Deallocate memory by pointer.
+    public fn dealloc(&mut self, ptr: &unsafe Byte) -> Result<(), AllocError> {
+        // Determine if this is a large or small allocation
+        let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &PageHeader;
+
+        // Check if it's a valid page (has our signature in flags or is large alloc)
+        unsafe {
+            if is_slab_page(page_base) {
+                self.dealloc_small(ptr, page_base as &mut PageHeader)
+            } else {
+                self.dealloc_large(ptr)
+            }
+        }
+    }
+
+    /// Deallocate small object.
+    fn dealloc_small(&mut self, ptr: &unsafe Byte, page: &mut PageHeader) -> Result<(), AllocError> {
+        let slot_idx = page.slot_index_from_ptr(ptr);
+
+        // Check if same thread owns the page
+        if page.thread_id == self.thread_id {
+            // Fast path: same thread
+            page.dealloc_slot(slot_idx);
+        } else {
+            // Slow path: remote free
+            page.add_to_remote_free(slot_idx);
+        }
+
+        self.dealloc_count = self.dealloc_count + 1;
+        Ok(())
+    }
+
+    /// Deallocate large object.
+    fn dealloc_large(&mut self, ptr: &unsafe Byte) -> Result<(), AllocError> {
+        // Header is before user data
+        let header_ptr = unsafe { ptr_offset(ptr, -LargeAllocHeader.SIZE) };
+        let header = header_ptr as &LargeAllocHeader;
+
+        // Increment generation before freeing (CBGR invalidation)
+        header.header.increment_generation();
+
+        // Unmap the memory
+        os_munmap(header_ptr, header.mapped_size)?;
+
+        self.dealloc_count = self.dealloc_count + 1;
+        Ok(())
+    }
+
+    /// Process remote frees for all pages.
+    public fn process_remote_frees(&mut self) {
+        for i in 0..SIZE_CLASS_COUNT {
+            let page = self.pages[i];
+            if (page as Int) != 0 {
+                page.process_remote_frees();
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Global State
+// =============================================================================
+
+/// Page pool for size class
+type PagePool is {
+    /// Free pages list
+    free_pages: &mut PageHeader,
+    /// Full pages list
+    full_pages: &mut PageHeader,
+    /// Partial pages list
+    partial_pages: &mut PageHeader,
+    /// Total pages allocated
+    total_pages: Int,
+};
+
+/// Global page manager (protected by spinlock)
+static mut GLOBAL_PAGE_POOLS: [PagePool; 11] = [
+    PagePool { free_pages: 0 as &mut PageHeader, full_pages: 0 as &mut PageHeader, partial_pages: 0 as &mut PageHeader, total_pages: 0 };
+    11
+];
+
+/// Global spinlock for page manager
+static mut PAGE_MANAGER_LOCK: UInt32 = 0;
+
+/// Acquire page manager lock
+@inline
+fn lock_page_manager() {
+    loop {
+        let expected = 0;
+        let result = atomic_compare_exchange_u32(
+            unsafe { &PAGE_MANAGER_LOCK as *mut UInt32 },
+            expected,
+            1,
+            ORDERING_ACQUIRE,
+            ORDERING_RELAXED
+        );
+        if result.1 {
+            break;
+        }
+        // Spin
+        spin_hint();
+    }
+}
+
+/// Release page manager lock
+@inline
+fn unlock_page_manager() {
+    atomic_store_u32(unsafe { &PAGE_MANAGER_LOCK as *mut UInt32 }, 0, ORDERING_RELEASE);
+}
+
+/// Request a new page for a size class
+fn request_new_page(class_idx: Int, thread_id: UInt32) -> Result<&mut PageHeader, AllocError> {
+    lock_page_manager();
+
+    let pool = unsafe { &mut GLOBAL_PAGE_POOLS[class_idx] };
+
+    // Try to get from free pages first
+    let page = if (pool.free_pages as Int) != 0 {
+        let page = pool.free_pages;
+        pool.free_pages = page.next_page as &mut PageHeader;
+        page
+    } else {
+        // Allocate new page via mmap
+        let ptr = os_mmap(PAGE_SIZE)?;
+        pool.total_pages = pool.total_pages + 1;
+        ptr as &mut PageHeader
+    };
+
+    // Initialize the page
+    let epoch = GLOBAL_EPOCH.current_epoch() as UInt16;
+    page.init(class_idx, thread_id, epoch);
+
+    unlock_page_manager();
+
+    Ok(page)
+}
+
+/// Return a page to the global pool
+fn return_page(page: &mut PageHeader) {
+    lock_page_manager();
+
+    let class_idx = page.size_class as Int;
+    let pool = unsafe { &mut GLOBAL_PAGE_POOLS[class_idx] };
+
+    // Add to free pages list - set next_page field via page's set method
+    page.set_next(pool.free_pages as &unsafe PageHeader);
+    pool.free_pages = page;
+
+    unlock_page_manager();
+}
+
+/// Check if a page base is a slab page (vs large allocation)
+@inline
+unsafe fn is_slab_page(page_base: &PageHeader) -> Bool {
+    // Check if it looks like a valid PageHeader
+    // Size class should be in valid range
+    page_base.size_class < SIZE_CLASS_COUNT as UInt16 &&
+    page_base.slot_count > 0 &&
+    page_base.slot_count <= MAX_SLOTS_PER_PAGE as UInt16
+}
+
+// =============================================================================
+// OS Memory Operations
+// =============================================================================
+
+/// Allocate memory via mmap/VirtualAlloc
+fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
+    @cfg(target_os = "linux") {
+        // Try with huge pages first
+        let result = mmap(
+            0 as &unsafe Byte,
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
+            -1,
+            0
+        );
+
+        if (result as Int) != -1 {
+            return Ok(result);
+        }
+
+        // Fall back to regular pages
+        let result = mmap(
+            0 as &unsafe Byte,
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0
+        );
+
+        if (result as Int) == -1 {
+            return Err(AllocError.MmapFailed { code: sys.linux.errno.get_errno() });
+        }
+
+        // Advise kernel about huge pages
+        madvise(result, size, MADV_HUGEPAGE);
+
+        return Ok(result);
+    }
+
+    @cfg(target_os = "macos") {
+        let result = mmap(
+            0 as &unsafe Byte,
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON,
+            -1,
+            0
+        );
+
+        if (result as Int) == -1 {
+            return Err(AllocError.MmapFailed { code: sys.darwin.libsystem.errno() });
+        }
+
+        return Ok(result);
+    }
+
+    @cfg(target_os = "windows") {
+        let result = VirtualAlloc(
+            0 as &unsafe Byte,
+            size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE
+        );
+
+        if (result as Int) == 0 {
+            return Err(AllocError.MmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+        }
+
+        return Ok(result);
+    }
+
+    unreachable()
+}
+
+/// Deallocate memory via munmap/VirtualFree
+fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
+    @cfg(target_os = "linux") {
+        let result = munmap(ptr, size);
+        if result != 0 {
+            return Err(AllocError.MunmapFailed { code: sys.linux.errno.get_errno() });
+        }
+        return Ok(());
+    }
+
+    @cfg(target_os = "macos") {
+        let result = munmap(ptr, size);
+        if result != 0 {
+            return Err(AllocError.MunmapFailed { code: sys.darwin.libsystem.errno() });
+        }
+        return Ok(());
+    }
+
+    @cfg(target_os = "windows") {
+        let result = VirtualFree(ptr, 0, MEM_RELEASE);
+        if !result {
+            return Err(AllocError.MunmapFailed { code: sys.windows.kernel32.GetLastError() as Int });
+        }
+        return Ok(());
+    }
+
+    unreachable()
+}
+
+// =============================================================================
+// Thread-Local Storage
+// =============================================================================
+
+/// Thread-local heap storage
+@thread_local
+static mut LOCAL_HEAP: Maybe<LocalHeap> = None;
+
+/// Get or create the thread-local heap
+@inline
+fn get_local_heap() -> &mut LocalHeap {
+    unsafe {
+        match LOCAL_HEAP {
+            Some(ref mut heap) => heap,
+            None => {
+                // Get thread ID from TLS
+                let tid = get_thread_id();
+                LOCAL_HEAP = Some(LocalHeap.new(tid));
+                LOCAL_HEAP.as_mut().unwrap()
+            }
+        }
+    }
+}
+
+/// Get current thread ID
+@inline
+fn get_thread_id() -> UInt32 {
+    @cfg(target_os = "linux") {
+        sys.linux.tls.get_tid_fast()
+    }
+
+    @cfg(target_os = "macos") {
+        sys.darwin.tls.get_tid_fast().unwrap_or(0) as UInt32
+    }
+
+    @cfg(target_os = "windows") {
+        sys.windows.tls.get_tid_fast().unwrap_or(0)
+    }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Allocate memory with CBGR tracking.
+/// Returns pointer, generation, and epoch.
+@inline
+public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    if size <= 0 {
+        return Err(AllocError.InvalidSize { size: size });
+    }
+    if align <= 0 || (align & (align - 1)) != 0 {
+        return Err(AllocError.InvalidAlignment { alignment: align });
+    }
+
+    let heap = get_local_heap();
+    match heap.alloc(size, align) {
+        Ok(result) => Ok(result),
+        Err(e) => Err(AllocError.OutOfMemory { requested: size }),
+    }
+}
+
+/// Allocate zeroed memory with CBGR tracking.
+@inline
+public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    match cbgr_alloc(size, align) {
+        Ok(result) => {
+            // Zero the memory - write zeros byte by byte
+            let ptr = result.0;
+            for i in 0..size {
+                unsafe { ptr_write(ptr_offset(ptr, i), 0 as Byte); };
+            }
+            Ok(result)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Deallocate memory.
+@inline
+public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
+    if (ptr as Int) == 0 {
+        return Err(AllocError.InvalidPointer);
+    }
+
+    let heap = get_local_heap();
+    match heap.dealloc(ptr) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(AllocError.InvalidPointer),
+    }
+}
+
+/// Reallocate memory to new size.
+public fn cbgr_realloc(
+    ptr: &unsafe Byte,
+    old_size: Int,
+    new_size: Int,
+    align: Int,
+) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    // Allocate new
+    match cbgr_alloc(new_size, align) {
+        Ok(new_result) => {
+            // Copy old data byte by byte
+            let new_ptr = new_result.0;
+            let copy_size = if old_size < new_size { old_size } else { new_size };
+            for i in 0..copy_size {
+                let byte_val: Byte = unsafe { ptr_read(ptr_offset(ptr, i)) };
+                unsafe { ptr_write(ptr_offset(new_ptr, i), byte_val); };
+            }
+
+            // Free old
+            match cbgr_dealloc(ptr) {
+                Ok(()) => Ok(new_result),
+                Err(e) => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Get allocation header from user pointer (for CBGR validation).
+@inline
+public fn get_header_from_ptr(ptr: &unsafe Byte) -> &AllocationHeader {
+    let page_base = ((ptr as Int) & !(PAGE_SIZE - 1)) as &PageHeader;
+
+    unsafe {
+        if is_slab_page(page_base) {
+            // Small allocation - synthesize header info from page
+            // This is a bit of a hack - we return a reference to the page header
+            // which has compatible generation/epoch fields at the same offsets
+            page_base as &AllocationHeader
+        } else {
+            // Large allocation - header is before user data
+            AllocationHeader.from_user_ptr(ptr)
+        }
+    }
+}
+
+// =============================================================================
+// Context System Integration
+// =============================================================================
+// The allocator can be accessed via the V-LLSI context system for dependency
+// injection of custom allocators. This enables:
+// - Arena allocators for specific scopes
+// - Debug allocators for tracking
+// - Custom allocators for specialized use cases
+//
+// Spec: docs/architecture/new-arch-spec.md Appendix F.3
+// =============================================================================
+
+/// Context slot ID for the allocator.
+/// Reserved in the compiler's context slot allocation.
+public const CONTEXT_SLOT_ALLOCATOR: UInt8 = 1;
+
+/// Allocator protocol for context-based allocation.
+///
+/// Custom allocators implement this protocol and can be provided
+/// via the context system using `provide`.
+///
+/// # Example
+///
+/// ```verum
+/// type ArenaAllocator implements Allocator {
+///     fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+///         // Arena allocation logic
+///     }
+///     // ...
+/// }
+///
+/// provide ArenaAllocator.new() as Allocator {
+///     // All allocations in this scope use the arena
+/// }
+/// ```
+public type Allocator is protocol {
+    /// Allocate memory with CBGR tracking.
+    fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>;
+
+    /// Allocate zeroed memory with CBGR tracking.
+    fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>;
+
+    /// Deallocate memory.
+    fn dealloc(&self, ptr: &unsafe Byte) -> Result<(), AllocError>;
+
+    /// Reallocate memory.
+    fn realloc(
+        &self,
+        ptr: &unsafe Byte,
+        old_size: Int,
+        new_size: Int,
+        align: Int,
+    ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError>;
+};
+
+/// Global allocator wrapper that implements the Allocator protocol.
+/// This is the default allocator used when no custom allocator is provided.
+public type GlobalAllocator is ();
+
+implement Allocator for GlobalAllocator {
+    @inline
+    fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_alloc(size, align)
+    }
+
+    @inline
+    fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_alloc_zeroed(size, align)
+    }
+
+    @inline
+    fn dealloc(&self, ptr: &unsafe Byte) -> Result<(), AllocError> {
+        cbgr_dealloc(ptr)
+    }
+
+    fn realloc(
+        &self,
+        ptr: &unsafe Byte,
+        old_size: Int,
+        new_size: Int,
+        align: Int,
+    ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_realloc(ptr, old_size, new_size, align)
+    }
+}
+
+/// Global allocator singleton.
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+
+/// Get the current allocator from context, or fall back to global.
+///
+/// This is the main entry point for context-aware allocation.
+/// When a custom allocator is provided via `provide`, it will be used.
+/// Otherwise, the global CBGR allocator is used.
+@inline
+public fn get_allocator() -> &dyn Allocator {
+    // Try to get allocator from context
+    match sys.common.ctx_get(CONTEXT_SLOT_ALLOCATOR) {
+        Some(ptr) => unsafe { ptr as &dyn Allocator },
+        None => &GLOBAL_ALLOCATOR as &dyn Allocator,
+    }
+}
+
+/// Set a custom allocator in the context.
+///
+/// # Safety
+///
+/// The allocator must remain valid for the duration of the context scope.
+@inline
+public fn set_context_allocator(allocator: &dyn Allocator) {
+    sys.common.ctx_set(CONTEXT_SLOT_ALLOCATOR, allocator as &unsafe Byte);
+}
+
+/// Clear the custom allocator from context (revert to global).
+@inline
+public fn clear_context_allocator() {
+    sys.common.ctx_clear(CONTEXT_SLOT_ALLOCATOR);
+}
+
+// =============================================================================
+// Context-Aware Allocation Functions
+// =============================================================================
+
+/// Allocate using the context allocator (or global if none provided).
+///
+/// This is the recommended way to allocate when you want to respect
+/// context-provided allocators.
+@inline
+public fn ctx_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    get_allocator().alloc(size, align)
+}
+
+/// Allocate zeroed memory using the context allocator.
+@inline
+public fn ctx_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    get_allocator().alloc_zeroed(size, align)
+}
+
+/// Deallocate using the context allocator.
+@inline
+public fn ctx_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
+    get_allocator().dealloc(ptr)
+}
+
+/// Reallocate using the context allocator.
+public fn ctx_realloc(
+    ptr: &unsafe Byte,
+    old_size: Int,
+    new_size: Int,
+    align: Int,
+) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+    get_allocator().realloc(ptr, old_size, new_size, align)
+}
+
+// =============================================================================
+// Allocator Statistics
+// =============================================================================
+
+/// Allocator statistics.
+public type AllocStats is {
+    /// Total allocations performed.
+    public alloc_count: UInt64,
+    /// Total deallocations performed.
+    public dealloc_count: UInt64,
+    /// Large allocations (direct mmap).
+    public large_alloc_count: UInt64,
+    /// Total bytes currently allocated.
+    public bytes_allocated: UInt64,
+    /// Total pages in use.
+    public pages_in_use: Int,
+};
+
+/// Get statistics for the current thread's allocator.
+public fn get_alloc_stats() -> AllocStats {
+    let heap = get_local_heap();
+
+    // Count pages in use
+    let mut pages = 0;
+    for i in 0..SIZE_CLASS_COUNT {
+        if (heap.pages[i] as Int) != 0 {
+            pages += 1;
+        }
+    }
+
+    AllocStats {
+        alloc_count: heap.alloc_count,
+        dealloc_count: heap.dealloc_count,
+        large_alloc_count: heap.large_alloc_count,
+        bytes_allocated: heap.bytes_allocated,
+        pages_in_use: pages,
+    }
+}
+
+/// Get global allocator statistics (aggregated across all threads).
+public fn get_global_alloc_stats() -> AllocStats {
+    lock_page_manager();
+
+    let mut total_pages = 0;
+    for i in 0..SIZE_CLASS_COUNT {
+        total_pages += unsafe { GLOBAL_PAGE_POOLS[i].total_pages };
+    }
+
+    unlock_page_manager();
+
+    // Note: alloc counts are per-thread, so we only report pages here
+    AllocStats {
+        alloc_count: 0,  // Would need global counter
+        dealloc_count: 0,
+        large_alloc_count: 0,
+        bytes_allocated: 0,
+        pages_in_use: total_pages,
+    }
+}
+
+// =============================================================================
+// Specialized Allocator Types
+// =============================================================================
+
+/// Tiered allocator with thread-local caching and size class optimization.
+///
+/// This is the default high-performance allocator. It uses the CBGR-integrated
+/// allocation system which operates in three tiers:
+///
+/// 1. **Thread-local fast path** (~20ns): Small allocations (≤2KB) are served
+///    from thread-local `LocalHeap` with no locking. Size-class-based slabs
+///    minimize fragmentation.
+///
+/// 2. **Page manager** (~100ns): When thread-local caches are exhausted,
+///    new 64KB pages are carved from pre-allocated 2MB chunks with CBGR
+///    metadata (generation counters, epoch capabilities).
+///
+/// 3. **OS backend** (~1μs): Large allocations (>2KB) use direct mmap/
+///    VirtualAlloc with inline allocation headers.
+///
+/// This allocator delegates to the global CBGR allocation infrastructure,
+/// which provides the tiered behavior automatically.
+public type TieredAllocator is ();
+
+implement TieredAllocator {
+    /// Initialize the tiered allocator.
+    ///
+    /// The underlying LocalHeap and page infrastructure is initialized
+    /// lazily on first allocation per thread.
+    public fn init() -> Result<TieredAllocator, AllocError> {
+        Ok(TieredAllocator())
+    }
+
+    /// Shutdown the allocator and release thread-local caches.
+    ///
+    /// After shutdown, any outstanding allocations remain valid but new
+    /// allocations through this allocator will fail.
+    public fn shutdown(&self) {
+        // Thread-local caches are cleaned up when threads exit.
+        // Global pages are reclaimed during process shutdown.
+    }
+}
+
+implement Allocator for TieredAllocator {
+    @inline
+    fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_alloc(size, align)
+    }
+
+    @inline
+    fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_alloc_zeroed(size, align)
+    }
+
+    @inline
+    fn dealloc(&self, ptr: &unsafe Byte) -> Result<(), AllocError> {
+        cbgr_dealloc(ptr)
+    }
+
+    fn realloc(
+        &self,
+        ptr: &unsafe Byte,
+        old_size: Int,
+        new_size: Int,
+        align: Int,
+    ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        cbgr_realloc(ptr, old_size, new_size, align)
+    }
+}
+
+/// Simple allocator without thread-local caching.
+///
+/// Uses the global CBGR allocation without any additional caching or
+/// optimization layers. Suitable for:
+/// - Single-threaded applications where thread-local overhead is unnecessary
+/// - Debugging/profiling where direct allocation tracking is preferred
+/// - Embedded contexts with minimal memory overhead
+///
+/// All allocations go directly through the global page manager with
+/// proper CBGR metadata (generation + epoch capabilities).
+public type SimpleAllocator is {
+    /// Number of active allocations for tracking.
+    active_allocs: Int,
+    /// Total bytes allocated through this allocator.
+    total_bytes: Int,
+};
+
+implement SimpleAllocator {
+    /// Initialize the simple allocator.
+    public fn init() -> Result<SimpleAllocator, AllocError> {
+        Ok(SimpleAllocator {
+            active_allocs: 0,
+            total_bytes: 0,
+        })
+    }
+
+    /// Shutdown the allocator.
+    ///
+    /// In debug mode, reports if there are outstanding allocations.
+    public fn shutdown(&self) {
+        if self.active_allocs != 0 {
+            // In production this is a no-op; in debug builds it would
+            // log a warning about leaked allocations.
+        }
+    }
+
+    /// Returns the number of active (not yet freed) allocations.
+    public fn active_allocations(&self) -> Int {
+        self.active_allocs
+    }
+
+    /// Returns the total bytes allocated (cumulative).
+    public fn total_bytes_allocated(&self) -> Int {
+        self.total_bytes
+    }
+}
+
+implement Allocator for SimpleAllocator {
+    fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        let result = cbgr_alloc(size, align);
+        match &result {
+            Ok(_) => {
+                // Track allocation (safe to cast away const for internal tracking)
+                unsafe {
+                    let self_mut = &mut *(self as &unsafe SimpleAllocator);
+                    self_mut.active_allocs = self_mut.active_allocs + 1;
+                    self_mut.total_bytes = self_mut.total_bytes + size;
+                }
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        let result = cbgr_alloc_zeroed(size, align);
+        match &result {
+            Ok(_) => {
+                unsafe {
+                    let self_mut = &mut *(self as &unsafe SimpleAllocator);
+                    self_mut.active_allocs = self_mut.active_allocs + 1;
+                    self_mut.total_bytes = self_mut.total_bytes + size;
+                }
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    fn dealloc(&self, ptr: &unsafe Byte) -> Result<(), AllocError> {
+        let result = cbgr_dealloc(ptr);
+        match &result {
+            Ok(()) => {
+                unsafe {
+                    let self_mut = &mut *(self as &unsafe SimpleAllocator);
+                    self_mut.active_allocs = self_mut.active_allocs - 1;
+                }
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    fn realloc(
+        &self,
+        ptr: &unsafe Byte,
+        old_size: Int,
+        new_size: Int,
+        align: Int,
+    ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        let result = cbgr_realloc(ptr, old_size, new_size, align);
+        match &result {
+            Ok(_) => {
+                unsafe {
+                    let self_mut = &mut *(self as &unsafe SimpleAllocator);
+                    self_mut.total_bytes = self_mut.total_bytes + (new_size - old_size);
+                }
+            }
+            Err(_) => {}
+        }
+        result
+    }
+}
+
+/// Bump allocator for arena-style allocation.
+///
+/// Allocations are served by bumping a pointer forward in a contiguous
+/// memory region. Individual deallocations are no-ops — all memory is
+/// released together when the allocator is reset or dropped.
+///
+/// # Performance
+///
+/// - **Alloc**: O(1), ~5ns (pointer bump + alignment)
+/// - **Dealloc**: O(1), ~0ns (no-op)
+/// - **Reset**: O(1), ~0ns (pointer reset)
+///
+/// # Use Cases
+///
+/// - Temporary allocations within a function or scope
+/// - Parse tree construction (allocate many nodes, free all at once)
+/// - Per-frame game allocations
+/// - Any pattern where objects have uniform lifetime
+///
+/// # Limitations
+///
+/// - Cannot free individual allocations
+/// - Fixed capacity — panics on overflow (use `try_alloc` for fallible)
+/// - Not thread-safe — use one per thread
+public type StackAllocator is {
+    /// Base pointer to the backing memory region.
+    base: &unsafe Byte,
+    /// Current bump offset from base.
+    offset: Int,
+    /// Total capacity in bytes.
+    capacity: Int,
+    /// High-water mark for diagnostics.
+    peak_usage: Int,
+    /// Number of allocations performed.
+    alloc_count: Int,
+};
+
+implement StackAllocator {
+    /// Create a new bump allocator with the given capacity in bytes.
+    ///
+    /// The backing memory is obtained from the global allocator.
+    /// Capacity should be chosen to cover the expected total allocation
+    /// within the arena's lifetime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing memory cannot be allocated.
+    public fn init(capacity: Int) -> Result<StackAllocator, AllocError> {
+        if capacity <= 0 {
+            return Err(AllocError.InvalidSize { size: capacity });
+        }
+        let result = cbgr_alloc(capacity, 16);
+        match result {
+            Ok((ptr, _gen, _caps)) => {
+                Ok(StackAllocator {
+                    base: ptr,
+                    offset: 0,
+                    capacity: capacity,
+                    peak_usage: 0,
+                    alloc_count: 0,
+                })
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Create a bump allocator with default capacity (64KB).
+    public fn new() -> Result<StackAllocator, AllocError> {
+        StackAllocator.init(65536)
+    }
+
+    /// Reset the allocator, logically freeing all allocations.
+    ///
+    /// After reset, the full capacity is available again.
+    /// Previously returned pointers become invalid.
+    public fn reset(&mut self) {
+        self.offset = 0;
+        self.alloc_count = 0;
+    }
+
+    /// Returns the number of bytes currently in use.
+    public fn bytes_used(&self) -> Int {
+        self.offset
+    }
+
+    /// Returns the remaining capacity in bytes.
+    public fn bytes_remaining(&self) -> Int {
+        self.capacity - self.offset
+    }
+
+    /// Returns the peak memory usage (high-water mark).
+    public fn peak(&self) -> Int {
+        self.peak_usage
+    }
+
+    /// Returns the total capacity in bytes.
+    public fn total_capacity(&self) -> Int {
+        self.capacity
+    }
+
+    /// Returns the number of allocations performed since last reset.
+    public fn allocation_count(&self) -> Int {
+        self.alloc_count
+    }
+
+    /// Shutdown the allocator and release the backing memory.
+    public fn shutdown(&mut self) {
+        if self.capacity > 0 {
+            let _ = cbgr_dealloc(self.base);
+            self.capacity = 0;
+            self.offset = 0;
+        }
+    }
+}
+
+implement Allocator for StackAllocator {
+    fn alloc(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        // Align the current offset
+        let aligned_offset = align_up(self.offset, align);
+        let new_offset = aligned_offset + size;
+
+        if new_offset > self.capacity {
+            return Err(AllocError.OutOfMemory { requested: size });
+        }
+
+        let ptr = unsafe { self.base.offset(aligned_offset) };
+
+        // Update state (safe interior mutation for bump allocator)
+        unsafe {
+            let self_mut = &mut *(self as &unsafe StackAllocator);
+            self_mut.offset = new_offset;
+            self_mut.alloc_count = self_mut.alloc_count + 1;
+            if new_offset > self_mut.peak_usage {
+                self_mut.peak_usage = new_offset;
+            }
+        }
+
+        // Return with dummy generation/caps (arena-managed, not individually tracked)
+        Ok((ptr, 0 as UInt32, 0 as UInt16))
+    }
+
+    fn alloc_zeroed(&self, size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        let result = self.alloc(size, align);
+        match result {
+            Ok((ptr, gen, caps)) => {
+                unsafe {
+                    memset(ptr, 0, size);
+                }
+                Ok((ptr, gen, caps))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn dealloc(&self, _ptr: &unsafe Byte) -> Result<(), AllocError> {
+        // Bump allocator: individual deallocation is a no-op.
+        // All memory is released on reset() or shutdown().
+        Ok(())
+    }
+
+    fn realloc(
+        &self,
+        ptr: &unsafe Byte,
+        old_size: Int,
+        new_size: Int,
+        align: Int,
+    ) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
+        // For bump allocators, realloc allocates new space and copies.
+        // The old space is "leaked" (reclaimed on reset).
+        let result = self.alloc(new_size, align);
+        match result {
+            Ok((new_ptr, gen, caps)) => {
+                let copy_size = if old_size < new_size { old_size } else { new_size };
+                unsafe {
+                    memcpy(new_ptr, ptr, copy_size);
+                }
+                Ok((new_ptr, gen, caps))
+            }
+            Err(e) => Err(e),
+        }
+    }
+}

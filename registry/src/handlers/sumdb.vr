@@ -1,0 +1,194 @@
+// =============================================================================
+// sumdb.vr — Checksum Database HTTP Handlers
+// =============================================================================
+// Spec: docs/detailed/15-cog-distribution-architecture.md Section 4.8
+//
+// HTTP endpoints for the transparent checksum database:
+//   GET /sumdb/lookup/:package@:version  — lookup checksum
+//   GET /sumdb/latest                    — signed tree head
+//   GET /sumdb/tile/:level/:index        — Merkle tile
+//   GET /sumdb/proof/:entry_id           — inclusion proof
+//
+// All responses are cache-friendly:
+// - Lookups and tiles: immutable (1 year cache)
+// - Tree head: 60 second cache
+// - Proofs: immutable (derived from immutable data)
+// =============================================================================
+
+module handlers.sumdb;
+
+mount core.collections.{List, Map};
+mount core.text.Text;
+mount core.time.Duration;
+mount crate.services.sumdb_service.{SumdbService, LookupResult, TreeHead, InclusionProof};
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/// Look up the checksum for a specific package version.
+///
+/// GET /sumdb/lookup/:package@:version
+///
+/// Response: JSON with entry details or 404.
+/// Cache-Control: public, max-age=31536000, immutable
+///
+/// This is the most critical endpoint — called by `verum build`
+/// after downloading a cog from ANY source (CDN, IPFS, Git, mirror).
+/// The client verifies the downloaded checksum against this response.
+fn handle_lookup(req: Request) -> Response
+    using [Database, Cache, Logger, Metrics]
+{
+    let package = req.param("package");
+    let version = req.param("version");
+
+    Metrics.increment("sumdb.lookups");
+    Logger.debug(f"sumdb lookup: {package}@{version}");
+
+    match SumdbService.lookup(package, version) {
+        Ok(Found(entry)) => {
+            Response.json(entry)
+                .header("Cache-Control", "public, max-age=31536000, immutable")
+                .header("X-Sumdb-Entry-Id", entry.entry_id.to_string())
+        }
+        Ok(NotFound) => {
+            Response.not_found()
+                .body("NOTFOUND")
+        }
+        Err(e) => {
+            Logger.error(f"sumdb lookup failed: {e}");
+            Metrics.increment("sumdb.errors");
+            Response.internal_error()
+        }
+    }
+}
+
+/// Get the current signed tree head.
+///
+/// GET /sumdb/latest
+///
+/// Response: JSON with tree_size, root_hash, timestamp, signature.
+/// Cache-Control: public, max-age=60 (updated with each new entry)
+///
+/// Clients use this to:
+/// 1. Detect new entries since last check
+/// 2. Verify log consistency (root hash should include all prior entries)
+/// 3. Detect log equivocation (different clients see different heads)
+fn handle_latest(req: Request) -> Response
+    using [Database, Metrics]
+{
+    Metrics.increment("sumdb.latest");
+
+    match SumdbService.get_tree_head() {
+        Ok(head) => {
+            Response.json(head)
+                .header("Cache-Control", "public, max-age=60")
+        }
+        Err(e) => {
+            Response.internal_error()
+        }
+    }
+}
+
+/// Get a Merkle tree tile for proof verification.
+///
+/// GET /sumdb/tile/:level/:index
+///
+/// Response: JSON array of 256 hashes.
+/// Cache-Control: public, max-age=31536000, immutable
+///
+/// Tiles partition the Merkle tree into cache-friendly chunks.
+/// Level 0 = leaf hashes, Level 1+ = internal nodes.
+/// Each tile contains exactly 256 entries.
+fn handle_tile(req: Request) -> Response
+    using [Database, Cache, Metrics]
+{
+    let level = req.param("level").parse_int().unwrap_or(0);
+    let index = req.param("index").parse_int().unwrap_or(0);
+
+    Metrics.increment("sumdb.tiles");
+
+    match SumdbService.get_tile(level, index) {
+        Ok(hashes) => {
+            Response.json(hashes)
+                .header("Cache-Control", "public, max-age=31536000, immutable")
+        }
+        Err(e) => {
+            Response.internal_error()
+        }
+    }
+}
+
+/// Get an inclusion proof for a specific entry.
+///
+/// GET /sumdb/proof/:entry_id
+///
+/// Response: JSON with entry_index, tree_size, proof_hashes.
+/// Cache-Control: public, max-age=31536000, immutable
+///
+/// The inclusion proof allows a client to verify that a specific
+/// entry is part of the log without downloading the entire log.
+/// The proof consists of sibling hashes along the Merkle path
+/// from the leaf to the root.
+fn handle_proof(req: Request) -> Response
+    using [Database, Metrics]
+{
+    let entry_id = req.param("entry_id").parse_int().unwrap_or(-1);
+
+    if entry_id < 0 {
+        return Response.bad_request().body("Invalid entry_id");
+    }
+
+    Metrics.increment("sumdb.proofs");
+
+    match SumdbService.prove_inclusion(entry_id) {
+        Ok(proof) => {
+            Response.json(proof)
+                .header("Cache-Control", "public, max-age=31536000, immutable")
+        }
+        Err(e) => {
+            Response.bad_request().body(e)
+        }
+    }
+}
+
+/// Verify a downloaded package against the sumdb.
+///
+/// POST /sumdb/verify
+/// Body: { "package": "...", "version": "...", "checksum": "..." }
+///
+/// Response: { "status": "valid" | "invalid" | "missing" }
+///
+/// This is a convenience endpoint for clients that prefer server-side
+/// verification. Most clients verify locally using lookup + proof.
+fn handle_verify(req: Request) -> Response
+    using [Database, Logger, Metrics]
+{
+    let body = req.json();
+    let package = body.get_text("package");
+    let version = body.get_text("version");
+    let checksum = body.get_text("checksum");
+
+    Metrics.increment("sumdb.verifications");
+
+    match SumdbService.verify(package, version, checksum) {
+        Ok(Valid) => {
+            Response.json(Map.from([("status", "valid")]))
+        }
+        Ok(Invalid { expected, actual }) => {
+            Logger.warn(f"sumdb: checksum mismatch for {package}@{version}: expected {expected}, got {actual}");
+            Metrics.increment("sumdb.mismatches");
+            Response.json(Map.from([
+                ("status", "invalid"),
+                ("expected", expected),
+                ("actual", actual),
+            ]))
+        }
+        Ok(Missing) => {
+            Response.json(Map.from([("status", "missing")]))
+        }
+        Err(e) => {
+            Response.internal_error()
+        }
+    }
+}

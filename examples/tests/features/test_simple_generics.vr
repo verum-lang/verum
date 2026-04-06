@@ -1,0 +1,24 @@
+// Simplified generic tests to isolate the issue
+
+type Maybe<T> is Some(T) | None;
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() {
+    let _ = print("=== Simple Generic Tests ===");
+
+    // Test identity with Float
+    let n = identity(42.0);
+    let _ = print(f"identity(42.0) = {n}");
+
+    // Test Maybe
+    let some_val: Maybe<Float> = Some(10.0);
+    match some_val {
+        Some(v) => { let _ = print(f"Some({v})"); },
+        None => { let _ = print("None"); }
+    }
+
+    let _ = print("=== Done ===");
+}

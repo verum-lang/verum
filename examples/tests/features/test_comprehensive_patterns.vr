@@ -1,0 +1,500 @@
+// Comprehensive Pattern Matching Test Suite
+// Tests all pattern matching features in Verum
+
+// ========================================
+// 1. TYPE DEFINITIONS FOR PATTERN TESTING
+// ========================================
+
+type Color is | Red | Green | Blue | Yellow | Custom(Int, Int, Int);
+
+type Maybe<T> is | Some(T) | None;
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { value: T, left: Tree<T>, right: Tree<T> };
+
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text
+};
+
+type Shape is
+    | Circle { radius: Float }
+    | Rectangle { width: Float, height: Float }
+    | Triangle { a: Float, b: Float, c: Float };
+
+type Either<L, R> is | Left(L) | Right(R);
+
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C
+};
+
+// ========================================
+// 2. LITERAL PATTERN MATCHING
+// ========================================
+
+fn match_literal_int(x: Int) -> Text {
+    match x {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "other"
+    }
+}
+
+fn match_literal_bool(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no"
+    }
+}
+
+fn match_literal_text(s: Text) -> Text {
+    match s {
+        "hello" => "greeting",
+        "goodbye" => "farewell",
+        "test" => "testing",
+        _ => "unknown"
+    }
+}
+
+fn test_literal_patterns() {
+    let _ = print("=== Test 1: Literal Patterns ===");
+
+    let _ = print(f"match 0: {match_literal_int(0)}");
+    let _ = print(f"match 2: {match_literal_int(2)}");
+    let _ = print(f"match 99: {match_literal_int(99)}");
+
+    let _ = print(f"match true: {match_literal_bool(true)}");
+    let _ = print(f"match false: {match_literal_bool(false)}");
+
+    let _ = print(f"match 'hello': {match_literal_text('hello')}");
+    let _ = print(f"match 'test': {match_literal_text('test')}");
+    let _ = print(f"match 'unknown': {match_literal_text('unknown')}");
+}
+
+// ========================================
+// 3. PATTERN GUARDS (WHERE CLAUSE)
+// ========================================
+
+fn classify_number(x: Int) -> Text {
+    match x {
+        n where n < 0 => "negative",
+        n where n == 0 => "zero",
+        n where n > 0 && n <= 10 => "small positive",
+        n where n > 10 && n <= 100 => "medium positive",
+        n where n > 100 => "large positive",
+        _ => "unknown"
+    }
+}
+
+fn classify_float(x: Float) -> Text {
+    match x {
+        f where f < 0.0 => "negative",
+        f where f == 0.0 => "zero",
+        f where f > 0.0 && f < 1.0 => "fraction",
+        f where f >= 1.0 => "whole or greater",
+        _ => "unknown"
+    }
+}
+
+fn complex_guard(x: Int, y: Int) -> Text {
+    match x {
+        a where a > y => "x greater than y",
+        a where a == y => "x equals y",
+        a where a < y => "x less than y",
+        _ => "unknown"
+    }
+}
+
+fn test_pattern_guards() {
+    let _ = print("\n=== Test 2: Pattern Guards (WHERE clause) ===");
+
+    let _ = print(f"classify -5: {classify_number(-5)}");
+    let _ = print(f"classify 0: {classify_number(0)}");
+    let _ = print(f"classify 7: {classify_number(7)}");
+    let _ = print(f"classify 50: {classify_number(50)}");
+    let _ = print(f"classify 200: {classify_number(200)}");
+
+    let _ = print(f"classify -2.5: {classify_float(-2.5)}");
+    let _ = print(f"classify 0.0: {classify_float(0.0)}");
+    let _ = print(f"classify 0.5: {classify_float(0.5)}");
+    let _ = print(f"classify 5.0: {classify_float(5.0)}");
+
+    let _ = print(f"complex_guard(10, 5): {complex_guard(10, 5)}");
+    let _ = print(f"complex_guard(5, 5): {complex_guard(5, 5)}");
+    let _ = print(f"complex_guard(3, 8): {complex_guard(3, 8)}");
+}
+
+// ========================================
+// 4. VARIANT PATTERN MATCHING
+// ========================================
+
+fn describe_color(c: Color) -> Text {
+    match c {
+        Red => "pure red",
+        Green => "pure green",
+        Blue => "pure blue",
+        Yellow => "pure yellow",
+        Custom(r, g, b) => f"custom RGB({r}, {g}, {b})"
+    }
+}
+
+fn unwrap_maybe<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(value) => value,
+        None => default
+    }
+}
+
+fn is_some<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false
+    }
+}
+
+fn map_result<T, E>(r: Result<T, E>, on_err: E) -> T {
+    match r {
+        Ok(val) => val,
+        Err(_) => on_err
+    }
+}
+
+fn test_variant_patterns() {
+    let _ = print("\n=== Test 3: Variant Pattern Matching ===");
+
+    let red = Red;
+    let custom = Custom(128, 64, 255);
+    let _ = print(describe_color(red));
+    let _ = print(describe_color(custom));
+
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    let _ = print(f"unwrap Some(42): {unwrap_maybe(some_val, 0)}");
+    let _ = print(f"unwrap None: {unwrap_maybe(none_val, 0)}");
+    let _ = print(f"is_some Some(42): {is_some(some_val)}");
+    let _ = print(f"is_some None: {is_some(none_val)}");
+
+    let ok: Result<Int, Int> = Ok(100);
+    let err: Result<Int, Int> = Err(0);
+    let _ = print(f"map_result Ok(100): {map_result(ok, -1)}");
+    let _ = print(f"map_result Err: {map_result(err, -1)}");
+}
+
+// ========================================
+// 5. RECORD DESTRUCTURING
+// ========================================
+
+fn point_quadrant(p: Point) -> Text {
+    match p {
+        Point { x, y } where x > 0.0 && y > 0.0 => "Q1",
+        Point { x, y } where x < 0.0 && y > 0.0 => "Q2",
+        Point { x, y } where x < 0.0 && y < 0.0 => "Q3",
+        Point { x, y } where x > 0.0 && y < 0.0 => "Q4",
+        Point { x, y } where x == 0.0 || y == 0.0 => "axis",
+        _ => "unknown"
+    }
+}
+
+fn describe_person(p: Person) -> Text {
+    match p {
+        Person { name, age, email } where age < 18 => f"{name} is a minor",
+        Person { name, age, email } where age >= 18 && age < 65 => f"{name} is an adult",
+        Person { name, age, email } where age >= 65 => f"{name} is a senior",
+        _ => "unknown"
+    }
+}
+
+fn test_record_destructuring() {
+    let _ = print("\n=== Test 4: Record Destructuring ===");
+
+    let p1 = Point { x: 5.0, y: 3.0 };
+    let p2 = Point { x: -2.0, y: 4.0 };
+    let p3 = Point { x: -1.0, y: -1.0 };
+    let p4 = Point { x: 3.0, y: -2.0 };
+    let p5 = Point { x: 0.0, y: 5.0 };
+
+    let _ = print(f"Point (5, 3) is in {point_quadrant(p1)}");
+    let _ = print(f"Point (-2, 4) is in {point_quadrant(p2)}");
+    let _ = print(f"Point (-1, -1) is in {point_quadrant(p3)}");
+    let _ = print(f"Point (3, -2) is in {point_quadrant(p4)}");
+    let _ = print(f"Point (0, 5) is on {point_quadrant(p5)}");
+
+    let person1 = Person { name: "Alice", age: 15, email: "alice@test.com" };
+    let person2 = Person { name: "Bob", age: 35, email: "bob@test.com" };
+    let person3 = Person { name: "Charlie", age: 70, email: "charlie@test.com" };
+
+    let _ = print(describe_person(person1));
+    let _ = print(describe_person(person2));
+    let _ = print(describe_person(person3));
+}
+
+// ========================================
+// 6. VARIANT WITH RECORD DESTRUCTURING
+// ========================================
+
+fn shape_category(s: Shape) -> Text {
+    match s {
+        Circle { radius } where radius < 1.0 => "small circle",
+        Circle { radius } where radius >= 1.0 && radius < 10.0 => "medium circle",
+        Circle { radius } where radius >= 10.0 => "large circle",
+        Rectangle { width, height } where width == height => "square",
+        Rectangle { width, height } where width > height => "wide rectangle",
+        Rectangle { width, height } where width < height => "tall rectangle",
+        Triangle { a, b, c } where a == b && b == c => "equilateral triangle",
+        Triangle { a, b, c } where a == b || b == c || a == c => "isosceles triangle",
+        Triangle { a, b, c } => "scalene triangle",
+        _ => "unknown shape"
+    }
+}
+
+fn test_variant_record_patterns() {
+    let _ = print("\n=== Test 5: Variant with Record Destructuring ===");
+
+    let small_circle = Circle { radius: 0.5 };
+    let medium_circle = Circle { radius: 5.0 };
+    let large_circle = Circle { radius: 15.0 };
+
+    let _ = print(shape_category(small_circle));
+    let _ = print(shape_category(medium_circle));
+    let _ = print(shape_category(large_circle));
+
+    let square = Rectangle { width: 5.0, height: 5.0 };
+    let wide = Rectangle { width: 10.0, height: 5.0 };
+    let tall = Rectangle { width: 5.0, height: 10.0 };
+
+    let _ = print(shape_category(square));
+    let _ = print(shape_category(wide));
+    let _ = print(shape_category(tall));
+
+    let equilateral = Triangle { a: 5.0, b: 5.0, c: 5.0 };
+    let isosceles = Triangle { a: 5.0, b: 5.0, c: 3.0 };
+    let scalene = Triangle { a: 3.0, b: 4.0, c: 5.0 };
+
+    let _ = print(shape_category(equilateral));
+    let _ = print(shape_category(isosceles));
+    let _ = print(shape_category(scalene));
+}
+
+// ========================================
+// 7. RANGE PATTERNS
+// ========================================
+
+fn classify_age(age: Int) -> Text {
+    match age {
+        0..=12 => "child",
+        13..=19 => "teenager",
+        20..=64 => "adult",
+        65..=120 => "senior",
+        _ => "invalid age"
+    }
+}
+
+fn classify_grade(score: Int) -> Text {
+    match score {
+        90..=100 => "A",
+        80..=89 => "B",
+        70..=79 => "C",
+        60..=69 => "D",
+        0..=59 => "F",
+        _ => "invalid score"
+    }
+}
+
+fn test_range_patterns() {
+    let _ = print("\n=== Test 6: Range Patterns ===");
+
+    let _ = print(f"age 8: {classify_age(8)}");
+    let _ = print(f"age 16: {classify_age(16)}");
+    let _ = print(f"age 35: {classify_age(35)}");
+    let _ = print(f"age 70: {classify_age(70)}");
+
+    let _ = print(f"score 95: {classify_grade(95)}");
+    let _ = print(f"score 82: {classify_grade(82)}");
+    let _ = print(f"score 75: {classify_grade(75)}");
+    let _ = print(f"score 50: {classify_grade(50)}");
+}
+
+// ========================================
+// 8. OR PATTERNS (a | b)
+// ========================================
+
+fn is_primary_color(c: Color) -> Bool {
+    match c {
+        Red | Green | Blue => true,
+        Yellow | Custom(_, _, _) => false
+    }
+}
+
+fn is_weekend(day: Int) -> Bool {
+    match day {
+        0 | 6 => true,
+        1 | 2 | 3 | 4 | 5 => false,
+        _ => false
+    }
+}
+
+fn is_vowel(c: Text) -> Bool {
+    match c {
+        "a" | "e" | "i" | "o" | "u" => true,
+        "A" | "E" | "I" | "O" | "U" => true,
+        _ => false
+    }
+}
+
+fn test_or_patterns() {
+    let _ = print("\n=== Test 7: OR Patterns (a | b) ===");
+
+    let _ = print(f"Red is primary: {is_primary_color(Red)}");
+    let _ = print(f"Yellow is primary: {is_primary_color(Yellow)}");
+    let _ = print(f"Blue is primary: {is_primary_color(Blue)}");
+
+    let _ = print(f"day 0 (Sunday) is weekend: {is_weekend(0)}");
+    let _ = print(f"day 3 (Wednesday) is weekend: {is_weekend(3)}");
+    let _ = print(f"day 6 (Saturday) is weekend: {is_weekend(6)}");
+
+    let _ = print(f"'a' is vowel: {is_vowel('a')}");
+    let _ = print(f"'E' is vowel: {is_vowel('E')}");
+    let _ = print(f"'x' is vowel: {is_vowel('x')}");
+}
+
+// ========================================
+// 9. NESTED PATTERNS
+// ========================================
+
+fn describe_either<L, R>(e: Either<L, R>) -> Text {
+    match e {
+        Left(_) => "Left variant",
+        Right(_) => "Right variant"
+    }
+}
+
+fn nested_maybe_depth<T>(m: Maybe<Maybe<T>>) -> Int {
+    match m {
+        Some(Some(_)) => 2,
+        Some(None) => 1,
+        None => 0
+    }
+}
+
+fn test_nested_patterns() {
+    let _ = print("\n=== Test 8: Nested Patterns ===");
+
+    let left: Either<Int, Text> = Left(42);
+    let right: Either<Int, Text> = Right("hello");
+
+    let _ = print(describe_either(left));
+    let _ = print(describe_either(right));
+
+    let nested_some: Maybe<Maybe<Int>> = Some(Some(42));
+    let nested_partial: Maybe<Maybe<Int>> = Some(None);
+    let nested_none: Maybe<Maybe<Int>> = None;
+
+    let _ = print(f"nested Some(Some(_)) depth: {nested_maybe_depth(nested_some)}");
+    let _ = print(f"nested Some(None) depth: {nested_maybe_depth(nested_partial)}");
+    let _ = print(f"nested None depth: {nested_maybe_depth(nested_none)}");
+}
+
+// ========================================
+// 10. WILDCARD PATTERNS
+// ========================================
+
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    match b {
+        0 => None,
+        _ => Some(a / b)
+    }
+}
+
+fn extract_value<T, E>(r: Result<T, E>) -> Maybe<T> {
+    match r {
+        Ok(val) => Some(val),
+        Err(_) => None
+    }
+}
+
+fn test_wildcard_patterns() {
+    let _ = print("\n=== Test 9: Wildcard Patterns ===");
+
+    let div1 = safe_divide(10, 2);
+    let div2 = safe_divide(10, 0);
+
+    let result1 = unwrap_maybe(div1, -1);
+    let result2 = unwrap_maybe(div2, -1);
+
+    let _ = print(f"10 / 2 = {result1}");
+    let _ = print(f"10 / 0 = {result2}");
+
+    let ok: Result<Int, Text> = Ok(100);
+    let err: Result<Int, Text> = Err("error");
+
+    let val1 = extract_value(ok);
+    let val2 = extract_value(err);
+
+    let _ = print(f"extract Ok(100): {unwrap_maybe(val1, -1)}");
+    let _ = print(f"extract Err: {unwrap_maybe(val2, -1)}");
+}
+
+// ========================================
+// 11. COMPLEX PATTERN COMBINATIONS
+// ========================================
+
+fn complex_match(x: Int, y: Int) -> Text {
+    match x {
+        a where a == 0 && y == 0 => "both zero",
+        a where a > 0 && y > 0 => "both positive",
+        a where a < 0 && y < 0 => "both negative",
+        a where a > 0 && y < 0 => "x positive, y negative",
+        a where a < 0 && y > 0 => "x negative, y positive",
+        _ => "mixed or zero"
+    }
+}
+
+fn test_complex_patterns() {
+    let _ = print("\n=== Test 10: Complex Pattern Combinations ===");
+
+    let _ = print(complex_match(0, 0));
+    let _ = print(complex_match(5, 10));
+    let _ = print(complex_match(-3, -7));
+    let _ = print(complex_match(8, -2));
+    let _ = print(complex_match(-4, 6));
+}
+
+// ========================================
+// 12. MAIN ENTRY POINT
+// ========================================
+
+fn main() {
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  COMPREHENSIVE PATTERN MATCHING TEST SUITE           ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+    let _ = print("");
+
+    test_literal_patterns();
+    test_pattern_guards();
+    test_variant_patterns();
+    test_record_destructuring();
+    test_variant_record_patterns();
+    test_range_patterns();
+    test_or_patterns();
+    test_nested_patterns();
+    test_wildcard_patterns();
+    test_complex_patterns();
+
+    let _ = print("");
+    let _ = print("╔═══════════════════════════════════════════════════════╗");
+    let _ = print("║  ALL PATTERN MATCHING TESTS COMPLETED                ║");
+    let _ = print("╚═══════════════════════════════════════════════════════╝");
+}

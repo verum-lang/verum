@@ -1,0 +1,13 @@
+// Test single context usage (without brackets)
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn test_function(msg: Text) using Logger {
+    let x = 42;
+}
+
+fn main() {
+    let y = 10;
+}

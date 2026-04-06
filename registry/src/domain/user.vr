@@ -1,0 +1,193 @@
+// User domain types
+// Defines User, UserRole, and ApiToken types
+//
+// This module uses refinement types from refinements.vr to ensure
+// type-level validation of usernames, emails, tokens, etc.
+
+mount core.collections.{List, Map};
+mount core.base.{Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// Import refinement types for validated fields
+mount super.refinements.{
+    Username,
+    Email,
+    TokenValue,
+    TokenScope,
+    NonEmptyText,
+    ValidatedPackageName
+};
+
+// UserRole defines the role/permission level of a user
+// NOTE: Types must be defined BEFORE they are used to avoid placeholder type issues
+pub type UserRole is
+    | Regular
+    | Moderator
+    | Admin;
+
+implement UserRole {
+    pub fn to_string(self) -> Text {
+        match self {
+            UserRole.Regular => "regular",
+            UserRole.Moderator => "moderator",
+            UserRole.Admin => "admin"
+        }
+    }
+
+    pub fn from_string(s: Text) -> UserRole {
+        match s {
+            "admin" => UserRole.Admin,
+            "moderator" => UserRole.Moderator,
+            _ => UserRole.Regular
+        }
+    }
+}
+
+// ApiToken represents an API authentication token
+// NOTE: ApiToken must be defined BEFORE User since User contains List<ApiToken>
+// Uses refinement types for validated fields
+pub type ApiToken is {
+    id: Int,
+    name: NonEmptyText,         // Token name must be non-empty
+    token: TokenValue,          // Validated token value (32-256 chars)
+    created_at: Int,
+    expires_at: Int,            // 0 = never expires
+    last_used_at: Int,
+    is_active: Bool,
+    scopes: List<TokenScope>    // Validated scopes (publish, yank, read, admin)
+};
+
+implement ApiToken {
+    pub fn new(id: Int, name: NonEmptyText, token: TokenValue) -> ApiToken {
+        let mut default_scopes = List.new();
+        default_scopes.push("publish");  // Valid TokenScope
+        default_scopes.push("yank");     // Valid TokenScope
+        let now = unix_timestamp();
+
+        ApiToken {
+            id: id,
+            name: name,
+            token: token,
+            created_at: now,
+            expires_at: 0,  // 0 = never expires
+            last_used_at: now,
+            is_active: true,
+            scopes: default_scopes
+        }
+    }
+
+    pub fn is_expired(self, current_time: Int) -> Bool {
+        if self.expires_at == 0 {
+            false
+        } else {
+            current_time > self.expires_at
+        }
+    }
+
+    pub fn is_valid(self, current_time: Int) -> Bool {
+        self.is_active && !self.is_expired(current_time)
+    }
+
+    pub fn has_scope(self, scope: TokenScope) -> Bool {
+        self.scopes.contains(scope)
+    }
+
+    pub fn with_scopes(self, scopes: List<TokenScope>) -> ApiToken {
+        ApiToken {
+            id: self.id,
+            name: self.name,
+            token: self.token,
+            created_at: self.created_at,
+            expires_at: self.expires_at,
+            last_used_at: self.last_used_at,
+            is_active: self.is_active,
+            scopes: scopes
+        }
+    }
+}
+
+// User represents a registry user
+// Uses refinement types for validated fields
+pub type User is {
+    id: Int,
+    username: Username,                          // Validated username (3-32 chars)
+    email: Email,                                // Validated email address
+    role: UserRole,
+    created_at: Int,
+    api_tokens: List<ApiToken>,
+    owned_packages: List<ValidatedPackageName>, // List of validated package names
+    is_active: Bool
+};
+
+implement User {
+    /// Create a new User with validated username and email
+    /// Note: Caller must ensure username and email are valid using their try_from() methods
+    pub fn new(id: Int, username: Username, email: Email) -> User {
+        User {
+            id: id,
+            username: username,
+            email: email,
+            role: UserRole.Regular,
+            created_at: unix_timestamp(),
+            api_tokens: List.new(),
+            owned_packages: List.new(),
+            is_active: true
+        }
+    }
+
+    pub fn with_role(self, role: UserRole) -> User {
+        User {
+            id: self.id,
+            username: self.username,
+            email: self.email,
+            role: role,
+            created_at: self.created_at,
+            api_tokens: self.api_tokens,
+            owned_packages: self.owned_packages,
+            is_active: self.is_active
+        }
+    }
+
+    pub fn add_token(self, token: ApiToken) -> User {
+        let mut updated_tokens = self.api_tokens;
+        updated_tokens.push(token);
+
+        User {
+            id: self.id,
+            username: self.username,
+            email: self.email,
+            role: self.role,
+            created_at: self.created_at,
+            api_tokens: updated_tokens,
+            owned_packages: self.owned_packages,
+            is_active: self.is_active
+        }
+    }
+
+    pub fn add_package(self, package_name: ValidatedPackageName) -> User {
+        let mut updated_packages = self.owned_packages;
+        updated_packages.push(package_name);
+
+        User {
+            id: self.id,
+            username: self.username,
+            email: self.email,
+            role: self.role,
+            created_at: self.created_at,
+            api_tokens: self.api_tokens,
+            owned_packages: updated_packages,
+            is_active: self.is_active
+        }
+    }
+
+    pub fn is_admin(self) -> Bool {
+        match self.role {
+            UserRole.Admin => true,
+            _ => false
+        }
+    }
+
+    pub fn can_publish(self) -> Bool {
+        self.is_active && self.api_tokens.len() > 0
+    }
+}

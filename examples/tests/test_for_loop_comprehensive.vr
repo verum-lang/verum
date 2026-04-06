@@ -1,0 +1,51 @@
+// Comprehensive test for for-loops with various iterable types
+
+fn test_array() {
+    for x in [1, 2, 3] {
+        print(x);
+    }
+}
+
+fn test_list() {
+    let items = [10, 20, 30];
+    for x in items {
+        print(x);
+    }
+}
+
+fn test_range() {
+    for i in 1..5 {
+        print(i);
+    }
+}
+
+fn test_range_inclusive() {
+    for i in 1..=5 {
+        print(i);
+    }
+}
+
+fn test_nested_ranges() {
+    for i in 0..3 {
+        for j in 0..2 {
+            print(f"{i},{j}");
+        }
+    }
+}
+
+fn main() {
+    print("Testing array:");
+    test_array();
+
+    print("Testing list:");
+    test_list();
+
+    print("Testing range:");
+    test_range();
+
+    print("Testing range inclusive:");
+    test_range_inclusive();
+
+    print("Testing nested ranges:");
+    test_nested_ranges();
+}

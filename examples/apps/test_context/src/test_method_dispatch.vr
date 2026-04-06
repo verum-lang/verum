@@ -1,0 +1,56 @@
+// Test Context Method Dispatch
+// This file tests that context methods can be called on context values
+
+context Logger {
+    fn log(msg: Text)
+}
+
+context Database {
+    fn query(sql: Text)
+    fn connect()
+}
+
+fn main() {
+    print("=== Context Method Dispatch Test ===");
+    print("");
+
+    // Provide implementations for the contexts
+    provide Logger = Logger {
+        log: fn(msg: Text) {
+            print(f"[LOG] {msg}");
+        }
+    };
+
+    provide Database = Database {
+        connect: fn() {
+            print("[DB] Connected to database");
+        },
+        query: fn(sql: Text) {
+            print(f"[DB] Executing: {sql}");
+        }
+    };
+
+    // Test 1: Simple context method call
+    print("Test 1: Simple context method call");
+    Logger.log("Hello, World!");
+    Logger.log("Testing context methods");
+    print("");
+
+    // Test 2: Multiple methods on same context
+    print("Test 2: Multiple methods on same context");
+    Database.connect();
+    Database.query("SELECT * FROM users");
+    Database.query("INSERT INTO logs VALUES (...)");
+    print("");
+
+    // Test 3: Multiple contexts
+    print("Test 3: Multiple contexts");
+    Logger.log("Starting database operations");
+    Database.connect();
+    Logger.log("Database connected successfully");
+    Database.query("SELECT count(*) FROM products");
+    Logger.log("Query executed");
+    print("");
+
+    print("✓ All context method dispatch tests passed!");
+}

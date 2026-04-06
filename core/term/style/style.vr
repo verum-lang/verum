@@ -1,0 +1,226 @@
+// =============================================================================
+// style/style.vr - Composite style type with builder API
+// =============================================================================
+// Style combines foreground color, background color, underline color, and
+// text modifiers into a single value. Builder-chain API allows concise
+// style construction: `Style.new().fg(Color.Red).bold().underlined()`
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
+// =============================================================================
+
+module style;
+
+mount super.color.Color;
+mount super.modifier.Modifier;
+
+// =============================================================================
+// Style — full terminal style specification
+// =============================================================================
+
+/// Style represents the complete visual appearance of a terminal cell:
+/// foreground color, background color, underline color, and text modifiers.
+///
+/// Styles are immutable values. Builder methods return new Style instances.
+/// Use `patch()` to overlay one style on top of another.
+public type Style is {
+    fg: Maybe<Color>,              // Foreground (text) color
+    bg: Maybe<Color>,              // Background color
+    underline_color: Maybe<Color>, // Underline color (requires terminal support)
+    add_modifier: Modifier,        // Modifiers to enable
+    sub_modifier: Modifier,        // Modifiers to disable (for patch semantics)
+};
+
+implement Style {
+    /// Default style: no colors, no modifiers.
+    public const DEFAULT: Style = Style {
+        fg: None,
+        bg: None,
+        underline_color: None,
+        add_modifier: Modifier.NONE,
+        sub_modifier: Modifier.NONE,
+    };
+
+    /// Create a new default style. Equivalent to Style.DEFAULT.
+    public fn new() -> Style {
+        Style.DEFAULT
+    }
+
+    /// Create a style that resets all attributes.
+    public fn reset() -> Style {
+        Style {
+            fg: Some(Color.Reset),
+            bg: Some(Color.Reset),
+            underline_color: Some(Color.Reset),
+            add_modifier: Modifier.NONE,
+            sub_modifier: Modifier.NONE,
+        }
+    }
+
+    // =========================================================================
+    // Color builder methods
+    // =========================================================================
+
+    /// Set the foreground (text) color.
+    public fn fg(self, color: Color) -> Style {
+        Style { fg: Some(color), ..self }
+    }
+
+    /// Set the background color.
+    public fn bg(self, color: Color) -> Style {
+        Style { bg: Some(color), ..self }
+    }
+
+    /// Set the underline color (requires terminal support for colored underlines).
+    public fn underline_color(self, color: Color) -> Style {
+        Style { underline_color: Some(color), ..self }
+    }
+
+    // =========================================================================
+    // Modifier builder methods
+    // =========================================================================
+
+    /// Add bold modifier.
+    public fn bold(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.BOLD), ..self }
+    }
+
+    /// Add dim (faint) modifier.
+    public fn dim(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.DIM), ..self }
+    }
+
+    /// Add italic modifier.
+    public fn italic(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.ITALIC), ..self }
+    }
+
+    /// Add underlined modifier.
+    public fn underlined(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.UNDERLINED), ..self }
+    }
+
+    /// Add slow blink modifier.
+    public fn slow_blink(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.SLOW_BLINK), ..self }
+    }
+
+    /// Add rapid blink modifier.
+    public fn rapid_blink(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.RAPID_BLINK), ..self }
+    }
+
+    /// Add reversed (inverse) modifier.
+    public fn reversed(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.REVERSED), ..self }
+    }
+
+    /// Add hidden modifier.
+    public fn hidden(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.HIDDEN), ..self }
+    }
+
+    /// Add crossed-out (strikethrough) modifier.
+    public fn crossed_out(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.CROSSED_OUT), ..self }
+    }
+
+    /// Add overlined modifier.
+    public fn overlined(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.OVERLINED), ..self }
+    }
+
+    /// Add double-underlined modifier.
+    public fn double_underlined(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.DOUBLE_UNDERLINED), ..self }
+    }
+
+    /// Add curly-underlined modifier (for spell-check style underlines).
+    public fn curly_underlined(self) -> Style {
+        Style { add_modifier: self.add_modifier.union(Modifier.CURLY_UNDERLINED), ..self }
+    }
+
+    // =========================================================================
+    // Modifier removal builder methods
+    // =========================================================================
+
+    /// Mark bold for removal when patching.
+    public fn not_bold(self) -> Style {
+        Style { sub_modifier: self.sub_modifier.union(Modifier.BOLD), ..self }
+    }
+
+    /// Mark dim for removal when patching.
+    public fn not_dim(self) -> Style {
+        Style { sub_modifier: self.sub_modifier.union(Modifier.DIM), ..self }
+    }
+
+    /// Mark italic for removal when patching.
+    public fn not_italic(self) -> Style {
+        Style { sub_modifier: self.sub_modifier.union(Modifier.ITALIC), ..self }
+    }
+
+    /// Mark underlined for removal when patching.
+    public fn not_underlined(self) -> Style {
+        Style { sub_modifier: self.sub_modifier.union(Modifier.UNDERLINED), ..self }
+    }
+
+    // =========================================================================
+    // Composition
+    // =========================================================================
+
+    /// Overlay `other` on top of `self`.
+    /// Fields set in `other` override those in `self`; unset fields are inherited.
+    /// Modifiers are merged: add_modifiers are unioned, sub_modifiers are unioned.
+    ///
+    /// Example:
+    ///   let base = Style.new().fg(Color.White).bold();
+    ///   let overlay = Style.new().fg(Color.Red);
+    ///   let result = base.patch(overlay);
+    ///   // result: fg=Red, bold=true (inherited from base)
+    public fn patch(self, other: Style) -> Style {
+        Style {
+            fg: match other.fg {
+                Some(c) => Some(c),
+                None => self.fg,
+            },
+            bg: match other.bg {
+                Some(c) => Some(c),
+                None => self.bg,
+            },
+            underline_color: match other.underline_color {
+                Some(c) => Some(c),
+                None => self.underline_color,
+            },
+            add_modifier: self.add_modifier
+                .difference(other.sub_modifier)
+                .union(other.add_modifier),
+            sub_modifier: self.sub_modifier
+                .difference(other.add_modifier)
+                .union(other.sub_modifier),
+        }
+    }
+
+    // =========================================================================
+    // Query methods
+    // =========================================================================
+
+    /// Check whether a specific modifier is enabled in this style.
+    public fn has_modifier(&self, modifier: Modifier) -> Bool {
+        self.add_modifier.contains(modifier)
+    }
+
+    /// Check whether this style has any foreground color set.
+    public fn has_fg(&self) -> Bool {
+        match self.fg {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// Check whether this style has any background color set.
+    public fn has_bg(&self) -> Bool {
+        match self.bg {
+            Some(_) => true,
+            None => false,
+        }
+    }
+}

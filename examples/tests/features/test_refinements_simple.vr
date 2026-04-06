@@ -1,0 +1,10 @@
+// Simple refinement types test to isolate parsing issues
+
+// Test 1: Basic inline refinement
+type Positive is Int{> 0};
+
+fn main() {
+    print("Testing basic refinement");
+    let x: Positive = 5;
+    print("Success!");
+}

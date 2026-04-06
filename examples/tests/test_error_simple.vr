@@ -1,0 +1,28 @@
+// Simple error handling test without Result type
+
+fn main() -> Int {
+    // Test 1: Basic try block that succeeds
+    let t1 = try {
+        42
+    } recover {
+        0
+    };
+
+    // Test 2: Basic try-finally
+    let t2 = try {
+        100
+    } finally {
+        0
+    };
+
+    // Test 3: Nested blocks
+    let t3 = try {
+        let x = 10;
+        let y = 20;
+        x + y
+    } recover {
+        -1
+    };
+
+    0
+}

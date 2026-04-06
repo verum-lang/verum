@@ -1,0 +1,173 @@
+// =============================================================================
+// frame.vr - Frame (draw context) and Terminal (double-buffered backend)
+// =============================================================================
+module frame;
+
+mount core.io.{IoResult, StreamError, IoErrorKind};
+mount super.cell.Cell;
+mount super.buffer.Buffer;
+mount super.diff.flush_diff;
+mount super.super.raw.{RawTerminal, PosixTerminal, TerminalSize, TermCapabilities, CursorShape, EscapeWriter};
+mount super.super.style.profile.ColorProfile;
+mount super.super.style.Style;
+mount super.super.layout.Rect;
+
+/// Frame — draw context provided to widgets.
+/// Contains a mutable reference to the buffer and the drawing area.
+public type Frame is {
+    buffer: &mut Buffer,
+    area: Rect,
+    cursor_position: Maybe<(Int, Int)>,
+};
+
+implement Frame {
+    /// Render a widget in the given area.
+    public fn render_widget(&mut self, widget: &(dyn Widget), area: Rect) {
+        widget.render(area, self.buffer);
+    }
+
+    /// Set cursor position (for text input fields).
+    public fn set_cursor(&mut self, x: Int, y: Int) {
+        self.cursor_position = Some((x, y));
+    }
+
+    /// Return the total available area.
+    public fn size(&self) -> Rect {
+        self.area
+    }
+
+    /// Return buffer width.
+    public fn width(&self) -> Int { self.area.width }
+
+    /// Return buffer height.
+    public fn height(&self) -> Int { self.area.height }
+}
+
+/// Viewport mode for the terminal.
+public type Viewport is
+    | Fullscreen
+    | Inline { height: Int }
+    | Fixed { area: Rect };
+
+/// Terminal — main rendering object with double buffering.
+/// Combines Layer 0 (raw) and Layer 3 (render).
+public type Terminal is {
+    backend: Heap<PosixTerminal>,
+    front_buffer: Buffer,
+    back_buffer: Buffer,
+    viewport: Viewport,
+    color_profile: ColorProfile,
+    capabilities: TermCapabilities,
+};
+
+implement Terminal {
+    /// Create a terminal with auto-detected capabilities.
+    public fn new() -> IoResult<Terminal> {
+        let backend = PosixTerminal.new()?;
+        let size = backend.size()?;
+        let w = size.columns;
+        let h = size.rows;
+
+        Ok(Terminal {
+            backend: Heap(backend),
+            front_buffer: Buffer.new(w, h),
+            back_buffer: Buffer.new(w, h),
+            viewport: Viewport.Fullscreen,
+            color_profile: ColorProfile.TrueColor,
+            capabilities: TermCapabilities.default(),
+        })
+    }
+
+    /// Initialize the terminal: raw mode + alternate screen.
+    public fn init(&mut self) -> IoResult<()> {
+        self.backend.enable_raw_mode()?;
+        self.backend.enter_alternate_screen()?;
+        self.backend.set_cursor_visible(false)?;
+        Ok(())
+    }
+
+    /// Draw one frame. Calls `draw_fn` with a Frame, then flushes the diff.
+    public fn draw(&mut self, draw_fn: fn(&mut Frame)) -> IoResult<()> {
+        // Check for resize
+        let size = self.backend.size()?;
+        if size.columns != self.back_buffer.width || size.rows != self.back_buffer.height {
+            self.resize(size.columns, size.rows);
+        }
+
+        // Clear back buffer
+        self.back_buffer.reset();
+
+        // Create Frame and invoke draw_fn
+        let area = Rect.new(0, 0, self.back_buffer.width, self.back_buffer.height);
+        let mut frame = Frame {
+            buffer: &mut self.back_buffer,
+            area: area,
+            cursor_position: None,
+        };
+        draw_fn(&mut frame);
+
+        // Flush diff: back_buffer → terminal
+        flush_diff(
+            &mut self.backend,
+            &self.front_buffer,
+            &self.back_buffer,
+            self.color_profile,
+        )?;
+
+        // Handle cursor
+        match frame.cursor_position {
+            Some((x, y)) => {
+                self.backend.move_to(x, y)?;
+                self.backend.set_cursor_visible(true)?;
+            }
+            None => {
+                self.backend.set_cursor_visible(false)?;
+            }
+        }
+
+        // Swap buffers
+        let temp = self.front_buffer;
+        self.front_buffer = self.back_buffer;
+        self.back_buffer = temp;
+
+        Ok(())
+    }
+
+    /// Restore terminal to original state.
+    public fn restore(&mut self) -> IoResult<()> {
+        self.backend.set_cursor_visible(true)?;
+        self.backend.leave_alternate_screen()?;
+        self.backend.disable_raw_mode()
+    }
+
+    /// Get the terminal size.
+    public fn size(&self) -> IoResult<TerminalSize> {
+        self.backend.size()
+    }
+
+    /// Get the current color profile.
+    public fn color_profile(&self) -> ColorProfile {
+        self.color_profile
+    }
+
+    /// Get the terminal capabilities.
+    public fn capabilities(&self) -> &TermCapabilities {
+        &self.capabilities
+    }
+
+    /// Get a mutable reference to the backend (for EventStream).
+    public fn backend_mut(&mut self) -> &mut PosixTerminal {
+        &mut self.backend
+    }
+
+    fn resize(&mut self, width: Int, height: Int) {
+        self.front_buffer = Buffer.new(width, height);
+        self.back_buffer = Buffer.new(width, height);
+    }
+}
+
+implement Drop for Terminal {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}

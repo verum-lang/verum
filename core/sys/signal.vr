@@ -1,0 +1,571 @@
+// =============================================================================
+// sys/signal.vr - Signal Handling
+// =============================================================================
+// Layer: 1 (System)
+// Dependencies: core, sys/{linux,darwin,windows}
+// =============================================================================
+//
+// Cross-platform signal handling for Verum programs.
+//
+// # Architecture
+//
+// Signal handling uses platform-specific mechanisms:
+// - Linux: sigaction() via direct syscall (rt_sigaction, syscall 13)
+// - macOS: sigaction() via libSystem.B.dylib
+// - Windows: SetConsoleCtrlHandler() via kernel32.dll
+//
+// # Safety
+//
+// Signal handlers execute in a restricted context. Only async-signal-safe
+// operations are permitted inside handlers:
+// - Setting atomic flags
+// - Writing to pre-allocated buffers
+// - Calling write() on file descriptors
+//
+// Do NOT allocate memory, acquire locks, or call non-reentrant functions
+// from within a signal handler.
+//
+// # Example
+// ```verum
+// mount core.sys.signal.{Signal, on_signal};
+//
+// fn main() {
+//     on_signal(Signal.Int, fn() {
+//         print("Caught SIGINT, shutting down...");
+//         exit(0);
+//     });
+//
+//     // Main loop
+//     loop {
+//         do_work();
+//     }
+// }
+// ```
+//
+// =============================================================================
+
+module sys.signal;
+
+mount core.*;
+mount core.intrinsics.{atomic_store, atomic_load, MemoryOrder};
+
+// =============================================================================
+// Platform-Specific FFI
+// =============================================================================
+
+// Unconditional declarations for type checking
+@intrinsic("libc.signal")
+fn signal(sig: Int, handler: fn(Int)) -> fn(Int);
+
+@intrinsic("libc.raise")
+fn raise(sig: Int) -> Int;
+
+@intrinsic("kernel32.SetConsoleCtrlHandler")
+fn SetConsoleCtrlHandler(handler: fn(UInt32) -> Int, add: Int) -> Int;
+
+// =============================================================================
+// Signal Types
+// =============================================================================
+
+/// POSIX signal numbers.
+///
+/// These are the standard signals available on Unix-like systems.
+/// On Windows, only Int (Ctrl+C), Term, and Abort are supported
+/// via SetConsoleCtrlHandler.
+public type Signal is
+    /// Hangup (terminal closed)
+    | Hup
+    /// Interrupt (Ctrl+C)
+    | Int
+    /// Quit (Ctrl+\)
+    | Quit
+    /// Illegal instruction
+    | Ill
+    /// Abort (from abort())
+    | Abort
+    /// Floating-point exception
+    | Fpe
+    /// Kill (cannot be caught)
+    | Kill
+    /// Segmentation fault
+    | Segv
+    /// Broken pipe
+    | Pipe
+    /// Alarm timer expired
+    | Alarm
+    /// Termination request
+    | Term
+    /// User-defined signal 1
+    | Usr1
+    /// User-defined signal 2
+    | Usr2
+    /// Child process status changed
+    | Child
+    /// Continue (resume stopped process)
+    | Cont
+    /// Stop (cannot be caught)
+    | Stop
+    /// Terminal stop (Ctrl+Z)
+    | Tstp
+    /// Window size changed
+    | Winch;
+
+implement Signal {
+    /// Convert to the platform-specific signal number.
+    public fn to_raw(&self) -> Int {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        {
+            match self {
+                Hup    => 1,
+                Int    => 2,
+                Quit   => 3,
+                Ill    => 4,
+                Abort  => 6,
+                Fpe    => 8,
+                Kill   => 9,
+                Segv   => 11,
+                Pipe   => 13,
+                Alarm  => 14,
+                Term   => 15,
+                Usr1   => {
+                    @cfg(target_os = "linux") { 10 }
+                    @cfg(target_os = "macos") { 30 }
+                },
+                Usr2   => {
+                    @cfg(target_os = "linux") { 12 }
+                    @cfg(target_os = "macos") { 31 }
+                },
+                Child  => {
+                    @cfg(target_os = "linux") { 17 }
+                    @cfg(target_os = "macos") { 20 }
+                },
+                Cont   => {
+                    @cfg(target_os = "linux") { 18 }
+                    @cfg(target_os = "macos") { 19 }
+                },
+                Stop   => {
+                    @cfg(target_os = "linux") { 19 }
+                    @cfg(target_os = "macos") { 17 }
+                },
+                Tstp   => {
+                    @cfg(target_os = "linux") { 20 }
+                    @cfg(target_os = "macos") { 18 }
+                },
+                Winch  => 28,
+            }
+        }
+
+        @cfg(target_os = "windows")
+        {
+            // Windows maps to console control events
+            match self {
+                Int   => 0,  // CTRL_C_EVENT
+                Term  => 2,  // CTRL_CLOSE_EVENT
+                Abort => 6,  // Same as Unix for consistency
+                _     => -1, // Unsupported on Windows
+            }
+        }
+    }
+
+    /// Convert from a platform-specific signal number.
+    public fn from_raw(signum: Int) -> Maybe<Signal> {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        {
+            match signum {
+                1  => Some(Signal.Hup),
+                2  => Some(Signal.Int),
+                3  => Some(Signal.Quit),
+                4  => Some(Signal.Ill),
+                6  => Some(Signal.Abort),
+                8  => Some(Signal.Fpe),
+                9  => Some(Signal.Kill),
+                11 => Some(Signal.Segv),
+                13 => Some(Signal.Pipe),
+                14 => Some(Signal.Alarm),
+                15 => Some(Signal.Term),
+                28 => Some(Signal.Winch),
+                _  => None,
+            }
+        }
+
+        @cfg(target_os = "windows")
+        {
+            match signum {
+                0 => Some(Signal.Int),
+                2 => Some(Signal.Term),
+                _ => None,
+            }
+        }
+    }
+
+    /// Get the signal name as a string.
+    public fn name(&self) -> Text {
+        match self {
+            Hup    => "SIGHUP",
+            Int    => "SIGINT",
+            Quit   => "SIGQUIT",
+            Ill    => "SIGILL",
+            Abort  => "SIGABRT",
+            Fpe    => "SIGFPE",
+            Kill   => "SIGKILL",
+            Segv   => "SIGSEGV",
+            Pipe   => "SIGPIPE",
+            Alarm  => "SIGALRM",
+            Term   => "SIGTERM",
+            Usr1   => "SIGUSR1",
+            Usr2   => "SIGUSR2",
+            Child  => "SIGCHLD",
+            Cont   => "SIGCONT",
+            Stop   => "SIGSTOP",
+            Tstp   => "SIGTSTP",
+            Winch  => "SIGWINCH",
+        }
+    }
+
+    /// Check if this signal can be caught/handled.
+    public fn is_catchable(&self) -> Bool {
+        match self {
+            Kill | Stop => false,
+            _ => true,
+        }
+    }
+}
+
+implement Debug for Signal {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+implement Display for Signal {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+implement Eq for Signal {
+    fn eq(&self, other: &Signal) -> Bool {
+        self.to_raw() == other.to_raw()
+    }
+}
+
+implement Clone for Signal {
+    fn clone(&self) -> Signal { *self }
+}
+
+implement Copy for Signal {}
+
+// =============================================================================
+// Signal Action (POSIX sigaction structure)
+// =============================================================================
+
+/// POSIX sigaction structure for detailed signal handling.
+@cfg(any(target_os = "linux", target_os = "macos"))
+@repr(C)
+type SigAction is {
+    handler: fn(Int),
+    mask: [UInt64; 2],   // Signal mask (128 bits)
+    flags: Int,
+    restorer: fn(),      // Linux only, ignored on macOS
+};
+
+// =============================================================================
+// Signal Handler Registration
+// =============================================================================
+
+/// Registered signal handlers.
+/// Using a fixed array of function pointers indexed by signal number.
+/// Signal handlers must be async-signal-safe.
+const MAX_SIGNALS: Int = 64;
+
+/// Global handler table. Each entry is a function pointer (as Int)
+/// that gets called when the corresponding signal is received.
+/// 0 means no handler registered.
+static mut SIGNAL_HANDLERS: [Int; 64] = [0; 64];
+
+/// Register a handler for the given signal.
+///
+/// The handler will be called when the signal is delivered to this process.
+/// Only one handler can be registered per signal; registering a new handler
+/// replaces the previous one.
+///
+/// # Safety
+///
+/// Signal handlers run in an async-signal-unsafe context. Only perform
+/// simple operations like setting flags or writing to pipes.
+///
+/// # Example
+/// ```verum
+/// on_signal(Signal.Int, fn() {
+///     // Set a flag to trigger graceful shutdown
+///     SHUTDOWN_REQUESTED.store(true, Relaxed);
+/// });
+/// ```
+public fn on_signal(sig: Signal, handler: fn()) -> Result<(), SignalError> {
+    if !sig.is_catchable() {
+        return Err(SignalError.Uncatchable(sig));
+    }
+
+    let signum = sig.to_raw();
+    if signum < 0 || signum >= MAX_SIGNALS {
+        return Err(SignalError.InvalidSignal(signum));
+    }
+
+    // Store handler in global table
+    unsafe {
+        SIGNAL_HANDLERS[signum] = handler as Int;
+    }
+
+    // Register platform-specific signal handler
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        register_posix_handler(signum)?;
+    }
+
+    @cfg(target_os = "windows")
+    {
+        register_windows_handler()?;
+    }
+
+    Ok(())
+}
+
+/// Remove a previously registered signal handler, restoring default behavior.
+public fn reset_signal(sig: Signal) -> Result<(), SignalError> {
+    let signum = sig.to_raw();
+    if signum < 0 || signum >= MAX_SIGNALS {
+        return Err(SignalError.InvalidSignal(signum));
+    }
+
+    unsafe {
+        SIGNAL_HANDLERS[signum] = 0;
+    }
+
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        // SIG_DFL = 0
+        signal(signum, 0 as fn(Int));
+    }
+
+    Ok(())
+}
+
+/// Ignore a signal.
+///
+/// The signal will be delivered but silently discarded.
+/// Useful for SIGPIPE in network servers.
+///
+/// # Example
+/// ```verum
+/// ignore_signal(Signal.Pipe);  // Prevent SIGPIPE crashes
+/// ```
+public fn ignore_signal(sig: Signal) -> Result<(), SignalError> {
+    if !sig.is_catchable() {
+        return Err(SignalError.Uncatchable(sig));
+    }
+
+    let signum = sig.to_raw();
+
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        // SIG_IGN = 1
+        signal(signum, 1 as fn(Int));
+    }
+
+    Ok(())
+}
+
+/// Send a signal to the current process.
+public fn raise_signal(sig: Signal) -> Result<(), SignalError> {
+    let signum = sig.to_raw();
+
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        let result = raise(signum);
+        if result != 0 {
+            return Err(SignalError.RaiseFailed(sig));
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Platform-Specific Registration
+// =============================================================================
+
+/// Trampoline handler that dispatches to the registered Verum handler.
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn signal_trampoline(signum: Int) {
+    if signum >= 0 && signum < MAX_SIGNALS {
+        let handler_ptr = unsafe { SIGNAL_HANDLERS[signum] };
+        if handler_ptr != 0 {
+            let handler = handler_ptr as fn();
+            handler();
+        }
+    }
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn register_posix_handler(signum: Int) -> Result<(), SignalError> {
+    let result = signal(signum, signal_trampoline);
+    // SIG_ERR is typically -1 cast to function pointer
+    if result as Int == -1 {
+        Err(SignalError.RegistrationFailed(signum))
+    } else {
+        Ok(())
+    }
+}
+
+@cfg(target_os = "windows")
+static mut WINDOWS_HANDLER_REGISTERED: Bool = false;
+
+@cfg(target_os = "windows")
+fn windows_ctrl_handler(ctrl_type: UInt32) -> Int {
+    let signum = match ctrl_type {
+        0 => 2,  // CTRL_C_EVENT -> SIGINT
+        2 => 15, // CTRL_CLOSE_EVENT -> SIGTERM
+        _ => return 0,
+    };
+
+    if signum < MAX_SIGNALS {
+        let handler_ptr = unsafe { SIGNAL_HANDLERS[signum] };
+        if handler_ptr != 0 {
+            let handler = handler_ptr as fn();
+            handler();
+            return 1; // Handled
+        }
+    }
+    0 // Not handled
+}
+
+@cfg(target_os = "windows")
+fn register_windows_handler() -> Result<(), SignalError> {
+    unsafe {
+        if !WINDOWS_HANDLER_REGISTERED {
+            let result = SetConsoleCtrlHandler(windows_ctrl_handler, 1);
+            if result == 0 {
+                return Err(SignalError.RegistrationFailed(0));
+            }
+            WINDOWS_HANDLER_REGISTERED = true;
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Signal-Safe Flag
+// =============================================================================
+
+/// A signal-safe boolean flag.
+///
+/// This type uses atomic operations and is safe to set from within
+/// a signal handler and check from the main thread.
+///
+/// # Example
+/// ```verum
+/// static SHUTDOWN: SignalFlag = SignalFlag.new();
+///
+/// fn main() {
+///     on_signal(Signal.Int, fn() {
+///         SHUTDOWN.set();
+///     });
+///
+///     while !SHUTDOWN.is_set() {
+///         do_work();
+///     }
+///     print("Shutting down gracefully");
+/// }
+/// ```
+public type SignalFlag is {
+    value: Int,
+};
+
+implement SignalFlag {
+    /// Create a new unset signal flag.
+    public fn new() -> SignalFlag {
+        SignalFlag { value: 0 }
+    }
+
+    /// Set the flag (signal-safe).
+    @inline
+    public fn set(&self) {
+        atomic_store(&self.value as &mut Int, 1, MemoryOrder.Release);
+    }
+
+    /// Clear the flag (signal-safe).
+    @inline
+    public fn clear(&self) {
+        atomic_store(&self.value as &mut Int, 0, MemoryOrder.Release);
+    }
+
+    /// Check if the flag is set (signal-safe).
+    @inline
+    public fn is_set(&self) -> Bool {
+        atomic_load(&self.value, MemoryOrder.Acquire) != 0
+    }
+}
+
+implement Debug for SignalFlag {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SignalFlag {{ set: {self.is_set()} }}")
+    }
+}
+
+implement Display for SignalFlag {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.is_set() {
+            f.write_str("SignalFlag(set)")
+        } else {
+            f.write_str("SignalFlag(unset)")
+        }
+    }
+}
+
+// =============================================================================
+// Signal Error
+// =============================================================================
+
+/// Errors from signal operations.
+public type SignalError is
+    /// Signal cannot be caught (SIGKILL, SIGSTOP).
+    | Uncatchable(Signal)
+    /// Invalid signal number.
+    | InvalidSignal(Int)
+    /// Failed to register handler.
+    | RegistrationFailed(Int)
+    /// Failed to raise signal.
+    | RaiseFailed(Signal);
+
+implement Debug for SignalError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Uncatchable(sig) => f.write_str(f"SignalError.Uncatchable({sig})"),
+            InvalidSignal(n) => f.write_str(f"SignalError.InvalidSignal({n})"),
+            RegistrationFailed(n) => f.write_str(f"SignalError.RegistrationFailed({n})"),
+            RaiseFailed(sig) => f.write_str(f"SignalError.RaiseFailed({sig})"),
+        }
+    }
+}
+
+implement Display for SignalError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Uncatchable(sig) => f.write_str(f"cannot catch signal {sig.name()}"),
+            InvalidSignal(n) => f.write_str(f"invalid signal number: {n}"),
+            RegistrationFailed(n) => f.write_str(f"failed to register handler for signal {n}"),
+            RaiseFailed(sig) => f.write_str(f"failed to raise signal {sig.name()}"),
+        }
+    }
+}
+
+implement Describable for SignalError {
+    fn description(&self) -> Text {
+        match self {
+            Uncatchable(sig) => f"cannot catch signal {sig.name()}",
+            InvalidSignal(n) => f"invalid signal number: {n}",
+            RegistrationFailed(n) => f"failed to register handler for signal {n}",
+            RaiseFailed(sig) => f"failed to raise signal {sig.name()}",
+        }
+    }
+}

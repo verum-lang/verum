@@ -1,0 +1,25 @@
+// Test multiple f-string calls like the original
+
+fn categorize(n: Float) -> Text {
+    match n {
+        x where x < 0.0 => "negative",
+        x where x == 0.0 => "zero",
+        x where x > 0.0 => "positive",
+        _ => "unknown"
+    }
+}
+
+fn main() {
+    let _ = print("=== Multi F-String Test ===");
+
+    // First call works?
+    let _ = print(f"-5 is {categorize(-5.0)}");
+
+    // Second call?
+    let _ = print(f"0 is {categorize(0.0)}");
+
+    // Third call?
+    let _ = print(f"10 is {categorize(10.0)}");
+
+    let _ = print("=== Done ===");
+}

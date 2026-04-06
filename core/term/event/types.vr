@@ -1,0 +1,173 @@
+// =============================================================================
+// event/types.vr - Event Types
+// =============================================================================
+// Layer: 1 (Event System)
+// Dependencies: keys.vr
+// =============================================================================
+//
+// Complete event type system for terminal input. All terminal input is
+// parsed into one of these structured event types by the InputParser.
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
+// =============================================================================
+
+module types;
+
+mount super.keys.{KeyCode, Modifiers};
+
+// =============================================================================
+// Event — top-level sum type
+// =============================================================================
+
+/// Top-level terminal event. Exhaustive sum type covering all input.
+public type Event is
+    | Key(KeyEvent)
+    | Mouse(MouseEvent)
+    | Resize(ResizeEvent)
+    | Paste(Text)
+    | FocusGained
+    | FocusLost;
+
+// =============================================================================
+// KeyEvent
+// =============================================================================
+
+/// Keyboard event with key code, modifiers, and press/release/repeat kind.
+public type KeyEvent is {
+    code: KeyCode,
+    modifiers: Modifiers,
+    kind: KeyEventKind,
+};
+
+/// Kind of key event: press, release, or repeat.
+public type KeyEventKind is Press | Release | Repeat;
+
+implement KeyEvent {
+    /// Create a simple key press with no modifiers.
+    public fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code: code,
+            modifiers: Modifiers.NONE,
+            kind: KeyEventKind.Press,
+        }
+    }
+
+    /// Create a key press with modifiers.
+    public fn with_mods(code: KeyCode, mods: Modifiers) -> KeyEvent {
+        KeyEvent {
+            code: code,
+            modifiers: mods,
+            kind: KeyEventKind.Press,
+        }
+    }
+
+    /// Check if this is a Ctrl+C event.
+    public fn is_ctrl_c(&self) -> Bool {
+        self.modifiers.contains(Modifiers.CTRL) && self.code is KeyCode.Char('c')
+    }
+
+    /// Check if this is an Escape event.
+    public fn is_escape(&self) -> Bool {
+        self.code is KeyCode.Escape
+    }
+
+    /// Check if this is an Enter event.
+    public fn is_enter(&self) -> Bool {
+        self.code is KeyCode.Enter
+    }
+}
+
+// =============================================================================
+// MouseEvent
+// =============================================================================
+
+/// Mouse event with position, button, and modifiers.
+public type MouseEvent is {
+    kind: MouseEventKind,
+    column: Int,
+    row: Int,
+    modifiers: Modifiers,
+};
+
+/// Kind of mouse event.
+public type MouseEventKind is
+    | Down(MouseButton)
+    | Up(MouseButton)
+    | Drag(MouseButton)
+    | Moved
+    | ScrollUp
+    | ScrollDown
+    | ScrollLeft
+    | ScrollRight;
+
+/// Mouse button.
+public type MouseButton is Left | Right | Middle;
+
+implement MouseEvent {
+    /// Get the position as a (column, row) tuple.
+    public fn position(&self) -> (Int, Int) {
+        (self.column, self.row)
+    }
+}
+
+// =============================================================================
+// ResizeEvent
+// =============================================================================
+
+/// Terminal resize event with new dimensions.
+public type ResizeEvent is {
+    columns: Int,
+    rows: Int,
+};
+
+implement ResizeEvent {
+    public fn new(columns: Int, rows: Int) -> ResizeEvent {
+        ResizeEvent { columns: columns, rows: rows }
+    }
+}
+
+// =============================================================================
+// Event helpers
+// =============================================================================
+
+implement Event {
+    /// Check if this is a key event.
+    public fn is_key(&self) -> Bool {
+        match self {
+            Event.Key(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a mouse event.
+    public fn is_mouse(&self) -> Bool {
+        match self {
+            Event.Mouse(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if this is a resize event.
+    public fn is_resize(&self) -> Bool {
+        match self {
+            Event.Resize(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Extract the key event, if this is a Key variant.
+    public fn as_key(&self) -> Maybe<KeyEvent> {
+        match self {
+            Event.Key(ke) => Some(ke),
+            _ => None,
+        }
+    }
+
+    /// Extract the mouse event, if this is a Mouse variant.
+    public fn as_mouse(&self) -> Maybe<MouseEvent> {
+        match self {
+            Event.Mouse(me) => Some(me),
+            _ => None,
+        }
+    }
+}

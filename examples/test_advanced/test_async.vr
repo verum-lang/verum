@@ -1,0 +1,81 @@
+// Test: Async/Await
+// Tests asynchronous programming with async/await syntax
+
+async fn fetch_data() -> Int {
+    // Simulate async operation
+    42
+}
+
+async fn fetch_text() -> Text {
+    "Hello from async"
+}
+
+async fn compute_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Async function calling other async functions
+async fn process_all() -> Int {
+    let data = fetch_data().await
+    let sum = compute_sum(data, 10).await
+    let text = fetch_text().await
+    println(text)
+    sum
+}
+
+// Async function with error handling
+async fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+// Sequential async operations
+async fn sequential_ops() {
+    let x = fetch_data().await
+    println(f"First fetch: {x}")
+
+    let y = fetch_data().await
+    println(f"Second fetch: {y}")
+
+    let sum = x + y
+    println(f"Sum: {sum}")
+}
+
+// Parallel async operations (if supported)
+async fn parallel_ops() {
+    let future1 = fetch_data()
+    let future2 = fetch_data()
+
+    let result1 = future1.await
+    let result2 = future2.await
+
+    println(f"Results: {result1}, {result2}")
+}
+
+async fn main() {
+    println("Starting async tests...")
+
+    let result = fetch_data().await
+    println(f"Result: {result}")
+
+    let text = fetch_text().await
+    println(f"Text: {text}")
+
+    let sum_result = compute_sum(10, 20).await
+    println(f"Sum: {sum_result}")
+
+    let all_result = process_all().await
+    println(f"Process all result: {all_result}")
+
+    sequential_ops().await
+
+    match safe_divide(100, 5).await {
+        Some(value) => println(f"Division: {value}"),
+        None => println("Division by zero")
+    }
+
+    println("Async tests completed")
+}

@@ -1,0 +1,13 @@
+// Test comparisons
+
+fn main() {
+    let _ = print("=== Comparison Tests ===");
+
+    let a = 10.0;
+    let b = 3.0;
+
+    let gt = a > b;
+    let _ = print(f"10 > 3: {gt}");
+
+    let _ = print("=== Done ===");
+}

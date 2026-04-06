@@ -1,0 +1,250 @@
+// =============================================================================
+// main.vr - Verum bootstrap compiler entry point
+// =============================================================================
+// Stage 1 self-hosted compiler. Reads .vr files, lexes, parses, and
+// (eventually) generates VBC bytecode or LLVM IR.
+//
+// Usage: verum run --aot bootstrap/main.vr -- <source-file>
+// =============================================================================
+
+mount core.*;
+mount bootstrap.token.*;
+mount bootstrap.lexer.Lexer;
+mount bootstrap.ast.*;
+mount bootstrap.parser.Parser;
+
+// =============================================================================
+// C Runtime Bridge Functions
+// =============================================================================
+// These have stub bodies that never execute — the LLVM lowering intercepts
+// calls to these names and routes them to C runtime implementations.
+
+fn __file_read_to_string_raw(path: Text) -> Text { "" }
+fn __args_count_raw() -> Int { 0 }
+fn __arg_raw(index: Int) -> Text { "" }
+
+// =============================================================================
+// Bridge Wrappers
+// =============================================================================
+
+fn read_file(path: Text) -> Result<Text, Text> {
+    let content = __file_read_to_string_raw(path);
+    // NULL/empty means failure (empty files aren't valid Verum source anyway)
+    if content.len() == 0 {
+        Err(f"could not read file (not found or empty)")
+    } else {
+        Ok(content)
+    }
+}
+
+fn get_args() -> List<Text> {
+    let count = __args_count_raw();
+    let mut result: List<Text> = List.new();
+    let mut i = 0;
+    while i < count {
+        result.push(__arg_raw(i));
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Compiler Driver
+// =============================================================================
+
+type CompileResult is {
+    ast: Maybe<Module>,
+    errors: List<Text>,
+    token_count: Int,
+};
+
+fn compile_file(path: Text) -> CompileResult {
+    // Read source file
+    let source = match read_file(path) {
+        Ok(content) => content,
+        Err(e) => {
+            return CompileResult {
+                ast: None,
+                errors: [f"failed to read {path}: {e}"],
+                token_count: 0,
+            };
+        }
+    };
+
+    // Lex
+    let mut lexer = Lexer.new(source);
+    let tokens = lexer.tokenize();
+    let token_count = tokens.len();
+
+    // Check for lexer errors
+    let mut errors: List<Text> = List.new();
+    let mut i = 0;
+    while i < token_count {
+        let tok = tokens[i];
+        if tok.kind == TK_ERROR {
+            errors.push(f"{path}:{tok.span.line}:{tok.span.col}: lexer error: {tok.value}");
+        }
+        i = i + 1;
+    }
+
+    if errors.len() > 0 {
+        return CompileResult { ast: None, errors: errors, token_count: token_count };
+    }
+
+    // Parse
+    let mut parser = Parser.new(tokens);
+    let result = parser.parse_module(path);
+
+    match result {
+        Ok(parsed) => {
+            CompileResult {
+                ast: Some(parsed),
+                errors: List.new(),
+                token_count: token_count,
+            }
+        }
+        Err(msg) => {
+            errors.push(f"{path}: parse error: {msg}");
+            CompileResult { ast: None, errors: errors, token_count: token_count }
+        }
+    }
+}
+
+// =============================================================================
+// AST Printer (for debugging)
+// =============================================================================
+
+fn print_ast(m: Module) {
+    print(f"Module: {m.path}");
+    print(f"  Declarations: {m.decls.len()}");
+
+    let mut i = 0;
+    while i < m.decls.len() {
+        let decl = m.decls[i];
+        print_decl(decl, 2);
+        i = i + 1;
+    }
+}
+
+fn print_decl(decl: Decl, indent: Int) {
+    let prefix = make_indent(indent);
+    match decl {
+        DeclFn(f) => {
+            let vis = if f.is_pub { "pub " } else { "" };
+            let async_str = if f.is_async { "async " } else { "" };
+            print(f"{prefix}{vis}{async_str}fn {f.name}({f.params.len()} params)");
+        }
+        DeclType(t) => {
+            let vis = if t.is_pub { "pub " } else { "" };
+            print(f"{prefix}{vis}type {t.name}");
+        }
+        DeclImpl(im) => {
+            match im.protocol {
+                Some(proto) => print(f"{prefix}implement {proto} for {im.target_type} ({im.methods.len()} methods)"),
+                None => print(f"{prefix}implement {im.target_type} ({im.methods.len()} methods)"),
+            }
+        }
+        DeclMount(m) => {
+            let path_str = join_path(m.path, ".");
+            print(f"{prefix}mount {path_str}");
+        }
+        DeclConst(c) => {
+            print(f"{prefix}const {c.name}");
+        }
+        DeclModule(md) => {
+            let vis = if md.is_pub { "pub " } else { "" };
+            print(f"{prefix}{vis}module {md.name}");
+        }
+        DeclAttr(a) => {
+            print(f"{prefix}@{a.attr.name}(...)");
+        }
+    }
+}
+
+fn make_indent(n: Int) -> Text {
+    let mut s = "";
+    let mut i = 0;
+    while i < n {
+        s = s + " ";
+        i = i + 1;
+    }
+    s
+}
+
+fn join_path(parts: List<Text>, sep: Text) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < parts.len() {
+        if i > 0 {
+            result = result + sep;
+        }
+        result = result + parts[i];
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    let args = get_args();
+
+    if args.len() < 2 {
+        print("Usage: verum-bootstrap <source-file> [--dump-tokens] [--dump-ast]");
+        return 1;
+    }
+
+    let source_file = args[1];
+    let dump_tokens = args_contains(args, "--dump-tokens");
+    let dump_ast = args_contains(args, "--dump-ast");
+
+    print(f"Verum Bootstrap Compiler v0.1.0");
+    print(f"Compiling: {source_file}");
+
+    let result = compile_file(source_file);
+
+    // Report token count
+    print(f"Tokens: {result.token_count}");
+
+    // Report errors
+    if result.errors.len() > 0 {
+        let mut i = 0;
+        while i < result.errors.len() {
+            print(f"ERROR: {result.errors[i]}");
+            i = i + 1;
+        }
+        return 1;
+    }
+
+    // Dump AST if requested
+    match result.ast {
+        Some(m) => {
+            let ndecls = m.decls.len();
+            let modpath = m.path;
+            print(f"Parse OK: path={modpath} decls={ndecls}");
+            if dump_ast {
+                print_ast(m);
+            }
+        }
+        None => {
+            print("Parse failed (no module produced)");
+            return 1;
+        }
+    }
+
+    print("Compilation successful.");
+    0
+}
+
+fn args_contains(arg_list: List<Text>, flag: Text) -> Bool {
+    let mut i = 0;
+    while i < arg_list.len() {
+        if arg_list[i] == flag {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}

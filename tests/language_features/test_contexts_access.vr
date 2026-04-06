@@ -1,0 +1,20 @@
+// Test accessing context
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn greet(name: Text) using Logger {
+    // Try to call Logger.log - this is where the issue occurs
+    Logger.log(f"Hello, {name}");
+}
+
+fn main() {
+    provide Logger = {
+        fn log(message: Text) {
+            print(f"[LOG] {message}");
+        }
+    };
+
+    greet("World");
+}

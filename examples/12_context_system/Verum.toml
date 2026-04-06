@@ -1,0 +1,7 @@
+[package]
+name = "context_system"
+version = "0.1.0"
+description = "Context-based dependency injection with provide/using"
+
+[language]
+profile = "application"

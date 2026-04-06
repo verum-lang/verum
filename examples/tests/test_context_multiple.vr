@@ -1,0 +1,23 @@
+// Test 2: Multiple contexts
+context Logger {
+    fn log(self, msg: Text)
+}
+
+context Database {
+    fn query(self, sql: Text) -> Int
+}
+
+fn process_data(id: Int) using [Logger, Database] {
+    Logger.log("Processing data");
+    let result = Database.query("SELECT * FROM users");
+    Logger.log("Query complete");
+}
+
+type SimpleLogger is { prefix: Text };
+type MockDb is { connection_string: Text };
+
+fn main() {
+    provide Logger = SimpleLogger { prefix: "[LOG]" };
+    provide Database = MockDb { connection_string: "mock://db" };
+    process_data(42);
+}

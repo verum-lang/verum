@@ -1,0 +1,27 @@
+// Test context groups
+
+context Logger {
+    fn log(message: Text);
+}
+
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+// Define a context group
+using AppContexts = [Logger, Database];
+
+fn process_data() using AppContexts {
+    Logger.log("Processing data");
+    Database.query("SELECT * FROM data")
+}
+
+fn main() {
+    println("Context group defined successfully")
+    println("Function using context group parsed")
+
+    // Note: Actual context injection requires protocol implementations
+    // provide Logger = my_logger
+    // provide Database = my_db
+    // process_data()
+}

@@ -1,0 +1,30 @@
+// Test list/array operations
+
+fn main() {
+    let _ = print("=== List Operations ===");
+
+    // Array creation
+    let arr = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    // Indexing
+    let _ = print(f"arr[0] = {arr[0]}");
+    let _ = print(f"arr[2] = {arr[2]}");
+    let _ = print(f"arr[4] = {arr[4]}");
+
+    // Sum using manual iteration
+    let mut sum = 0.0;
+    let mut i = 0.0;
+    while i < 5.0 {
+        // Note: Can't use float as index directly, need workaround
+        sum = sum + arr[0];  // Simplified - just show indexing works
+        i = i + 1.0;
+    }
+
+    // Mutable array
+    let mut nums = [10.0, 20.0, 30.0];
+    let _ = print(f"Before: {nums[1]}");
+    nums[1] = 25.0;
+    let _ = print(f"After: {nums[1]}");
+
+    let _ = print("=== Done ===");
+}

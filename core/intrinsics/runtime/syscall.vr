@@ -1,0 +1,57 @@
+// =============================================================================
+// core/intrinsics/runtime/syscall.vr - System Call Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Operating system
+//
+// Direct kernel access without libc wrappers.
+// AOT: Lower to inline assembly syscall instructions.
+// VBC: VM issues the syscall on behalf of the program.
+//
+// VBC Opcode: SyscallLinux (0x45)
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.runtime.syscall;
+
+// =============================================================================
+// SECTION 1: Raw Syscalls
+// =============================================================================
+
+/// Raw syscall with 0 arguments.
+///
+/// Requires: Operating system
+@intrinsic("syscall0")
+@vbc_direct_lowering
+public fn syscall0(num: Int) -> Int;
+
+/// Raw syscall with 1 argument.
+@intrinsic("syscall1")
+@vbc_direct_lowering
+public fn syscall1(num: Int, a1: Int) -> Int;
+
+/// Raw syscall with 2 arguments.
+@intrinsic("syscall2")
+@vbc_direct_lowering
+public fn syscall2(num: Int, a1: Int, a2: Int) -> Int;
+
+/// Raw syscall with 3 arguments.
+@intrinsic("syscall3")
+@vbc_direct_lowering
+public fn syscall3(num: Int, a1: Int, a2: Int, a3: Int) -> Int;
+
+/// Raw syscall with 4 arguments.
+@intrinsic("syscall4")
+@vbc_direct_lowering
+public fn syscall4(num: Int, a1: Int, a2: Int, a3: Int, a4: Int) -> Int;
+
+/// Raw syscall with 5 arguments.
+@intrinsic("syscall5")
+@vbc_direct_lowering
+public fn syscall5(num: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int) -> Int;
+
+/// Raw syscall with 6 arguments (maximum on Linux x86_64).
+@intrinsic("syscall6")
+@vbc_direct_lowering
+public fn syscall6(num: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int;

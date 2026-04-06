@@ -1,0 +1,307 @@
+// Verum Registry - OIDC Trusted Publishing Handler
+//
+// Implements keyless publishing via OIDC token exchange from CI/CD systems.
+// Supports GitHub Actions and GitLab CI as trusted identity providers.
+//
+// Flow:
+//   1. CI job requests OIDC token from its provider
+//   2. CI sends OIDC token to POST /api/v1/oidc/exchange
+//   3. Registry validates token, checks claims against trusted publishers
+//   4. Registry issues short-lived publish token scoped to the package
+//
+// Spec: docs/detailed/15-cog-distribution-architecture.md Section 6
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Bool, Int};
+mount core.time.unix_timestamp;
+
+mount super.super.contexts.{Database, Auth};
+mount super.super.contexts.http_client.HttpClient;
+mount super.super.domain.errors.RegistryError;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/// Supported OIDC identity providers
+pub type OidcIssuer is
+    | GitHub
+    | GitLab
+    | Unknown { issuer_url: Text };
+
+implement OidcIssuer {
+    pub fn from_url(url: Text) -> OidcIssuer {
+        if url == "https://token.actions.githubusercontent.com" {
+            OidcIssuer.GitHub
+        } else if url == "https://gitlab.com" {
+            OidcIssuer.GitLab
+        } else {
+            OidcIssuer.Unknown { issuer_url: url }
+        }
+    }
+
+    pub fn to_url(self) -> Text {
+        match self {
+            OidcIssuer.GitHub => "https://token.actions.githubusercontent.com",
+            OidcIssuer.GitLab => "https://gitlab.com",
+            OidcIssuer.Unknown { issuer_url } => issuer_url,
+        }
+    }
+}
+
+/// Decoded OIDC claims relevant to trusted publishing
+type OidcClaims is {
+    issuer: Text,
+    subject: Text,
+    audience: Text,
+    repository_owner: Text,
+    repository_name: Text,
+    workflow_name: Text,
+    environment: Text,
+    expires_at: Int,
+};
+
+/// Request to exchange an OIDC token for a publish token
+pub type OidcExchangeRequest is {
+    oidc_token: Text,
+    package_name: Text,
+};
+
+/// Response with a short-lived publish token
+pub type OidcExchangeResponse is {
+    publish_token: Text,
+    expires_in_seconds: Int,
+    package_name: Text,
+};
+
+// ============================================================================
+// Handler
+// ============================================================================
+
+/// Exchange an OIDC identity token for a short-lived publish token.
+///
+/// POST /api/v1/oidc/exchange
+///
+/// The OIDC token is validated against the provider's JWKS endpoint,
+/// then the claims are checked against the trusted publisher configuration
+/// for the requested package.
+pub async fn handle_oidc_exchange(req: OidcExchangeRequest) -> Result<OidcExchangeResponse, RegistryError>
+    using [Database, HttpClient]
+    requires {
+        !req.oidc_token.is_empty(),
+        !req.package_name.is_empty(),
+    }
+    ensures {
+        match result {
+            Result.Ok(resp) => resp.expires_in_seconds > 0 && !resp.publish_token.is_empty(),
+            _ => true,
+        }
+    }
+{
+    // 1. Decode token header to extract issuer (without full verification yet)
+    let claims = decode_oidc_claims(req.oidc_token.clone())?;
+
+    // 2. Validate the issuer is a supported provider
+    let issuer = OidcIssuer.from_url(claims.issuer.clone());
+    match issuer {
+        OidcIssuer.Unknown { issuer_url } => {
+            return Result.Err(RegistryError.validation_error(
+                "oidc_token",
+                f"Unsupported OIDC issuer: {issuer_url}"
+            ));
+        },
+        _ => {},
+    }
+
+    // 3. Verify token signature against provider's JWKS
+    let jwks_url = get_jwks_url(issuer);
+    let jwks_response = HttpClient.get(jwks_url).await;
+    match jwks_response {
+        Result.Err(_) => {
+            return Result.Err(RegistryError.internal_error(
+                "Failed to fetch OIDC provider JWKS"
+            ));
+        },
+        Result.Ok(jwks) => {
+            if !verify_token_signature(req.oidc_token.clone(), jwks) {
+                return Result.Err(RegistryError.validation_error(
+                    "oidc_token",
+                    "OIDC token signature verification failed"
+                ));
+            }
+        },
+    }
+
+    // 4. Check token expiration
+    let now = unix_timestamp();
+    if claims.expires_at > 0 && now > claims.expires_at {
+        return Result.Err(RegistryError.invalid_token("OIDC token has expired"));
+    }
+
+    // 5. Look up trusted publisher configuration for this package + issuer
+    let params = sql_params_3(
+        req.package_name.clone(),
+        claims.issuer.clone(),
+        claims.repository_owner.clone(),
+    );
+
+    let trusted_row = Database.fetch_optional_with(
+        "SELECT repository_name, workflow_name, environment FROM oidc_trusted_publishers tp JOIN packages p ON tp.package_id = p.id WHERE p.name = $1 AND tp.issuer = $2 AND tp.repository_owner = $3",
+        params,
+    ).await?;
+
+    let trusted = match trusted_row {
+        Maybe.None => {
+            return Result.Err(RegistryError.unauthorized(
+                f"No trusted publisher configured for package '{req.package_name}' from {claims.repository_owner}/{claims.repository_name}"
+            ));
+        },
+        Maybe.Some(row) => row,
+    };
+
+    // 6. Verify repository name matches
+    let expected_repo = match trusted.get("repository_name") {
+        Maybe.Some(r) => r.clone(),
+        Maybe.None => "",
+    };
+
+    if expected_repo != claims.repository_name {
+        return Result.Err(RegistryError.unauthorized(
+            f"Repository mismatch: expected '{expected_repo}', got '{claims.repository_name}'"
+        ));
+    }
+
+    // 7. Verify workflow name if configured
+    let expected_workflow = match trusted.get("workflow_name") {
+        Maybe.Some(w) => w.clone(),
+        Maybe.None => "",
+    };
+
+    if !expected_workflow.is_empty() && expected_workflow != claims.workflow_name {
+        return Result.Err(RegistryError.unauthorized(
+            f"Workflow mismatch: expected '{expected_workflow}', got '{claims.workflow_name}'"
+        ));
+    }
+
+    // 8. Verify environment if configured
+    let expected_env = match trusted.get("environment") {
+        Maybe.Some(e) => e.clone(),
+        Maybe.None => "",
+    };
+
+    if !expected_env.is_empty() && expected_env != claims.environment {
+        return Result.Err(RegistryError.unauthorized(
+            f"Environment mismatch: expected '{expected_env}', got '{claims.environment}'"
+        ));
+    }
+
+    // 9. Issue short-lived publish token (15 minutes)
+    let token_ttl = 900;
+    let publish_token = generate_short_lived_token(req.package_name.clone(), token_ttl);
+
+    Result.Ok(OidcExchangeResponse {
+        publish_token: publish_token,
+        expires_in_seconds: token_ttl,
+        package_name: req.package_name,
+    })
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Get the JWKS endpoint URL for an OIDC issuer.
+fn get_jwks_url(issuer: OidcIssuer) -> Text {
+    match issuer {
+        OidcIssuer.GitHub => "https://token.actions.githubusercontent.com/.well-known/jwks",
+        OidcIssuer.GitLab => "https://gitlab.com/oauth/discovery/keys",
+        OidcIssuer.Unknown { issuer_url } => f"{issuer_url}/.well-known/jwks",
+    }
+}
+
+/// Decode OIDC JWT claims without signature verification.
+/// Extracts issuer, subject, repository info from the token payload.
+fn decode_oidc_claims(token: Text) -> Result<OidcClaims, RegistryError> {
+    // JWT has 3 base64url-encoded segments: header.payload.signature
+    let parts = token.split(".");
+    if parts.len() != 3 {
+        return Result.Err(RegistryError.validation_error(
+            "oidc_token",
+            "Malformed JWT: expected 3 segments"
+        ));
+    }
+
+    let payload_b64 = parts.get(1).unwrap().clone();
+    let payload_json = base64url_decode(payload_b64);
+
+    // Extract claims from JSON payload
+    let issuer = json_get_string(payload_json.clone(), "iss");
+    let subject = json_get_string(payload_json.clone(), "sub");
+    let audience = json_get_string(payload_json.clone(), "aud");
+    let expires_at = json_get_int(payload_json.clone(), "exp");
+
+    // Provider-specific claim extraction
+    let (repo_owner, repo_name, workflow, environment) =
+        if issuer == "https://token.actions.githubusercontent.com" {
+            // GitHub Actions: repository = "owner/repo", workflow_ref = "owner/repo/.github/workflows/name.yml@ref"
+            let repository = json_get_string(payload_json.clone(), "repository");
+            let repo_parts = repository.split("/");
+            let owner = repo_parts.get(0).map(fn(s) { s.clone() }).unwrap_or("");
+            let name = repo_parts.get(1).map(fn(s) { s.clone() }).unwrap_or("");
+            let wf = json_get_string(payload_json.clone(), "workflow");
+            let env = json_get_string(payload_json.clone(), "environment");
+            (owner, name, wf, env)
+        } else if issuer == "https://gitlab.com" {
+            // GitLab CI: namespace_path, project_path
+            let namespace = json_get_string(payload_json.clone(), "namespace_path");
+            let project = json_get_string(payload_json.clone(), "project_path");
+            let project_parts = project.split("/");
+            let name = project_parts.last().map(fn(s) { s.clone() }).unwrap_or("");
+            let env = json_get_string(payload_json.clone(), "environment");
+            (namespace, name, "", env)
+        } else {
+            ("", "", "", "")
+        };
+
+    Result.Ok(OidcClaims {
+        issuer: issuer,
+        subject: subject,
+        audience: audience,
+        repository_owner: repo_owner,
+        repository_name: repo_name,
+        workflow_name: workflow,
+        environment: environment,
+        expires_at: expires_at,
+    })
+}
+
+/// Verify JWT signature against JWKS keys.
+fn verify_token_signature(token: Text, jwks_json: Text) -> Bool {
+    // In production: parse JWKS, find matching kid, verify RS256/ES256 signature
+    // Delegates to core/crypto intrinsics
+    intrinsic_verify_jwt(token, jwks_json)
+}
+
+/// Generate a short-lived publish token scoped to a package.
+fn generate_short_lived_token(package_name: Text, ttl_seconds: Int) -> Text {
+    let now = unix_timestamp();
+    let expires = now + ttl_seconds;
+    let payload = f"oidc:{package_name}:{expires}";
+    // In production: HMAC-sign with server secret
+    let signature = intrinsic_hmac_sha256(payload.clone(), "server-signing-key");
+    f"{payload}:{signature}"
+}
+
+/// Create a list with 3 SQL parameters.
+fn sql_params_3(p1: Text, p2: Text, p3: Text) -> List<Text> {
+    let mut params = List.new();
+    params.push(p1);
+    params.push(p2);
+    params.push(p3);
+    params
+}
+
+// JSON and base64 helpers (delegate to intrinsics in production)
+fn base64url_decode(input: Text) -> Text { intrinsic_base64url_decode(input) }
+fn json_get_string(json: Text, key: Text) -> Text { intrinsic_json_get_string(json, key) }
+fn json_get_int(json: Text, key: Text) -> Int { intrinsic_json_get_int(json, key) }

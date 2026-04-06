@@ -1,0 +1,13 @@
+// Bool early return test
+
+fn is_positive(n: Int) -> Bool {
+    if n < 0 {
+        return false;
+    }
+    true
+}
+
+fn main() {
+    print(f"is_positive(-5) = {is_positive(-5)}");
+    print(f"is_positive(5) = {is_positive(5)}");
+}

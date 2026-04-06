@@ -1,0 +1,32 @@
+// Test: BS-005/006/007 - Type definitions with 'is' syntax
+// Priority: High
+// Expected output: 123\n1.0, 2.0\nStatus set
+
+// Type alias
+type UserId is Int;
+
+// Record type
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+// Variant type (sum type)
+type Status is
+    | Active
+    | Inactive
+    | Pending(Int);
+
+fn main() {
+    // Type alias usage
+    let id: UserId = 123;
+    print(f"{id}");
+
+    // Record usage
+    let p = Point { x: 1.0, y: 2.0 };
+    print(f"{p.x}, {p.y}");
+
+    // Variant usage
+    let s = Status.Pending(5);
+    print("Status set");
+}

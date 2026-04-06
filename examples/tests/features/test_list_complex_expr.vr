@@ -1,0 +1,5 @@
+fn main() {
+    let nums = [1, 2, 3, 4, 5];
+    let result = [x * x + x - 1 for x in nums if x > 2];
+    println("Complex expression in comprehension");
+}

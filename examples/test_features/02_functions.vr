@@ -1,0 +1,31 @@
+// Test function definitions
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(x: Int, y: Int) -> Int = x * y;
+
+fn greet(name: Text) {
+    print(f"Hello, {name}!")
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn main() {
+    let sum = add(3, 5)
+    print(f"3 + 5 = {sum}")
+    
+    let product = multiply(4, 7)
+    print(f"4 * 7 = {product}")
+    
+    greet("World")
+    
+    let fact5 = factorial(5)
+    print(f"5! = {fact5}")
+}

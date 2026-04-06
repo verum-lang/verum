@@ -1,0 +1,616 @@
+// Verum Registry - Authentication Integration Tests
+//
+// Comprehensive integration tests for token-based authentication
+// Tests token creation, usage, revocation, and expiration
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+mount core.time.unix_timestamp;
+
+// Import test utilities
+mount super.super.test_utils.{
+    setup_test_db,
+    cleanup_test_db,
+    assert_ok,
+    assert_err,
+    assert_eq,
+    assert_ne,
+    sleep,
+};
+
+// Import domain types
+mount super.super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.src.dto.user_dto.{
+    RegisterRequestDto,
+    LoginRequestDto,
+    CreateTokenRequestDto,
+};
+
+// Import handlers
+mount super.super.src.handlers.users.{
+    register_user,
+    login_user,
+    verify_token,
+    create_token,
+    list_tokens,
+    revoke_token,
+};
+
+// ============================================================================
+// Token Creation and Usage Tests
+// ============================================================================
+
+@test
+fn test_token_creation_and_usage() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "tokenuser",
+        email: "token@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "tokenuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create API token
+    let mut scopes = List.new();
+    scopes.push("publish");
+    scopes.push("yank");
+
+    let create_req = CreateTokenRequestDto {
+        name: "ci-token",
+        expires_days: 90,
+        scopes: scopes,
+    };
+
+    let create_result = create_token(create_req, auth_token.clone()).await;
+    assert_ok(&create_result);
+
+    let token_response = create_result.unwrap();
+    assert_ne(&token_response.token, &"");
+    assert_eq(&token_response.name, &"ci-token");
+
+    // Use token to access protected endpoint
+    let verify_result = verify_token(token_response.token.clone()).await;
+    assert_ok(&verify_result);
+
+    let verify_response = verify_result.unwrap();
+    assert_eq(&verify_response.valid, &true);
+    assert_eq(&verify_response.user.username, &"tokenuser");
+
+    cleanup_test_db();
+}
+
+@test
+fn test_token_creation_validation() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "validationuser",
+        email: "validation@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "validationuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Test empty token name
+    let empty_name = CreateTokenRequestDto {
+        name: "",  // Empty name
+        expires_days: 30,
+        scopes: List.new(),
+    };
+
+    let result1 = create_token(empty_name, auth_token.clone()).await;
+    assert_err(&result1);
+
+    // Test token name too long
+    let long_name = CreateTokenRequestDto {
+        name: "a".repeat(100),  // Exceeds 64 char limit
+        expires_days: 30,
+        scopes: List.new(),
+    };
+
+    let result2 = create_token(long_name, auth_token.clone()).await;
+    assert_err(&result2);
+
+    // Test invalid expiration (too short)
+    let short_expiry = CreateTokenRequestDto {
+        name: "valid-name",
+        expires_days: 0,  // Less than 1
+        scopes: List.new(),
+    };
+
+    let result3 = create_token(short_expiry, auth_token.clone()).await;
+    assert_err(&result3);
+
+    // Test invalid expiration (too long)
+    let long_expiry = CreateTokenRequestDto {
+        name: "valid-name",
+        expires_days: 400,  // Exceeds 365 day limit
+        scopes: List.new(),
+    };
+
+    let result4 = create_token(long_expiry, auth_token).await;
+    assert_err(&result4);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_token_creation_requires_authentication() {
+    setup_test_db();
+
+    // Try to create token without authentication
+    let create_req = CreateTokenRequestDto {
+        name: "unauthorized-token",
+        expires_days: 30,
+        scopes: List.new(),
+    };
+
+    let invalid_token = "invalid-auth-token";
+    let result = create_token(create_req, invalid_token).await;
+    assert_err(&result);
+
+    match result {
+        Result.Err(RegistryError.InvalidToken { message }) => {
+            // Expected
+        },
+        _ => panic("Expected InvalidToken error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Token Listing Tests
+// ============================================================================
+
+@test
+fn test_list_user_tokens() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "listtokens",
+        email: "list@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "listtokens",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Initially, no API tokens
+    let initial_list = list_tokens(auth_token.clone()).await;
+    assert_ok(&initial_list);
+    assert_eq(&initial_list.unwrap().len(), &0);
+
+    // Create multiple tokens
+    let token_names = ["ci-token", "deploy-token", "read-only-token"];
+
+    for name in token_names {
+        let create_req = CreateTokenRequestDto {
+            name: name.clone(),
+            expires_days: 90,
+            scopes: List.new(),
+        };
+
+        create_token(create_req, auth_token.clone()).await;
+    }
+
+    // List tokens - should have 3
+    let token_list = list_tokens(auth_token).await;
+    assert_ok(&token_list);
+
+    let tokens = token_list.unwrap();
+    assert_eq(&tokens.len(), &3);
+
+    // Verify token values are NOT included in list (security)
+    for token_dto in tokens {
+        // Token DTOs from list should not have the token value
+        // Only CreateTokenRequestDto response includes the actual token
+        assert_ne(&token_dto.name, &"");
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_list_tokens_requires_authentication() {
+    setup_test_db();
+
+    // Try to list tokens without authentication
+    let invalid_token = "invalid-token";
+    let result = list_tokens(invalid_token).await;
+    assert_err(&result);
+
+    match result {
+        Result.Err(RegistryError.InvalidToken { message }) => {
+            // Expected
+        },
+        _ => panic("Expected InvalidToken error"),
+    }
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Token Revocation Tests
+// ============================================================================
+
+@test
+fn test_token_revocation() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "revokeuser",
+        email: "revoke@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "revokeuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create API token
+    let create_req = CreateTokenRequestDto {
+        name: "temp-token",
+        expires_days: 30,
+        scopes: List.new(),
+    };
+
+    let api_token = create_token(create_req, auth_token.clone()).await.unwrap().token;
+
+    // Verify token works before revocation
+    let verify_before = verify_token(api_token.clone()).await;
+    assert_ok(&verify_before);
+    assert_eq(&verify_before.unwrap().valid, &true);
+
+    // Revoke the token
+    let revoke_result = revoke_token(api_token.clone(), auth_token).await;
+    assert_ok(&revoke_result);
+    assert_eq(&revoke_result.unwrap(), &true);
+
+    // Verify token no longer works
+    let verify_after = verify_token(api_token).await;
+    assert_ok(&verify_after);
+    assert_eq(&verify_after.unwrap().valid, &false);
+
+    cleanup_test_db();
+}
+
+@test
+fn test_token_revocation_only_owner() {
+    setup_test_db();
+
+    // Register two users
+    let user1 = RegisterRequestDto {
+        username: "user1",
+        email: "user1@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(user1).await;
+
+    let user2 = RegisterRequestDto {
+        username: "user2",
+        email: "user2@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(user2).await;
+
+    // User1 creates token
+    let token1 = login_user(LoginRequestDto {
+        username: "user1",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let api_token = create_token(CreateTokenRequestDto {
+        name: "user1-token",
+        expires_days: 30,
+        scopes: List.new(),
+    }, token1).await.unwrap().token;
+
+    // User2 tries to revoke user1's token (should fail)
+    let token2 = login_user(LoginRequestDto {
+        username: "user2",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let revoke_result = revoke_token(api_token.clone(), token2).await;
+    assert_err(&revoke_result);
+
+    match revoke_result {
+        Result.Err(RegistryError.Unauthorized { message }) => {
+            // Expected - users can only revoke their own tokens
+        },
+        _ => panic("Expected Unauthorized error"),
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_revoke_nonexistent_token() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "revoketest",
+        email: "revoketest@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "revoketest",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Try to revoke non-existent token
+    let fake_token = "nonexistent-token-12345";
+    let result = revoke_token(fake_token, auth_token).await;
+    assert_err(&result);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Token Expiration Tests
+// ============================================================================
+
+@test
+fn test_token_expiration() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "expiryuser",
+        email: "expiry@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "expiryuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create token with very short expiry (1 day)
+    let create_req = CreateTokenRequestDto {
+        name: "short-lived-token",
+        expires_days: 1,
+        scopes: List.new(),
+    };
+
+    let api_token = create_token(create_req, auth_token).await.unwrap().token;
+
+    // Token should work immediately
+    let verify_immediate = verify_token(api_token.clone()).await;
+    assert_ok(&verify_immediate);
+    assert_eq(&verify_immediate.unwrap().valid, &true);
+
+    // In production, would wait for expiry and verify token is invalid
+    // For now, this demonstrates the test structure
+
+    // TODO: Implement time-based testing once we have time manipulation utilities
+    // sleep(24 * 60 * 60 * 1000);  // Sleep 24 hours
+    // let verify_expired = verify_token(api_token).await;
+    // assert_ok(&verify_expired);
+    // assert_eq(&verify_expired.unwrap().valid, &false);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Invalid Token Tests
+// ============================================================================
+
+@test
+fn test_invalid_token_rejected() {
+    setup_test_db();
+
+    // Try to verify completely invalid token
+    let garbage_tokens = [
+        "",
+        "invalid",
+        "not-a-real-token",
+        "x".repeat(1000),
+        "token_with_special_chars_!@#$%",
+    ];
+
+    for garbage in garbage_tokens {
+        let result = verify_token(garbage.clone()).await;
+        assert_ok(&result);  // verify_token returns Ok(TokenResponseDto) with valid=false
+
+        let response = result.unwrap();
+        assert_eq(&response.valid, &false);
+    }
+
+    cleanup_test_db();
+}
+
+@test
+fn test_token_format_validation() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "formattest",
+        email: "format@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "formattest",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create valid token
+    let api_token = create_token(CreateTokenRequestDto {
+        name: "format-token",
+        expires_days: 30,
+        scopes: List.new(),
+    }, auth_token).await.unwrap().token;
+
+    // Verify token has expected format
+    assert_ne(&api_token, &"");
+    assert(&api_token.len() > 16);  // Tokens should have minimum length
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Token Scopes Tests
+// ============================================================================
+
+@test
+fn test_token_with_scopes() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "scopeuser",
+        email: "scope@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "scopeuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create token with specific scopes
+    let mut scopes = List.new();
+    scopes.push("publish");
+    scopes.push("yank");
+    scopes.push("update");
+
+    let create_req = CreateTokenRequestDto {
+        name: "scoped-token",
+        expires_days: 90,
+        scopes: scopes.clone(),
+    };
+
+    let token_response = create_token(create_req, auth_token).await;
+    assert_ok(&token_response);
+
+    let token_dto = token_response.unwrap();
+    assert_eq(&token_dto.scopes.len(), &3);
+
+    // In production, would test that token can only perform allowed operations
+    // For now, this verifies scopes are correctly stored
+
+    cleanup_test_db();
+}
+
+@test
+fn test_token_without_scopes() {
+    setup_test_db();
+
+    // Register and login
+    let register_req = RegisterRequestDto {
+        username: "noscopeuser",
+        email: "noscope@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(register_req).await;
+
+    let auth_token = login_user(LoginRequestDto {
+        username: "noscopeuser",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Create token without scopes (full access)
+    let create_req = CreateTokenRequestDto {
+        name: "full-access-token",
+        expires_days: 30,
+        scopes: List.new(),  // Empty scopes = full access
+    };
+
+    let token_response = create_token(create_req, auth_token).await;
+    assert_ok(&token_response);
+
+    let token_dto = token_response.unwrap();
+    assert_eq(&token_dto.scopes.len(), &0);
+
+    cleanup_test_db();
+}
+
+// ============================================================================
+// Token Security Tests
+// ============================================================================
+
+@test
+fn test_token_not_reused_across_users() {
+    setup_test_db();
+
+    // Register two users
+    let user1 = RegisterRequestDto {
+        username: "user1",
+        email: "user1@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(user1).await;
+
+    let user2 = RegisterRequestDto {
+        username: "user2",
+        email: "user2@example.com",
+        password: "password123",
+        confirm_password: "password123",
+    };
+    register_user(user2).await;
+
+    // Get tokens for both users
+    let token1 = login_user(LoginRequestDto {
+        username: "user1",
+        password: "password123",
+    }).await.unwrap().token;
+
+    let token2 = login_user(LoginRequestDto {
+        username: "user2",
+        password: "password123",
+    }).await.unwrap().token;
+
+    // Tokens should be different
+    assert_ne(&token1, &token2);
+
+    // Each token should only verify for its own user
+    let verify1 = verify_token(token1).await.unwrap();
+    assert_eq(&verify1.user.username, &"user1");
+
+    let verify2 = verify_token(token2).await.unwrap();
+    assert_eq(&verify2.user.username, &"user2");
+
+    cleanup_test_db();
+}

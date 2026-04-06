@@ -1,0 +1,706 @@
+// =============================================================================
+// mem/fat_ref.vr - FatRef<T> (32 bytes) for Unsized Types
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: mem/header, mem/capability, mem/hazard, mem/epoch
+// =============================================================================
+//
+// FatRef<T> is the reference type for unsized types (slices, trait objects)
+// in the CBGR system. It extends ThinRef with metadata for length/vtable and
+// supports offset tracking for subslice views.
+//
+// # Memory Layout (32 bytes total)
+//
+// ```
+// Offset  Size  Field             Description
+// ──────────────────────────────────────────────────────────────────────
+// 0       8     ptr               Pointer to data (non-null)
+// 8       4     generation        Expected generation counter
+// 12      4     epoch_and_caps    Packed: epoch (16-bit) + capabilities (16-bit)
+// 16      8     metadata          Length for slices, vtable for dyn traits
+// 24      4     offset_from_base  Offset from allocation base (for subslices)
+// 28      4     reserved          Reserved for future use
+// ──────────────────────────────────────────────────────────────────────
+// Total: 32 bytes (cache-line half)
+// ```
+//
+// # Subslice Views
+//
+// When creating a subslice view, the offset_from_base field tracks the offset
+// from the original allocation. This enables validation against the base
+// allocation's header while allowing efficient subslice operations.
+//
+// # Usage
+//
+// FatRef is automatically selected by the compiler for:
+// - Slice types: `&[T]`, `&str`
+// - Trait objects: `&dyn Protocol`
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.2
+// =============================================================================
+
+module core.mem.fat_ref;
+mount super.header.{AllocationHeader, HEADER_SIZE, GEN_UNALLOCATED};
+mount super.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE,
+    has_capability, validate_read, validate_write,
+};
+mount super.hazard.{HazardGuard, acquire_hazard};
+mount super.epoch.{GLOBAL_EPOCH};
+mount super.{UseAfterFreeError, RevocationError, ExecutionTier, get_execution_tier};
+
+// Import intrinsics as functions (from submodule directly for reliable resolution)
+mount core.intrinsics.memory.{ptr_offset};
+
+// =============================================================================
+// FatRef Structure
+// =============================================================================
+
+/// FatRef - 32-byte generational reference for unsized types.
+///
+/// This extends ThinRef with additional metadata for slices and trait objects.
+/// It provides the same CBGR safety guarantees while supporting dynamically
+/// sized types.
+///
+/// # Example (Slice)
+///
+/// ```verum
+/// let data = List.from([1, 2, 3, 4, 5]);
+/// let slice: FatRef<[Int]> = data.as_fat_ref();
+///
+/// // Access with bounds checking
+/// let subslice = slice.slice_view(1, 3)?;  // Elements 1..4
+/// assert_eq(subslice.len(), 3);
+/// ```
+@repr(C, size(32), align(8))
+public type FatRef<T> is {
+    /// Pointer to data (non-null when valid).
+    ptr: &unsafe Byte,
+
+    /// Expected generation counter from allocation time.
+    generation: UInt32,
+
+    /// Packed epoch (bits 0-15) and capabilities (bits 16-31).
+    epoch_and_caps: UInt32,
+
+    /// Metadata: length for slices, vtable pointer for trait objects.
+    metadata: Int,
+
+    /// Offset from base allocation (for subslice views).
+    offset_from_base: UInt32,
+
+    /// Reserved for future use.
+    reserved: UInt32,
+};
+
+implement<T> FatRef<T> {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    /// Create a new FatRef for a slice.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - `ptr` is non-null and properly aligned for T
+    /// - `ptr` points to memory with a valid AllocationHeader at base offset
+    /// - `length` is valid for the allocation
+    @inline
+    public unsafe fn new_slice(
+        ptr: &unsafe Byte,
+        generation: UInt32,
+        epoch: UInt16,
+        capabilities: UInt16,
+        length: Int,
+        offset_from_base: UInt32,
+    ) -> FatRef<T> {
+        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
+
+        FatRef {
+            ptr: ptr,
+            generation: generation,
+            epoch_and_caps: epoch_and_caps,
+            metadata: length,
+            offset_from_base: offset_from_base,
+            reserved: 0,
+        }
+    }
+
+    /// Create a new FatRef for a trait object (dyn Protocol).
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - `ptr` is non-null and properly aligned
+    /// - `vtable` is a valid vtable pointer for the concrete type
+    @inline
+    public unsafe fn new_dyn(
+        ptr: &unsafe Byte,
+        generation: UInt32,
+        epoch: UInt16,
+        capabilities: UInt16,
+        vtable: Int,
+    ) -> FatRef<T> {
+        let epoch_and_caps = (capabilities as UInt32) * 65536 | (epoch as UInt32);
+
+        FatRef {
+            ptr: ptr,
+            generation: generation,
+            epoch_and_caps: epoch_and_caps,
+            metadata: vtable,  // vtable pointer stored as metadata
+            offset_from_base: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Create a null FatRef (for initialization/edge cases).
+    ///
+    /// # Safety
+    ///
+    /// Creates an invalid FatRef that will fail validation.
+    @inline
+    public unsafe fn null() -> FatRef<T> {
+        FatRef {
+            ptr: 0 as &unsafe Byte,
+            generation: GEN_UNALLOCATED,
+            epoch_and_caps: 0,
+            metadata: 0,
+            offset_from_base: 0,
+            reserved: 0,
+        }
+    }
+
+    /// Create from allocation header.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure header is valid and ptr is the corresponding user data.
+    @inline
+    public unsafe fn from_header(
+        ptr: &unsafe Byte,
+        header: &AllocationHeader,
+        length: Int,
+        capabilities: UInt16,
+    ) -> FatRef<T> {
+        let (generation, epoch) = header.load_generation_epoch_fast();
+        FatRef.new_slice(ptr, generation, epoch, capabilities, length, 0)
+    }
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    /// Check if this is a null reference.
+    @inline
+    public fn is_null(&self) -> Bool {
+        self.generation == GEN_UNALLOCATED || self.ptr as Int == 0
+    }
+
+    /// Get raw pointer (unsafe, bypasses validation).
+    @inline
+    public fn as_ptr(&self) -> &unsafe Byte {
+        self.ptr
+    }
+
+    /// Get generation counter.
+    @inline
+    public fn generation(&self) -> UInt32 {
+        self.generation
+    }
+
+    /// Get epoch counter (unpacked from epoch_and_caps).
+    @inline
+    public fn epoch(&self) -> UInt16 {
+        (self.epoch_and_caps & 0xFFFF) as UInt16
+    }
+
+    /// Get capabilities (unpacked from epoch_and_caps).
+    @inline
+    public fn capabilities(&self) -> UInt16 {
+        (self.epoch_and_caps >> 16) as UInt16
+    }
+
+    /// Get metadata (length for slices, vtable for dyn traits).
+    @inline
+    public fn metadata(&self) -> Int {
+        self.metadata
+    }
+
+    /// Get length (for slices).
+    @inline
+    public fn len(&self) -> Int {
+        self.metadata
+    }
+
+    /// Check if slice is empty.
+    @inline
+    public fn is_empty(&self) -> Bool {
+        self.metadata == 0
+    }
+
+    /// Get offset from base allocation.
+    @inline
+    public fn offset_from_base(&self) -> UInt32 {
+        self.offset_from_base
+    }
+
+    /// Check if reference has a specific capability.
+    @inline
+    public fn has_capability(&self, cap: UInt16) -> Bool {
+        has_capability(self.capabilities(), cap)
+    }
+
+    /// Check if reference has read capability.
+    @inline
+    public fn can_read(&self) -> Bool {
+        self.has_capability(CAP_READ)
+    }
+
+    /// Check if reference has write capability.
+    @inline
+    public fn can_write(&self) -> Bool {
+        validate_write(self.capabilities())
+    }
+
+    /// Check if reference can be revoked.
+    @inline
+    public fn can_revoke(&self) -> Bool {
+        self.has_capability(CAP_REVOKE)
+    }
+
+    // =========================================================================
+    // Base Pointer
+    // =========================================================================
+
+    /// Get pointer to base of allocation (before any offset).
+    @inline
+    fn base_ptr(&self) -> &unsafe Byte {
+        ptr_offset(self.ptr, -(self.offset_from_base as Int))
+    }
+
+    /// Get pointer to allocation header at base.
+    @inline
+    public unsafe fn base_header(&self) -> &AllocationHeader {
+        AllocationHeader.from_user_ptr(self.base_ptr())
+    }
+
+    /// Get mutable header at base.
+    @inline
+    public unsafe fn base_header_mut(&self) -> &mut AllocationHeader {
+        AllocationHeader.from_user_ptr_mut(self.base_ptr())
+    }
+
+    // =========================================================================
+    // Validation
+    // =========================================================================
+
+    /// Validate generation and epoch (core CBGR check).
+    ///
+    /// For subslice views, validation is performed against the base
+    /// allocation's header.
+    @inline
+    public fn validate(&self) -> Result<(), UseAfterFreeError> {
+        if self.is_null() {
+            return Err(UseAfterFreeError.null_pointer("FatRef"));
+        }
+
+        // Get base pointer for validation
+        let base = self.base_ptr();
+
+        unsafe {
+            let header = AllocationHeader.from_user_ptr(base);
+            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
+
+            if self.generation == actual_gen && self.epoch() == actual_epoch {
+                return Ok(());
+            }
+
+            Err(UseAfterFreeError.new(
+                self.generation,
+                actual_gen,
+                self.epoch(),
+                actual_epoch,
+                "FatRef",
+            ))
+        }
+    }
+
+    /// Fast validation using combined 64-bit load.
+    @inline
+    public unsafe fn validate_fast(&self) -> Result<(), UseAfterFreeError> {
+        if self.is_null() {
+            return Err(UseAfterFreeError.null_pointer("FatRef"));
+        }
+
+        let base = self.base_ptr();
+        let header = AllocationHeader.from_user_ptr(base);
+        let (actual_gen, actual_epoch) = header.load_generation_epoch_combined();
+
+        if self.generation == actual_gen && self.epoch() == actual_epoch {
+            return Ok(());
+        }
+
+        Err(UseAfterFreeError.new(
+            self.generation,
+            actual_gen,
+            self.epoch(),
+            actual_epoch,
+            "FatRef",
+        ))
+    }
+
+    /// Check if reference is valid (does not panic).
+    @inline
+    public fn is_valid(&self) -> Bool {
+        self.validate().is_ok()
+    }
+
+    /// Tier-aware validation based on current execution tier.
+    @inline
+    fn validate_for_tier(&self) -> Result<(), UseAfterFreeError> {
+        match get_execution_tier() {
+            Interpreter => self.validate(),
+            BaselineJit => unsafe { self.validate_fast() },
+            OptimizingJit => unsafe { self.validate_fast() },
+            Aot => {
+                if self.is_null() {
+                    Err(UseAfterFreeError.null_pointer("FatRef"))
+                } else {
+                    Ok(())
+                }
+            },
+        }
+    }
+
+    // =========================================================================
+    // Access Operations
+    // =========================================================================
+
+    /// Get element at index with bounds checking.
+    ///
+    /// # Performance
+    ///
+    /// ~15-20ns (validation + bounds check + element access)
+    public fn get<U>(&self, index: Int) -> Result<&U, UseAfterFreeError> {
+        // Acquire hazard pointer
+        let _guard = acquire_hazard(self.base_ptr());
+
+        // Validate
+        self.validate_for_tier()?;
+
+        // Check read capability
+        if !self.can_read() {
+            return Err(UseAfterFreeError.capability_violation("read", "FatRef"));
+        }
+
+        // Bounds check
+        if index < 0 || index >= self.metadata {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
+        }
+
+        // Calculate element offset
+        let element_size = U.size as Int;
+        let offset = index * element_size;
+
+        unsafe {
+            let element_ptr = ptr_offset(self.ptr, offset) as &U;
+            Ok(element_ptr)
+        }
+    }
+
+    /// Get mutable element at index with bounds checking.
+    public fn get_mut<U>(&mut self, index: Int) -> Result<&mut U, UseAfterFreeError> {
+        // Acquire hazard pointer
+        let _guard = acquire_hazard(self.base_ptr());
+
+        // Validate
+        self.validate_for_tier()?;
+
+        // Check write capability
+        if !self.has_capability(CAP_WRITE) {
+            return Err(UseAfterFreeError.capability_violation("write", "FatRef"));
+        }
+
+        // Check mutable capability
+        if !self.has_capability(CAP_MUTABLE) {
+            return Err(UseAfterFreeError.capability_violation("mutable", "FatRef"));
+        }
+
+        // Bounds check
+        if index < 0 || index >= self.metadata {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef"));
+        }
+
+        // Calculate element offset
+        let element_size = U.size as Int;
+        let offset = index * element_size;
+
+        unsafe {
+            let element_ptr = ptr_offset(self.ptr, offset) as &mut U;
+            Ok(element_ptr)
+        }
+    }
+
+    /// Get first element.
+    @inline
+    public fn first<U>(&self) -> Result<&U, UseAfterFreeError> {
+        if self.is_empty() {
+            Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
+        } else {
+            self.get(0)
+        }
+    }
+
+    /// Get last element.
+    @inline
+    public fn last<U>(&self) -> Result<&U, UseAfterFreeError> {
+        if self.is_empty() {
+            Err(UseAfterFreeError.capability_violation("bounds", "FatRef (empty)"))
+        } else {
+            self.get(self.metadata - 1)
+        }
+    }
+
+    // =========================================================================
+    // Slicing Operations
+    // =========================================================================
+
+    /// Create a subslice view into this reference.
+    ///
+    /// Returns a new FatRef pointing to a portion of the data.
+    /// The subslice shares the same generation and will be invalidated
+    /// when the original allocation is freed.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - Start index (inclusive)
+    /// * `length` - Number of elements in subslice
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let arr: FatRef<[Int]> = ...;  // length 10
+    /// let sub = arr.slice_view(2, 5)?;  // elements [2, 3, 4, 5, 6]
+    /// ```
+    public fn slice_view<U>(&self, start: Int, length: Int) -> Result<FatRef<T>, UseAfterFreeError> {
+        self.validate_for_tier()?;
+
+        // Bounds check
+        if start < 0 || length < 0 || start + length > self.metadata {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
+        }
+
+        // Calculate byte offset
+        let element_size = U.size as Int;
+        let byte_offset = start * element_size;
+
+        let new_ptr = ptr_offset(self.ptr, byte_offset);
+        let new_offset = self.offset_from_base + (byte_offset as UInt32);
+
+        Ok(FatRef {
+            ptr: new_ptr,
+            generation: self.generation,
+            epoch_and_caps: self.epoch_and_caps,
+            metadata: length,
+            offset_from_base: new_offset,
+            reserved: self.reserved,
+        })
+    }
+
+    /// Split into two subslices at index.
+    ///
+    /// Returns (left, right) where:
+    /// - left contains elements [0, mid)
+    /// - right contains elements [mid, len)
+    public fn split_at<U>(&self, mid: Int) -> Result<(FatRef<T>, FatRef<T>), UseAfterFreeError> {
+        self.validate_for_tier()?;
+
+        if mid < 0 || mid > self.metadata {
+            return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.split_at"));
+        }
+
+        let left = self.slice_view<U>(0, mid)?;
+        let right = self.slice_view<U>(mid, self.metadata - mid)?;
+
+        Ok((left, right))
+    }
+
+    // =========================================================================
+    // Reference Operations
+    // =========================================================================
+
+    /// Clone this reference (shares generation).
+    @inline
+    public fn clone_ref(&self) -> FatRef<T> {
+        FatRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: self.epoch_and_caps,
+            metadata: self.metadata,
+            offset_from_base: self.offset_from_base,
+            reserved: self.reserved,
+        }
+    }
+
+    /// Create a read-only view of this reference.
+    @inline
+    public fn as_readonly(&self) -> FatRef<T> {
+        let new_caps = self.capabilities() & !(CAP_WRITE | CAP_MUTABLE);
+        FatRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            metadata: self.metadata,
+            offset_from_base: self.offset_from_base,
+            reserved: self.reserved,
+        }
+    }
+
+    /// Attenuate capabilities (can only remove, never add).
+    @inline
+    public fn attenuate(&self, mask: UInt16) -> FatRef<T> {
+        let new_caps = self.capabilities() & mask;
+        FatRef {
+            ptr: self.ptr,
+            generation: self.generation,
+            epoch_and_caps: (new_caps as UInt32) * 65536 | (self.epoch() as UInt32),
+            metadata: self.metadata,
+            offset_from_base: self.offset_from_base,
+            reserved: self.reserved,
+        }
+    }
+
+    // =========================================================================
+    // Revocation
+    // =========================================================================
+
+    /// Explicitly revoke this reference.
+    ///
+    /// Increments the generation counter at the base allocation, invalidating
+    /// this reference, all subslice views, and all copies.
+    public fn revoke(&self) -> Result<(), RevocationError> {
+        if self.is_null() {
+            return Err(RevocationError.null_pointer("FatRef"));
+        }
+
+        if !self.can_revoke() {
+            return Err(RevocationError.capability_violation("FatRef"));
+        }
+
+        unsafe {
+            let header = self.base_header_mut();
+
+            // Verify current state
+            let (actual_gen, actual_epoch) = header.load_generation_epoch_fast();
+
+            if self.generation != actual_gen || self.epoch() != actual_epoch {
+                return Err(RevocationError.already_revoked("FatRef"));
+            }
+
+            // Increment generation
+            let old_gen = header.increment_generation();
+
+            if old_gen != actual_gen {
+                return Err(RevocationError.internal_error(
+                    "FatRef",
+                    "generation changed during revocation",
+                ));
+            }
+
+            // Notify epoch manager
+            let new_gen = header.load_generation();
+            let new_epoch = header.load_epoch();
+            GLOBAL_EPOCH.on_revocation(
+                self.base_ptr(),
+                actual_gen,
+                new_gen,
+                new_epoch,
+            );
+
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Raw Access (Unsafe)
+    // =========================================================================
+
+    /// Get raw pointer to element without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure index is in bounds.
+    @inline
+    public unsafe fn get_unchecked<U>(&self, index: Int) -> &U {
+        let element_size = U.size as Int;
+        let offset = index * element_size;
+        let ptr = ptr_offset(self.ptr, offset);
+        ptr as &U
+    }
+
+    /// Get raw mutable pointer to element without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure index is in bounds and exclusive access.
+    @inline
+    public unsafe fn get_unchecked_mut<U>(&mut self, index: Int) -> &mut U {
+        let element_size = U.size as Int;
+        let offset = index * element_size;
+        let ptr = ptr_offset(self.ptr, offset);
+        ptr as &mut U
+    }
+}
+
+// =============================================================================
+// Trait Implementations
+// =============================================================================
+
+/// FatRef is Copy (32 bytes, no drop semantics).
+implement<T> Copy for FatRef<T> {}
+
+/// FatRef is Clone.
+implement<T> Clone for FatRef<T> {
+    fn clone(&self) -> FatRef<T> {
+        *self
+    }
+}
+
+/// FatRef is Send if T is Send.
+unsafe implement<T: Send> Send for FatRef<T> {}
+
+/// FatRef is Sync if T is Sync.
+unsafe implement<T: Sync> Sync for FatRef<T> {}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Create a FatRef from a heap allocation.
+///
+/// # Safety
+///
+/// Caller must ensure `ptr` is a valid heap allocation with CBGR header.
+@inline
+public unsafe fn fat_ref_from_heap<T>(
+    ptr: &unsafe Byte,
+    length: Int,
+    capabilities: UInt16,
+) -> FatRef<T> {
+    let header = AllocationHeader.from_user_ptr(ptr);
+    FatRef.from_header(ptr, header, length, capabilities)
+}
+
+/// Create an empty FatRef slice.
+@inline
+public fn empty_slice<T>() -> FatRef<T> {
+    FatRef {
+        ptr: 0 as &unsafe Byte,
+        generation: GEN_UNALLOCATED,
+        epoch_and_caps: 0,
+        metadata: 0,
+        offset_from_base: 0,
+        reserved: 0,
+    }
+}

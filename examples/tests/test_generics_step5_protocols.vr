@@ -1,0 +1,19 @@
+// Step 5: Test generic protocols
+
+type Show<T> is protocol {
+    fn show(&self) -> Text;
+}
+
+type Box<T> is {
+    value: T
+}
+
+implement<T> Show<Box<T>> where T: Show<T> {
+    fn show(&self) -> Text {
+        "Box"
+    }
+}
+
+fn main() -> Int {
+    42
+}

@@ -1,0 +1,58 @@
+// Test Result type and error handling
+
+type ParseError is | InvalidFormat | OutOfRange | EmptyInput;
+type ParseResult is Result<Int, ParseError>;
+
+fn parse_positive(s: Text) -> ParseResult {
+    if s == "" {
+        Err(EmptyInput)
+    } else if s == "0" {
+        Ok(0)
+    } else if s == "42" {
+        Ok(42)
+    } else if s == "-1" {
+        Err(OutOfRange)
+    } else {
+        Err(InvalidFormat)
+    }
+}
+
+fn describe_error(e: ParseError) -> Text {
+    match e {
+        InvalidFormat => "Invalid format",
+        OutOfRange => "Out of range",
+        EmptyInput => "Empty input"
+    }
+}
+
+fn main() {
+    let _ = print("Testing Result type...");
+
+    // Test Ok case
+    match parse_positive("42") {
+        Ok(n) => {
+            let _ = print(f"Parsed: {n}");
+        }
+        Err(e) => {
+            let _ = print(f"Error: {describe_error(e)}");
+        }
+    }
+
+    // Test error cases
+    match parse_positive("") {
+        Ok(n) => { let _ = print(f"Got: {n}"); }
+        Err(e) => { let _ = print(f"Error: {describe_error(e)}"); }
+    }
+
+    match parse_positive("-1") {
+        Ok(n) => { let _ = print(f"Got: {n}"); }
+        Err(e) => { let _ = print(f"Error: {describe_error(e)}"); }
+    }
+
+    match parse_positive("abc") {
+        Ok(n) => { let _ = print(f"Got: {n}"); }
+        Err(e) => { let _ = print(f"Error: {describe_error(e)}"); }
+    }
+
+    let _ = print("Done!");
+}

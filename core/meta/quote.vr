@@ -1,0 +1,496 @@
+// =============================================================================
+// quote.vr - Quasi-Quotation Support
+// =============================================================================
+// Version: 0.1.0
+// =============================================================================
+//
+// # Quasi-Quotation
+//
+// The `quote` construct enables code generation by embedding Verum syntax
+// directly in meta functions with interpolation support.
+//
+// ## Syntax
+//
+// ```verum
+// quote { <verum-code> }           // Basic quotation
+// quote { $ident }                  // Identifier interpolation
+// quote { ${expr} }                 // Expression interpolation
+// quote { $[for x in iter { ... }] } // Repetition
+// ```
+//
+// ## Interpolation
+//
+// | Syntax     | Description                     | Example                |
+// |------------|----------------------------------|------------------------|
+// | `$x`       | Interpolate identifier          | `let $name = 0;`       |
+// | `${expr}`  | Interpolate expression result   | `fn ${name}() { }`     |
+// | `$[...]`   | Repetition with iterator        | `$[for f in fields]`   |
+// | `$$`       | Literal dollar sign             | `let cost = $$100;`    |
+//
+// =============================================================================
+
+module meta.quote;
+
+mount core.{Text, List, Maybe};
+mount meta.token.{TokenStream, Token, TokenTree, TokenKind, Delimiter, Group};
+mount meta.span.{Span};
+mount meta.contexts.{ToTokens};
+
+// =============================================================================
+// Quote Builder
+// =============================================================================
+
+/// Quote builder for programmatic token stream construction
+///
+/// While the `quote { ... }` syntax is the primary way to create token streams,
+/// `QuoteBuilder` provides a programmatic API for dynamic construction.
+///
+/// ## Example
+///
+/// ```verum
+/// meta fn build_struct(name: Text, fields: List<(Text, Text)>) -> TokenStream {
+///     let mut builder = QuoteBuilder.new();
+///
+///     builder
+///         .keyword("type")
+///         .ident(name)
+///         .keyword("is")
+///         .brace_open();
+///
+///     for (field_name, field_type) in fields {
+///         builder
+///             .ident(field_name)
+///             .punct(':')
+///             .ident(field_type)
+///             .punct(',');
+///     }
+///
+///     builder.brace_close();
+///
+///     builder.build()
+/// }
+/// ```
+public type QuoteBuilder is {
+    /// Accumulated tokens
+    tokens: List<TokenTree>,
+
+    /// Current span for new tokens
+    span: Span,
+};
+
+implement QuoteBuilder {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// Create empty quote builder
+    public fn new() -> Self {
+        Self {
+            tokens: List.new(),
+            span: Span.call_site(),
+        }
+    }
+
+    /// Create quote builder with specific span
+    public fn with_span(span: Span) -> Self {
+        Self {
+            tokens: List.new(),
+            span,
+        }
+    }
+
+    // =========================================================================
+    // Basic Tokens
+    // =========================================================================
+
+    /// Add identifier
+    public fn ident(mut self, name: Text) -> Self {
+        self.tokens.push(TokenTree.Token(Token.ident_spanned(name, self.span)));
+        self
+    }
+
+    /// Add keyword
+    public fn keyword(mut self, kw: Text) -> Self {
+        self.tokens.push(TokenTree.Token(Token {
+            kind: TokenKind.Keyword(keyword_from_str(kw)),
+            span: self.span,
+        }));
+        self
+    }
+
+    /// Add punctuation (joint with next)
+    public fn punct_joint(mut self, ch: Char) -> Self {
+        self.tokens.push(TokenTree.Token(Token.punct(ch, Spacing.Joint)));
+        self
+    }
+
+    /// Add punctuation (alone)
+    public fn punct(mut self, ch: Char) -> Self {
+        self.tokens.push(TokenTree.Token(Token.punct(ch, Spacing.Alone)));
+        self
+    }
+
+    /// Add multi-character operator
+    public fn operator(mut self, op: Text) -> Self {
+        let chars: List<Char> = op.chars().collect();
+        let len = chars.len();
+
+        for (i, ch) in chars.iter().enumerate() {
+            let spacing = if i < len - 1 { Spacing.Joint } else { Spacing.Alone };
+            self.tokens.push(TokenTree.Token(Token.punct(*ch, spacing)));
+        }
+        self
+    }
+
+    // =========================================================================
+    // Literals
+    // =========================================================================
+
+    /// Add integer literal
+    public fn int_lit(mut self, value: Int) -> Self {
+        self.tokens.push(TokenTree.Token(Token.literal(Literal.int(value))));
+        self
+    }
+
+    /// Add float literal
+    public fn float_lit(mut self, value: Float64) -> Self {
+        self.tokens.push(TokenTree.Token(Token.literal(Literal.float(value))));
+        self
+    }
+
+    /// Add string literal
+    public fn string_lit(mut self, value: Text) -> Self {
+        self.tokens.push(TokenTree.Token(Token.literal(Literal.string(value))));
+        self
+    }
+
+    /// Add char literal
+    public fn char_lit(mut self, value: Char) -> Self {
+        self.tokens.push(TokenTree.Token(Token.literal(Literal.char(value))));
+        self
+    }
+
+    /// Add boolean literal
+    public fn bool_lit(mut self, value: Bool) -> Self {
+        self.tokens.push(TokenTree.Token(Token.literal(Literal.bool(value))));
+        self
+    }
+
+    // =========================================================================
+    // Delimiters
+    // =========================================================================
+
+    /// Open parenthesis group
+    public fn paren_open(mut self) -> GroupBuilder {
+        GroupBuilder {
+            parent: self,
+            delimiter: Delimiter.Parenthesis,
+            tokens: List.new(),
+        }
+    }
+
+    /// Open brace group
+    public fn brace_open(mut self) -> GroupBuilder {
+        GroupBuilder {
+            parent: self,
+            delimiter: Delimiter.Brace,
+            tokens: List.new(),
+        }
+    }
+
+    /// Open bracket group
+    public fn bracket_open(mut self) -> GroupBuilder {
+        GroupBuilder {
+            parent: self,
+            delimiter: Delimiter.Bracket,
+            tokens: List.new(),
+        }
+    }
+
+    /// Add parenthesized group
+    public fn paren(self, inner: TokenStream) -> Self {
+        self.group(Delimiter.Parenthesis, inner)
+    }
+
+    /// Add braced group
+    public fn brace(self, inner: TokenStream) -> Self {
+        self.group(Delimiter.Brace, inner)
+    }
+
+    /// Add bracketed group
+    public fn bracket(self, inner: TokenStream) -> Self {
+        self.group(Delimiter.Bracket, inner)
+    }
+
+    /// Add group with delimiter
+    public fn group(mut self, delimiter: Delimiter, inner: TokenStream) -> Self {
+        self.tokens.push(TokenTree.Group(Group {
+            delimiter,
+            tokens: inner,
+            span: self.span,
+        }));
+        self
+    }
+
+    // =========================================================================
+    // Interpolation
+    // =========================================================================
+
+    /// Interpolate token stream
+    public fn splice(mut self, tokens: TokenStream) -> Self {
+        self.tokens.extend(tokens.to_trees());
+        self
+    }
+
+    /// Interpolate value implementing ToTokens
+    public fn interpolate<T: ToTokens>(mut self, value: T) -> Self using AstAccess {
+        let tokens = value.to_tokens();
+        self.tokens.extend(tokens.to_trees());
+        self
+    }
+
+    /// Interpolate list with separator
+    public fn join<T: ToTokens>(mut self, items: List<T>, separator: Text) -> Self using AstAccess {
+        let len = items.len();
+        for (i, item) in items.iter().enumerate() {
+            self = self.interpolate(item);
+            if i < len - 1 {
+                for ch in separator.chars() {
+                    self = self.punct(ch);
+                }
+            }
+        }
+        self
+    }
+
+    // =========================================================================
+    // Common Patterns
+    // =========================================================================
+
+    /// Add `let <name> = <value>;`
+    public fn let_binding(self, name: Text, value: TokenStream) -> Self {
+        self.keyword("let")
+            .ident(name)
+            .punct('=')
+            .splice(value)
+            .punct(';')
+    }
+
+    /// Add `fn <name>(<params>) -> <ret> { <body> }`
+    public fn function(
+        self,
+        name: Text,
+        params: TokenStream,
+        ret: TokenStream,
+        body: TokenStream,
+    ) -> Self {
+        self.keyword("fn")
+            .ident(name)
+            .paren(params)
+            .operator("->")
+            .splice(ret)
+            .brace(body)
+    }
+
+    /// Add `type <name> is <def>;`
+    public fn type_def(self, name: Text, def: TokenStream) -> Self {
+        self.keyword("type")
+            .ident(name)
+            .keyword("is")
+            .splice(def)
+            .punct(';')
+    }
+
+    /// Add `implement <proto> for <ty> { <body> }`
+    public fn impl_block(
+        self,
+        proto: TokenStream,
+        ty: TokenStream,
+        body: TokenStream,
+    ) -> Self {
+        self.keyword("implement")
+            .splice(proto)
+            .keyword("for")
+            .splice(ty)
+            .brace(body)
+    }
+
+    // =========================================================================
+    // Building
+    // =========================================================================
+
+    /// Build token stream
+    public fn build(self) -> TokenStream {
+        TokenStream.from_trees(self.tokens)
+    }
+
+    /// Set span for subsequent tokens
+    public fn with_span(mut self, span: Span) -> Self {
+        self.span = span;
+        self
+    }
+}
+
+// =============================================================================
+// GroupBuilder
+// =============================================================================
+
+/// Builder for constructing delimited groups
+///
+/// Created by `QuoteBuilder.paren_open()`, etc.
+public type GroupBuilder is {
+    parent: QuoteBuilder,
+    delimiter: Delimiter,
+    tokens: List<TokenTree>,
+};
+
+implement GroupBuilder {
+    /// Add identifier
+    public fn ident(mut self, name: Text) -> Self {
+        self.tokens.push(TokenTree.Token(Token.ident_spanned(name, self.parent.span)));
+        self
+    }
+
+    /// Add punctuation
+    public fn punct(mut self, ch: Char) -> Self {
+        self.tokens.push(TokenTree.Token(Token.punct(ch, Spacing.Alone)));
+        self
+    }
+
+    /// Add keyword
+    public fn keyword(mut self, kw: Text) -> Self {
+        self.tokens.push(TokenTree.Token(Token {
+            kind: TokenKind.Keyword(keyword_from_str(kw)),
+            span: self.parent.span,
+        }));
+        self
+    }
+
+    /// Splice token stream
+    public fn splice(mut self, tokens: TokenStream) -> Self {
+        self.tokens.extend(tokens.to_trees());
+        self
+    }
+
+    /// Close group and return to parent builder
+    public fn close(mut self) -> QuoteBuilder {
+        let group = Group {
+            delimiter: self.delimiter,
+            tokens: TokenStream.from_trees(self.tokens),
+            span: self.parent.span,
+        };
+        self.parent.tokens.push(TokenTree.Group(group));
+        self.parent
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Convert string to keyword (compiler intrinsic)
+@compiler_intrinsic
+fn keyword_from_str(s: Text) -> Keyword;
+
+/// Create token stream from format string with interpolations
+///
+/// This is the implementation behind the `quote { }` syntax.
+/// The compiler transforms `quote { ... }` into calls to this function.
+///
+/// ## Interpolation Syntax
+///
+/// - `$ident`: Looks up `ident` in scope and interpolates its token representation
+/// - `${expr}`: Evaluates expression and interpolates result
+/// - `$[for x in iter { ... }]`: Repeats block for each item
+///
+/// ## Example (what the compiler does)
+///
+/// ```verum
+/// // Source:
+/// quote { let $name: $ty = $value; }
+///
+/// // Transformed to:
+/// __quote_impl(
+///     List(
+///         QuotePart.Literal("let "),
+///         QuotePart.Interpolate(name),
+///         QuotePart.Literal(": "),
+///         QuotePart.Interpolate(ty),
+///         QuotePart.Literal(" = "),
+///         QuotePart.Interpolate(value),
+///         QuotePart.Literal(";"),
+///     ),
+///     Span.call_site()
+/// )
+/// ```
+@compiler_intrinsic
+public fn __quote_impl(parts: List<QuotePart>, span: Span) -> TokenStream;
+
+/// Part of a quote expression
+@compiler_type
+public type QuotePart is
+    /// Literal tokens (no interpolation)
+    | Literal(Text)
+    /// Interpolated value ($x)
+    | Interpolate(TokenStream)
+    /// Repetition ($[for x in iter { ... }])
+    | Repeat {
+        var_name: Text,
+        iterator: TokenStream,
+        body: List<QuotePart>,
+        separator: Maybe<Text>,
+    };
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Create empty token stream
+public fn empty() -> TokenStream {
+    TokenStream.empty()
+}
+
+/// Create token stream with single identifier
+public fn ident(name: Text) -> TokenStream {
+    TokenStream.ident(name)
+}
+
+/// Create token stream with single string literal
+public fn string(value: Text) -> TokenStream {
+    TokenStream.literal(Literal.string(value))
+}
+
+/// Create token stream with single integer literal
+public fn int(value: Int) -> TokenStream {
+    TokenStream.literal(Literal.int(value))
+}
+
+/// Join multiple token streams with separator
+public fn join_with(streams: List<TokenStream>, sep: TokenStream) -> TokenStream {
+    let mut result = TokenStream.empty();
+    let len = streams.len();
+
+    for (i, stream) in streams.iter().enumerate() {
+        result = result.append(stream.clone());
+        if i < len - 1 {
+            result = result.append(sep.clone());
+        }
+    }
+
+    result
+}
+
+/// Wrap token stream in parentheses
+public fn parens(inner: TokenStream) -> TokenStream {
+    inner.wrap(Delimiter.Parenthesis)
+}
+
+/// Wrap token stream in braces
+public fn braces(inner: TokenStream) -> TokenStream {
+    inner.wrap(Delimiter.Brace)
+}
+
+/// Wrap token stream in brackets
+public fn brackets(inner: TokenStream) -> TokenStream {
+    inner.wrap(Delimiter.Bracket)
+}

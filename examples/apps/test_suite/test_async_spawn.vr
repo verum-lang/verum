@@ -1,0 +1,15 @@
+// Test 3: Spawn task
+// Tests spawning async tasks
+
+async fn task_work(id: Int) -> Int {
+    id * 2
+}
+
+fn main() {
+    let handle = spawn async {
+        task_work(21).await
+    };
+
+    let result = handle.await;
+    print(result);
+}

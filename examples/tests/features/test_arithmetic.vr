@@ -1,0 +1,44 @@
+// Test arithmetic operations - single f-string per value to avoid multi-call bug
+
+fn main() {
+    let _ = print("=== Arithmetic Tests ===");
+
+    // Basic operations
+    let a = 10.0;
+    let b = 3.0;
+
+    let _ = print(f"a = {a}");
+    let _ = print(f"b = {b}");
+
+    let sum = a + b;
+    let _ = print(f"a + b = {sum}");
+
+    let diff = a - b;
+    let _ = print(f"a - b = {diff}");
+
+    let prod = a * b;
+    let _ = print(f"a * b = {prod}");
+
+    let quot = a / b;
+    let _ = print(f"a / b = {quot}");
+
+    // Compound expressions
+    let result = (a + b) * (a - b);
+    let _ = print(f"(a + b) * (a - b) = {result}");
+
+    // Negation
+    let neg = -a;
+    let _ = print(f"-a = {neg}");
+
+    // Comparisons
+    let gt = a > b;
+    let _ = print(f"a > b: {gt}");
+
+    let lt = a < b;
+    let _ = print(f"a < b: {lt}");
+
+    let eq = a == b;
+    let _ = print(f"a == b: {eq}");
+
+    let _ = print("=== Done ===");
+}

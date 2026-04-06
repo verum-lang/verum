@@ -1,0 +1,450 @@
+// Resilience Patterns - Usage Examples
+//
+// This file demonstrates how to integrate resilience patterns into
+// the verum-registry handlers for production-grade fault tolerance.
+
+mount core.collections.{List, Map};
+mount core.base.{Result, Maybe, Text, Int};
+
+// Import context protocols
+mount super.super.contexts.{Database, Storage, Cache, Auth};
+mount super.super.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.super.dto.package_dto.{
+    PackageDto,
+    PackageVersionDto,
+    PublishRequestDto,
+    PublishResponseDto,
+};
+
+// Import resilience patterns
+mount super.mod.{
+    CircuitBreaker,
+    CircuitState,
+    RetryConfig,
+    Bulkhead,
+    with_retry_async,
+    with_timeout,
+    with_fallback_async,
+    database_bulkhead,
+    execute_resilient,
+    ResilienceConfig,
+};
+
+// ============================================================================
+// Global Resilience Infrastructure
+// ============================================================================
+
+/// Global circuit breakers for different services
+pub type ServiceCircuitBreakers is {
+    database: CircuitBreaker,
+    storage: CircuitBreaker,
+    cache: CircuitBreaker,
+    auth: CircuitBreaker,
+};
+
+implement ServiceCircuitBreakers {
+    pub fn new() -> ServiceCircuitBreakers {
+        ServiceCircuitBreakers {
+            // Database: Open after 5 failures, close after 3 successes, 30s timeout
+            database: CircuitBreaker.new(5, 3, 30000),
+
+            // Storage: More tolerant, open after 10 failures, 60s timeout
+            storage: CircuitBreaker.new(10, 3, 60000),
+
+            // Cache: Very tolerant, used as fallback
+            cache: CircuitBreaker.new(20, 5, 10000),
+
+            // Auth: Strict, open after 3 failures, 2 minute timeout
+            auth: CircuitBreaker.new(3, 2, 120000),
+        }
+    }
+}
+
+/// Global bulkheads for resource isolation
+pub type ServiceBulkheads is {
+    database: Bulkhead,
+    storage: Bulkhead,
+    external_api: Bulkhead,
+};
+
+implement ServiceBulkheads {
+    pub fn new() -> ServiceBulkheads {
+        ServiceBulkheads {
+            database: database_bulkhead(),      // 10 concurrent, 50 queue
+            storage: Bulkhead.new(20, 100),     // 20 concurrent, 100 queue
+            external_api: Bulkhead.new(5, 50),  // 5 concurrent, 50 queue
+        }
+    }
+}
+
+// ============================================================================
+// Example 1: Resilient Package Retrieval
+// ============================================================================
+
+/// Get package with comprehensive resilience protection
+///
+/// Applies:
+/// - Circuit breaker for database
+/// - Timeout (5 seconds)
+/// - Retry with exponential backoff (3 attempts)
+/// - Fallback to cache
+/// - Bulkhead isolation
+pub async fn get_package_resilient(
+    name: Text,
+    version: Text,
+    mut circuits: ServiceCircuitBreakers,
+    mut bulkheads: ServiceBulkheads
+) -> Result<PackageVersionDto, RegistryError>
+    using [Database, Storage, Cache]
+{
+    // Check database circuit breaker
+    circuits.database = circuits.database.try_reset();
+
+    if !circuits.database.should_allow() {
+        // Circuit is open, try cache fallback immediately
+        return with_fallback_async(
+            || Cache.get(f"pkg:{name}:{version}"),
+            |_| Result.Err(RegistryError.service_unavailable(
+                "Database circuit breaker open, cache miss"
+            ))
+        ).await;
+    }
+
+    // Primary operation with all resilience patterns
+    let package_id = f"{name}-{version}";
+
+    // Apply bulkhead + timeout + retry
+    let (db_result, updated_bulkhead) = with_bulkhead(
+        bulkheads.database,
+        || with_retry_async(
+            || with_timeout(
+                || Database.fetch_one(
+                    f"SELECT * FROM packages WHERE id = '{package_id}'"
+                ),
+                5000  // 5 second timeout
+            ),
+            RetryConfig {
+                max_attempts: 3,
+                initial_delay_ms: 100,
+                max_delay_ms: 2000,
+                multiplier: 2.0,
+                jitter: true,
+            },
+            |err| err.is_recoverable()
+        )
+    ).await;
+
+    bulkheads.database = updated_bulkhead;
+
+    // Update circuit breaker and handle result
+    match db_result {
+        Result.Ok(package_data) => {
+            // Success - update circuit breaker
+            circuits.database = circuits.database.record_success();
+
+            // Get download URL from storage (with retry)
+            let url_result = with_retry_async(
+                || with_timeout(
+                    || Storage.get_url(f"packages/{package_id}.tar.gz"),
+                    3000
+                ),
+                RetryConfig.aggressive(),
+                |err| err.is_recoverable()
+            ).await;
+
+            let url = match url_result {
+                Result.Ok(u) => u,
+                Result.Err(_) => {
+                    // Storage failed, use placeholder
+                    f"https://registry.example.com/packages/{package_id}.tar.gz"
+                }
+            };
+
+            // Create response DTO
+            let version_dto = PackageVersionDto {
+                version: version,
+                description: "",
+                dependencies: List.new(),
+                published_at: "0",
+                published_by: "",
+                checksum: "sha256:placeholder",
+                download_url: url,
+            };
+
+            // Cache for future requests
+            let _ = Cache.set(f"pkg:{name}:{version}", version_dto.clone()).await;
+
+            Result.Ok(version_dto)
+        },
+        Result.Err(err) => {
+            // Failure - update circuit breaker
+            circuits.database = circuits.database.record_failure();
+
+            // Try cache fallback
+            with_fallback_async(
+                || Cache.get(f"pkg:{name}:{version}"),
+                |_| Result.Err(err)
+            ).await
+        }
+    }
+}
+
+// ============================================================================
+// Example 2: Resilient Package Publishing
+// ============================================================================
+
+/// Publish package with resilience patterns
+///
+/// Applies:
+/// - Authentication with retry
+/// - Circuit breaker for database and storage
+/// - Bulkhead isolation
+/// - Transactional rollback on failure
+pub async fn publish_package_resilient(
+    req: PublishRequestDto,
+    token: Text,
+    mut circuits: ServiceCircuitBreakers,
+    mut bulkheads: ServiceBulkheads
+) -> Result<PublishResponseDto, RegistryError>
+    using [Database, Storage, Auth, Cache]
+{
+    // Step 1: Verify authentication with retry
+    let user_result = with_retry_async(
+        || with_timeout(
+            || Auth.verify_token(token.clone()),
+            2000
+        ),
+        RetryConfig {
+            max_attempts: 2,  // Limited retries for auth
+            initial_delay_ms: 50,
+            max_delay_ms: 500,
+            multiplier: 2.0,
+            jitter: false,
+        },
+        |err| err.is_recoverable()
+    ).await;
+
+    let user = match user_result {
+        Result.Ok(u) => u,
+        Result.Err(_) => {
+            circuits.auth = circuits.auth.record_failure();
+            return Result.Err(RegistryError.invalid_token("Authentication failed"));
+        }
+    };
+
+    circuits.auth = circuits.auth.record_success();
+
+    // Check permissions
+    if user.role != "publisher" && user.role != "admin" {
+        return Result.Err(RegistryError.unauthorized("Insufficient permissions"));
+    }
+
+    // Step 2: Check if package exists (with circuit breaker)
+    if !circuits.database.should_allow() {
+        return Result.Err(RegistryError.service_unavailable("Database unavailable"));
+    }
+
+    let package_id = f"{req.name}-{req.version}";
+
+    let exists_result = with_timeout(
+        || Database.fetch_optional(
+            f"SELECT id FROM packages WHERE id = '{package_id}'"
+        ),
+        3000
+    ).await;
+
+    match exists_result {
+        Result.Ok(existing) => {
+            circuits.database = circuits.database.record_success();
+            match existing {
+                Maybe.Some(_) => {
+                    return Result.Err(RegistryError.package_already_exists(req.name));
+                },
+                Maybe.None => {}
+            }
+        },
+        Result.Err(err) => {
+            circuits.database = circuits.database.record_failure();
+            return Result.Err(err);
+        }
+    }
+
+    // Step 3: Store tarball with retry and circuit breaker
+    if !circuits.storage.should_allow() {
+        return Result.Err(RegistryError.service_unavailable("Storage unavailable"));
+    }
+
+    let storage_result = with_retry_async(
+        || with_timeout(
+            || Storage.store(
+                f"packages/{package_id}.tar.gz",
+                req.tarball.clone()
+            ),
+            30000  // 30 second timeout for large uploads
+        ),
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 1000,
+            max_delay_ms: 10000,
+            multiplier: 2.0,
+            jitter: true,
+        },
+        |err| err.is_recoverable()
+    ).await;
+
+    match storage_result {
+        Result.Ok(_) => {
+            circuits.storage = circuits.storage.record_success();
+        },
+        Result.Err(err) => {
+            circuits.storage = circuits.storage.record_failure();
+            return Result.Err(err);
+        }
+    }
+
+    // Step 4: Save to database with bulkhead
+    let (db_result, updated_bulkhead) = with_bulkhead(
+        bulkheads.database,
+        || with_timeout(
+            || Database.execute(
+                f"INSERT INTO packages (id, name, version, description, license) VALUES ('{package_id}', '{req.name}', '{req.version}', '{req.description}', '{req.license}')"
+            ),
+            5000
+        )
+    ).await;
+
+    bulkheads.database = updated_bulkhead;
+
+    match db_result {
+        Result.Ok(_) => {
+            circuits.database = circuits.database.record_success();
+
+            // Invalidate cache
+            let _ = Cache.delete(f"pkg:{req.name}:*").await;
+
+            Result.Ok(PublishResponseDto.success(req.name, req.version))
+        },
+        Result.Err(err) => {
+            circuits.database = circuits.database.record_failure();
+
+            // Rollback: Delete uploaded tarball
+            let _ = Storage.delete(f"packages/{package_id}.tar.gz").await;
+
+            Result.Err(err)
+        }
+    }
+}
+
+// ============================================================================
+// Example 3: Using the Comprehensive Resilience Wrapper
+// ============================================================================
+
+/// Get package using the comprehensive execute_resilient wrapper
+pub async fn get_package_with_config(
+    name: Text,
+    version: Text
+) -> Result<PackageVersionDto, RegistryError>
+    using [Database, Cache]
+{
+    let package_id = f"{name}-{version}";
+
+    // Configure comprehensive resilience
+    let config = ResilienceConfig.database_default()
+        .with_fallback(|_err| {
+            // Fallback to cache
+            Cache.get(f"pkg:{name}:{version}")
+        });
+
+    // Execute with all patterns applied
+    execute_resilient(
+        config,
+        || Database.fetch_one(f"SELECT * FROM packages WHERE id = '{package_id}'")
+    ).await
+}
+
+// ============================================================================
+// Example 4: Health Check with Circuit Breaker Status
+// ============================================================================
+
+/// Health check endpoint that includes circuit breaker status
+pub fn health_check_with_circuits(
+    circuits: ServiceCircuitBreakers
+) -> HealthCheckResponse {
+    let db_state = circuits.database.get_state();
+    let storage_state = circuits.storage.get_state();
+    let cache_state = circuits.cache.get_state();
+    let auth_state = circuits.auth.get_state();
+
+    let db_healthy = match db_state {
+        CircuitState.Closed => true,
+        _ => false
+    };
+
+    let storage_healthy = match storage_state {
+        CircuitState.Closed => true,
+        _ => false
+    };
+
+    let overall_healthy = db_healthy && storage_healthy;
+
+    HealthCheckResponse {
+        status: if overall_healthy { "healthy" } else { "degraded" },
+        database: circuit_state_to_string(db_state),
+        storage: circuit_state_to_string(storage_state),
+        cache: circuit_state_to_string(cache_state),
+        auth: circuit_state_to_string(auth_state),
+    }
+}
+
+pub type HealthCheckResponse is {
+    status: Text,
+    database: Text,
+    storage: Text,
+    cache: Text,
+    auth: Text,
+};
+
+fn circuit_state_to_string(state: CircuitState) -> Text {
+    match state {
+        CircuitState.Closed => "operational",
+        CircuitState.Open => "circuit_open",
+        CircuitState.HalfOpen => "testing_recovery"
+    }
+}
+
+// ============================================================================
+// Example 5: Metrics Collection
+// ============================================================================
+
+/// Collect metrics from all resilience components
+pub fn collect_resilience_metrics(
+    circuits: ServiceCircuitBreakers,
+    bulkheads: ServiceBulkheads
+) -> ResilienceMetricsReport {
+    ResilienceMetricsReport {
+        circuit_breakers: Map.new()
+            .insert("database", circuits.database.metrics())
+            .insert("storage", circuits.storage.metrics())
+            .insert("cache", circuits.cache.metrics())
+            .insert("auth", circuits.auth.metrics()),
+
+        bulkheads: Map.new()
+            .insert("database", bulkheads.database.stats())
+            .insert("storage", bulkheads.storage.stats())
+            .insert("external_api", bulkheads.external_api.stats()),
+    }
+}
+
+pub type ResilienceMetricsReport is {
+    circuit_breakers: Map<Text, CircuitBreakerMetrics>,
+    bulkheads: Map<Text, BulkheadStats>,
+};
+
+implement ResilienceMetricsReport {
+    pub fn to_json(self) -> Text {
+        // In production, would serialize to JSON
+        f"ResilienceMetrics[circuits={self.circuit_breakers.len()}, bulkheads={self.bulkheads.len()}]"
+    }
+}

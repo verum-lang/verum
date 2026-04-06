@@ -1,0 +1,7 @@
+[package]
+name = "collections"
+version = "0.1.0"
+description = "List, Map, and Set basics"
+
+[language]
+profile = "application"

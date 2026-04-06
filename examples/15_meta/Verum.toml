@@ -1,0 +1,7 @@
+[package]
+name = "meta"
+version = "0.1.0"
+description = "Compile-time meta-programming: @derive, @cfg, meta fn"
+
+[language]
+profile = "application"

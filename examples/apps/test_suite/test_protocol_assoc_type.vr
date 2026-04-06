@@ -1,0 +1,25 @@
+// Test 8: Protocol with Associated Type
+// Tests: associated types in protocols
+
+type Container is protocol {
+    type Item;
+
+    fn get(&self) -> Item;
+}
+
+type IntBox is {
+    value: Int
+}
+
+implement Container for IntBox {
+    type Item = Int;
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn main() -> Int {
+    let box = IntBox { value: 42 };
+    box.get()
+}

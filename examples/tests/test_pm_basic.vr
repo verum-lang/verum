@@ -1,0 +1,72 @@
+// Basic Pattern Matching Tests
+
+// Test 1: Simple variant matching
+fn test1() -> Text {
+    type Maybe is Some(Int) | None;
+
+    let x = Some(42);
+    match x {
+        Some(n) => "PASS: Simple variant",
+        None => "FAIL"
+    }
+}
+
+// Test 2: Pattern guard with if
+fn test2() -> Text {
+    let x = 5;
+    match x {
+        n if n > 0 => "PASS: Guard with if",
+        _ => "FAIL"
+    }
+}
+
+// Test 3: Pattern guard with where
+fn test3() -> Text {
+    let x = 5;
+    match x {
+        n where n > 0 => "PASS: Guard with where",
+        _ => "FAIL"
+    }
+}
+
+// Test 4: Record pattern
+fn test4() -> Text {
+    type Point is { x: Int, y: Int };
+
+    let p = Point { x: 10, y: 20 };
+    match p {
+        Point { x, y } => "PASS: Record pattern"
+    }
+}
+
+// Test 5: Nested patterns
+fn test5() -> Text {
+    type Result is Ok(Int) | Err(Text);
+    type Maybe is Some(Result) | None;
+
+    let x = Some(Ok(42));
+    match x {
+        Some(Ok(n)) => "PASS: Nested patterns",
+        Some(Err(_)) => "FAIL",
+        None => "FAIL"
+    }
+}
+
+// Test 6: Or patterns
+fn test6() -> Text {
+    let x = 2;
+    match x {
+        1 | 2 | 3 => "PASS: Or patterns",
+        _ => "FAIL"
+    }
+}
+
+fn main() {
+    println("=== Pattern Matching Tests ===");
+    println(test1());
+    println(test2());
+    println(test3());
+    println(test4());
+    println(test5());
+    println(test6());
+}

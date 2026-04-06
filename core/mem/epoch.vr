@@ -1,0 +1,532 @@
+// =============================================================================
+// mem/epoch.vr - Global Epoch Management for Generation Wraparound Safety
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None (leaf module)
+// =============================================================================
+//
+// This module manages the global epoch counter and coordinates cache
+// invalidation when generation counters wrap around.
+//
+// # Problem: ABA Problem with Generation Counters
+//
+// Generation counters (32-bit) can theoretically wrap around after 2³²
+// allocations. Without epoch tracking, this creates an ABA problem:
+//
+// ```
+// 1. Reference R stores generation=42
+// 2. Object is freed, generation becomes 43
+// 3. After 2³² allocations, same slot has generation=42 again
+// 4. Reference R validates successfully against wrong object!
+// ```
+//
+// # Solution: Global Epoch Counter
+//
+// The epoch counter (16-bit) increments whenever any allocation's generation
+// wraps around. References store both generation AND epoch, so:
+//
+// ```
+// 1. Reference R stores generation=42, epoch=0
+// 2. Object is freed, generation becomes 43
+// 3. After wraparound, epoch becomes 1
+// 4. Same slot now has generation=42, epoch=1
+// 5. Reference R fails validation (epoch mismatch)
+// ```
+//
+// # Cache Invalidation
+//
+// When epoch changes, all thread-local generation caches must be invalidated.
+// This is done via callbacks registered with the EpochManager.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 6.5
+// =============================================================================
+
+// Import intrinsics as functions
+
+module core.mem.epoch;
+mount core.intrinsics.{
+    spin_hint,
+    atomic_load_u64, atomic_fetch_add_u64,
+    atomic_load_int, atomic_fetch_add_int, atomic_store_int, atomic_cmpxchg_int,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default sync interval for EpochCache (checks between epoch reloads).
+public const DEFAULT_SYNC_INTERVAL: Int = 1000;
+
+/// Maximum epoch value before it wraps (16-bit).
+public const EPOCH_MAX: UInt16 = 0xFFFF;
+
+// =============================================================================
+// Callback Types
+// =============================================================================
+
+/// Callback function type for epoch wraparound notifications.
+/// Called with the new epoch value when a wraparound occurs.
+public type EpochCallback is fn(UInt64);
+
+/// Callback function type for explicit revocation notifications.
+/// Called with (ptr, old_gen, new_gen, epoch) when a reference is revoked.
+public type RevocationCallback is fn(&unsafe Byte, UInt32, UInt32, UInt16);
+
+// =============================================================================
+// Callback Entry
+// =============================================================================
+
+/// Registered callback entry with ID.
+type CallbackEntry is {
+    id: Int,
+    callback: EpochCallback,
+};
+
+/// Registered revocation callback entry.
+type RevocationCallbackEntry is {
+    id: Int,
+    callback: RevocationCallback,
+};
+
+// =============================================================================
+// Epoch Manager
+// =============================================================================
+
+/// Global epoch manager.
+///
+/// Manages the global epoch counter and coordinates cache invalidation across
+/// all threads when generation counters wrap around.
+///
+/// # Thread Safety
+///
+/// All fields accessed atomically. Callback list protected by spinlock.
+public type EpochManager is {
+    /// Global epoch counter (atomic UInt64).
+    epoch: UInt64,
+
+    /// Total number of wraparounds detected (atomic).
+    wraparounds: Int,
+
+    /// Epoch callbacks list (protected by spinlock).
+    callbacks: List<CallbackEntry>,
+
+    /// Revocation callbacks list (protected by spinlock).
+    revocation_callbacks: List<RevocationCallbackEntry>,
+
+    /// Next callback ID (atomic).
+    next_callback_id: Int,
+
+    /// Next revocation callback ID (atomic).
+    next_revocation_id: Int,
+
+    /// Spinlock for callback list access.
+    callbacks_lock: Int,
+
+    /// Spinlock for revocation callback list access.
+    revocation_lock: Int,
+};
+
+/// Global epoch manager instance.
+///
+/// This is the single source of truth for epoch state. All CBGR validation
+/// checks epoch against this instance.
+public static mut GLOBAL_EPOCH: EpochManager = EpochManager {
+    epoch: 0,
+    wraparounds: 0,
+    callbacks: List.new(),
+    revocation_callbacks: List.new(),
+    next_callback_id: 0,
+    next_revocation_id: 0,
+    callbacks_lock: 0,
+    revocation_lock: 0,
+};
+
+implement EpochManager {
+    // =========================================================================
+    // Epoch Counter Operations
+    // =========================================================================
+
+    /// Get current global epoch.
+    @inline
+    public fn current_epoch(&self) -> UInt64 {
+        atomic_load_u64(&self.epoch, "acquire")
+    }
+
+    /// Increment global epoch (called on generation wraparound).
+    ///
+    /// This function:
+    /// 1. Increments the global epoch counter
+    /// 2. Increments the wraparound counter
+    /// 3. Notifies all registered callbacks
+    ///
+    /// # Returns
+    ///
+    /// The new epoch value.
+    public fn increment_epoch(&mut self) -> UInt64 {
+        let new_epoch = atomic_fetch_add_u64(&self.epoch, 1, "acq_rel") + 1;
+        atomic_fetch_add_int(&self.wraparounds, 1, "relaxed");
+
+        // Notify all callbacks
+        self.notify_callbacks(new_epoch);
+
+        new_epoch
+    }
+
+    /// Called when a generation counter wraps around.
+    ///
+    /// This is the main entry point for wraparound notification.
+    /// The AllocationHeader.increment_generation() method calls this
+    /// when generation reaches GEN_MAX.
+    @inline
+    public fn on_wraparound(&mut self) {
+        self.increment_epoch();
+    }
+
+    /// Get total number of wraparounds.
+    @inline
+    public fn wraparound_count(&self) -> Int {
+        atomic_load_int(&self.wraparounds, "relaxed")
+    }
+
+    // =========================================================================
+    // Epoch Callbacks
+    // =========================================================================
+
+    /// Register a callback for epoch changes.
+    ///
+    /// The callback is invoked whenever the epoch increments (due to
+    /// generation wraparound). Use this to invalidate thread-local caches.
+    ///
+    /// # Returns
+    ///
+    /// Callback ID that can be used to unregister.
+    public fn register_callback(&mut self, callback: EpochCallback) -> Int {
+        let id = atomic_fetch_add_int(&self.next_callback_id, 1, "relaxed");
+
+        // Acquire spinlock
+        self.lock_callbacks();
+
+        self.callbacks.push(CallbackEntry {
+            id: id,
+            callback: callback,
+        });
+
+        // Release spinlock
+        self.unlock_callbacks();
+
+        id
+    }
+
+    /// Unregister an epoch callback.
+    ///
+    /// # Returns
+    ///
+    /// True if the callback was found and removed.
+    public fn unregister_callback(&mut self, id: Int) -> Bool {
+        self.lock_callbacks();
+
+        let mut found = false;
+        let mut i = 0;
+        while i < self.callbacks.len() {
+            if self.callbacks[i].id == id {
+                self.callbacks.remove(i);
+                found = true;
+                break;
+            }
+            i += 1;
+        }
+
+        self.unlock_callbacks();
+        found
+    }
+
+    /// Notify all registered epoch callbacks.
+    fn notify_callbacks(&self, new_epoch: UInt64) {
+        // Acquire spinlock (use const self for iteration)
+        self.lock_callbacks_shared();
+
+        for entry in &self.callbacks {
+            (entry.callback)(new_epoch);
+        }
+
+        self.unlock_callbacks_shared();
+    }
+
+    // =========================================================================
+    // Revocation Callbacks
+    // =========================================================================
+
+    /// Register a callback for explicit revocation events.
+    ///
+    /// Called when ThinRef.revoke() or FatRef.revoke() is invoked.
+    /// Useful for tracking reference invalidation in debug builds.
+    public fn register_revocation_callback(&mut self, callback: RevocationCallback) -> Int {
+        let id = atomic_fetch_add_int(&self.next_revocation_id, 1, "relaxed");
+
+        self.lock_revocation();
+
+        self.revocation_callbacks.push(RevocationCallbackEntry {
+            id: id,
+            callback: callback,
+        });
+
+        self.unlock_revocation();
+
+        id
+    }
+
+    /// Unregister a revocation callback.
+    public fn unregister_revocation_callback(&mut self, id: Int) -> Bool {
+        self.lock_revocation();
+
+        let mut found = false;
+        let mut i = 0;
+        while i < self.revocation_callbacks.len() {
+            if self.revocation_callbacks[i].id == id {
+                self.revocation_callbacks.remove(i);
+                found = true;
+                break;
+            }
+            i += 1;
+        }
+
+        self.unlock_revocation();
+        found
+    }
+
+    /// Called when a reference is explicitly revoked.
+    ///
+    /// # Arguments
+    ///
+    /// * `ptr` - Pointer to the revoked allocation
+    /// * `old_gen` - Generation before revocation
+    /// * `new_gen` - Generation after revocation
+    /// * `epoch` - Current epoch
+    public fn on_revocation(
+        &self,
+        ptr: &unsafe Byte,
+        old_gen: UInt32,
+        new_gen: UInt32,
+        epoch: UInt16,
+    ) {
+        self.lock_revocation_shared();
+
+        for entry in &self.revocation_callbacks {
+            (entry.callback)(ptr, old_gen, new_gen, epoch);
+        }
+
+        self.unlock_revocation_shared();
+    }
+
+    // =========================================================================
+    // Spinlock Operations
+    // =========================================================================
+
+    /// Acquire callback spinlock (exclusive).
+    @inline
+    fn lock_callbacks(&self) {
+        while atomic_cmpxchg_int(&self.callbacks_lock, 0, 1, "acquire", "relaxed").old != 0 {
+            spin_hint();
+        }
+    }
+
+    /// Release callback spinlock.
+    @inline
+    fn unlock_callbacks(&self) {
+        atomic_store_int(&self.callbacks_lock, 0, "release");
+    }
+
+    /// Acquire callback spinlock (shared, for iteration).
+    /// In this simple implementation, shared == exclusive.
+    @inline
+    fn lock_callbacks_shared(&self) {
+        self.lock_callbacks();
+    }
+
+    @inline
+    fn unlock_callbacks_shared(&self) {
+        self.unlock_callbacks();
+    }
+
+    /// Acquire revocation spinlock.
+    @inline
+    fn lock_revocation(&self) {
+        while atomic_cmpxchg_int(&self.revocation_lock, 0, 1, "acquire", "relaxed").old != 0 {
+            spin_hint();
+        }
+    }
+
+    /// Release revocation spinlock.
+    @inline
+    fn unlock_revocation(&self) {
+        atomic_store_int(&self.revocation_lock, 0, "release");
+    }
+
+    @inline
+    fn lock_revocation_shared(&self) {
+        self.lock_revocation();
+    }
+
+    @inline
+    fn unlock_revocation_shared(&self) {
+        self.unlock_revocation();
+    }
+}
+
+// =============================================================================
+// Epoch Cache
+// =============================================================================
+
+/// Per-thread epoch cache.
+///
+/// Each thread maintains a cached epoch value to avoid atomic loads on every
+/// CBGR check. The cache is synchronized periodically (every N checks) and
+/// invalidated when epoch callbacks fire.
+///
+/// # Performance
+///
+/// Without cache: ~3ns per epoch load (atomic load)
+/// With cache: ~0.5ns per check (local read) + 3ns every N checks
+///
+/// For N=1000, average overhead: ~0.5ns (3ns amortized over 1000 checks)
+public type EpochCache is {
+    /// Cached epoch value.
+    cached_epoch: UInt64,
+
+    /// Number of checks since last sync.
+    checks_since_sync: Int,
+
+    /// Sync interval (checks between epoch reloads).
+    sync_interval: Int,
+};
+
+implement EpochCache {
+    /// Create new epoch cache with specified sync interval.
+    ///
+    /// # Arguments
+    ///
+    /// * `sync_interval` - Number of checks before reloading epoch from global
+    ///
+    /// Lower values = more accurate but more overhead.
+    /// Recommended: 1000 for typical workloads.
+    public fn new(sync_interval: Int) -> EpochCache {
+        EpochCache {
+            cached_epoch: unsafe { GLOBAL_EPOCH.current_epoch() },
+            checks_since_sync: 0,
+            sync_interval: sync_interval,
+        }
+    }
+
+    /// Create cache with default sync interval (1000).
+    public fn default() -> EpochCache {
+        EpochCache.new(DEFAULT_SYNC_INTERVAL)
+    }
+
+    /// Get cached epoch, syncing periodically.
+    ///
+    /// This is the hot path for CBGR validation. Returns the cached
+    /// epoch value, reloading from global every `sync_interval` checks.
+    @inline
+    public fn get(&mut self) -> UInt64 {
+        self.checks_since_sync += 1;
+
+        if self.checks_since_sync >= self.sync_interval {
+            self.sync();
+        }
+
+        self.cached_epoch
+    }
+
+    /// Force sync with global epoch.
+    ///
+    /// Called periodically from get() and when cache is invalidated.
+    @inline
+    public fn sync(&mut self) {
+        self.cached_epoch = unsafe { GLOBAL_EPOCH.current_epoch() };
+        self.checks_since_sync = 0;
+    }
+
+    /// Invalidate cache (force sync on next get).
+    ///
+    /// Called when an epoch callback fires to ensure thread sees
+    /// the new epoch on next validation.
+    @inline
+    public fn invalidate(&mut self) {
+        self.checks_since_sync = self.sync_interval;
+    }
+
+    /// Check if cached epoch matches expected.
+    @inline
+    public fn check(&mut self, expected_epoch: UInt16) -> Bool {
+        // Truncate cached epoch to 16 bits for comparison
+        (self.get() as UInt16) == expected_epoch
+    }
+}
+
+// =============================================================================
+// Thread-Local Epoch Cache
+// =============================================================================
+
+/// Thread-local epoch cache for fast access.
+@thread_local
+static mut THREAD_EPOCH_CACHE: EpochCache = EpochCache {
+    cached_epoch: 0,
+    checks_since_sync: 0,
+    sync_interval: DEFAULT_SYNC_INTERVAL,
+};
+
+/// Get the thread-local epoch cache.
+@inline
+public fn get_thread_epoch_cache() -> &mut EpochCache {
+    unsafe { &mut THREAD_EPOCH_CACHE }
+}
+
+/// Get current epoch from thread-local cache.
+@inline
+public fn cached_epoch() -> UInt64 {
+    unsafe { THREAD_EPOCH_CACHE.get() }
+}
+
+/// Invalidate thread-local epoch cache.
+///
+/// Should be called from epoch callback to ensure thread sees new epoch.
+@inline
+public fn invalidate_epoch_cache() {
+    unsafe { THREAD_EPOCH_CACHE.invalidate() }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Register an epoch callback on the global epoch manager.
+public fn register_epoch_callback(callback: EpochCallback) -> Int {
+    unsafe { GLOBAL_EPOCH.register_callback(callback) }
+}
+
+/// Unregister an epoch callback from the global epoch manager.
+public fn unregister_epoch_callback(id: Int) -> Bool {
+    unsafe { GLOBAL_EPOCH.unregister_callback(id) }
+}
+
+/// Register a revocation callback on the global epoch manager.
+public fn register_revocation_callback(callback: RevocationCallback) -> Int {
+    unsafe { GLOBAL_EPOCH.register_revocation_callback(callback) }
+}
+
+/// Unregister a revocation callback from the global epoch manager.
+public fn unregister_revocation_callback(id: Int) -> Bool {
+    unsafe { GLOBAL_EPOCH.unregister_revocation_callback(id) }
+}
+
+/// Get current global epoch.
+@inline
+public fn current_epoch() -> UInt64 {
+    unsafe { GLOBAL_EPOCH.current_epoch() }
+}
+
+/// Get total wraparound count.
+@inline
+public fn wraparound_count() -> Int {
+    unsafe { GLOBAL_EPOCH.wraparound_count() }
+}

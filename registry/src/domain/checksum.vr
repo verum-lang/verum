@@ -1,0 +1,153 @@
+// Checksum Domain Types
+//
+// Value objects for cryptographic integrity verification.
+// These domain types represent checksum algorithms and computed checksums
+// as immutable value objects, independent of any specific service implementation.
+
+mount core.base.{Text, Maybe};
+
+/// Supported cryptographic checksum algorithms
+///
+/// Each variant represents a cryptographic hash function used for
+/// package integrity verification. The registry supports multiple
+/// algorithms to provide flexibility and future-proofing.
+pub type ChecksumAlgorithm is
+    | SHA256
+    | SHA512
+    | Blake3;
+
+implement ChecksumAlgorithm {
+    /// Convert algorithm to its canonical string representation
+    ///
+    /// Returns lowercase algorithm identifier as used in checksum format.
+    ///
+    /// # Examples
+    /// ```vrm
+    /// let algo = ChecksumAlgorithm.SHA256;
+    /// assert(algo.to_string() == "sha256");
+    /// ```
+    pub fn to_string(self) -> Text {
+        match self {
+            ChecksumAlgorithm.SHA256 => "sha256",
+            ChecksumAlgorithm.SHA512 => "sha512",
+            ChecksumAlgorithm.Blake3 => "blake3",
+        }
+    }
+
+    /// Parse algorithm from its string representation
+    ///
+    /// Returns Some(algorithm) if the string matches a known algorithm,
+    /// None otherwise. String matching is case-sensitive.
+    ///
+    /// # Examples
+    /// ```vrm
+    /// let algo = ChecksumAlgorithm.from_string("sha256");
+    /// assert(algo == Maybe.Some(ChecksumAlgorithm.SHA256));
+    ///
+    /// let invalid = ChecksumAlgorithm.from_string("md5");
+    /// assert(invalid == Maybe.None);
+    /// ```
+    pub fn from_string(s: &Text) -> Maybe<ChecksumAlgorithm> {
+        if s == "sha256" {
+            Maybe.Some(ChecksumAlgorithm.SHA256)
+        } else if s == "sha512" {
+            Maybe.Some(ChecksumAlgorithm.SHA512)
+        } else if s == "blake3" {
+            Maybe.Some(ChecksumAlgorithm.Blake3)
+        } else {
+            Maybe.None
+        }
+    }
+}
+
+/// Checksum value object
+///
+/// Represents a cryptographic checksum consisting of an algorithm
+/// identifier and the computed hash value. This is an immutable
+/// value object that encapsulates package integrity verification data.
+///
+/// # Format
+/// The canonical string format is "algorithm:hash", e.g.:
+/// "sha256:a3b2c1d4e5f6..."
+pub type Checksum is {
+    algorithm: ChecksumAlgorithm,
+    hash: Text,
+};
+
+implement Checksum {
+    /// Create a new checksum value object
+    ///
+    /// # Arguments
+    /// * `algorithm` - The cryptographic algorithm used
+    /// * `hash` - The hexadecimal hash string (no validation performed)
+    ///
+    /// # Examples
+    /// ```vrm
+    /// let checksum = Checksum.new(
+    ///     ChecksumAlgorithm.SHA256,
+    ///     "a3b2c1d4e5f6..."
+    /// );
+    /// ```
+    pub fn new(algorithm: ChecksumAlgorithm, hash: Text) -> Checksum {
+        Checksum {
+            algorithm: algorithm,
+            hash: hash,
+        }
+    }
+
+    /// Convert checksum to canonical string representation
+    ///
+    /// Returns "algorithm:hash" format for storage and transmission.
+    ///
+    /// # Examples
+    /// ```vrm
+    /// let checksum = Checksum.new(ChecksumAlgorithm.SHA256, "abc123");
+    /// assert(checksum.to_string() == "sha256:abc123");
+    /// ```
+    pub fn to_string(self) -> Text {
+        f"{self.algorithm.to_string()}:{self.hash}"
+    }
+
+    /// Parse checksum from canonical string representation
+    ///
+    /// Parses "algorithm:hash" format into a Checksum value object.
+    /// Returns None if the format is invalid or the algorithm is unknown.
+    ///
+    /// # Format
+    /// Expected format: f"algorithm:hash"
+    /// - algorithm: One of "sha256", "sha512", "blake3"
+    /// - hash: Hexadecimal string (not validated)
+    ///
+    /// # Examples
+    /// ```vrm
+    /// let checksum = Checksum.from_string("sha256:abc123");
+    /// match checksum {
+    ///     Maybe.Some(c) => assert(c.hash == "abc123"),
+    ///     Maybe.None => panic("Failed to parse"),
+    /// }
+    ///
+    /// let invalid = Checksum.from_string("invalid-format");
+    /// assert(invalid == Maybe.None);
+    /// ```
+    pub fn from_string(s: &Text) -> Maybe<Checksum> {
+        // Split on first colon to separate algorithm from hash
+        let parts = s.split(":");
+
+        // Must have exactly 2 parts (algorithm and hash)
+        if parts.len() != 2 {
+            return Maybe.None;
+        }
+
+        let algorithm_str = parts.get(0).unwrap().clone();
+        let hash_str = parts.get(1).unwrap().clone();
+
+        // Parse algorithm
+        match ChecksumAlgorithm.from_string(&algorithm_str) {
+            Maybe.Some(algo) => {
+                // Return checksum (hash validation could be added here)
+                Maybe.Some(Checksum.new(algo, hash_str))
+            },
+            Maybe.None => Maybe.None,
+        }
+    }
+}

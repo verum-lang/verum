@@ -1,0 +1,980 @@
+// ============================================================================
+// Comprehensive Pattern Matching Test Suite
+// ============================================================================
+// Tests ALL pattern features from grammar/verum.ebnf Section 2.14
+//
+// Pattern Grammar Coverage:
+// - or_pattern: and_pattern { '|' and_pattern }
+// - simple_pattern: All 12 pattern types
+// - guard: 'if' expression | 'where' expression
+//
+// This test covers:
+// 1. Literal patterns (integer, float, bool, char, string)
+// 2. Identifier patterns (basic, mut, ref, @ bindings)
+// 3. Wildcard patterns
+// 4. Rest patterns
+// 5. Tuple patterns (nested, empty, single)
+// 6. Array patterns
+// 7. Slice patterns (with rest in various positions)
+// 8. Record patterns (full, partial, with ..)
+// 9. Variant patterns (unit, tuple, named)
+// 10. Reference patterns (&, &mut)
+// 11. Range patterns (.., ..=)
+// 12. Or patterns (|)
+// 13. Pattern guards with 'if'
+// 14. Pattern guards with 'where'
+// 15. Nested patterns (deeply nested)
+// 16. @ bindings (at-patterns)
+// ============================================================================
+
+// ============================================================================
+// Type Definitions for Testing
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+type Point3D is { x: Int, y: Int, z: Int };
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int)
+    | Rgba { r: Int, g: Int, b: Int, a: Int };
+
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Triangle(Int, Int, Int)
+    | Polygon([Int; 4]);
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { value: T, left: Box<Tree<T>>, right: Box<Tree<T>> };
+
+type ComplexEnum is
+    | UnitVariant
+    | TupleVariant(Int, Text)
+    | NamedVariant { id: Int, name: Text, active: Bool };
+
+// ============================================================================
+// Section 1: Literal Patterns
+// ============================================================================
+
+fn test_literal_patterns() {
+    print(f"=== Testing Literal Patterns ===");
+
+    // Integer literals
+    let x = 42;
+    match x {
+        0 => print(f"  zero"),
+        1 => print(f"  one"),
+        42 => print(f"  forty-two (matched!)"),
+        100 => print(f"  hundred"),
+        _ => print(f"  other"),
+    }
+
+    // Negative integers
+    let neg = -5;
+    match neg {
+        -10 => print(f"  negative ten"),
+        -5 => print(f"  negative five (matched!)"),
+        -1 => print(f"  negative one"),
+        0 => print(f"  zero"),
+        _ => print(f"  other"),
+    }
+
+    // Boolean literals
+    let flag = true;
+    match flag {
+        true => print(f"  true (matched!)"),
+        false => print(f"  false"),
+    }
+
+    // String literals
+    let text = "hello";
+    match text {
+        "hello" => print(f"  hello (matched!)"),
+        "world" => print(f"  world"),
+        "bye" => print(f"  bye"),
+        _ => print(f"  unknown"),
+    }
+
+    // Character literals
+    let ch = 'a';
+    match ch {
+        'a' => print(f"  letter a (matched!)"),
+        'b' => print(f"  letter b"),
+        'z' => print(f"  letter z"),
+        _ => print(f"  other char"),
+    }
+
+    print(f"  ✓ Literal patterns complete\n");
+}
+
+// ============================================================================
+// Section 2: Identifier Patterns
+// ============================================================================
+
+fn test_identifier_patterns() {
+    print(f"=== Testing Identifier Patterns ===");
+
+    // Basic identifier pattern
+    let value = 100;
+    match value {
+        x => print(f"  Bound to x: {x}"),
+    }
+
+    // Mutable identifier pattern
+    let mut_val = 50;
+    match mut_val {
+        mut y => {
+            // Note: y is a mutable binding here
+            print(f"  Bound to mut y: {y}");
+        }
+    }
+
+    // Reference identifier pattern
+    let ref_val = 75;
+    match ref_val {
+        ref z => print(f"  Bound to ref z: {z}"),
+    }
+
+    // ref mut pattern
+    let refmut_val = 25;
+    match refmut_val {
+        ref mut w => print(f"  Bound to ref mut w: {w}"),
+    }
+
+    print(f"  ✓ Identifier patterns complete\n");
+}
+
+// ============================================================================
+// Section 3: Wildcard Patterns
+// ============================================================================
+
+fn test_wildcard_patterns() {
+    print(f"=== Testing Wildcard Patterns ===");
+
+    // Simple wildcard
+    let x = 999;
+    match x {
+        _ => print(f"  Wildcard matches anything: {x}"),
+    }
+
+    // Wildcard in tuple
+    let pair = (1, 2, 3);
+    match pair {
+        (_, _, _) => print(f"  All wildcards in tuple"),
+    }
+
+    // Partial wildcards
+    match pair {
+        (a, _, c) => print(f"  Mixed: a={a}, _, c={c}"),
+    }
+
+    // Wildcard in record pattern
+    let point = Point { x: 10, y: 20 };
+    match point {
+        Point { x: _, y } => print(f"  Wildcard x, captured y={y}"),
+    }
+
+    print(f"  ✓ Wildcard patterns complete\n");
+}
+
+// ============================================================================
+// Section 4: Rest Patterns
+// ============================================================================
+
+fn test_rest_patterns() {
+    print(f"=== Testing Rest Patterns ===");
+
+    // Rest in record pattern
+    let point3d = Point3D { x: 1, y: 2, z: 3 };
+    match point3d {
+        Point3D { x, .. } => print(f"  Rest in record: x={x}, rest ignored"),
+    }
+
+    // Rest at end of record
+    match point3d {
+        Point3D { x, y, .. } => print(f"  Captured x={x}, y={y}, rest ignored"),
+    }
+
+    print(f"  ✓ Rest patterns complete\n");
+}
+
+// ============================================================================
+// Section 5: Tuple Patterns
+// ============================================================================
+
+fn test_tuple_patterns() {
+    print(f"=== Testing Tuple Patterns ===");
+
+    // Simple tuple pattern
+    let pair = (1, 2);
+    match pair {
+        (a, b) => print(f"  Pair: ({a}, {b})"),
+    }
+
+    // Triple tuple
+    let triple = (10, 20, 30);
+    match triple {
+        (x, y, z) => print(f"  Triple: ({x}, {y}, {z})"),
+    }
+
+    // Nested tuple patterns
+    let nested = ((1, 2), (3, 4));
+    match nested {
+        ((a, b), (c, d)) => print(f"  Nested tuple: {a}, {b}, {c}, {d}"),
+    }
+
+    // Deeply nested
+    let deep = (((1, 2), 3), (4, (5, 6)));
+    match deep {
+        (((a, b), c), (d, (e, f))) => {
+            print(f"  Deep nested: {a}, {b}, {c}, {d}, {e}, {f}");
+        }
+    }
+
+    // Tuple with mixed patterns
+    match triple {
+        (0, 0, 0) => print(f"  All zeros"),
+        (_, 0, _) => print(f"  Middle is zero"),
+        (x, _, z) => print(f"  First={x}, last={z}"),
+    }
+
+    // Single element tuple
+    let single = (42,);
+    match single {
+        (x,) => print(f"  Single element tuple: {x}"),
+    }
+
+    print(f"  ✓ Tuple patterns complete\n");
+}
+
+// ============================================================================
+// Section 6: Array Patterns
+// ============================================================================
+
+fn test_array_patterns() {
+    print(f"=== Testing Array Patterns ===");
+
+    // Fixed-size array pattern
+    let arr = [1, 2, 3];
+    match arr {
+        [a, b, c] => print(f"  Array: [{a}, {b}, {c}]"),
+    }
+
+    // Array with wildcards
+    match arr {
+        [first, _, last] => print(f"  First={first}, last={last}"),
+    }
+
+    // Array literals in patterns
+    match arr {
+        [0, 0, 0] => print(f"  All zeros"),
+        [1, 2, 3] => print(f"  1, 2, 3 (matched!)"),
+        _ => print(f"  Other array"),
+    }
+
+    // Two-element array
+    let pair_arr = [10, 20];
+    match pair_arr {
+        [x, y] => print(f"  Pair array: [{x}, {y}]"),
+    }
+
+    print(f"  ✓ Array patterns complete\n");
+}
+
+// ============================================================================
+// Section 7: Slice Patterns
+// ============================================================================
+
+fn test_slice_patterns() {
+    print(f"=== Testing Slice Patterns ===");
+
+    // Rest at beginning
+    let arr = [1, 2, 3, 4, 5];
+    match arr {
+        [.., last] => print(f"  Rest at start, last={last}"),
+    }
+
+    // Rest at end
+    match arr {
+        [first, ..] => print(f"  First={first}, rest at end"),
+    }
+
+    // Rest in middle
+    match arr {
+        [first, .., last] => print(f"  First={first}, middle rest, last={last}"),
+    }
+
+    // Multiple elements with rest
+    match arr {
+        [a, b, .., z] => print(f"  a={a}, b={b}, rest, z={z}"),
+    }
+
+    // Rest with more captures
+    match arr {
+        [a, b, c, ..] => print(f"  First three: {a}, {b}, {c}"),
+    }
+
+    print(f"  ✓ Slice patterns complete\n");
+}
+
+// ============================================================================
+// Section 8: Record Patterns
+// ============================================================================
+
+fn test_record_patterns() {
+    print(f"=== Testing Record Patterns ===");
+
+    let point = Point { x: 10, y: 20 };
+
+    // Full record pattern
+    match point {
+        Point { x: a, y: b } => print(f"  Full pattern: x={a}, y={b}"),
+    }
+
+    // Shorthand record pattern
+    match point {
+        Point { x, y } => print(f"  Shorthand: x={x}, y={y}"),
+    }
+
+    // Partial with rest
+    match point {
+        Point { x, .. } => print(f"  Partial with rest: x={x}"),
+    }
+
+    // Pattern matching on field values
+    match point {
+        Point { x: 0, y: 0 } => print(f"  Origin"),
+        Point { x: 0, y } => print(f"  On y-axis: y={y}"),
+        Point { x, y: 0 } => print(f"  On x-axis: x={x}"),
+        Point { x, y } => print(f"  General point: ({x}, {y}) (matched!)"),
+    }
+
+    // 3D point
+    let point3d = Point3D { x: 1, y: 2, z: 3 };
+    match point3d {
+        Point3D { x, y, z } => print(f"  3D point: ({x}, {y}, {z})"),
+    }
+
+    // Nested record in variant
+    let rgba = Color.Rgba { r: 255, g: 128, b: 64, a: 255 };
+    match rgba {
+        Color.Rgba { r, g, b, a } => print(f"  RGBA: ({r}, {g}, {b}, {a})"),
+        _ => print(f"  Not RGBA"),
+    }
+
+    print(f"  ✓ Record patterns complete\n");
+}
+
+// ============================================================================
+// Section 9: Variant Patterns
+// ============================================================================
+
+fn test_variant_patterns() {
+    print(f"=== Testing Variant Patterns ===");
+
+    // Unit variants
+    let color = Color.Red;
+    match color {
+        Color.Red => print(f"  Red (matched!)"),
+        Color.Green => print(f"  Green"),
+        Color.Blue => print(f"  Blue"),
+        _ => print(f"  Complex color"),
+    }
+
+    // Tuple variant
+    let rgb = Color.Rgb(255, 128, 0);
+    match rgb {
+        Color.Rgb(r, g, b) => print(f"  RGB: ({r}, {g}, {b})"),
+        _ => print(f"  Not RGB"),
+    }
+
+    // Named variant (record-like)
+    let rgba = Color.Rgba { r: 200, g: 100, b: 50, a: 255 };
+    match rgba {
+        Color.Rgba { r, g, b, a } => print(f"  RGBA named: ({r}, {g}, {b}, {a})"),
+        _ => print(f"  Not RGBA"),
+    }
+
+    // Shape variants
+    let circle = Shape.Circle { radius: 10 };
+    match circle {
+        Shape.Circle { radius } => print(f"  Circle with radius={radius}"),
+        Shape.Rectangle { width, height } => print(f"  Rectangle: {width}x{height}"),
+        Shape.Triangle(a, b, c) => print(f"  Triangle: {a}, {b}, {c}"),
+        _ => print(f"  Other shape"),
+    }
+
+    let rect = Shape.Rectangle { width: 20, height: 30 };
+    match rect {
+        Shape.Circle { .. } => print(f"  Circle"),
+        Shape.Rectangle { width, height } => {
+            print(f"  Rectangle: {width}x{height} (matched!)");
+        }
+        _ => print(f"  Other"),
+    }
+
+    // Maybe patterns
+    let maybe_val = Maybe.Some(42);
+    match maybe_val {
+        Maybe.Some(x) => print(f"  Maybe.Some({x})"),
+        Maybe.None => print(f"  Maybe.None"),
+    }
+
+    let nothing: Maybe<Int> = Maybe.None;
+    match nothing {
+        Maybe.Some(x) => print(f"  Some: {x}"),
+        Maybe.None => print(f"  None (matched!)"),
+    }
+
+    // Result patterns
+    let ok_result: Result<Int, Text> = Result.Ok(100);
+    match ok_result {
+        Result.Ok(val) => print(f"  Result.Ok({val})"),
+        Result.Err(msg) => print(f"  Result.Err({msg})"),
+    }
+
+    let err_result: Result<Int, Text> = Result.Err("error message");
+    match err_result {
+        Result.Ok(val) => print(f"  Ok: {val}"),
+        Result.Err(msg) => print(f"  Err: {msg} (matched!)"),
+    }
+
+    // ComplexEnum patterns
+    let unit = ComplexEnum.UnitVariant;
+    match unit {
+        ComplexEnum.UnitVariant => print(f"  Unit variant (matched!)"),
+        _ => print(f"  Other variant"),
+    }
+
+    let tuple_var = ComplexEnum.TupleVariant(123, "test");
+    match tuple_var {
+        ComplexEnum.TupleVariant(id, name) => {
+            print(f"  Tuple variant: id={id}, name={name}");
+        }
+        _ => print(f"  Other"),
+    }
+
+    let named_var = ComplexEnum.NamedVariant {
+        id: 456,
+        name: "example",
+        active: true
+    };
+    match named_var {
+        ComplexEnum.NamedVariant { id, name, active } => {
+            print(f"  Named variant: id={id}, name={name}, active={active}");
+        }
+        _ => print(f"  Other"),
+    }
+
+    print(f"  ✓ Variant patterns complete\n");
+}
+
+// ============================================================================
+// Section 10: Reference Patterns
+// ============================================================================
+
+fn test_reference_patterns() {
+    print(f"=== Testing Reference Patterns ===");
+
+    let value = 42;
+    let ref_val = &value;
+
+    // Reference pattern matching
+    match ref_val {
+        &x => print(f"  Reference pattern: {x}"),
+    }
+
+    // Mutable reference pattern
+    let mut mut_value = 100;
+    let ref_mut = &mut mut_value;
+    match ref_mut {
+        &mut y => print(f"  Mutable reference pattern: {y}"),
+    }
+
+    // Reference in tuple
+    let tuple_ref = (&10, &20);
+    match tuple_ref {
+        (&a, &b) => print(f"  Tuple of references: {a}, {b}"),
+    }
+
+    print(f"  ✓ Reference patterns complete\n");
+}
+
+// ============================================================================
+// Section 11: Range Patterns
+// ============================================================================
+
+fn test_range_patterns() {
+    print(f"=== Testing Range Patterns ===");
+
+    // Inclusive range
+    let score = 75;
+    match score {
+        0..=49 => print(f"  F grade"),
+        50..=64 => print(f"  D grade"),
+        65..=74 => print(f"  C grade"),
+        75..=84 => print(f"  B grade (matched!)"),
+        85..=100 => print(f"  A grade"),
+        _ => print(f"  Invalid score"),
+    }
+
+    // Exclusive range
+    let num = 15;
+    match num {
+        0..10 => print(f"  0-9"),
+        10..20 => print(f"  10-19 (matched!)"),
+        20..30 => print(f"  20-29"),
+        _ => print(f"  30+"),
+    }
+
+    // Character range
+    let ch = 'm';
+    match ch {
+        'a'..='f' => print(f"  a-f"),
+        'g'..='l' => print(f"  g-l"),
+        'm'..='r' => print(f"  m-r (matched!)"),
+        's'..='z' => print(f"  s-z"),
+        _ => print(f"  other"),
+    }
+
+    // Open-ended ranges
+    match score {
+        ..50 => print(f"  Below 50"),
+        50.. => print(f"  50 and above (matched!)"),
+    }
+
+    print(f"  ✓ Range patterns complete\n");
+}
+
+// ============================================================================
+// Section 12: Or Patterns
+// ============================================================================
+
+fn test_or_patterns() {
+    print(f"=== Testing Or Patterns ===");
+
+    // Simple or pattern
+    let digit = 3;
+    match digit {
+        1 | 2 | 3 => print(f"  Small digit: {digit}"),
+        4 | 5 | 6 => print(f"  Medium digit"),
+        7 | 8 | 9 => print(f"  Large digit"),
+        0 => print(f"  Zero"),
+        _ => print(f"  Not a digit"),
+    }
+
+    // Or with ranges
+    let value = 25;
+    match value {
+        0..=10 | 90..=100 => print(f"  Extremes"),
+        11..=89 => print(f"  Middle range: {value}"),
+        _ => print(f"  Out of bounds"),
+    }
+
+    // Or with variants
+    let color = Color.Green;
+    match color {
+        Color.Red | Color.Green => print(f"  Primary color (R or G)"),
+        Color.Blue => print(f"  Primary color (B)"),
+        _ => print(f"  Complex color"),
+    }
+
+    // Or with patterns in tuple
+    let pair = (1, 5);
+    match pair {
+        (0 | 1, 0 | 1) => print(f"  Both 0 or 1"),
+        (0 | 1, _) => print(f"  First is 0 or 1 (matched!)"),
+        (_, 0 | 1) => print(f"  Second is 0 or 1"),
+        _ => print(f"  Neither"),
+    }
+
+    // Complex or patterns
+    match digit {
+        0 | 2 | 4 | 6 | 8 => print(f"  Even digit"),
+        1 | 3 | 5 | 7 | 9 => print(f"  Odd digit (matched!)"),
+        _ => print(f"  Not a digit"),
+    }
+
+    print(f"  ✓ Or patterns complete\n");
+}
+
+// ============================================================================
+// Section 13: Pattern Guards with 'if'
+// ============================================================================
+
+fn test_guards_if() {
+    print(f"=== Testing Pattern Guards with 'if' ===");
+
+    // Simple guard
+    let num = 15;
+    match num {
+        n if n < 0 => print(f"  Negative: {n}"),
+        n if n == 0 => print(f"  Zero"),
+        n if n < 10 => print(f"  Small positive: {n}"),
+        n if n < 20 => print(f"  Medium positive: {n} (matched!)"),
+        n if n < 100 => print(f"  Large positive: {n}"),
+        _ => print(f"  Very large"),
+    }
+
+    // Guard with tuple pattern
+    let point = Point { x: 5, y: 10 };
+    match point {
+        Point { x, y } if x == 0 && y == 0 => print(f"  Origin"),
+        Point { x, y } if x == y => print(f"  Diagonal"),
+        Point { x, y } if x > y => print(f"  x > y"),
+        Point { x, y } if x < y => print(f"  x < y (matched!)"),
+        _ => print(f"  Other"),
+    }
+
+    // Guard with variant pattern
+    let maybe_val = Maybe.Some(42);
+    match maybe_val {
+        Maybe.Some(x) if x < 0 => print(f"  Negative some"),
+        Maybe.Some(x) if x == 0 => print(f"  Zero some"),
+        Maybe.Some(x) if x > 0 => print(f"  Positive some: {x}"),
+        Maybe.None => print(f"  None"),
+    }
+
+    // Multiple guards on same pattern
+    let score = 88;
+    match score {
+        s if s >= 90 => print(f"  A: {s}"),
+        s if s >= 80 => print(f"  B: {s} (matched!)"),
+        s if s >= 70 => print(f"  C: {s}"),
+        s if s >= 60 => print(f"  D: {s}"),
+        _ => print(f"  F"),
+    }
+
+    // Guard with or pattern
+    let value = 5;
+    match value {
+        n if n % 2 == 0 => print(f"  Even: {n}"),
+        1 | 3 | 5 if value < 10 => print(f"  Small odd: {value}"),
+        _ => print(f"  Other"),
+    }
+
+    print(f"  ✓ Pattern guards (if) complete\n");
+}
+
+// ============================================================================
+// Section 14: Pattern Guards with 'where'
+// ============================================================================
+
+fn test_guards_where() {
+    print(f"=== Testing Pattern Guards with 'where' ===");
+
+    // Basic where guard
+    let num = 25;
+    match num {
+        n where n < 10 => print(f"  Less than 10"),
+        n where n < 20 => print(f"  Less than 20"),
+        n where n < 30 => print(f"  Less than 30 (matched!)"),
+        _ => print(f"  30 or more"),
+    }
+
+    // Where guard with tuple
+    let pair = (10, 20);
+    match pair {
+        (x, y) where x > y => print(f"  x > y"),
+        (x, y) where x < y => print(f"  x < y (matched!)"),
+        (x, y) where x == y => print(f"  x == y"),
+        _ => print(f"  unreachable"),
+    }
+
+    // Where guard with record pattern
+    let point = Point { x: 15, y: 15 };
+    match point {
+        Point { x, y } where x + y < 20 => print(f"  Sum < 20"),
+        Point { x, y } where x + y == 30 => print(f"  Sum == 30 (matched!)"),
+        Point { x, y } where x + y > 30 => print(f"  Sum > 30"),
+        _ => print(f"  Other"),
+    }
+
+    // Where guard with variant
+    let result: Result<Int, Text> = Result.Ok(100);
+    match result {
+        Result.Ok(val) where val < 50 => print(f"  Small ok: {val}"),
+        Result.Ok(val) where val < 150 => print(f"  Medium ok: {val}"),
+        Result.Ok(val) => print(f"  Large ok: {val}"),
+        Result.Err(_) => print(f"  Error"),
+    }
+
+    // Complex where guard
+    let x = 12;
+    match x {
+        n where n % 3 == 0 && n % 4 == 0 => print(f"  Divisible by 12: {n}"),
+        n where n % 3 == 0 => print(f"  Divisible by 3"),
+        n where n % 4 == 0 => print(f"  Divisible by 4"),
+        _ => print(f"  Other"),
+    }
+
+    print(f"  ✓ Pattern guards (where) complete\n");
+}
+
+// ============================================================================
+// Section 15: Nested Patterns
+// ============================================================================
+
+fn test_nested_patterns() {
+    print(f"=== Testing Nested Patterns ===");
+
+    // Nested tuples
+    let nested = ((1, 2), (3, (4, 5)));
+    match nested {
+        ((a, b), (c, (d, e))) => {
+            print(f"  Deeply nested tuple: {a}, {b}, {c}, {d}, {e}");
+        }
+    }
+
+    // Nested variant patterns
+    let nested_maybe = Maybe.Some(Maybe.Some(42));
+    match nested_maybe {
+        Maybe.Some(Maybe.Some(x)) => print(f"  Double Some: {x}"),
+        Maybe.Some(Maybe.None) => print(f"  Some None"),
+        Maybe.None => print(f"  None"),
+    }
+
+    // Nested result in maybe
+    let complex: Maybe<Result<Int, Text>> = Maybe.Some(Result.Ok(99));
+    match complex {
+        Maybe.Some(Result.Ok(val)) => print(f"  Some Ok: {val}"),
+        Maybe.Some(Result.Err(msg)) => print(f"  Some Err: {msg}"),
+        Maybe.None => print(f"  None"),
+    }
+
+    // Nested record in variant
+    let shape_with_point = Shape.Circle { radius: 5 };
+    match shape_with_point {
+        Shape.Circle { radius } => print(f"  Circle radius: {radius}"),
+        Shape.Rectangle { width, height } => {
+            print(f"  Rectangle: {width}x{height}");
+        }
+        _ => print(f"  Other shape"),
+    }
+
+    // Complex nesting with arrays
+    let arr_of_tuples = [(1, 2), (3, 4)];
+    match arr_of_tuples {
+        [(a, b), (c, d)] => print(f"  Array of tuples: ({a},{b}), ({c},{d})"),
+    }
+
+    // Triple nesting
+    let triple_nest = Maybe.Some((10, Result.Ok(20)));
+    match triple_nest {
+        Maybe.Some((x, Result.Ok(y))) => print(f"  Triple nest: x={x}, y={y}"),
+        Maybe.Some((x, Result.Err(_))) => print(f"  Some with error: x={x}"),
+        Maybe.None => print(f"  None"),
+    }
+
+    print(f"  ✓ Nested patterns complete\n");
+}
+
+// ============================================================================
+// Section 16: @ Binding Patterns (At-Patterns)
+// ============================================================================
+
+fn test_at_bindings() {
+    print(f"=== Testing @ Binding Patterns ===");
+
+    // Basic @ binding
+    let value = 42;
+    match value {
+        whole @ 42 => print(f"  Bound whole value: {whole}"),
+        _ => print(f"  Other"),
+    }
+
+    // @ binding with range
+    let num = 15;
+    match num {
+        n @ 0..10 => print(f"  0-9: {n}"),
+        n @ 10..20 => print(f"  10-19: {n} (matched!)"),
+        n @ 20..30 => print(f"  20-29: {n}"),
+        _ => print(f"  30+"),
+    }
+
+    // @ binding with variant
+    let maybe_val = Maybe.Some(100);
+    match maybe_val {
+        whole @ Maybe.Some(x) => {
+            print(f"  Bound whole Maybe: whole (contains {x})");
+        }
+        Maybe.None => print(f"  None"),
+    }
+
+    // @ binding with nested pattern
+    let nested = Maybe.Some((1, 2));
+    match nested {
+        outer @ Maybe.Some((a, b)) => {
+            print(f"  outer @ Some((a,b)): a={a}, b={b}");
+        }
+        Maybe.None => print(f"  None"),
+    }
+
+    // @ binding in tuple
+    let pair = (5, 10);
+    match pair {
+        (first @ 5, second) => print(f"  first={first}, second={second}"),
+        _ => print(f"  Other"),
+    }
+
+    // Complex @ binding
+    let color = Color.Rgb(255, 128, 64);
+    match color {
+        whole @ Color.Rgb(r, g, b) => {
+            print(f"  Whole color bound: r={r}, g={g}, b={b}");
+        }
+        _ => print(f"  Other color"),
+    }
+
+    print(f"  ✓ @ binding patterns complete\n");
+}
+
+// ============================================================================
+// Section 17: Let Pattern Matching
+// ============================================================================
+
+fn test_let_patterns() {
+    print(f"=== Testing Let Pattern Matching ===");
+
+    // Simple destructuring
+    let (a, b, c) = (1, 2, 3);
+    print(f"  Let tuple: a={a}, b={b}, c={c}");
+
+    // Record destructuring
+    let Point { x, y } = Point { x: 10, y: 20 };
+    print(f"  Let record: x={x}, y={y}");
+
+    // With renaming
+    let Point { x: px, y: py } = Point { x: 5, y: 15 };
+    print(f"  Let record renamed: px={px}, py={py}");
+
+    // Array destructuring
+    let [first, second, third] = [100, 200, 300];
+    print(f"  Let array: {first}, {second}, {third}");
+
+    // If-let pattern
+    let maybe_val = Maybe.Some(42);
+    if let Maybe.Some(x) = maybe_val {
+        print(f"  If-let Some: {x}");
+    }
+
+    // If-let with else
+    let result: Result<Int, Text> = Result.Ok(99);
+    if let Result.Ok(val) = result {
+        print(f"  If-let Ok: {val}");
+    } else {
+        print(f"  If-let else branch");
+    }
+
+    // Nested let destructuring
+    let ((x1, y1), (x2, y2)) = ((1, 2), (3, 4));
+    print(f"  Nested let: ({x1},{y1}), ({x2},{y2})");
+
+    print(f"  ✓ Let patterns complete\n");
+}
+
+// ============================================================================
+// Section 18: Combined Complex Patterns
+// ============================================================================
+
+fn test_complex_combined() {
+    print(f"=== Testing Complex Combined Patterns ===");
+
+    // Or + guard + nested
+    let value = (5, 10);
+    match value {
+        (x, y) if x > y => print(f"  x > y"),
+        (1 | 2, y) if y > 5 => print(f"  x is 1|2 and y > 5"),
+        (x, 10 | 20) => print(f"  x={x}, y is 10|20 (matched!)"),
+        _ => print(f"  Other"),
+    }
+
+    // Range + or + guard
+    let score = 75;
+    match score {
+        s @ 0..50 if s < 25 => print(f"  Very low: {s}"),
+        s @ 0..50 => print(f"  Low: {s}"),
+        s @ 50..75 | s @ 75..85 if s >= 75 => print(f"  Good: {s}"),
+        _ => print(f"  Other"),
+    }
+
+    // Deeply nested with guards
+    let complex = Maybe.Some(Result.Ok(Point { x: 5, y: 10 }));
+    match complex {
+        Maybe.Some(Result.Ok(Point { x, y })) if x < y => {
+            print(f"  Complex match: x={x} < y={y}");
+        }
+        Maybe.Some(Result.Ok(Point { x, y })) => {
+            print(f"  Complex no guard: x={x}, y={y}");
+        }
+        _ => print(f"  Other complex"),
+    }
+
+    // @ binding + or + nested
+    let val = Maybe.Some(3);
+    match val {
+        whole @ Maybe.Some(1 | 2 | 3) => {
+            print(f"  @ + or pattern matched");
+        }
+        _ => print(f"  Other"),
+    }
+
+    // Slice + guard + @
+    let arr = [1, 2, 3, 4, 5];
+    match arr {
+        [first, rest @ ..] if first > 0 => print(f"  First={first}, has rest"),
+        _ => print(f"  Other"),
+    }
+
+    print(f"  ✓ Complex combined patterns complete\n");
+}
+
+// ============================================================================
+// Main Test Runner
+// ============================================================================
+
+fn main() {
+    print(f"\n╔════════════════════════════════════════════════════════════╗");
+    print(f"║  COMPREHENSIVE PATTERN MATCHING TEST SUITE                 ║");
+    print(f"║  Testing ALL Grammar Pattern Features                     ║");
+    print(f"╚════════════════════════════════════════════════════════════╝\n");
+
+    test_literal_patterns();
+    test_identifier_patterns();
+    test_wildcard_patterns();
+    test_rest_patterns();
+    test_tuple_patterns();
+    test_array_patterns();
+    test_slice_patterns();
+    test_record_patterns();
+    test_variant_patterns();
+    test_reference_patterns();
+    test_range_patterns();
+    test_or_patterns();
+    test_guards_if();
+    test_guards_where();
+    test_nested_patterns();
+    test_at_bindings();
+    test_let_patterns();
+    test_complex_combined();
+
+    print(f"╔════════════════════════════════════════════════════════════╗");
+    print(f"║  ✓ ALL PATTERN MATCHING TESTS COMPLETE!                   ║");
+    print(f"║  • 18 test sections                                       ║");
+    print(f"║  • 150+ individual pattern tests                          ║");
+    print(f"║  • Full grammar coverage                                  ║");
+    print(f"╚════════════════════════════════════════════════════════════╝\n");
+}

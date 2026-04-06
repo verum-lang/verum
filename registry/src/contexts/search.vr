@@ -1,0 +1,47 @@
+// Search protocol for package discovery
+mount core.base.{Result, Text, Int, Maybe, Float};
+mount core.collections.{List, Map};
+
+pub type SearchError is
+    | QueryParseFailed(Text)
+    | IndexNotReady
+    | SearchFailed(Text)
+    | InvalidFilter(Text);
+
+pub type SearchQuery is {
+    term: Text,
+    filters: Map<Text, Text>,
+    limit: Maybe<Int>,
+    offset: Maybe<Int>,
+    sort_by: Maybe<Text>,
+};
+
+pub type SearchResult is {
+    package_name: Text,
+    version: Text,
+    description: Text,
+    score: Float,
+    downloads: Int,
+    license: Text,
+    published_at: Text,
+    category: Maybe<Text>,
+};
+
+pub type SearchResponse is {
+    results: List<SearchResult>,
+    total: Int,
+    page: Int,
+    per_page: Int,
+};
+
+pub context protocol Search {
+    async fn search(self, query: SearchQuery) -> Result<SearchResponse, SearchError>;
+    async fn index_package(self, name: Text, metadata: Map<Text, Text>) -> Result<(), SearchError>;
+    async fn remove_package(self, name: Text) -> Result<(), SearchError>;
+    async fn suggest(self, prefix: Text, limit: Int) -> Result<List<Text>, SearchError>;
+    async fn rebuild_index(self) -> Result<(), SearchError>;
+    async fn autocomplete(self, query: Text, limit: Int) -> Result<List<Text>, SearchError>;
+
+    // Health check methods
+    async fn ping(self) -> Result<(), SearchError>;
+}

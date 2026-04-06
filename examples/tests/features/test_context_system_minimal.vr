@@ -1,0 +1,44 @@
+// Minimal context system test
+// Test 1: Basic context definition
+
+context Logger {
+    fn log(message: Text);
+}
+
+// Test 2: Single context usage (without brackets)
+fn simple_logging(msg: Text) using Logger {
+    Logger.log(msg);
+}
+
+// Test 3: Multiple contexts with brackets
+context Database {
+    fn query(sql: Text) -> Text;
+}
+
+fn two_contexts(sql: Text, msg: Text) using [Database, Logger] {
+    Logger.log(msg);
+    let result = Database.query(sql);
+}
+
+// Test 4: Context group definition
+using WebContext = [Database, Logger];
+
+// Test 5: Using context group in function
+fn web_function(sql: Text) using WebContext {
+    Logger.log("web operation");
+    Database.query(sql);
+}
+
+// Test 6: Provide statement
+type ConsoleLogger = {
+    prefix: Text
+}
+
+fn test_provide() {
+    provide Logger = ConsoleLogger { prefix: "APP" };
+    simple_logging("test");
+}
+
+fn main() {
+    test_provide();
+}

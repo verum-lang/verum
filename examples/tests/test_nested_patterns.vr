@@ -1,0 +1,141 @@
+// Test: Complex nested pattern matching
+
+fn test_nested_variants() {
+    type Inner is Some(Int) | None;
+    type Outer is Ok(Inner) | Err(Text);
+
+    let value = Ok(Some(42));
+    let result = match value {
+        Ok(Some(x)) => x,
+        Ok(None) => 0,
+        Err(_) => -1
+    };
+    result
+}
+
+fn test_nested_array_variant() {
+    type Maybe is Some(Int) | None;
+
+    let arr = [Some(1), None, Some(3)];
+    let result = match arr {
+        [Some(a), None, Some(b)] => a + b,
+        [Some(a), Some(b), Some(c)] => a + b + c,
+        _ => 0
+    };
+    result
+}
+
+fn test_nested_record_in_variant() {
+    type Point is record { x: Int, y: Int };
+    type Shape is Circle(Point) | Empty;
+
+    let s = Circle(Point { x: 5, y: 10 });
+    let result = match s {
+        Circle(Point { x, y }) if x > 0 && y > 0 => x * y,
+        Circle(Point { x, y }) => x + y,
+        Empty => 0
+    };
+    result
+}
+
+fn test_deeply_nested() {
+    type A is WrapA(Int);
+    type B is WrapB(A);
+    type C is WrapC(B);
+
+    let value = WrapC(WrapB(WrapA(42)));
+    let result = match value {
+        WrapC(WrapB(WrapA(x))) => x,
+        _ => 0
+    };
+    result
+}
+
+fn test_nested_with_rest() {
+    type Maybe is Some(Int) | None;
+
+    let arr = [Some(1), Some(2), None, Some(3)];
+    let result = match arr {
+        [Some(first), middle @ .., None, last] => first,
+        _ => 0
+    };
+    result
+}
+
+fn test_nested_tuple_in_record() {
+    type Pair is record { values: (Int, Int) };
+
+    let p = Pair { values: (10, 20) };
+    let result = match p {
+        Pair { values: (a, b) } => a + b,
+        _ => 0
+    };
+    result
+}
+
+fn test_nested_array_in_record() {
+    type Container is record { items: [Int] };
+
+    let c = Container { items: [1, 2, 3] };
+    let result = match c {
+        Container { items: [a, b, c] } => a + b + c,
+        Container { items: [a, b] } => a + b,
+        Container { items: [a] } => a,
+        _ => 0
+    };
+    result
+}
+
+fn test_mixed_nesting() {
+    type Inner is record { value: Int };
+    type Middle is Some(Inner) | None;
+    type Outer is [Middle];
+
+    let data = [Some(Inner { value: 10 }), None, Some(Inner { value: 20 })];
+    let result = match data {
+        [Some(Inner { value: a }), None, Some(Inner { value: b })] => a + b,
+        _ => 0
+    };
+    result
+}
+
+fn test_nested_with_multiple_guards() {
+    type Point is record { x: Int, y: Int };
+    type Shape is Circle(Point) | Rectangle(Point, Point);
+
+    let s = Circle(Point { x: 5, y: 10 });
+    let result = match s {
+        Circle(Point { x, y }) if x > 0 && y > 0 && x < 10 => "small circle in Q1",
+        Circle(Point { x, y }) if x > 0 && y > 0 => "circle in Q1",
+        Rectangle(Point { x: x1, y: y1 }, Point { x: x2, y: y2 })
+            if x2 > x1 && y2 > y1 => "valid rectangle",
+        _ => "other"
+    };
+    result
+}
+
+fn test_nested_or_patterns() {
+    type Status is Active | Inactive | Pending;
+    type User is record { name: Text, status: Status };
+
+    let u = User { name: "Alice", status: Active };
+    let result = match u {
+        User { status: Active | Pending, .. } => "needs attention",
+        User { status: Inactive, .. } => "inactive",
+        _ => "unknown"
+    };
+    result
+}
+
+fn main() {
+    println(test_nested_variants());
+    println(test_nested_array_variant());
+    println(test_nested_record_in_variant());
+    println(test_deeply_nested());
+    println(test_nested_with_rest());
+    println(test_nested_tuple_in_record());
+    println(test_nested_array_in_record());
+    println(test_mixed_nesting());
+    println(test_nested_with_multiple_guards());
+    println(test_nested_or_patterns());
+}

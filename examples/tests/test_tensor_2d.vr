@@ -1,0 +1,36 @@
+// Test: 2D Tensor Literals with Nested Arrays
+// Grammar: nested_array_elements = '{' , expression_list , '}' , { ',' , '{' , expression_list , '}' }
+
+fn main() {
+    // Test 1: Simple 2x3 matrix (2 rows, 3 columns)
+    let matrix1 = tensor<2, 3>Float {
+        { 1.0, 2.0, 3.0 },
+        { 4.0, 5.0, 6.0 }
+    };
+
+    // Test 2: 3x3 identity-like matrix
+    let matrix2 = tensor<3, 3>Int {
+        { 1, 0, 0 },
+        { 0, 1, 0 },
+        { 0, 0, 1 }
+    };
+
+    // Test 3: 4x2 matrix
+    let matrix3 = tensor<4, 2>Float {
+        { 1.1, 2.2 },
+        { 3.3, 4.4 },
+        { 5.5, 6.6 },
+        { 7.7, 8.8 }
+    };
+
+    // Test 4: 1x1 matrix (edge case)
+    let matrix4 = tensor<1, 1>Float {
+        { 42.0 }
+    };
+
+    // Test 5: 2x5 matrix
+    let matrix5 = tensor<2, 5>Int {
+        { 1, 2, 3, 4, 5 },
+        { 6, 7, 8, 9, 10 }
+    };
+}

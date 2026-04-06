@@ -1,0 +1,5 @@
+fn main() {
+    let nums = [1, 2, 3];
+    let squares = [x * x for x in nums];
+    println("List comprehension");
+}

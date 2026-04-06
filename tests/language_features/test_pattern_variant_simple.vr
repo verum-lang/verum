@@ -1,0 +1,13 @@
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+fn main() {
+    // Test: Simple variant pattern
+    let val = Maybe.Some(42);
+    match val {
+        Maybe.Some(x) => print(f"Some: {x}"),
+        Maybe.None => print(f"None"),
+    }
+    print(f"Simple variant pattern test complete!");
+}

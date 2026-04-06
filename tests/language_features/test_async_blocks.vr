@@ -1,0 +1,34 @@
+// Test async blocks
+fn main() {
+    // Test 1: Basic async block
+    print("Test 1: Basic async block");
+    let future1 = async {
+        42
+    };
+    print(f"Result: {future1.await}");
+
+    // Test 2: Async block with computation
+    print("\nTest 2: Async block with computation");
+    let future2 = async {
+        let x = 10;
+        let y = 20;
+        x + y
+    };
+    print(f"Result: {future2.await}");
+
+    // Test 3: Spawn with async block
+    print("\nTest 3: Spawn with async block");
+    let handle = spawn async {
+        let a = 5;
+        let b = 7;
+        a * b
+    };
+    print(f"Result: {handle.await}");
+
+    // Test 4: Multiple async blocks
+    print("\nTest 4: Multiple async blocks");
+    let f1 = async { 1 };
+    let f2 = async { 2 };
+    let f3 = async { 3 };
+    print(f"Results: {f1.await}, {f2.await}, {f3.await}");
+}

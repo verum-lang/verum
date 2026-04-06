@@ -1,0 +1,506 @@
+// Comprehensive Basic Types and Collections Test
+// Tests: Int, Float, Bool, Text, List, Map, Set, Maybe
+
+// ===== Test 1: Integer Types =====
+
+fn test_integers() {
+    print("--- Test 1: Integer Types ---");
+
+    // Basic integer operations
+    let a: Int = 42;
+    let b: Int = 10;
+
+    print("a = " + a.to_string());
+    print("b = " + b.to_string());
+    print("a + b = " + (a + b).to_string());
+    print("a - b = " + (a - b).to_string());
+    print("a * b = " + (a * b).to_string());
+    print("a / b = " + (a / b).to_string());
+    print("a % b = " + (a % b).to_string());
+
+    // Comparison operations
+    print("a > b = " + (a > b).to_string());
+    print("a < b = " + (a < b).to_string());
+    print("a >= b = " + (a >= b).to_string());
+    print("a <= b = " + (a <= b).to_string());
+    print("a == b = " + (a == b).to_string());
+    print("a != b = " + (a != b).to_string());
+
+    // Negative integers
+    let neg: Int = -25;
+    print("negative: " + neg.to_string());
+    print("abs(negative): " + (-neg).to_string());
+
+    // Zero
+    let zero: Int = 0;
+    print("zero: " + zero.to_string());
+    print("zero == 0: " + (zero == 0).to_string());
+
+    print("");
+}
+
+// ===== Test 2: Float Types =====
+
+fn test_floats() {
+    print("--- Test 2: Float Types ---");
+
+    // Basic float operations
+    let x: Float = 3.14159;
+    let y: Float = 2.71828;
+
+    print("x = " + x.to_string());
+    print("y = " + y.to_string());
+    print("x + y = " + (x + y).to_string());
+    print("x - y = " + (x - y).to_string());
+    print("x * y = " + (x * y).to_string());
+    print("x / y = " + (x / y).to_string());
+
+    // Float comparisons
+    print("x > y = " + (x > y).to_string());
+    print("x < y = " + (x < y).to_string());
+    print("x == y = " + (x == y).to_string());
+
+    // Special values
+    let zero_f: Float = 0.0;
+    print("zero float: " + zero_f.to_string());
+
+    let negative_f: Float = -5.5;
+    print("negative float: " + negative_f.to_string());
+
+    // Float methods (if available)
+    let val: Float = 3.7;
+    print("floor(3.7) = " + val.floor().to_string());
+    print("ceil(3.7) = " + val.ceil().to_string());
+    print("round(3.7) = " + val.round().to_string());
+
+    let neg_val: Float = -8.3;
+    print("abs(-8.3) = " + neg_val.abs().to_string());
+
+    print("");
+}
+
+// ===== Test 3: Boolean Types =====
+
+fn test_booleans() {
+    print("--- Test 3: Boolean Types ---");
+
+    let t: Bool = true;
+    let f: Bool = false;
+
+    print("true: " + t.to_string());
+    print("false: " + f.to_string());
+
+    // Logical operations
+    print("true && true = " + (true && true).to_string());
+    print("true && false = " + (true && false).to_string());
+    print("false && false = " + (false && false).to_string());
+
+    print("true || true = " + (true || true).to_string());
+    print("true || false = " + (true || false).to_string());
+    print("false || false = " + (false || false).to_string());
+
+    print("!true = " + (!true).to_string());
+    print("!false = " + (!false).to_string());
+
+    // Boolean equality
+    print("true == true = " + (true == true).to_string());
+    print("true == false = " + (true == false).to_string());
+    print("false == false = " + (false == false).to_string());
+
+    print("true != false = " + (true != false).to_string());
+
+    print("");
+}
+
+// ===== Test 4: Text Types =====
+
+fn test_text() {
+    print("--- Test 4: Text Types ---");
+
+    // Basic strings
+    let hello: Text = "Hello";
+    let world: Text = "World";
+
+    print("hello = " + hello);
+    print("world = " + world);
+
+    // String concatenation
+    let greeting = hello + ", " + world + "!";
+    print("concatenation: " + greeting);
+
+    // Empty string
+    let empty: Text = "";
+    print("empty string: '" + empty + "'");
+    print("empty.len() = " + empty.len().to_string());
+
+    // String length
+    print("hello.len() = " + hello.len().to_string());
+    print("greeting.len() = " + greeting.len().to_string());
+
+    // String equality
+    print("hello == 'Hello' = " + (hello == "Hello").to_string());
+    print("hello == 'hello' = " + (hello == "hello").to_string());
+    print("hello != world = " + (hello != world).to_string());
+
+    // Special characters
+    let with_quote: Text = "It's a test";
+    print("with apostrophe: " + with_quote);
+
+    let with_newline: Text = "Line 1\nLine 2";
+    print("with newline: " + with_newline);
+
+    print("");
+}
+
+// ===== Test 5: List Types =====
+
+fn test_lists() {
+    print("--- Test 5: List Types ---");
+
+    // Empty list
+    let empty_list: List<Int> = [];
+    print("empty list: []");
+    print("empty list length: " + empty_list.len().to_string());
+
+    // List literal
+    let numbers: List<Int> = [1, 2, 3, 4, 5];
+    print("numbers = [1, 2, 3, 4, 5]");
+    print("numbers.len() = " + numbers.len().to_string());
+
+    // List access
+    print("numbers[0] = " + numbers[0].to_string());
+    print("numbers[2] = " + numbers[2].to_string());
+    print("numbers[4] = " + numbers[4].to_string());
+
+    // List of strings
+    let words: List<Text> = ["apple", "banana", "cherry"];
+    print("words = ['apple', 'banana', 'cherry']");
+    print("words[0] = " + words[0]);
+    print("words[1] = " + words[1]);
+    print("words[2] = " + words[2]);
+
+    // List operations
+    let mut mutable_list: List<Int> = [10, 20, 30];
+    print("mutable_list = [10, 20, 30]");
+
+    mutable_list = mutable_list.push(40);
+    print("after push(40): length = " + mutable_list.len().to_string());
+
+    // List iteration
+    print("iterating over [1, 2, 3]:");
+    for n in [1, 2, 3] {
+        print("  " + n.to_string());
+    }
+
+    // Nested lists
+    let matrix: List<List<Int>> = [[1, 2], [3, 4], [5, 6]];
+    print("matrix (nested list) created");
+    print("matrix[0][0] = " + matrix[0][0].to_string());
+    print("matrix[1][1] = " + matrix[1][1].to_string());
+    print("matrix[2][0] = " + matrix[2][0].to_string());
+
+    print("");
+}
+
+// ===== Test 6: Map Types =====
+
+fn test_maps() {
+    print("--- Test 6: Map Types ---");
+
+    // Empty map
+    let empty_map: Map<Text, Int> = {};
+    print("empty map: {}");
+    print("empty map size: " + empty_map.len().to_string());
+
+    // Map literal
+    let ages: Map<Text, Int> = {
+        "Alice": 30,
+        "Bob": 25,
+        "Charlie": 35
+    };
+    print("ages map created");
+    print("ages['Alice'] = " + ages["Alice"].to_string());
+    print("ages['Bob'] = " + ages["Bob"].to_string());
+    print("ages['Charlie'] = " + ages["Charlie"].to_string());
+
+    // Map operations
+    let mut mutable_map: Map<Text, Int> = {"one": 1, "two": 2};
+    print("mutable_map = {'one': 1, 'two': 2}");
+
+    mutable_map = mutable_map.insert("three", 3);
+    print("after insert('three', 3): size = " + mutable_map.len().to_string());
+
+    // Check key existence
+    print("contains_key('one') = " + mutable_map.contains_key("one").to_string());
+    print("contains_key('four') = " + mutable_map.contains_key("four").to_string());
+
+    // Map of different value type
+    let scores: Map<Text, Float> = {
+        "math": 95.5,
+        "english": 87.3,
+        "science": 92.0
+    };
+    print("scores['math'] = " + scores["math"].to_string());
+    print("scores['english'] = " + scores["english"].to_string());
+
+    print("");
+}
+
+// ===== Test 7: Set Types =====
+
+fn test_sets() {
+    print("--- Test 7: Set Types ---");
+
+    // Empty set
+    let empty_set: Set<Int> = {};
+    print("empty set: {}");
+    print("empty set size: " + empty_set.len().to_string());
+
+    // Set literal
+    let numbers: Set<Int> = {1, 2, 3, 4, 5};
+    print("numbers set = {1, 2, 3, 4, 5}");
+    print("numbers.len() = " + numbers.len().to_string());
+
+    // Set membership
+    print("contains(3) = " + numbers.contains(3).to_string());
+    print("contains(10) = " + numbers.contains(10).to_string());
+
+    // Set operations
+    let mut mutable_set: Set<Int> = {1, 2, 3};
+    print("mutable_set = {1, 2, 3}");
+
+    mutable_set = mutable_set.insert(4);
+    print("after insert(4): size = " + mutable_set.len().to_string());
+
+    mutable_set = mutable_set.insert(2);  // Duplicate, should not increase size
+    print("after insert(2) again: size = " + mutable_set.len().to_string());
+
+    // Set of strings
+    let fruits: Set<Text> = {"apple", "banana", "cherry"};
+    print("fruits set created");
+    print("contains('apple') = " + fruits.contains("apple").to_string());
+    print("contains('orange') = " + fruits.contains("orange").to_string());
+
+    // Set operations (union, intersection, etc.)
+    let set1: Set<Int> = {1, 2, 3, 4};
+    let set2: Set<Int> = {3, 4, 5, 6};
+    print("set1 = {1, 2, 3, 4}");
+    print("set2 = {3, 4, 5, 6}");
+
+    let union = set1.union(set2);
+    print("union size: " + union.len().to_string());
+
+    let intersection = set1.intersection(set2);
+    print("intersection size: " + intersection.len().to_string());
+
+    print("");
+}
+
+// ===== Test 8: Maybe Types =====
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+fn test_maybe() {
+    print("--- Test 8: Maybe Types ---");
+
+    // Some variant
+    let some_int: Maybe<Int> = Some(42);
+    print("some_int = Some(42)");
+
+    match some_int {
+        Some(value) => print("  value: " + value.to_string()),
+        None => print("  no value")
+    }
+
+    // None variant
+    let none_int: Maybe<Int> = None;
+    print("none_int = None");
+
+    match none_int {
+        Some(value) => print("  value: " + value.to_string()),
+        None => print("  no value")
+    }
+
+    // Maybe with different types
+    let some_text: Maybe<Text> = Some("hello");
+    print("some_text = Some('hello')");
+
+    match some_text {
+        Some(text) => print("  text: " + text),
+        None => print("  no text")
+    }
+
+    // Maybe methods
+    print("some_int.is_some() = " + some_int.is_some().to_string());
+    print("some_int.is_none() = " + some_int.is_none().to_string());
+    print("none_int.is_some() = " + none_int.is_some().to_string());
+    print("none_int.is_none() = " + none_int.is_none().to_string());
+
+    // unwrap_or
+    print("some_int.unwrap_or(0) = " + some_int.unwrap_or(0).to_string());
+    print("none_int.unwrap_or(99) = " + none_int.unwrap_or(99).to_string());
+
+    // Nested Maybe
+    let nested: Maybe<Maybe<Int>> = Some(Some(100));
+    print("nested Maybe<Maybe<Int>> = Some(Some(100))");
+
+    match nested {
+        Some(inner) => {
+            match inner {
+                Some(val) => print("  nested value: " + val.to_string()),
+                None => print("  inner is None")
+            }
+        },
+        None => print("  outer is None")
+    }
+
+    print("");
+}
+
+// ===== Test 9: Tuple Types =====
+
+fn test_tuples() {
+    print("--- Test 9: Tuple Types ---");
+
+    // Two-element tuple
+    let pair: (Int, Text) = (42, "answer");
+    print("pair = (42, 'answer')");
+
+    let (num, text) = pair;
+    print("  num: " + num.to_string());
+    print("  text: " + text);
+
+    // Three-element tuple
+    let triple: (Int, Float, Bool) = (10, 3.14, true);
+    print("triple = (10, 3.14, true)");
+
+    let (a, b, c) = triple;
+    print("  a: " + a.to_string());
+    print("  b: " + b.to_string());
+    print("  c: " + c.to_string());
+
+    // Tuple access
+    print("pair.0 = " + pair.0.to_string());
+    print("pair.1 = " + pair.1);
+
+    // Nested tuples
+    let nested_tuple: ((Int, Int), (Text, Text)) = ((1, 2), ("a", "b"));
+    print("nested tuple created");
+
+    let ((x1, x2), (y1, y2)) = nested_tuple;
+    print("  x1: " + x1.to_string() + ", x2: " + x2.to_string());
+    print("  y1: " + y1 + ", y2: " + y2);
+
+    print("");
+}
+
+// ===== Test 10: Type Conversions =====
+
+fn test_conversions() {
+    print("--- Test 10: Type Conversions ---");
+
+    // Int to String
+    let num: Int = 123;
+    let num_str = num.to_string();
+    print("123.to_string() = '" + num_str + "'");
+
+    // Float to String
+    let float_val: Float = 45.67;
+    let float_str = float_val.to_string();
+    print("45.67.to_string() = '" + float_str + "'");
+
+    // Bool to String
+    let bool_val: Bool = true;
+    let bool_str = bool_val.to_string();
+    print("true.to_string() = '" + bool_str + "'");
+
+    // Int to Float (if supported)
+    let int_val: Int = 10;
+    let as_float: Float = int_val.to_float();
+    print("10.to_float() = " + as_float.to_string());
+
+    // Float to Int (if supported)
+    let float_to_int: Float = 9.99;
+    let as_int: Int = float_to_int.to_int();
+    print("9.99.to_int() = " + as_int.to_string());
+
+    print("");
+}
+
+// ===== Test 11: Complex Nested Types =====
+
+fn test_complex_types() {
+    print("--- Test 11: Complex Nested Types ---");
+
+    // List of Maybe
+    let maybe_list: List<Maybe<Int>> = [Some(1), None, Some(3), None, Some(5)];
+    print("List<Maybe<Int>> with 5 elements");
+
+    let mut count_some = 0;
+    let mut count_none = 0;
+    for item in maybe_list {
+        match item {
+            Some(_) => count_some = count_some + 1,
+            None => count_none = count_none + 1
+        }
+    }
+    print("  Some count: " + count_some.to_string());
+    print("  None count: " + count_none.to_string());
+
+    // Map of Lists
+    let list_map: Map<Text, List<Int>> = {
+        "evens": [2, 4, 6, 8],
+        "odds": [1, 3, 5, 7],
+        "primes": [2, 3, 5, 7]
+    };
+    print("Map<Text, List<Int>> created");
+    print("  evens length: " + list_map["evens"].len().to_string());
+    print("  odds length: " + list_map["odds"].len().to_string());
+
+    // List of Tuples
+    let point_list: List<(Float, Float)> = [(0.0, 0.0), (1.0, 1.0), (2.0, 4.0)];
+    print("List<(Float, Float)> with 3 points");
+
+    for point in point_list {
+        let (x, y) = point;
+        print("  point: (" + x.to_string() + ", " + y.to_string() + ")");
+    }
+
+    print("");
+}
+
+// ===== Main Entry Point =====
+
+fn main() {
+    print("=== Comprehensive Basic Types and Collections Test ===");
+    print("");
+
+    test_integers();
+    test_floats();
+    test_booleans();
+    test_text();
+    test_lists();
+    test_maps();
+    test_sets();
+    test_maybe();
+    test_tuples();
+    test_conversions();
+    test_complex_types();
+
+    print("=== Basic Types and Collections Tested ===");
+    print("✓ Int (integers with arithmetic and comparison)");
+    print("✓ Float (floating point with methods)");
+    print("✓ Bool (booleans with logical operations)");
+    print("✓ Text (strings with concatenation and methods)");
+    print("✓ List<T> (dynamic arrays with indexing and iteration)");
+    print("✓ Map<K, V> (key-value associative containers)");
+    print("✓ Set<T> (unique element collections)");
+    print("✓ Maybe<T> (optional values)");
+    print("✓ Tuples (fixed-size heterogeneous collections)");
+    print("✓ Type conversions (to_string, to_int, to_float)");
+    print("✓ Complex nested types (List<Maybe<T>>, Map<K, List<V>>, etc.)");
+    print("");
+    print("=== Test Complete ===");
+}

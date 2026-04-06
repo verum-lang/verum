@@ -1,0 +1,118 @@
+module sys.process_ops;
+
+// =============================================================================
+// sys/process_ops.vr - Process Operations (replaces C verum_process_*)
+// =============================================================================
+// Layer: 1 (I/O)
+// Dependencies: sys/raw
+// =============================================================================
+//
+// Pure Verum process management. Compiled through VBC → LLVM.
+//
+// =============================================================================
+
+mount core.{List, Text, Maybe, Some, None};
+mount super.raw.*;
+
+/// Exit status from a child process.
+public type ProcessExitStatus is {
+    code: Int,
+};
+
+implement ProcessExitStatus {
+    /// Check if the process exited successfully (code 0).
+    public fn success(&self) -> Bool {
+        self.code == 0
+    }
+
+    /// Get the exit code.
+    public fn code(&self) -> Int {
+        self.code
+    }
+}
+
+/// A child process handle.
+public type Child is {
+    pid: Int,
+    stdout_fd: Int,
+    stderr_fd: Int,
+};
+
+implement Child {
+    /// Wait for the child to exit. Returns the exit status.
+    public fn wait(&self) -> ProcessExitStatus {
+        let status = __process_wait_raw(self.pid);
+        ProcessExitStatus { code: status }
+    }
+
+    /// Read all stdout from the child (if captured).
+    public fn read_stdout(&self) -> Text {
+        if self.stdout_fd < 0 {
+            return "";
+        }
+        let result_ptr = __fd_read_all_raw(self.stdout_fd);
+        __fd_close_raw(self.stdout_fd);
+        // Result ptr is a [len, cap, buf] header
+        if result_ptr == 0 {
+            ""
+        } else {
+            // Read length and buffer pointer from header
+            let len = __ptr_read_i64(result_ptr);
+            let buf_ptr = __ptr_read_i64(result_ptr + 16);
+            // Construct text from raw buffer
+            __text_from_raw(buf_ptr, len)
+        }
+    }
+}
+
+// Raw helpers used by Child
+fn __ptr_read_i64(ptr: Int) -> Int { 0 }
+fn __text_from_raw(buf: Int, len: Int) -> Text { "" }
+
+/// Spawn a child process with the given program and arguments.
+public fn spawn(program: Text, args: List<Text>) -> Maybe<Child> {
+    let result = __process_spawn_raw(program, args, 1, 1);
+    if result < 0 {
+        None
+    } else {
+        Some(Child {
+            pid: result,
+            stdout_fd: -1,
+            stderr_fd: -1,
+        })
+    }
+}
+
+/// Run a program and wait for it to finish.
+/// Returns the exit status.
+public fn run(program: Text, args: List<Text>) -> ProcessExitStatus {
+    let result = __process_spawn_raw(program, args, 0, 0);
+    if result < 0 {
+        ProcessExitStatus { code: -1 }
+    } else {
+        let status = __process_wait_raw(result);
+        ProcessExitStatus { code: status }
+    }
+}
+
+/// Get command-line arguments.
+public fn args() -> List<Text> {
+    let count = __args_count_raw();
+    let mut result = List.new();
+    let mut i = 0;
+    while i < count {
+        result.push(__arg_raw(i));
+        i = i + 1;
+    }
+    result
+}
+
+/// Get a specific command-line argument.
+public fn arg(index: Int) -> Text {
+    __arg_raw(index)
+}
+
+/// Get the number of command-line arguments.
+public fn arg_count() -> Int {
+    __args_count_raw()
+}

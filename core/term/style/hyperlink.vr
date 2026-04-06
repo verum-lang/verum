@@ -1,0 +1,65 @@
+// =============================================================================
+// style/hyperlink.vr - OSC 8 Hyperlinks
+// =============================================================================
+// Layer: 2 (Style & Color)
+// Dependencies: core.io, raw/escape.vr, widget/paragraph.vr (Span)
+// =============================================================================
+//
+// Hyperlink support via OSC 8 escape sequences. Allows terminal text to
+// carry invisible URI attributes that modern terminals render as clickable
+// links (similar to HTML <a> tags).
+//
+// Usage:
+// ```verum
+// Span.styled("Click here", Style.new().fg(Color.Blue).underlined())
+//     .hyperlink("https://verum-lang.org")
+// ```
+//
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.3
+// =============================================================================
+
+module hyperlink;
+
+mount core.io.IoResult;
+mount super.super.raw.escape.EscapeWriter;
+mount super.super.widget.paragraph.Span;
+
+// =============================================================================
+// HyperlinkSpan Type
+// =============================================================================
+
+/// A span with an associated hyperlink URI.
+/// The URI is transmitted as an OSC 8 attribute and rendered by the terminal
+/// as a clickable link.
+public type HyperlinkSpan is {
+    span: Span,
+    uri: Text,
+};
+
+// =============================================================================
+// Span Extension
+// =============================================================================
+
+implement Span {
+    /// Attach a hyperlink URI to this span.
+    public fn hyperlink(self, uri: Text) -> HyperlinkSpan {
+        HyperlinkSpan { span: self, uri: uri }
+    }
+}
+
+// =============================================================================
+// Writing Hyperlinks
+// =============================================================================
+
+/// Write text with a hyperlink to the output writer.
+/// Opens the link with OSC 8 ; params ; uri ST, writes the visible text,
+/// then closes with OSC 8 ;; ST.
+public fn write_hyperlink(
+    writer: &mut (dyn EscapeWriter),
+    uri: &Text,
+    text: &Text,
+) -> IoResult<()> {
+    writer.write_osc(8, &f";{uri}").map_err(|e| IoError.Other(e.to_string()))?;
+    let _ = writer.write(text.as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
+    writer.write_osc(8, ";").map_err(|e| IoError.Other(e.to_string()))
+}

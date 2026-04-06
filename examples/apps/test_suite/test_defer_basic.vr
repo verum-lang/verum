@@ -1,0 +1,8 @@
+// Test: Basic defer statement
+// Tests if defer executes at scope exit
+
+fn main() {
+    print("Before defer");
+    defer print("Defer executed");
+    print("After defer");
+}

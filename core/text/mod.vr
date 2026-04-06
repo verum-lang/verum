@@ -1,0 +1,106 @@
+// =============================================================================
+// text/mod.vr - Text module manifest
+// =============================================================================
+// Layer: 1 (Text)
+// Dependencies: core
+// =============================================================================
+//
+// The text module provides comprehensive text processing capabilities:
+//
+// - text.vr: UTF-8 Text type with SSO optimization
+// - char.vr: Character utilities and Unicode support
+// - format.vr: Formatting system (Formatter, Debug, Display, print)
+//
+// =============================================================================
+
+// Re-export text types
+
+module core.text;
+public mount .text.Text;
+public mount .text.Utf8Error;
+public mount .text.Utf16Error;
+public mount .text.ParseError;
+
+// Iterators
+public mount .text.Chars;
+public mount .text.ByteIter;
+public mount .text.CharIndices;
+public mount .text.Lines;
+public mount .text.TextMatches;
+public mount .text.TextMatchIndices;
+
+// Internal representations (for advanced use)
+// Note: These are internal implementation details, not re-exported publicly
+mount .text.TextRepr;
+mount .text.InlineText;
+mount .text.HeapText;
+
+// Tagged string literals (SQL, HTML, regex, etc.)
+public mount .tagged_literals.*;
+
+// Regex
+public mount .regex.Regex;
+
+// Character utilities
+public mount .char.GeneralCategory;
+public mount .char.CharPattern;
+public mount .char.AnyChar;
+public mount .char.CharRange;
+public mount .char.char_any_of;
+public mount .char.char_range;
+
+// Formatting
+public mount .format.Write;
+public mount .format.WriteError;
+public mount .format.WriteErrorKind;
+public mount .format.FormatResult;
+public mount .format.Alignment;
+public mount .format.Sign;
+public mount .format.FormatSpec;
+public mount .format.Formatter;
+
+// Debug helpers
+public mount .format.DebugStruct;
+public mount .format.DebugTuple;
+public mount .format.DebugList;
+public mount .format.DebugMap;
+
+// Print functions
+public mount .format.print;
+public mount .format.println;
+public mount .format.println_empty;
+public mount .format.eprint;
+public mount .format.eprintln;
+public mount .format.format_debug;
+public mount .format.format_display;
+public mount .format.dbg;
+
+// =============================================================================
+// Prelude exports (commonly used items)
+// =============================================================================
+
+// Items exported to the prelude for convenient access.
+public module prelude {
+    public mount super.Text;
+    public mount super.Chars;
+    public mount super.print;
+    public mount super.println;
+    public mount super.eprint;
+    public mount super.eprintln;
+    public mount super.dbg;
+    public mount super.Formatter;
+    public mount super.FormatSpec;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+// SSO capacity - strings up to this size are stored inline
+public const SSO_CAPACITY: Int = 23;
+
+// Maximum UTF-8 bytes per character
+public const MAX_UTF8_BYTES: Int = 4;
+
+// Unicode replacement character (U+FFFD)
+public const REPLACEMENT_CHARACTER: Char = '\u{FFFD}';

@@ -1,0 +1,15 @@
+type Pair<A, B> is {
+    first: A,
+    second: B
+}
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn main() {
+    let p1 = make_pair(1, "one")
+    let p2 = make_pair("hello", 42)
+    println(f"Pair 1: ({p1.first}, {p1.second})")
+    println(f"Pair 2: ({p2.first}, {p2.second})")
+}

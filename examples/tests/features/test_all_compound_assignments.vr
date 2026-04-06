@@ -1,0 +1,53 @@
+fn main() {
+    // Test +=
+    let mut a = 10;
+    a += 5;
+    print(f"a += 5: {a}");  // Should print 15
+
+    // Test -=
+    let mut b = 20;
+    b -= 7;
+    print(f"b -= 7: {b}");  // Should print 13
+
+    // Test *=
+    let mut c = 4;
+    c *= 3;
+    print(f"c *= 3: {c}");  // Should print 12
+
+    // Test /=
+    let mut d = 20;
+    d /= 4;
+    print(f"d /= 4: {d}");  // Should print 5
+
+    // Test %=
+    let mut e = 17;
+    e %= 5;
+    print(f"e %= 5: {e}");  // Should print 2
+
+    // Test &= (bitwise AND)
+    let mut f = 12;  // 1100 in binary
+    f &= 10;         // 1010 in binary
+    print(f"f &= 10: {f}");  // Should print 8 (1000 in binary)
+
+    // Test |= (bitwise OR)
+    let mut g = 12;  // 1100 in binary
+    g |= 10;         // 1010 in binary
+    print(f"g |= 10: {g}");  // Should print 14 (1110 in binary)
+
+    // Test ^= (bitwise XOR)
+    let mut h = 12;  // 1100 in binary
+    h ^= 10;         // 1010 in binary
+    print(f"h ^= 10: {h}");  // Should print 6 (0110 in binary)
+
+    // Test <<= (left shift)
+    let mut i = 5;
+    i <<= 2;
+    print(f"i <<= 2: {i}");  // Should print 20 (5 * 4)
+
+    // Test >>= (right shift)
+    let mut j = 20;
+    j >>= 2;
+    print(f"j >>= 2: {j}");  // Should print 5 (20 / 4)
+
+    print("All compound assignment operators work correctly!");
+}

@@ -1,0 +1,97 @@
+// =============================================================================
+// async/parallel.vr - Parallel collection processing
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core
+// =============================================================================
+//
+// Provides parallel_map and related utilities for processing collections
+// across multiple workers. Currently uses a sequential fallback; true
+// parallelism via spawn will be added when the runtime supports it.
+//
+// =============================================================================
+
+module parallel;
+
+// =============================================================================
+// Parallel Map
+// =============================================================================
+
+/// Apply a function to each element of a list, returning a new list of results.
+///
+/// `worker_count` is a hint for future parallel execution; the current
+/// implementation processes items sequentially.
+///
+/// Example:
+///   let doubled = parallel_map([1, 2, 3], 4, |x| x * 2);
+///   // doubled == [2, 4, 6]
+public fn parallel_map<T, U>(
+    items: List<T>,
+    worker_count: Int,
+    f: fn(T) -> U
+) -> List<U> {
+    let mut results = [];
+    let mut i = 0;
+    let n = items.len();
+    while i < n {
+        results.push(f(items[i]));
+        i = i + 1;
+    }
+    results
+}
+
+/// Apply a function to each element, keeping only elements where f returns Some.
+///
+/// Equivalent to map + filter in a single pass.
+public fn parallel_filter_map<T, U>(
+    items: List<T>,
+    worker_count: Int,
+    f: fn(T) -> Maybe<U>
+) -> List<U> {
+    let mut results = [];
+    let mut i = 0;
+    let n = items.len();
+    while i < n {
+        match f(items[i]) {
+            Some(val) => results.push(val),
+            None => {}
+        }
+        i = i + 1;
+    }
+    results
+}
+
+/// Apply a function to each element for its side effects.
+public fn parallel_for_each<T>(
+    items: List<T>,
+    worker_count: Int,
+    f: fn(T) -> ()
+) {
+    let mut i = 0;
+    let n = items.len();
+    while i < n {
+        f(items[i]);
+        i = i + 1;
+    }
+}
+
+/// Reduce a list in parallel using an associative binary operation.
+///
+/// Returns None for an empty list.
+public fn parallel_reduce<T>(
+    items: List<T>,
+    worker_count: Int,
+    f: fn(T, T) -> T
+) -> Maybe<T> {
+    let n = items.len();
+    if n == 0 {
+        return None;
+    }
+    let mut acc = items[0];
+    let mut i = 1;
+    while i < n {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    Some(acc)
+}

@@ -1,0 +1,90 @@
+// ============================================================================
+// Comprehensive Test Application for Verum Language (v2.2)
+// ============================================================================
+// This application tests the following major Verum language features:
+//  1. Basic types: Float, Bool, Text
+//  2. Type definitions with 'is' keyword
+//  3. Variant types (enums): Operator
+//  4. Functions with parameters and return types
+//  5. Pattern matching with match expressions
+//  6. Control flow: if/else
+//  7. Maybe and Result types
+//  8. Operators: arithmetic (+, -, *, /), comparison (==)
+//  9. Text string literals
+// ============================================================================
+
+// Result type for calculations
+type CalcResult is Result<Float, Text>;
+
+// Supported operators
+type Operator is Add | Sub | Mul | Div;
+
+// Calculate function
+fn calculate(a: Float, op: Operator, b: Float) -> CalcResult {
+        match op {
+                Operator.Add => Ok(a + b),
+                Operator.Sub => Ok(a - b),
+                Operator.Mul => Ok(a * b),
+                Operator.Div => {
+                        if b == 0.0 {
+                                Err("Division by zero")
+                        } else {
+                                Ok(a / b)
+                        }
+                }
+        }
+}
+
+// Parse operator from string
+fn parse_op(s: Text) -> Maybe<Operator> {
+        match s {
+                "+" => Some(Operator.Add),
+                "-" => Some(Operator.Sub),
+                "*" => Some(Operator.Mul),
+                "/" => Some(Operator.Div),
+                _ => None
+        }
+}
+
+// Print calculation result
+fn print_result(result: CalcResult) {
+        match result {
+                Ok(value) => print(value),
+                Err(msg) => print(msg)
+        }
+}
+
+// Process and print a calculation expression
+fn process(a: Float, op_str: Text, b: Float) {
+        match parse_op(op_str) {
+                Some(op) => {
+                        let result = calculate(a, op, b);
+                        print_result(result)
+                },
+                None => print("Unknown operator")
+        }
+}
+
+// Main entry
+fn main() {
+        print("Verum Calculator v1.0");
+        print("Usage: <number> <op> <number>");
+        print("Operators: + - * /");
+        print("");
+
+        // Test all operations
+        print("10 + 5 = ");
+        process(10.0, "+", 5.0);
+
+        print("20 - 8 = ");
+        process(20.0, "-", 8.0);
+
+        print("6 * 7 = ");
+        process(6.0, "*", 7.0);
+
+        print("100 / 4 = ");
+        process(100.0, "/", 4.0);
+
+        print("10 / 0 = ");
+        process(10.0, "/", 0.0);
+}

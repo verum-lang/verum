@@ -1,0 +1,16 @@
+// Context System Test - Corrected Syntax
+
+// Define a context
+context Logger {
+    fn log(msg: Text)
+}
+
+// Function that uses the context
+fn greet(name: Text) using [Logger] {
+    print(f"Hello, {name}!");
+}
+
+// Simple main function (provide statement is more complex and requires implementation)
+fn main() {
+    print("Context system test file created");
+}

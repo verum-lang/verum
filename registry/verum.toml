@@ -1,0 +1,132 @@
+[package]
+name = "verum-registry"
+version = "0.1.0"
+authors = []
+license = "MIT OR Apache-2.0"
+keywords = []
+categories = []
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[dev_dependencies]
+
+[build_dependencies]
+
+[build]
+target = ""
+opt_level = 0
+incremental = false
+lto = false
+panic = "unwind"
+
+[features]
+default = []
+
+[profile.dev]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[profile.release]
+tier = "2"
+verification = "runtime"
+opt_level = 3
+debug = false
+debug_assertions = false
+overflow_checks = false
+lto = true
+incremental = false
+codegen_units = 16
+cbgr_checks = "optimized"
+
+[profile.test]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[profile.bench]
+tier = "0"
+verification = "runtime"
+opt_level = 0
+debug = true
+debug_assertions = true
+overflow_checks = true
+lto = false
+incremental = true
+codegen_units = 256
+cbgr_checks = "all"
+
+[lsp]
+enable_cost_hints = true
+validation_mode = "incremental"
+auto_import = true
+format_on_save = false
+
+[registry]
+index = "https://packages.verum.lang"
+
+[llvm]
+cpu = "generic"
+features = ""
+reloc_mode = "pic"
+code_model = "default"
+pic = true
+pie = true
+
+[optimization]
+inline_threshold = 225
+unroll_threshold = 100
+vectorize = true
+slp_vectorize = true
+loop_unroll = true
+loop_interleaving = false
+merge_functions = true
+call_graph_profile = true
+licm_mssa = true
+licm_mssa_opt_cap = 1
+verify_each = false
+debug_logging = false
+vectorization_strategy = "aggressive"
+cbgr_optimizations = true
+
+[lto]
+mode = "thin"
+incremental = true
+import_instr_limit = 100
+aggressive_inlining = true
+enable_devirtualization = true
+enable_global_dce = true
+
+[pgo]
+enabled = false
+mode = "none"
+profile_dir = "pgo-data"
+enable_bb_reordering = true
+hot_inline_multiplier = 1.5
+use_sampling = false
+
+[cross_compile]
+enabled = false
+link_args = []
+linking_strategy = "dynamic"
+strip_symbols = false
+universal_binary = false
+minimal_runtime = false

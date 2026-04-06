@@ -1,0 +1,5 @@
+module runtime.sync;
+
+/// Emit a spin-loop hint for the CPU.
+@intrinsic("verum.runtime.spin_loop_hint")
+public fn spin_loop_hint();

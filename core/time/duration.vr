@@ -1,0 +1,375 @@
+// =============================================================================
+// duration.vr - Duration type
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Dependencies: core
+// =============================================================================
+//
+// Duration represents a span of time stored as nanoseconds.
+// It provides constructors for common time units and methods for conversion.
+//
+// # Example
+// ```verum
+// let timeout = Duration.secs(30);
+// let delay = Duration.millis(100);
+// let combined = timeout + delay;
+//
+// print(f"Total: {combined.as_secs()} seconds");
+// print(f"Total: {combined.as_millis()} milliseconds");
+// ```
+//
+// =============================================================================
+
+module core.time.duration;
+mount core.*;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const NANOS_PER_MICRO: Int = 1_000;
+const NANOS_PER_MILLI: Int = 1_000_000;
+const NANOS_PER_SEC: Int = 1_000_000_000;
+const NANOS_PER_MIN: Int = 60_000_000_000;
+const NANOS_PER_HOUR: Int = 3_600_000_000_000;
+
+// =============================================================================
+// Duration
+// =============================================================================
+
+/// A duration of time, stored as nanoseconds.
+///
+/// Duration is always non-negative. Attempting to create a negative
+/// duration will result in zero.
+///
+/// # Example
+/// ```verum
+/// let five_secs = Duration.secs(5);
+/// let half_sec = Duration.millis(500);
+/// let total = five_secs + half_sec;  // 5.5 seconds
+///
+/// assert(total.as_millis() == 5500);
+/// assert(total.as_secs() == 5);  // truncated
+/// ```
+public type Duration is {
+    /// Total nanoseconds (always non-negative)
+    nanos: Int,
+};
+
+implement Duration {
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /// The maximum representable duration.
+    public fn max_value() -> Duration {
+        Duration { nanos: Int.max_value() }
+    }
+
+    /// Create a duration of zero.
+    public fn zero() -> Duration {
+        Duration { nanos: 0 }
+    }
+
+    /// Create a duration from nanoseconds.
+    public fn nanos(n: Int) -> Duration {
+        Duration { nanos: n.max(0) }
+    }
+
+    /// Create a duration from nanoseconds (alias).
+    public fn from_nanos(n: Int) -> Duration {
+        Duration.nanos(n)
+    }
+
+    /// Create a duration from microseconds.
+    public fn micros(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_MICRO }
+    }
+
+    /// Create a duration from microseconds (alias).
+    public fn from_micros(n: Int) -> Duration {
+        Duration.micros(n)
+    }
+
+    /// Create a duration from milliseconds.
+    public fn millis(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_MILLI }
+    }
+
+    /// Create a duration from milliseconds (alias).
+    public fn from_millis(n: Int) -> Duration {
+        Duration.millis(n)
+    }
+
+    /// Create a duration from seconds.
+    public fn secs(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_SEC }
+    }
+
+    /// Create a duration from seconds (alias).
+    public fn from_secs(n: Int) -> Duration {
+        Duration.secs(n)
+    }
+
+    /// Create a duration from a floating-point number of seconds.
+    ///
+    /// Converts fractional seconds to nanosecond precision.
+    /// Negative values are clamped to zero.
+    public fn from_secs_f64(secs: Float) -> Duration {
+        if secs <= 0.0 {
+            Duration.zero()
+        } else {
+            let whole_secs: Int = secs as Int;
+            let frac: Float = secs - (whole_secs as Float);
+            let nanos: Int = (frac * 1_000_000_000.0) as Int;
+            Duration { nanos: whole_secs * NANOS_PER_SEC + nanos }
+        }
+    }
+
+    /// Create a duration from seconds && nanoseconds.
+    public fn new(secs: Int, nanos: Int) -> Duration {
+        Duration { nanos: secs.max(0) * NANOS_PER_SEC + nanos.max(0) }
+    }
+
+    /// Create a duration from minutes.
+    public fn mins(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_MIN }
+    }
+
+    /// Create a duration from hours.
+    public fn hours(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_HOUR }
+    }
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    /// Get total nanoseconds.
+    public fn as_nanos(&self) -> Int {
+        self.nanos
+    }
+
+    /// Get total microseconds (truncated).
+    public fn as_micros(&self) -> Int {
+        self.nanos / NANOS_PER_MICRO
+    }
+
+    /// Get total milliseconds (truncated).
+    public fn as_millis(&self) -> Int {
+        self.nanos / NANOS_PER_MILLI
+    }
+
+    /// Get total seconds (truncated).
+    public fn as_secs(&self) -> Int {
+        self.nanos / NANOS_PER_SEC
+    }
+
+    /// Get the fractional seconds part as nanoseconds.
+    ///
+    /// This is the nanoseconds remaining after whole seconds are removed.
+    /// Always in range [0, 999_999_999].
+    public fn subsec_nanos(&self) -> Int {
+        self.nanos % NANOS_PER_SEC
+    }
+
+    /// Get the fractional seconds part as microseconds.
+    public fn subsec_micros(&self) -> Int {
+        (self.nanos % NANOS_PER_SEC) / NANOS_PER_MICRO
+    }
+
+    /// Get the fractional seconds part as milliseconds.
+    public fn subsec_millis(&self) -> Int {
+        (self.nanos % NANOS_PER_SEC) / NANOS_PER_MILLI
+    }
+
+    /// Get total seconds as floating point.
+    public fn as_secs_f64(&self) -> Float {
+        (self.nanos as Float) / (NANOS_PER_SEC as Float)
+    }
+
+    // =========================================================================
+    // Predicates
+    // =========================================================================
+
+    /// Check if this duration is zero.
+    public fn is_zero(&self) -> Bool {
+        self.nanos == 0
+    }
+
+    // =========================================================================
+    // Arithmetic
+    // =========================================================================
+
+    /// Checked addition. Returns None on overflow.
+    public fn checked_add(&self, other: Duration) -> Maybe<Duration> {
+        let res = self.nanos + other.nanos;
+        if res < self.nanos {
+            // Overflow
+            None
+        } else {
+            Some(Duration { nanos: res })
+        }
+    }
+
+    /// Saturating addition.
+    public fn saturating_add(&self, other: Duration) -> Duration {
+        self.checked_add(other).unwrap_or(Duration { nanos: Int.max_value() })
+    }
+
+    /// Checked subtraction. Returns None if res would be negative.
+    public fn checked_sub(&self, other: Duration) -> Maybe<Duration> {
+        if other.nanos > self.nanos {
+            None
+        } else {
+            Some(Duration { nanos: self.nanos - other.nanos })
+        }
+    }
+
+    /// Saturating subtraction.
+    public fn saturating_sub(&self, other: Duration) -> Duration {
+        self.checked_sub(other).unwrap_or(Duration.zero())
+    }
+
+    /// Checked multiplication. Returns None on overflow.
+    public fn checked_mul(&self, rhs: Int) -> Maybe<Duration> {
+        if rhs < 0 {
+            return None;
+        }
+        // Simple overflow check
+        if rhs > 0 && self.nanos > Int.max_value() / rhs {
+            None
+        } else {
+            Some(Duration { nanos: self.nanos * rhs })
+        }
+    }
+
+    /// Saturating multiplication.
+    public fn saturating_mul(&self, rhs: Int) -> Duration {
+        self.checked_mul(rhs).unwrap_or(Duration { nanos: Int.max_value() })
+    }
+
+    /// Checked division. Returns None if rhs is zero.
+    public fn checked_div(&self, rhs: Int) -> Maybe<Duration> {
+        if rhs <= 0 {
+            None
+        } else {
+            Some(Duration { nanos: self.nanos / rhs })
+        }
+    }
+}
+
+// =============================================================================
+// Operator Implementations
+// =============================================================================
+
+implement Add for Duration {
+    type Output = Duration;
+
+    fn add(self, other: Duration) -> Duration {
+        Duration { nanos: self.nanos + other.nanos }
+    }
+}
+
+implement Sub for Duration {
+    type Output = Duration;
+
+    fn sub(self, other: Duration) -> Duration {
+        Duration { nanos: (self.nanos - other.nanos).max(0) }
+    }
+}
+
+implement Mul<Int> for Duration {
+    type Output = Duration;
+
+    fn mul(self, rhs: Int) -> Duration {
+        Duration { nanos: self.nanos * rhs.max(0) }
+    }
+}
+
+implement Div<Int> for Duration {
+    type Output = Duration;
+
+    fn div(self, rhs: Int) -> Duration {
+        assert(rhs > 0, "Duration division by zero || negative");
+        Duration { nanos: self.nanos / rhs }
+    }
+}
+
+// =============================================================================
+// Comparison Implementations
+// =============================================================================
+
+implement Eq for Duration {
+    fn eq(&self, other: &Duration) -> Bool {
+        self.nanos == other.nanos
+    }
+}
+
+implement Ord for Duration {
+    fn cmp(&self, other: &Duration) -> Ordering {
+        self.nanos.cmp(&other.nanos)
+    }
+}
+
+implement PartialOrd for Duration {
+    fn partial_cmp(&self, other: &Duration) -> Maybe<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// =============================================================================
+// Other Implementations
+// =============================================================================
+
+implement Default for Duration {
+    fn default() -> Duration {
+        Duration.zero()
+    }
+}
+
+implement Clone for Duration {
+    fn clone(&self) -> Duration {
+        Duration { nanos: self.nanos }
+    }
+}
+
+implement Copy for Duration {}
+
+implement Hash for Duration {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.nanos.hash(hasher);
+    }
+}
+
+implement Debug for Duration {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let secs = self.as_secs();
+        let subsec_nanos = self.subsec_nanos();
+
+        if secs == 0 {
+            if subsec_nanos == 0 {
+                f.write_str("0ns")
+            } else if subsec_nanos < NANOS_PER_MICRO {
+                f.write_str(f"{subsec_nanos}ns")
+            } else if subsec_nanos < NANOS_PER_MILLI {
+                f.write_str(f"{subsec_nanos / NANOS_PER_MICRO}µs")
+            } else {
+                f.write_str(f"{subsec_nanos / NANOS_PER_MILLI}ms")
+            }
+        } else {
+            if subsec_nanos == 0 {
+                f.write_str(f"{secs}s")
+            } else {
+                let ms = subsec_nanos / NANOS_PER_MILLI;
+                f.write_str(f"{secs}.{ms:03}s")
+            }
+        }
+    }
+}
+
+implement Display for Duration {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}

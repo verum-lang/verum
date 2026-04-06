@@ -1,0 +1,9 @@
+// Test Self keyword
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+fn main() {
+    print("Self keyword test");
+}

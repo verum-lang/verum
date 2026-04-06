@@ -1,0 +1,7 @@
+type Color is
+    | Red
+    | Rgb { r: Int, g: Int, b: Int };
+
+fn main() {
+    print(f"Type defined successfully!");
+}

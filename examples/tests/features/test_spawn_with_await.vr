@@ -1,0 +1,11 @@
+// Test spawn with await (method call syntax)
+async fn compute() -> Int {
+    100 + 23
+}
+
+fn main() {
+    let handle = spawn compute();
+    let result = handle.await;
+    println("Result: ");
+    println(result);
+}

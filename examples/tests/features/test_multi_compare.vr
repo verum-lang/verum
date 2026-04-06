@@ -1,0 +1,16 @@
+// Test multiple comparisons
+
+fn main() {
+    let _ = print("=== Multi Comparison ===");
+
+    let a = 10.0;
+    let b = 3.0;
+
+    let gt = a > b;
+    let _ = print(f"gt: {gt}");
+
+    let lt = a < b;
+    let _ = print(f"lt: {lt}");
+
+    let _ = print("=== Done ===");
+}

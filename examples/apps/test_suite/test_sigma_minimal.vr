@@ -1,0 +1,8 @@
+// Minimal sigma-type test
+
+type PositiveSigma is x: Int where x > 0;
+
+fn main() {
+    let val: PositiveSigma = 5;
+    let _ = print(f"Value: {val}");
+}

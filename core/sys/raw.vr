@@ -1,0 +1,254 @@
+module sys.raw;
+
+// =============================================================================
+// sys/raw.vr - Raw OS Syscall Intrinsics
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None
+// =============================================================================
+//
+// These functions provide the absolute lowest-level interface to the OS.
+// Each is intercepted by LLVM lowering and compiled to the platform-appropriate
+// syscall or library call. No C runtime dependency.
+//
+// Platform abstraction:
+//   - Linux:  raw SYS_* syscalls via inline asm
+//   - macOS:  libSystem.B.dylib FFI calls
+//   - Windows: kernel32.dll FFI calls
+//
+// =============================================================================
+
+module raw;
+
+// =============================================================================
+// File I/O (replacing verum_file_* from C runtime)
+// =============================================================================
+
+/// Open a file. Returns fd on success, -1 on error.
+/// flags: 0=read, 1=write, 2=read+write, 0x100=create, 0x200=truncate, 0x400=append
+@intrinsic("file_open")
+public fn __file_open_raw(path: Text, flags: Int, mode: Int) -> Int;
+
+/// Close a file descriptor.
+@intrinsic("file_close")
+public fn __file_close_raw(fd: Int) -> Int;
+
+/// Read from fd into buffer. Returns bytes read, 0=EOF, -1=error.
+@intrinsic("file_read")
+public fn __file_read_raw(fd: Int, buf: Int, len: Int) -> Int;
+
+/// Write to fd from buffer. Returns bytes written, -1=error.
+@intrinsic("file_write")
+public fn __file_write_raw(fd: Int, buf: Int, len: Int) -> Int;
+
+/// Seek within file. whence: 0=SET, 1=CUR, 2=END. Returns new offset.
+@intrinsic("file_seek")
+public fn __file_seek_raw(fd: Int, offset: Int, whence: Int) -> Int;
+
+/// Get file size via fstat. Returns size or -1.
+@intrinsic("file_size")
+public fn __file_size_raw(fd: Int) -> Int;
+
+/// Delete file (unlink).
+@intrinsic("file_delete")
+public fn __file_delete_raw(path: Text) -> Int;
+
+/// Create directory.
+@intrinsic("mkdir")
+public fn __mkdir_raw(path: Text, mode: Int) -> Int;
+
+/// Read entire file to Text (convenience).
+@intrinsic("file_read_to_string")
+public fn __file_read_to_string_raw(path: Text) -> Text;
+
+/// Write Text to file (create/truncate).
+@intrinsic("file_write_string")
+public fn __file_write_string_raw(path: Text, content: Text) -> Int;
+
+// =============================================================================
+// Networking (replacing verum_tcp_*/verum_udp_* from C runtime)
+// =============================================================================
+
+/// Create TCP socket, connect to host:port. Returns fd or -1.
+@intrinsic("tcp_connect")
+public fn __tcp_connect_raw(host: Text, port: Int) -> Int;
+
+/// Create TCP socket, bind to port, listen. Returns listen_fd or -1.
+@intrinsic("tcp_listen")
+public fn __tcp_listen_raw(port: Int) -> Int;
+
+/// Accept incoming connection. Returns new fd or -1.
+@intrinsic("tcp_accept")
+public fn __tcp_accept_raw(listen_fd: Int) -> Int;
+
+/// Send text over TCP. Returns bytes sent or -1.
+@intrinsic("tcp_send")
+public fn __tcp_send_raw(fd: Int, data: Text) -> Int;
+
+/// Receive text from TCP. Returns received Text.
+@intrinsic("tcp_recv")
+public fn __tcp_recv_raw(fd: Int, max_len: Int) -> Text;
+
+/// Close TCP socket.
+@intrinsic("tcp_close")
+public fn __tcp_close_raw(fd: Int) -> Int;
+
+/// Create UDP socket, bind to port. Returns fd or -1.
+@intrinsic("udp_bind")
+public fn __udp_bind_raw(port: Int) -> Int;
+
+/// Send UDP datagram.
+@intrinsic("udp_send")
+public fn __udp_send_raw(fd: Int, data: Text, host: Text, port: Int) -> Int;
+
+/// Receive UDP datagram.
+@intrinsic("udp_recv")
+public fn __udp_recv_raw(fd: Int, max_len: Int) -> Text;
+
+/// Close UDP socket.
+@intrinsic("udp_close")
+public fn __udp_close_raw(fd: Int) -> Int;
+
+// =============================================================================
+// Time (replacing verum_time_* from C runtime)
+// =============================================================================
+
+/// Get monotonic time in nanoseconds.
+@intrinsic("time_monotonic_nanos")
+public fn __time_monotonic_nanos_raw() -> Int;
+
+/// Sleep for specified nanoseconds.
+@intrinsic("time_sleep_nanos")
+public fn __time_sleep_nanos_raw(nanos: Int) -> Int;
+
+/// Get wall-clock time in milliseconds since epoch.
+@intrinsic("time_now_ms")
+public fn __time_now_ms_raw() -> Int;
+
+// =============================================================================
+// Memory (raw allocation — used by higher-level allocators)
+// =============================================================================
+
+/// Allocate size bytes. Returns pointer or 0.
+@intrinsic("alloc")
+public fn __alloc_raw(size: Int) -> Int;
+
+/// Allocate zeroed memory.
+@intrinsic("alloc_zeroed")
+public fn __alloc_zeroed_raw(size: Int) -> Int;
+
+/// Free previously allocated memory.
+@intrinsic("dealloc")
+public fn __dealloc_raw(ptr: Int, size: Int) -> Int;
+
+// =============================================================================
+// Process (replacing verum_process_* from C runtime)
+// =============================================================================
+
+/// Spawn child process. Returns pid or -1.
+@intrinsic("process_spawn")
+public fn __process_spawn_raw(program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int;
+
+/// Wait for child process. Returns status.
+@intrinsic("process_wait")
+public fn __process_wait_raw(pid: Int) -> Int;
+
+/// Read all bytes from fd. Returns list header pointer.
+@intrinsic("fd_read_all")
+public fn __fd_read_all_raw(fd: Int) -> Int;
+
+/// Close fd.
+@intrinsic("fd_close")
+public fn __fd_close_raw(fd: Int) -> Int;
+
+// =============================================================================
+// Context System
+// =============================================================================
+
+/// Get context value by type ID.
+@intrinsic("ctx_get")
+public fn __ctx_get_raw(type_id: Int) -> Int;
+
+/// Provide context value.
+@intrinsic("ctx_provide")
+public fn __ctx_provide_raw(type_id: Int, value: Int) -> Int;
+
+/// End context scope.
+@intrinsic("ctx_end")
+public fn __ctx_end_raw(type_id: Int) -> Int;
+
+// =============================================================================
+// Defer cleanup (RAII on unwind)
+// =============================================================================
+
+/// Push a defer cleanup callback.
+@intrinsic("defer_push")
+public fn __defer_push_raw(cleanup_fn: Int, arg: Int) -> Int;
+
+/// Pop and execute the most recent defer.
+@intrinsic("defer_pop")
+public fn __defer_pop_raw() -> Int;
+
+/// Run all defers down to target depth.
+@intrinsic("defer_run_to")
+public fn __defer_run_to_raw(target_depth: Int) -> Int;
+
+/// Get current defer stack depth.
+@intrinsic("defer_depth")
+public fn __defer_depth_raw() -> Int;
+
+// =============================================================================
+// Command-line Arguments
+// =============================================================================
+
+/// Get number of command-line arguments.
+@intrinsic("args_count")
+public fn __args_count_raw() -> Int;
+
+/// Get argument at index.
+@intrinsic("arg")
+public fn __arg_raw(index: Int) -> Text;
+
+// =============================================================================
+// Concurrency Primitives
+// =============================================================================
+
+/// Create a new mutex. Returns handle.
+@intrinsic("mutex_new")
+public fn __mutex_new_raw() -> Int;
+
+/// Lock a mutex.
+@intrinsic("mutex_lock")
+public fn __mutex_lock_raw(mtx: Int) -> Int;
+
+/// Unlock a mutex.
+@intrinsic("mutex_unlock")
+public fn __mutex_unlock_raw(mtx: Int) -> Int;
+
+/// Try to lock a mutex. Returns 1 if acquired, 0 if not.
+@intrinsic("mutex_trylock")
+public fn __mutex_trylock_raw(mtx: Int) -> Int;
+
+/// Create a condition variable.
+@intrinsic("cond_new")
+public fn __cond_new_raw() -> Int;
+
+/// Wait on a condition variable.
+@intrinsic("cond_wait")
+public fn __cond_wait_raw(cond: Int, mtx: Int) -> Int;
+
+/// Wait on condvar with timeout (nanoseconds).
+@intrinsic("cond_timedwait")
+public fn __cond_timedwait_raw(cond: Int, mtx: Int, timeout_ns: Int) -> Int;
+
+/// Signal one waiter on condvar.
+@intrinsic("cond_signal")
+public fn __cond_signal_raw(cond: Int) -> Int;
+
+/// Broadcast to all waiters on condvar.
+@intrinsic("cond_broadcast")
+public fn __cond_broadcast_raw(cond: Int) -> Int;
+
+/// Close a generator handle.
+@intrinsic("gen_close")
+public fn __gen_close_raw(gen_handle: Int) -> Int;

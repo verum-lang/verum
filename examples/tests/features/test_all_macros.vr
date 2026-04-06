@@ -1,0 +1,47 @@
+// Comprehensive test of all built-in macros
+
+fn main() {
+    println!("=== Macro Test Suite ===");
+    println!("");
+
+    // Test 1: println! - print with newline
+    println!("Test 1: println! macro");
+    println!("Line 1");
+    println!("Line 2");
+    println!("");
+
+    // Test 2: print! - print without newline
+    println!("Test 2: print! macro");
+    print!("A");
+    print!("B");
+    print!("C");
+    println!("D");
+    println!("");
+
+    // Test 3: format! - format string
+    println!("Test 3: format! macro");
+    let msg = format!("This is a formatted message");
+    let _ = print(msg);
+    println!("");
+
+    // Test 4: vec! - create vector/list
+    println!("Test 4: vec! macro");
+    let nums = vec![1, 2, 3, 4, 5];
+    let _ = print("Created vector with 5 elements");
+    println!("");
+
+    // Test 5: dbg! - debug print
+    println!("Test 5: dbg! macro");
+    dbg!("Debug information");
+    println!("");
+
+    // Test 6: assert! - runtime assertion (placeholder)
+    println!("Test 6: assert macros");
+    assert!(true);
+    assert_eq!(1, 1);
+    assert_ne!(1, 2);
+    println!("All assertions passed");
+    println!("");
+
+    println!("=== All Tests Complete ===");
+}

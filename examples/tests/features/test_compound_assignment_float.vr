@@ -1,0 +1,23 @@
+fn main() {
+    // Test += with floats
+    let mut a = 10.5;
+    a += 5.3;
+    print(f"a += 5.3: {a}");  // Should print 15.8
+
+    // Test -= with floats
+    let mut b = 20.7;
+    b -= 7.2;
+    print(f"b -= 7.2: {b}");  // Should print 13.5
+
+    // Test *= with floats
+    let mut c = 4.5;
+    c *= 2.0;
+    print(f"c *= 2.0: {c}");  // Should print 9.0
+
+    // Test /= with floats
+    let mut d = 20.0;
+    d /= 4.0;
+    print(f"d /= 4.0: {d}");  // Should print 5.0
+
+    print("Float compound assignments work correctly!");
+}

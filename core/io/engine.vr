@@ -1,0 +1,225 @@
+// =============================================================================
+// io/engine.vr - Async I/O Engine (kqueue / epoll / IOCP)
+// =============================================================================
+// Layer: 3 (I/O)
+// Dependencies: core
+// =============================================================================
+//
+// Platform-native async I/O engine:
+//   - macOS: kqueue
+//   - Linux: epoll
+//   - Windows: IOCP (via sys/windows/io.vr IocpDriver)
+//
+// The IoEngine allows registering file descriptors for readiness
+// notification, polling for events, and performing async socket operations.
+//
+// Usage:
+//   let engine = IoEngine.new();
+//   engine.register(fd, IoEvent.Read);    // Watch for readability
+//   let n = engine.poll(64, 5_000_000);   // Poll with 5ms timeout
+//   engine.deregister(fd);
+//   engine.destroy();
+//
+// =============================================================================
+
+module engine;
+
+mount core.*;
+
+// =============================================================================
+// Event Types
+// =============================================================================
+
+/// I/O event interest flags.
+public type IoEvent is {
+    flags: Int,
+};
+
+implement IoEvent {
+    /// Interest in read readiness (EPOLLIN / EVFILT_READ).
+    public fn Read() -> IoEvent { IoEvent { flags: 1 } }
+
+    /// Interest in write readiness (EPOLLOUT / EVFILT_WRITE).
+    public fn Write() -> IoEvent { IoEvent { flags: 2 } }
+
+    /// Interest in both read and write readiness.
+    public fn ReadWrite() -> IoEvent { IoEvent { flags: 3 } }
+}
+
+// =============================================================================
+// I/O Engine
+// =============================================================================
+
+/// Platform-native async I/O multiplexer.
+///
+/// Wraps kqueue (macOS), epoll (Linux), or IOCP (Windows).
+/// Zero-allocation polling with bounded event buffers.
+public type IoEngine is {
+    handle: Int,
+};
+
+// Raw intrinsics
+@intrinsic("io_engine_new")
+fn __io_engine_new_raw(capacity: Int) -> Int;
+
+@intrinsic("io_engine_destroy")
+fn __io_engine_destroy_raw(engine: Int) -> Int;
+
+@intrinsic("io_submit")
+fn __io_submit_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+@intrinsic("io_poll")
+fn __io_poll_raw(engine: Int, max: Int, timeout_ns: Int) -> Int;
+
+@intrinsic("io_remove")
+fn __io_remove_raw(engine: Int, fd: Int) -> Int;
+
+@intrinsic("io_modify")
+fn __io_modify_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+implement IoEngine {
+    /// Create a new I/O engine with the given event capacity.
+    /// Default capacity is 256 if cap <= 0.
+    public fn new() -> IoEngine {
+        let h = __io_engine_new_raw(256);
+        IoEngine { handle: h }
+    }
+
+    /// Create with custom capacity.
+    public fn with_capacity(capacity: Int) -> IoEngine {
+        let h = __io_engine_new_raw(capacity);
+        IoEngine { handle: h }
+    }
+
+    /// Register a file descriptor for event notification.
+    /// Returns 0 on success, -1 on error.
+    public fn register(&self, fd: Int, event: IoEvent) -> Int {
+        __io_submit_raw(self.handle, fd, event.flags)
+    }
+
+    /// Deregister a file descriptor.
+    public fn deregister(&self, fd: Int) -> Int {
+        __io_remove_raw(self.handle, fd)
+    }
+
+    /// Modify the event interest for a registered fd.
+    public fn modify(&self, fd: Int, event: IoEvent) -> Int {
+        __io_modify_raw(self.handle, fd, event.flags)
+    }
+
+    /// Poll for ready events.
+    ///
+    /// max: maximum number of events to return.
+    /// timeout_ns: timeout in nanoseconds (-1 = block forever, 0 = non-blocking).
+    /// Returns: number of ready events, or -1 on error.
+    public fn poll(&self, max: Int, timeout_ns: Int) -> Int {
+        __io_poll_raw(self.handle, max, timeout_ns)
+    }
+
+    /// Destroy the engine, closing the underlying kqueue/epoll fd.
+    public fn destroy(&self) {
+        __io_engine_destroy_raw(self.handle);
+    }
+
+    /// Check if the engine is valid (non-null handle).
+    public fn is_valid(&self) -> Bool {
+        self.handle != 0
+    }
+}
+
+// =============================================================================
+// Async Socket Operations
+// =============================================================================
+
+/// Socket configuration utilities.
+public type Socket is ();
+
+@intrinsic("socket_set_nonblocking")
+fn __socket_set_nonblocking_raw(fd: Int) -> Int;
+
+@intrinsic("socket_set_blocking")
+fn __socket_set_blocking_raw(fd: Int) -> Int;
+
+@intrinsic("socket_set_reuseaddr")
+fn __socket_set_reuseaddr_raw(fd: Int) -> Int;
+
+@intrinsic("socket_set_nodelay")
+fn __socket_set_nodelay_raw(fd: Int) -> Int;
+
+@intrinsic("socket_set_keepalive")
+fn __socket_set_keepalive_raw(fd: Int) -> Int;
+
+@intrinsic("socket_get_error")
+fn __socket_get_error_raw(fd: Int) -> Int;
+
+@intrinsic("async_accept")
+fn __async_accept_raw(engine: Int, listen_fd: Int, timeout_ns: Int) -> Int;
+
+@intrinsic("async_read")
+fn __async_read_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;
+
+@intrinsic("async_write")
+fn __async_write_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;
+
+implement Socket {
+    /// Set a socket to non-blocking mode.
+    public fn set_nonblocking(fd: Int) -> Int {
+        __socket_set_nonblocking_raw(fd)
+    }
+
+    /// Set a socket to blocking mode.
+    public fn set_blocking(fd: Int) -> Int {
+        __socket_set_blocking_raw(fd)
+    }
+
+    /// Enable SO_REUSEADDR on a socket.
+    public fn set_reuseaddr(fd: Int) -> Int {
+        __socket_set_reuseaddr_raw(fd)
+    }
+
+    /// Enable TCP_NODELAY (disable Nagle's algorithm).
+    public fn set_nodelay(fd: Int) -> Int {
+        __socket_set_nodelay_raw(fd)
+    }
+
+    /// Enable SO_KEEPALIVE.
+    public fn set_keepalive(fd: Int) -> Int {
+        __socket_set_keepalive_raw(fd)
+    }
+
+    /// Get pending socket error (SO_ERROR).
+    public fn get_error(fd: Int) -> Int {
+        __socket_get_error_raw(fd)
+    }
+}
+
+/// Async socket operations using an IoEngine.
+public type AsyncSocket is {
+    engine: IoEngine,
+};
+
+implement AsyncSocket {
+    /// Create an async socket context with a shared IoEngine.
+    public fn new(engine: IoEngine) -> AsyncSocket {
+        AsyncSocket { engine: engine }
+    }
+
+    /// Async accept: waits for a connection on listen_fd.
+    /// timeout_ns: -1 = block forever, 0 = non-blocking.
+    /// Returns new fd on success, -1 on error.
+    public fn accept(&self, listen_fd: Int, timeout_ns: Int) -> Int {
+        __async_accept_raw(self.engine.handle, listen_fd, timeout_ns)
+    }
+
+    /// Async read: waits for data on fd, reads into buffer.
+    /// Returns bytes read, or -1 on error.
+    public fn read(&self, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int {
+        __async_read_raw(self.engine.handle, fd, buf, len, timeout_ns)
+    }
+
+    /// Async write: waits for writability on fd, writes from buffer.
+    /// Returns bytes written, or -1 on error.
+    public fn write(&self, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int {
+        __async_write_raw(self.engine.handle, fd, buf, len, timeout_ns)
+    }
+}

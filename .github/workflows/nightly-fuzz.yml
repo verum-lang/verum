@@ -1,0 +1,824 @@
+# =============================================================================
+# Verum Compliance Suite (VCS) - Nightly Fuzzing Campaign
+# =============================================================================
+#
+# Extended fuzzing campaigns to discover edge cases, crashes, and security
+# vulnerabilities. This workflow runs longer fuzzing sessions than the
+# standard CI fuzz tests.
+#
+# Schedule:
+#   - Nightly: 4-hour campaign (Sun-Thu)
+#   - Weekend: 12-hour extended campaign (Friday night)
+#   - Monthly: 24-hour deep campaign (first Saturday)
+#
+# Reference: VCS Spec Section 23.4 - Continuous Fuzzing
+# =============================================================================
+
+name: VCS Nightly Fuzzing
+
+on:
+  schedule:
+    # Nightly campaign at 1:00 AM UTC (Sun-Thu)
+    - cron: '0 1 * * 0-4'
+    # Extended weekend campaign (Friday 10 PM UTC, runs 12 hours)
+    - cron: '0 22 * * 5'
+    # Monthly deep campaign (first Saturday at midnight)
+    - cron: '0 0 1-7 * 6'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration'
+        required: false
+        default: '4h'
+        type: choice
+        options:
+          - '1h'
+          - '2h'
+          - '4h'
+          - '8h'
+          - '12h'
+          - '24h'
+      targets:
+        description: 'Fuzz targets'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - lexer
+          - parser
+          - cbgr
+          - types
+          - smt
+          - codegen
+      corpus_merge:
+        description: 'Merge corpus from previous runs'
+        required: false
+        default: true
+        type: boolean
+      minimize_crashes:
+        description: 'Minimize crash files'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+  UBSAN_OPTIONS: print_stacktrace=1
+
+# Only one fuzzing campaign at a time
+concurrency:
+  group: nightly-fuzz
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Configure Campaign
+  # ==========================================================================
+  configure:
+    name: Configure Fuzzing Campaign
+    runs-on: ubuntu-latest
+    outputs:
+      duration: ${{ steps.config.outputs.duration }}
+      duration_seconds: ${{ steps.config.outputs.duration_seconds }}
+      targets: ${{ steps.config.outputs.targets }}
+      parallelism: ${{ steps.config.outputs.parallelism }}
+      campaign_type: ${{ steps.config.outputs.campaign_type }}
+      minimize: ${{ steps.config.outputs.minimize }}
+
+    steps:
+      - name: Determine Configuration
+        id: config
+        run: |
+          # Determine campaign type based on schedule
+          DAY_OF_WEEK=$(date +%u)
+          DAY_OF_MONTH=$(date +%d)
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            DURATION="${{ github.event.inputs.duration }}"
+            TARGETS="${{ github.event.inputs.targets }}"
+            CAMPAIGN_TYPE="manual"
+            MINIMIZE="${{ github.event.inputs.minimize }}"
+          elif [ "$DAY_OF_WEEK" == "6" ] && [ "$DAY_OF_MONTH" -le 7 ]; then
+            # First Saturday: monthly deep campaign
+            DURATION="24h"
+            TARGETS="all"
+            CAMPAIGN_TYPE="monthly-deep"
+            MINIMIZE="true"
+          elif [ "$DAY_OF_WEEK" == "5" ]; then
+            # Friday: weekend extended
+            DURATION="12h"
+            TARGETS="all"
+            CAMPAIGN_TYPE="weekend-extended"
+            MINIMIZE="true"
+          else
+            # Regular nightly
+            DURATION="4h"
+            TARGETS="all"
+            CAMPAIGN_TYPE="nightly"
+            MINIMIZE="true"
+          fi
+
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo "targets=$TARGETS" >> $GITHUB_OUTPUT
+          echo "campaign_type=$CAMPAIGN_TYPE" >> $GITHUB_OUTPUT
+          echo "minimize=$MINIMIZE" >> $GITHUB_OUTPUT
+
+          # Convert duration to seconds
+          case $DURATION in
+            1h)  SECONDS=3600 ;;
+            2h)  SECONDS=7200 ;;
+            4h)  SECONDS=14400 ;;
+            8h)  SECONDS=28800 ;;
+            12h) SECONDS=43200 ;;
+            24h) SECONDS=86400 ;;
+            *)   SECONDS=14400 ;;
+          esac
+          echo "duration_seconds=$SECONDS" >> $GITHUB_OUTPUT
+
+          # Set parallelism based on duration
+          if [ $SECONDS -ge 43200 ]; then
+            echo "parallelism=8" >> $GITHUB_OUTPUT
+          elif [ $SECONDS -ge 14400 ]; then
+            echo "parallelism=6" >> $GITHUB_OUTPUT
+          else
+            echo "parallelism=4" >> $GITHUB_OUTPUT
+          fi
+
+          echo "## Fuzzing Campaign Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Campaign Type | $CAMPAIGN_TYPE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Duration | $DURATION |" >> $GITHUB_STEP_SUMMARY
+          echo "| Targets | $TARGETS |" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Build Fuzz Targets
+  # ==========================================================================
+  build-fuzzers:
+    name: Build Fuzz Targets
+    needs: configure
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "nightly-fuzz-v1"
+
+      - name: Build all fuzz targets
+        run: |
+          cd vcs/fuzz
+          cargo +nightly fuzz build
+
+      - name: Upload fuzz binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-binaries
+          path: vcs/fuzz/target/*/release/*_fuzz*
+          retention-days: 1
+
+  # ==========================================================================
+  # Restore and Merge Corpus
+  # ==========================================================================
+  prepare-corpus:
+    name: Prepare Fuzzing Corpus
+    needs: configure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download previous corpus
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: nightly-fuzz.yml
+          name: fuzz-corpus-merged
+          path: corpus-prev/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Download crash seeds
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: nightly-fuzz.yml
+          name: fuzz-crashes-*
+          path: crashes-prev/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Prepare unified corpus
+        run: |
+          mkdir -p corpus-unified
+
+          # Copy from VCS seeds
+          if [ -d "vcs/fuzz/seeds" ]; then
+            cp -r vcs/fuzz/seeds/* corpus-unified/ 2>/dev/null || true
+          fi
+
+          # Merge previous corpus
+          if [ -d "corpus-prev" ]; then
+            cp -r corpus-prev/* corpus-unified/ 2>/dev/null || true
+          fi
+
+          # Include VCS spec files as seeds
+          find vcs/specs -name "*.vr" -exec cp {} corpus-unified/ \; 2>/dev/null || true
+
+          CORPUS_SIZE=$(find corpus-unified -type f | wc -l)
+          echo "Unified corpus size: $CORPUS_SIZE files"
+
+      - name: Upload unified corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-unified
+          path: corpus-unified/
+          retention-days: 1
+
+  # ==========================================================================
+  # Fuzz Lexer
+  # ==========================================================================
+  fuzz-lexer:
+    name: Fuzz Lexer
+    needs: [configure, build-fuzzers, prepare-corpus]
+    if: needs.configure.outputs.targets == 'all' || needs.configure.outputs.targets == 'lexer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1560  # 26 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Download unified corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: corpus-unified
+          path: corpus/
+
+      - name: Run Lexer Fuzzing Campaign
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports corpus/lexer_fuzz
+
+          # Copy unified corpus
+          cp ../../../corpus/* corpus/lexer_fuzz/ 2>/dev/null || true
+
+          echo "Starting lexer fuzzing for ${{ needs.configure.outputs.duration }}..."
+          START_TIME=$(date +%s)
+
+          timeout ${{ needs.configure.outputs.duration_seconds }} \
+            cargo +nightly fuzz run lexer_fuzz \
+              --jobs ${{ needs.configure.outputs.parallelism }} \
+              -- \
+              -max_len=8192 \
+              -max_total_time=${{ needs.configure.outputs.duration_seconds }} \
+              -dict=dictionaries/verum_lexer.dict \
+              -artifact_prefix=artifacts/lexer/ \
+              -print_final_stats=1 \
+              -print_pcs=1 \
+              -print_coverage=1 \
+            2>&1 | tee reports/lexer_fuzz.log || true
+
+          END_TIME=$(date +%s)
+          RUNTIME=$((END_TIME - START_TIME))
+
+          # Generate statistics
+          CRASH_COUNT=$(find artifacts/lexer* -type f 2>/dev/null | wc -l || echo "0")
+          CORPUS_SIZE=$(find corpus/lexer_fuzz -type f | wc -l)
+
+          echo "lexer_crashes=$CRASH_COUNT" >> $GITHUB_OUTPUT
+          echo "lexer_corpus=$CORPUS_SIZE" >> $GITHUB_OUTPUT
+          echo "lexer_runtime=$RUNTIME" >> $GITHUB_OUTPUT
+
+          # Extract coverage from log
+          if grep -q "cov:" reports/lexer_fuzz.log; then
+            COVERAGE=$(grep -oP 'cov: \K[0-9]+' reports/lexer_fuzz.log | tail -1)
+            echo "lexer_coverage=$COVERAGE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Minimize crashes
+        if: needs.configure.outputs.minimize == 'true'
+        run: |
+          cd vcs/fuzz
+          mkdir -p minimized/lexer
+
+          for crash in artifacts/lexer/*; do
+            if [ -f "$crash" ]; then
+              MIN_FILE="minimized/lexer/$(basename $crash).min"
+              timeout 300 cargo +nightly fuzz tmin lexer_fuzz "$crash" -o "$MIN_FILE" 2>/dev/null || true
+            fi
+          done
+
+      - name: Upload lexer crashes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-lexer
+          path: |
+            vcs/fuzz/artifacts/lexer/
+            vcs/fuzz/minimized/lexer/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload lexer corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-lexer
+          path: vcs/fuzz/corpus/lexer_fuzz/
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz Parser
+  # ==========================================================================
+  fuzz-parser:
+    name: Fuzz Parser
+    needs: [configure, build-fuzzers, prepare-corpus]
+    if: needs.configure.outputs.targets == 'all' || needs.configure.outputs.targets == 'parser'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1560
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Download unified corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: corpus-unified
+          path: corpus/
+
+      - name: Run Parser Fuzzing Campaign
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports corpus/parser_fuzz
+
+          cp ../../../corpus/* corpus/parser_fuzz/ 2>/dev/null || true
+
+          echo "Starting parser fuzzing for ${{ needs.configure.outputs.duration }}..."
+
+          timeout ${{ needs.configure.outputs.duration_seconds }} \
+            cargo +nightly fuzz run parser_fuzz \
+              --jobs ${{ needs.configure.outputs.parallelism }} \
+              -- \
+              -max_len=32768 \
+              -max_total_time=${{ needs.configure.outputs.duration_seconds }} \
+              -dict=dictionaries/verum_parser.dict \
+              -artifact_prefix=artifacts/parser/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/parser_fuzz.log || true
+
+          CRASH_COUNT=$(find artifacts/parser* -type f 2>/dev/null | wc -l || echo "0")
+          echo "parser_crashes=$CRASH_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Minimize crashes
+        if: needs.configure.outputs.minimize == 'true'
+        run: |
+          cd vcs/fuzz
+          mkdir -p minimized/parser
+
+          for crash in artifacts/parser/*; do
+            if [ -f "$crash" ]; then
+              MIN_FILE="minimized/parser/$(basename $crash).min"
+              timeout 300 cargo +nightly fuzz tmin parser_fuzz "$crash" -o "$MIN_FILE" 2>/dev/null || true
+            fi
+          done
+
+      - name: Upload parser crashes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-parser
+          path: |
+            vcs/fuzz/artifacts/parser/
+            vcs/fuzz/minimized/parser/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload parser corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-parser
+          path: vcs/fuzz/corpus/parser_fuzz/
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz CBGR
+  # ==========================================================================
+  fuzz-cbgr:
+    name: Fuzz CBGR (${{ matrix.target }})
+    needs: [configure, build-fuzzers, prepare-corpus]
+    if: needs.configure.outputs.targets == 'all' || needs.configure.outputs.targets == 'cbgr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1560
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - cbgr_allocate_deallocate
+          - cbgr_concurrent_access
+          - cbgr_generation_wraparound
+          - cbgr_capability_checks
+          - cbgr_stress
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run CBGR Fuzzing (${{ matrix.target }})
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports corpus/${{ matrix.target }}
+
+          # Calculate per-target duration (divide by matrix size)
+          DURATION=$((${{ needs.configure.outputs.duration_seconds }} / 5))
+
+          echo "Starting ${{ matrix.target }} fuzzing for ${DURATION}s..."
+
+          RUSTFLAGS="-Zsanitizer=address" \
+          timeout $DURATION \
+            cargo +nightly fuzz run ${{ matrix.target }} \
+              --jobs 2 \
+              --sanitizer address \
+              -- \
+              -max_len=4096 \
+              -max_total_time=$DURATION \
+              -artifact_prefix=artifacts/${{ matrix.target }}/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/${{ matrix.target }}.log || true
+
+      - name: Upload CBGR crashes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-cbgr-${{ matrix.target }}
+          path: vcs/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload CBGR corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-cbgr-${{ matrix.target }}
+          path: vcs/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz Types
+  # ==========================================================================
+  fuzz-types:
+    name: Fuzz Type System
+    needs: [configure, build-fuzzers, prepare-corpus]
+    if: needs.configure.outputs.targets == 'all' || needs.configure.outputs.targets == 'types'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1560
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install dependencies
+        run: |
+          cargo install cargo-fuzz --locked
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Download unified corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: corpus-unified
+          path: corpus/
+
+      - name: Run Type System Fuzzing
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports corpus/types_inference_fuzz
+
+          cp ../../../corpus/* corpus/types_inference_fuzz/ 2>/dev/null || true
+
+          echo "Starting type system fuzzing for ${{ needs.configure.outputs.duration }}..."
+
+          timeout ${{ needs.configure.outputs.duration_seconds }} \
+            cargo +nightly fuzz run types_inference_fuzz \
+              --jobs ${{ needs.configure.outputs.parallelism }} \
+              -- \
+              -max_len=16384 \
+              -max_total_time=${{ needs.configure.outputs.duration_seconds }} \
+              -artifact_prefix=artifacts/types_inference/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/types_inference_fuzz.log || true
+
+      - name: Upload types crashes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-types
+          path: vcs/fuzz/artifacts/types_*/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload types corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-types
+          path: vcs/fuzz/corpus/types_*/
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz SMT
+  # ==========================================================================
+  fuzz-smt:
+    name: Fuzz SMT Solver
+    needs: [configure, build-fuzzers, prepare-corpus]
+    if: needs.configure.outputs.targets == 'all' || needs.configure.outputs.targets == 'smt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1560
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install dependencies
+        run: |
+          cargo install cargo-fuzz --locked
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Run SMT Fuzzing
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts reports corpus/smt_fuzz
+
+          echo "Starting SMT fuzzing for ${{ needs.configure.outputs.duration }}..."
+
+          timeout ${{ needs.configure.outputs.duration_seconds }} \
+            cargo +nightly fuzz run smt_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=4096 \
+              -max_total_time=${{ needs.configure.outputs.duration_seconds }} \
+              -timeout=120 \
+              -artifact_prefix=artifacts/smt/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/smt_fuzz.log || true
+
+      - name: Upload SMT crashes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-smt
+          path: vcs/fuzz/artifacts/smt/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload SMT corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-smt
+          path: vcs/fuzz/corpus/smt_fuzz/
+          retention-days: 30
+
+  # ==========================================================================
+  # Merge All Corpus
+  # ==========================================================================
+  merge-corpus:
+    name: Merge Fuzzing Corpus
+    needs: [configure, fuzz-lexer, fuzz-parser, fuzz-cbgr, fuzz-types, fuzz-smt]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all corpus artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-corpus-*
+          path: all-corpus/
+          merge-multiple: false
+
+      - name: Merge corpus
+        run: |
+          mkdir -p merged-corpus
+
+          for dir in all-corpus/*/; do
+            if [ -d "$dir" ]; then
+              cp -r "$dir"* merged-corpus/ 2>/dev/null || true
+            fi
+          done
+
+          # Deduplicate by content hash
+          cd merged-corpus
+          for f in *; do
+            if [ -f "$f" ]; then
+              HASH=$(sha256sum "$f" | cut -d' ' -f1)
+              mv "$f" "${HASH:0:16}" 2>/dev/null || true
+            fi
+          done
+
+          CORPUS_SIZE=$(find . -type f | wc -l)
+          echo "Merged corpus size: $CORPUS_SIZE unique entries"
+
+      - name: Upload merged corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-merged
+          path: merged-corpus/
+          retention-days: 90
+
+  # ==========================================================================
+  # Generate Report
+  # ==========================================================================
+  report:
+    name: Generate Fuzzing Report
+    needs: [configure, fuzz-lexer, fuzz-parser, fuzz-cbgr, fuzz-types, fuzz-smt, merge-corpus]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all crash artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-crashes-*
+          path: all-crashes/
+          merge-multiple: false
+
+      - name: Generate Report
+        id: report
+        run: |
+          echo "# VCS Nightly Fuzzing Report" > fuzz-report.md
+          echo "" >> fuzz-report.md
+          echo "**Campaign Type:** ${{ needs.configure.outputs.campaign_type }}" >> fuzz-report.md
+          echo "**Duration:** ${{ needs.configure.outputs.duration }}" >> fuzz-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> fuzz-report.md
+          echo "**Commit:** ${{ github.sha }}" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+
+          echo "## Results by Target" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+          echo "| Target | Crashes | Status |" >> fuzz-report.md
+          echo "|--------|---------|--------|" >> fuzz-report.md
+
+          TOTAL_CRASHES=0
+
+          for target in lexer parser cbgr types smt; do
+            CRASH_DIR="all-crashes/fuzz-crashes-$target"
+            CRASH_COUNT=0
+
+            if [ -d "$CRASH_DIR" ]; then
+              CRASH_COUNT=$(find "$CRASH_DIR" -type f 2>/dev/null | wc -l || echo "0")
+            fi
+
+            # Check CBGR matrix targets
+            for cbgr_dir in all-crashes/fuzz-crashes-cbgr-*/; do
+              if [ -d "$cbgr_dir" ] && [[ "$target" == "cbgr" ]]; then
+                CBGR_COUNT=$(find "$cbgr_dir" -type f 2>/dev/null | wc -l || echo "0")
+                CRASH_COUNT=$((CRASH_COUNT + CBGR_COUNT))
+              fi
+            done
+
+            TOTAL_CRASHES=$((TOTAL_CRASHES + CRASH_COUNT))
+
+            if [ "$CRASH_COUNT" -gt 0 ]; then
+              echo "| $target | $CRASH_COUNT | CRASH |" >> fuzz-report.md
+            else
+              echo "| $target | 0 | OK |" >> fuzz-report.md
+            fi
+          done
+
+          echo "" >> fuzz-report.md
+          echo "## Summary" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+
+          if [ $TOTAL_CRASHES -gt 0 ]; then
+            echo "**Total crashes found: $TOTAL_CRASHES**" >> fuzz-report.md
+            echo "" >> fuzz-report.md
+            echo "Crash artifacts have been uploaded for investigation." >> fuzz-report.md
+            echo "status=crashes_found" >> $GITHUB_OUTPUT
+          else
+            echo "No crashes found during this fuzzing campaign." >> fuzz-report.md
+            echo "status=clean" >> $GITHUB_OUTPUT
+          fi
+
+          echo "total_crashes=$TOTAL_CRASHES" >> $GITHUB_OUTPUT
+
+          cat fuzz-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-fuzz-report
+          path: fuzz-report.md
+          retention-days: 90
+
+  # ==========================================================================
+  # Notify on Crashes
+  # ==========================================================================
+  notify:
+    name: Notify on Crashes
+    needs: [report]
+    if: needs.report.outputs.status == 'crashes_found'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,workflow
+          text: 'VCS Nightly Fuzzing found ${{ needs.report.outputs.total_crashes }} crash(es) - investigate immediately'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const crashes = '${{ needs.report.outputs.total_crashes }}';
+            const title = `[SECURITY] Nightly Fuzzing Crashes - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Nightly Fuzzing Campaign Found Crashes
+
+            **Campaign:** ${{ needs.configure.outputs.campaign_type }}
+            **Duration:** ${{ needs.configure.outputs.duration }}
+            **Crashes Found:** ${crashes}
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+
+            ### Action Required
+
+            1. Download crash artifacts from the workflow run
+            2. Reproduce crashes locally
+            3. Minimize crash files for easier debugging
+            4. Fix the underlying issues
+            5. Add regression tests to prevent recurrence
+
+            ### Priority: HIGH
+
+            These crashes may indicate memory safety violations or security vulnerabilities.
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'fuzzing', 'high-priority', 'bug']
+            });

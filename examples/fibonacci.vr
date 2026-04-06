@@ -1,0 +1,105 @@
+// fibonacci.vr
+// Demonstrates recursion, pattern matching, and memoization
+
+// Simple recursive implementation
+fn fib_recursive(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib_recursive(n - 1) + fib_recursive(n - 2)
+    }
+}
+
+// Pattern matching version
+fn fib_match(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        n => fib_match(n - 1) + fib_match(n - 2)
+    }
+}
+
+// Tail-recursive version (efficient)
+fn fib_tail(n: Int) -> Int {
+    fn fib_helper(n: Int, a: Int, b: Int) -> Int {
+        if n == 0 {
+            a
+        } else {
+            fib_helper(n - 1, b, a + b)
+        }
+    }
+
+    fib_helper(n, 0, 1)
+}
+
+// Iterative version
+fn fib_iter(n: Int) -> Int {
+    if n <= 1 {
+        return n;
+    }
+
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+
+    while i <= n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+
+    b
+}
+
+// Generate Fibonacci sequence as a list
+fn fib_sequence(count: Int) -> List<Int> {
+    let mut result = [];
+    for i in 0..count {
+        result = result.push(fib_tail(i));
+    }
+    result
+}
+
+// Lazy fibonacci sequence generator
+fn fib_lazy() -> Iterator<Int> {
+    let mut a = 0;
+    let mut b = 1;
+
+    Iterator.from_fn(|| {
+        let current = a;
+        let next = a + b;
+        a = b;
+        b = next;
+        Some(current)
+    })
+}
+
+fn main() {
+    // Test different implementations
+    print("Fibonacci numbers (recursive):");
+    for i in 0..10 {
+        print(f"fib({i}) = {fib_recursive(i)}");
+    }
+
+    print("\nFibonacci numbers (tail-recursive):");
+    for i in 0..10 {
+        print(f"fib({i}) = {fib_tail(i)}");
+    }
+
+    print("\nFibonacci sequence:");
+    let sequence = fib_sequence(15);
+    print(sequence);
+
+    print("\nFirst 20 Fibonacci numbers (lazy):");
+    let lazy_fibs = fib_lazy().take(20).collect();
+    print(lazy_fibs);
+
+    // Performance comparison
+    let n = 30;
+    print(f"\nCalculating fib({n})...");
+
+    // Tail recursive is efficient
+    let result = fib_tail(n);
+    print(f"Result: {result}");
+}

@@ -1,0 +1,299 @@
+// =============================================================================
+// condvar.vr - Condition variable for thread synchronization
+// =============================================================================
+// Layer: 2.5 (Sync)
+// Dependencies: core, sync/atomic, sync/mutex
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI primitives:
+// - Uses spin_hint() intrinsic for spin-wait hint
+// - Uses compiler_fence() intrinsic for memory ordering
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// Condition variables allow threads to efficiently wait for a condition to
+// become true. They are always used in conjunction with a Mutex.
+//
+// # Example
+// ```verum
+// let mutex = Mutex.new(Queue.new());
+// let condvar = Condvar.new();
+//
+// // Producer thread
+// {
+//     let mut guard = mutex.lock().unwrap();
+//     guard.push(item);
+//     condvar.notify_one();
+// }
+//
+// // Consumer thread
+// {
+//     let mut guard = mutex.lock().unwrap();
+//     while guard.is_empty() {
+//         guard = condvar.wait(guard).unwrap();
+//     }
+//     let item = guard.pop();
+// }
+// ```
+//
+// =============================================================================
+
+module core.sync.condvar;
+mount core.*;
+mount .atomic.*;
+mount .mutex.*;
+
+// Cross-platform futex imports — real OS blocking, no spin-wait
+@cfg(target_os = "linux")
+mount sys.linux.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+// =============================================================================
+// Condvar
+// =============================================================================
+
+/// Condition variable for thread synchronization.
+///
+/// A condition variable represents the ability to block a thread such that
+/// it consumes no CPU time while waiting for an event to occur.
+///
+/// # Performance
+/// - wait: O(1) lock ops + sleep
+/// - notify_one: O(1) wake one waiter
+/// - notify_all: O(n) wake all waiters
+///
+/// # Thread Safety
+/// - Condvar is Sync && can be shared between threads
+/// - Always use with a Mutex for the protected state
+public type Condvar is {
+    /// Number of waiting threads (diagnostic)
+    waiters: AtomicInt,
+    /// Sequence counter — futex waits on this, notify increments + wakes
+    seq: AtomicInt,
+};
+
+implement Condvar {
+    /// Create a new condition variable.
+    public fn new() -> Condvar {
+        Condvar {
+            waiters: AtomicInt.new(0),
+            seq: AtomicInt.new(0),
+        }
+    }
+
+    /// Block the current thread until notified.
+    ///
+    /// Atomically releases the mutex and blocks using OS futex.
+    /// When notified, re-acquires the mutex before returning.
+    ///
+    /// # Spurious Wakeups
+    /// May return spuriously. Always check the condition in a loop:
+    /// ```verum
+    /// while not condition {
+    ///     guard = condvar.wait(guard).unwrap();
+    /// }
+    /// ```
+    public fn wait<T>(&self, guard: MutexGuard<T>) -> LockResult<MutexGuard<T>> {
+        let mutex = guard.mutex;
+
+        self.waiters.fetch_add(1, MemoryOrdering.SeqCst);
+
+        // Snapshot sequence counter BEFORE releasing mutex
+        let my_seq = self.seq.load(MemoryOrdering.Acquire);
+
+        // Release the mutex
+        drop(guard);
+
+        // Block until seq changes — real OS-level sleep via futex
+        let _ = sys_futex_wait(&self.seq.value, my_seq, None);
+
+        self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
+
+        // Re-acquire the mutex
+        mutex.lock()
+    }
+
+    /// Block until notified or timeout expires.
+    ///
+    /// Returns `(guard, timed_out)` where `timed_out` is true if the
+    /// timeout elapsed before being notified.
+    public fn wait_timeout<T>(
+        &self,
+        guard: MutexGuard<T>,
+        timeout_ns: Int
+    ) -> LockResult<(MutexGuard<T>, Bool)> {
+        let mutex = guard.mutex;
+
+        self.waiters.fetch_add(1, MemoryOrdering.SeqCst);
+        let my_seq = self.seq.load(MemoryOrdering.Acquire);
+
+        drop(guard);
+
+        // Block with timeout — real OS-level sleep
+        let result = sys_futex_wait(&self.seq.value, my_seq, Some(timeout_ns as UInt64));
+
+        let timed_out = match result {
+            Err(_) => true,   // Timeout or error
+            Ok(_) => false,   // Woken normally
+        };
+
+        self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
+
+        mutex.lock().map(|g| (g, timed_out))
+    }
+
+    /// Block until the predicate becomes true.
+    ///
+    /// This is a convenience method that handles spurious wakeups:
+    /// ```verum
+    /// let guard = condvar.wait_while(guard, |data| data.is_empty()).unwrap();
+    /// // Condition is now true
+    /// ```
+    public fn wait_while<T, P: fn(&T) -> Bool>(
+        &self,
+        mut guard: MutexGuard<T>,
+        predicate: P
+    ) -> LockResult<MutexGuard<T>> {
+        while predicate(&*guard) {
+            guard = self.wait(guard)?;
+        }
+        Ok(guard)
+    }
+
+    /// Notify one waiting thread.
+    ///
+    /// If there are threads waiting on this condition variable, one of them
+    /// will be woken via OS futex wake.
+    public fn notify_one(&self) {
+        if self.waiters.load(MemoryOrdering.SeqCst) > 0 {
+            self.seq.fetch_add(1, MemoryOrdering.Release);
+            let _ = sys_futex_wake(&self.seq.value, 1);
+        }
+    }
+
+    /// Notify all waiting threads.
+    ///
+    /// All threads currently waiting will be woken via OS futex wake-all.
+    public fn notify_all(&self) {
+        if self.waiters.load(MemoryOrdering.SeqCst) > 0 {
+            self.seq.fetch_add(1, MemoryOrdering.Release);
+            let _ = sys_futex_wake(&self.seq.value, Int.MAX);
+        }
+    }
+
+    /// Get the number of threads currently waiting.
+    public fn waiter_count(&self) -> Int {
+        self.waiters.load(MemoryOrdering.Relaxed)
+    }
+}
+
+implement Default for Condvar {
+    fn default() -> Condvar {
+        Condvar.new()
+    }
+}
+
+implement Debug for Condvar {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Condvar { waiters: ")?;
+        self.waiters.load(MemoryOrdering.Relaxed).fmt_debug(f)?;
+        f.write_str(", seq: ")?;
+        self.seq.load(MemoryOrdering.Relaxed).fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+// =============================================================================
+// WaitTimeoutResult
+// =============================================================================
+
+/// Result of a timed wait operation.
+public type WaitTimeoutResult is {
+    timed_out: Bool,
+};
+
+implement WaitTimeoutResult {
+    /// Returns true if the wait timed out.
+    public fn timed_out(&self) -> Bool {
+        self.timed_out
+    }
+}
+
+// =============================================================================
+// CondvarGuard - for scoped notifications
+// =============================================================================
+
+/// Guard that notifies on drop.
+///
+/// Useful for ensuring notification happens even if code panics.
+public type CondvarNotifyGuard is {
+    condvar: &Condvar,
+    notify_all: Bool,
+};
+
+implement CondvarNotifyGuard {
+    /// Create guard that will notify one on drop.
+    public fn notify_one_guard(condvar: &Condvar) -> CondvarNotifyGuard {
+        CondvarNotifyGuard {
+            condvar: condvar,
+            notify_all: false,
+        }
+    }
+
+    /// Create guard that will notify all on drop.
+    public fn notify_all_guard(condvar: &Condvar) -> CondvarNotifyGuard {
+        CondvarNotifyGuard {
+            condvar: condvar,
+            notify_all: true,
+        }
+    }
+}
+
+implement Drop for CondvarNotifyGuard {
+    fn drop(&mut self) {
+        if self.notify_all {
+            self.condvar.notify_all();
+        } else {
+            self.condvar.notify_one();
+        }
+    }
+}
+
+// =============================================================================
+// Example Usage Patterns
+// =============================================================================
+
+/// Create a mutex/condvar pair for producer-consumer pattern.
+///
+/// # Example
+/// ```verum
+/// let (mutex, condvar) = producer_consumer_pair(List.new());
+///
+/// // Producer
+/// {
+///     let mut guard = mutex.lock().unwrap();
+///     guard.push(item);
+///     condvar.notify_one();
+/// }
+///
+/// // Consumer
+/// {
+///     let mut guard = mutex.lock().unwrap();
+///     guard = condvar.wait_while(guard, |q| q.is_empty()).unwrap();
+///     let item = guard.pop();
+/// }
+/// ```
+public fn producer_consumer_pair<T>(initial: T) -> (Mutex<T>, Condvar) {
+    (Mutex.new(initial), Condvar.new())
+}

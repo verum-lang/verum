@@ -1,0 +1,194 @@
+// In-Memory LRU Cache Provider
+//
+// Implements the Cache context protocol with an in-memory LRU eviction policy
+// and TTL-based expiration. Suitable for single-node deployments; swap with a
+// Redis-backed provider for distributed caching.
+
+mount core.base.{Result, Text, Int, Bool, Maybe};
+mount core.collections.{List, Map};
+mount core.sync.Mutex;
+mount core.time.unix_timestamp;
+
+mount crate.contexts.cache.{Cache, CacheError};
+
+// ============================================================================
+// Cache Entry
+// ============================================================================
+
+type CacheItem is {
+    value: List<Int>,
+    expires_at: Int,
+    last_access: Int,
+};
+
+// ============================================================================
+// LruCacheProvider
+// ============================================================================
+
+pub type LruCacheProvider is {
+    store: Mutex<Map<Text, CacheItem>>,
+    default_ttl: Int,
+    max_entries: Int,
+};
+
+implement LruCacheProvider {
+    pub fn new(default_ttl: Int) -> LruCacheProvider {
+        LruCacheProvider {
+            store: Mutex.new(Map.new()),
+            default_ttl: default_ttl,
+            max_entries: 10000,
+        }
+    }
+
+    /// Evict expired entries, then evict oldest entries if over capacity.
+    fn evict_if_needed(self) {
+        let mut map = self.store.lock();
+        let now = unix_timestamp();
+
+        // Collect expired keys
+        let mut expired = List.new();
+        for key in map.keys() {
+            match map.get(key) {
+                Maybe.Some(item) => {
+                    if item.expires_at > 0 && now > item.expires_at {
+                        expired.push(key.clone());
+                    }
+                },
+                Maybe.None => {},
+            }
+        }
+        for key in expired {
+            map.remove(key);
+        }
+
+        // If still over capacity, evict by oldest last_access
+        while map.len() > self.max_entries {
+            let mut oldest_key = "";
+            let mut oldest_time = now + 1;
+            for key in map.keys() {
+                match map.get(key) {
+                    Maybe.Some(item) => {
+                        if item.last_access < oldest_time {
+                            oldest_time = item.last_access;
+                            oldest_key = key.clone();
+                        }
+                    },
+                    Maybe.None => {},
+                }
+            }
+            if oldest_key.is_empty() {
+                break;
+            }
+            map.remove(oldest_key);
+        }
+    }
+}
+
+implement Cache for LruCacheProvider {
+    async fn get(self, key: Text) -> Result<Maybe<List<Int>>, CacheError> {
+        let mut map = self.store.lock();
+        let now = unix_timestamp();
+        match map.get(key.clone()) {
+            Maybe.Some(item) => {
+                if item.expires_at > 0 && now > item.expires_at {
+                    map.remove(key);
+                    Result.Ok(Maybe.None)
+                } else {
+                    // Update last access time
+                    map.insert(key, CacheItem {
+                        value: item.value.clone(),
+                        expires_at: item.expires_at,
+                        last_access: now,
+                    });
+                    Result.Ok(Maybe.Some(item.value.clone()))
+                }
+            },
+            Maybe.None => Result.Ok(Maybe.None),
+        }
+    }
+
+    async fn set(self, key: Text, value: List<Int>) -> Result<(), CacheError> {
+        self.set_with_ttl(key, value, self.default_ttl).await
+    }
+
+    async fn set_with_ttl(self, key: Text, value: List<Int>, ttl: Int) -> Result<(), CacheError> {
+        let now = unix_timestamp();
+        let expires = if ttl > 0 { now + ttl } else { 0 };
+        let item = CacheItem {
+            value: value,
+            expires_at: expires,
+            last_access: now,
+        };
+        let mut map = self.store.lock();
+        map.insert(key, item);
+        drop(map);
+        self.evict_if_needed();
+        Result.Ok(())
+    }
+
+    async fn delete(self, key: Text) -> Result<(), CacheError> {
+        let mut map = self.store.lock();
+        map.remove(key);
+        Result.Ok(())
+    }
+
+    async fn exists(self, key: Text) -> Result<Bool, CacheError> {
+        let map = self.store.lock();
+        let now = unix_timestamp();
+        match map.get(key) {
+            Maybe.Some(item) => {
+                if item.expires_at > 0 && now > item.expires_at {
+                    Result.Ok(false)
+                } else {
+                    Result.Ok(true)
+                }
+            },
+            Maybe.None => Result.Ok(false),
+        }
+    }
+
+    async fn invalidate_pattern(self, pattern: Text) -> Result<Int, CacheError> {
+        let mut map = self.store.lock();
+        let mut to_remove = List.new();
+        for key in map.keys() {
+            if key.starts_with(pattern) {
+                to_remove.push(key.clone());
+            }
+        }
+        let count = to_remove.len();
+        for key in to_remove {
+            map.remove(key);
+        }
+        Result.Ok(count)
+    }
+
+    async fn clear(self) -> Result<(), CacheError> {
+        let mut map = self.store.lock();
+        map.clear();
+        Result.Ok(())
+    }
+
+    async fn ttl(self, key: Text) -> Result<Maybe<Int>, CacheError> {
+        let map = self.store.lock();
+        let now = unix_timestamp();
+        match map.get(key) {
+            Maybe.Some(item) => {
+                if item.expires_at == 0 {
+                    Result.Ok(Maybe.None)
+                } else {
+                    let remaining = item.expires_at - now;
+                    if remaining < 0 {
+                        Result.Ok(Maybe.Some(0))
+                    } else {
+                        Result.Ok(Maybe.Some(remaining))
+                    }
+                }
+            },
+            Maybe.None => Result.Err(CacheError.CacheMiss(key)),
+        }
+    }
+
+    async fn ping(self) -> Result<(), CacheError> {
+        Result.Ok(())
+    }
+}

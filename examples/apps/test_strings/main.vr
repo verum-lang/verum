@@ -1,0 +1,41 @@
+// String Operations Test
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn describe(item: Text, count: Int) -> Text {
+    f"You have {count} {item}(s)"
+}
+
+fn main() {
+    print("=== String Test ===");
+
+    // Basic strings
+    let s1 = "Hello";
+    let s2 = "World";
+    print(s1);
+    print(s2);
+
+    // F-strings
+    let name = "Alice";
+    let greeting = f"Hello, {name}!";
+    print(greeting);
+
+    // F-string with numbers
+    let x = 42;
+    let y = 3.14;
+    print(f"x = {x}, y = {y}");
+
+    // Function returning f-string
+    print(greet("Bob"));
+    print(describe("apple", 5));
+
+    // Multiple interpolations
+    let a = 10;
+    let b = 20;
+    let sum = a + b;
+    print(f"{a} + {b} = {sum}");
+
+    print("=== Done ===");
+}

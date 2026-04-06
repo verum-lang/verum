@@ -1,0 +1,32 @@
+// Logger protocol for structured logging
+mount core.base.Text;
+mount core.collections.Map;
+
+pub type LogLevel is
+    | Trace
+    | Debug
+    | Info
+    | Warn
+    | Error
+    | Fatal;
+
+pub type LogContext is {
+    fields: Map<Text, Text>,
+    timestamp: Text,
+    level: LogLevel,
+};
+
+pub context protocol Logger {
+    fn trace(self, message: Text) -> ();
+    fn debug(self, message: Text) -> ();
+    fn info(self, message: Text) -> ();
+    fn warn(self, message: Text) -> ();
+    fn error(self, message: Text) -> ();
+    fn fatal(self, message: Text) -> ();
+
+    fn with_field(self, key: Text, value: Text) -> Logger;
+    fn with_fields(self, fields: Map<Text, Text>) -> Logger;
+
+    fn log(self, level: LogLevel, message: Text) -> ();
+    fn log_with_context(self, ctx: LogContext, message: Text) -> ();
+}

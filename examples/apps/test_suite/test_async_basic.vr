@@ -1,0 +1,11 @@
+// Test 1: Simple async function
+// Tests if async functions can be declared and called with await
+
+async fn fetch_data() -> Int {
+    42
+}
+
+fn main() {
+    let result = fetch_data().await;
+    print(result);
+}

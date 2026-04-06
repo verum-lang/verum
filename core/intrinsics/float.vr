@@ -1,0 +1,359 @@
+// =============================================================================
+// core/intrinsics/float.vr - Floating-Point Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None (compiler-provided)
+//
+// This module provides floating-point intrinsics that map directly to LLVM/CPU
+// instructions. All operations are zero-allocation and VBC-compatible.
+//
+// # Categories
+//
+// - Basic math: sqrt, cbrt, pow, exp, log
+// - Trigonometric: sin, cos, tan, asin, acos, atan
+// - Hyperbolic: sinh, cosh, tanh, asinh, acosh, atanh
+// - Rounding: floor, ceil, round, trunc
+// - FMA: fused multiply-add/subtract
+// - Classification: is_nan, is_inf, is_finite, is_normal
+// - Special values: infinity, nan, bit conversions
+//
+// Spec: docs/detailed/05-syntax-grammar.md
+// =============================================================================
+
+module core.intrinsics.float;
+
+// =============================================================================
+// SECTION 1: Basic Math
+// =============================================================================
+
+/// Square root
+public fn sqrt<T>(x: T) -> T { @intrinsic("sqrt", x) }
+/// Square root for Float32
+public fn sqrt_f32(x: Float32) -> Float32 { @intrinsic("sqrt", x) }
+/// Square root for Float64
+public fn sqrt_f64(x: Float64) -> Float64 { @intrinsic("sqrt", x) }
+
+/// Cube root
+public fn cbrt<T>(x: T) -> T { @intrinsic("cbrt", x) }
+
+/// Exponential (e^x)
+public fn exp<T>(x: T) -> T { @intrinsic("exp", x) }
+
+/// Exponential minus 1 (e^x - 1, more precise for small x)
+public fn expm1<T>(x: T) -> T { @intrinsic("expm1", x) }
+
+/// Base-2 exponential (2^x)
+public fn exp2<T>(x: T) -> T { @intrinsic("exp2", x) }
+
+/// Base-10 exponential (10^x)
+public fn exp10<T>(x: T) -> T { @intrinsic("exp10", x) }
+
+/// Natural logarithm
+public fn log<T>(x: T) -> T { @intrinsic("log", x) }
+
+/// Natural log of (1 + x), more precise for small x
+public fn log1p<T>(x: T) -> T { @intrinsic("log1p", x) }
+
+/// Base-10 logarithm
+public fn log10<T>(x: T) -> T { @intrinsic("log10", x) }
+
+/// Base-2 logarithm
+public fn log2<T>(x: T) -> T { @intrinsic("log2", x) }
+
+/// Power (base^exponent)
+public fn pow<T>(x: T, y: T) -> T { @intrinsic("pow", x, y) }
+
+/// Integer power (more efficient for integer exponents)
+public fn powi<T>(x: T, n: Int32) -> T { @intrinsic("powi", x, n) }
+
+/// Hypotenuse (sqrt(x^2 + y^2) without overflow)
+public fn hypot<T>(x: T, y: T) -> T { @intrinsic("hypot", x, y) }
+
+// =============================================================================
+// SECTION 2: Rounding
+// =============================================================================
+
+/// Floor (round toward negative infinity)
+public fn floor<T>(x: T) -> T { @intrinsic("floor", x) }
+
+/// Ceiling (round toward positive infinity)
+public fn ceil<T>(x: T) -> T { @intrinsic("ceil", x) }
+
+/// Round to nearest integer (ties to even)
+public fn round<T>(x: T) -> T { @intrinsic("round", x) }
+
+/// Round to nearest integer (ties away from zero)
+public fn roundeven<T>(x: T) -> T { @intrinsic("roundeven", x) }
+
+/// Truncate toward zero
+public fn trunc<T>(x: T) -> T { @intrinsic("trunc", x) }
+
+/// Round to nearest integer
+public fn nearbyint<T>(x: T) -> T { @intrinsic("nearbyint", x) }
+
+/// Round to integer value in floating-point format
+public fn rint<T>(x: T) -> T { @intrinsic("rint", x) }
+
+// =============================================================================
+// SECTION 3: Fused Multiply-Add
+// =============================================================================
+
+/// Fused multiply-add (a * b + c with single rounding)
+public fn fma<T>(a: T, b: T, c: T) -> T { @intrinsic("fma", a, b, c) }
+
+/// Fused multiply-subtract (a * b - c with single rounding)
+public fn fms<T>(a: T, b: T, c: T) -> T { @intrinsic("fma", a, b, neg(c)) }
+
+// Helper for fms
+fn neg<T>(x: T) -> T { @intrinsic("fneg", x) }
+
+// =============================================================================
+// SECTION 4: Sign and Comparison
+// =============================================================================
+
+/// Copy sign from y to x
+public fn copysign<T>(x: T, y: T) -> T { @intrinsic("copysign", x, y) }
+
+/// Minimum (NaN-propagating, IEEE 754-2019 minimum)
+public fn minnum<T>(x: T, y: T) -> T { @intrinsic("minnum", x, y) }
+
+/// Maximum (NaN-propagating, IEEE 754-2019 maximum)
+public fn maxnum<T>(x: T, y: T) -> T { @intrinsic("maxnum", x, y) }
+
+/// Minimum (NaN returns NaN, IEEE 754-2019 minimumNumber)
+public fn minimum<T>(x: T, y: T) -> T { @intrinsic("minimum", x, y) }
+
+/// Maximum (NaN returns NaN, IEEE 754-2019 maximumNumber)
+public fn maximum<T>(x: T, y: T) -> T { @intrinsic("maximum", x, y) }
+
+/// Floating-point remainder (IEEE 754)
+public fn fmod<T>(x: T, y: T) -> T { @intrinsic("fmod", x, y) }
+
+/// Floating-point remainder with quotient (returns (remainder, quotient))
+public fn remquo<T>(x: T, y: T) -> (T, Int) { @intrinsic("remquo", x, y) }
+
+/// Absolute value for floats
+public fn fabs<T>(x: T) -> T { @intrinsic("fabs", x) }
+
+/// Negative absolute value
+public fn fneg<T>(x: T) -> T { @intrinsic("fneg", x) }
+
+// =============================================================================
+// SECTION 5: Trigonometric Functions
+// =============================================================================
+
+/// Sine
+public fn sin<T>(x: T) -> T { @intrinsic("sin", x) }
+
+/// Cosine
+public fn cos<T>(x: T) -> T { @intrinsic("cos", x) }
+
+/// Tangent
+public fn tan<T>(x: T) -> T { @intrinsic("tan", x) }
+
+/// Arc sine
+public fn asin<T>(x: T) -> T { @intrinsic("asin", x) }
+
+/// Arc cosine
+public fn acos<T>(x: T) -> T { @intrinsic("acos", x) }
+
+/// Arc tangent
+public fn atan<T>(x: T) -> T { @intrinsic("atan", x) }
+
+/// Two-argument arc tangent (atan2(y, x))
+public fn atan2<T>(y: T, x: T) -> T { @intrinsic("atan2", y, x) }
+
+/// Sine and cosine simultaneously (more efficient)
+public fn sincos<T>(x: T) -> (T, T) { @intrinsic("sincos", x) }
+
+// =============================================================================
+// SECTION 6: Hyperbolic Functions
+// =============================================================================
+
+/// Hyperbolic sine
+public fn sinh<T>(x: T) -> T { @intrinsic("sinh", x) }
+
+/// Hyperbolic cosine
+public fn cosh<T>(x: T) -> T { @intrinsic("cosh", x) }
+
+/// Hyperbolic tangent
+public fn tanh<T>(x: T) -> T { @intrinsic("tanh", x) }
+
+/// Inverse hyperbolic sine
+public fn asinh<T>(x: T) -> T { @intrinsic("asinh", x) }
+
+/// Inverse hyperbolic cosine
+public fn acosh<T>(x: T) -> T { @intrinsic("acosh", x) }
+
+/// Inverse hyperbolic tangent
+public fn atanh<T>(x: T) -> T { @intrinsic("atanh", x) }
+
+// =============================================================================
+// SECTION 7: Float Classification
+// =============================================================================
+
+/// Check if float is NaN
+public fn is_nan<T>(x: T) -> Bool { @intrinsic("is_nan", x) }
+
+/// Check if float is infinite
+public fn is_inf<T>(x: T) -> Bool { @intrinsic("is_inf", x) }
+
+/// Check if float is finite (not NaN or infinite)
+public fn is_finite<T>(x: T) -> Bool { @intrinsic("is_finite", x) }
+
+/// Check if float is normal (not zero, subnormal, infinite, or NaN)
+public fn is_normal<T>(x: T) -> Bool { @intrinsic("is_normal", x) }
+
+/// Check if float is subnormal (denormalized)
+public fn is_subnormal<T>(x: T) -> Bool { @intrinsic("is_subnormal", x) }
+
+/// Check if float has negative sign
+public fn is_sign_negative<T>(x: T) -> Bool { @intrinsic("is_sign_negative", x) }
+
+/// Check if float has positive sign
+public fn is_sign_positive<T>(x: T) -> Bool { @intrinsic("is_sign_positive", x) }
+
+// =============================================================================
+// SECTION 8: Bit Conversion
+// =============================================================================
+
+/// Float32 to bits
+public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("bitcast", x) }
+
+/// Float32 from bits
+public fn f32_from_bits(bits: UInt32) -> Float32 { @intrinsic("bitcast", bits) }
+
+/// Float64 to bits
+public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("bitcast", x) }
+
+/// Float64 from bits
+public fn f64_from_bits(bits: UInt64) -> Float64 { @intrinsic("bitcast", bits) }
+
+// =============================================================================
+// SECTION 9: Special Values
+// =============================================================================
+
+/// Float32 positive infinity
+public fn f32_infinity() -> Float32 { @intrinsic("f32_infinity") }
+
+/// Float32 negative infinity
+public fn f32_neg_infinity() -> Float32 { @intrinsic("f32_neg_infinity") }
+
+/// Float32 NaN (quiet)
+public fn f32_nan() -> Float32 { @intrinsic("f32_nan") }
+
+/// Float64 positive infinity
+public fn f64_infinity() -> Float64 { @intrinsic("f64_infinity") }
+
+/// Float64 negative infinity
+public fn f64_neg_infinity() -> Float64 { @intrinsic("f64_neg_infinity") }
+
+/// Float64 NaN (quiet)
+public fn f64_nan() -> Float64 { @intrinsic("f64_nan") }
+
+// =============================================================================
+// SECTION 8: Type-Specific Float Operations
+// =============================================================================
+// Float32-specific
+public fn abs_f32(x: Float32) -> Float32 { @intrinsic("fabs", x) }
+public fn ceil_f32(x: Float32) -> Float32 { @intrinsic("ceil", x) }
+public fn floor_f32(x: Float32) -> Float32 { @intrinsic("floor", x) }
+public fn round_f32(x: Float32) -> Float32 { @intrinsic("round", x) }
+public fn trunc_f32(x: Float32) -> Float32 { @intrinsic("trunc", x) }
+public fn sin_f32(x: Float32) -> Float32 { @intrinsic("sin", x) }
+public fn cos_f32(x: Float32) -> Float32 { @intrinsic("cos", x) }
+public fn tan_f32(x: Float32) -> Float32 { @intrinsic("tan", x) }
+public fn asin_f32(x: Float32) -> Float32 { @intrinsic("asin", x) }
+public fn acos_f32(x: Float32) -> Float32 { @intrinsic("acos", x) }
+public fn atan_f32(x: Float32) -> Float32 { @intrinsic("atan", x) }
+public fn sinh_f32(x: Float32) -> Float32 { @intrinsic("sinh", x) }
+public fn cosh_f32(x: Float32) -> Float32 { @intrinsic("cosh", x) }
+public fn tanh_f32(x: Float32) -> Float32 { @intrinsic("tanh", x) }
+public fn asinh_f32(x: Float32) -> Float32 { @intrinsic("asinh", x) }
+public fn acosh_f32(x: Float32) -> Float32 { @intrinsic("acosh", x) }
+public fn atanh_f32(x: Float32) -> Float32 { @intrinsic("atanh", x) }
+public fn exp_f32(x: Float32) -> Float32 { @intrinsic("exp", x) }
+public fn log_f32(x: Float32) -> Float32 { @intrinsic("log", x) }
+public fn cbrt_f32(x: Float32) -> Float32 { @intrinsic("cbrt", x) }
+public fn pow_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("pow", x, y) }
+public fn powi_f32(x: Float32, n: Int32) -> Float32 { @intrinsic("powi", x, n) }
+public fn fma_f32(x: Float32, y: Float32, z: Float32) -> Float32 { @intrinsic("fma", x, y, z) }
+public fn hypot_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("hypot", x, y) }
+public fn copysign_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("copysign", x, y) }
+public fn minnum_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("minnum", x, y) }
+public fn maxnum_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("maxnum", x, y) }
+public fn is_nan_f32(x: Float32) -> Bool { @intrinsic("is_nan", x) }
+
+// Float64-specific
+public fn abs_f64(x: Float64) -> Float64 { @intrinsic("fabs", x) }
+public fn ceil_f64(x: Float64) -> Float64 { @intrinsic("ceil", x) }
+public fn floor_f64(x: Float64) -> Float64 { @intrinsic("floor", x) }
+public fn round_f64(x: Float64) -> Float64 { @intrinsic("round", x) }
+public fn trunc_f64(x: Float64) -> Float64 { @intrinsic("trunc", x) }
+public fn sin_f64(x: Float64) -> Float64 { @intrinsic("sin", x) }
+public fn cos_f64(x: Float64) -> Float64 { @intrinsic("cos", x) }
+public fn tan_f64(x: Float64) -> Float64 { @intrinsic("tan", x) }
+public fn asin_f64(x: Float64) -> Float64 { @intrinsic("asin", x) }
+public fn acos_f64(x: Float64) -> Float64 { @intrinsic("acos", x) }
+public fn atan_f64(x: Float64) -> Float64 { @intrinsic("atan", x) }
+public fn sinh_f64(x: Float64) -> Float64 { @intrinsic("sinh", x) }
+public fn cosh_f64(x: Float64) -> Float64 { @intrinsic("cosh", x) }
+public fn tanh_f64(x: Float64) -> Float64 { @intrinsic("tanh", x) }
+public fn asinh_f64(x: Float64) -> Float64 { @intrinsic("asinh", x) }
+public fn acosh_f64(x: Float64) -> Float64 { @intrinsic("acosh", x) }
+public fn atanh_f64(x: Float64) -> Float64 { @intrinsic("atanh", x) }
+public fn exp_f64(x: Float64) -> Float64 { @intrinsic("exp", x) }
+public fn log_f64(x: Float64) -> Float64 { @intrinsic("log", x) }
+public fn cbrt_f64(x: Float64) -> Float64 { @intrinsic("cbrt", x) }
+public fn pow_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("pow", x, y) }
+public fn powi_f64(x: Float64, n: Int32) -> Float64 { @intrinsic("powi", x, n) }
+public fn fma_f64(x: Float64, y: Float64, z: Float64) -> Float64 { @intrinsic("fma", x, y, z) }
+public fn hypot_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("hypot", x, y) }
+public fn copysign_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("copysign", x, y) }
+public fn minnum_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("minnum", x, y) }
+public fn maxnum_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("maxnum", x, y) }
+public fn is_nan_f64(x: Float64) -> Bool { @intrinsic("is_nan", x) }
+public fn atan2_f32(y: Float32, x: Float32) -> Float32 { @intrinsic("atan2", y, x) }
+public fn atan2_f64(y: Float64, x: Float64) -> Float64 { @intrinsic("atan2", y, x) }
+public fn exp2_f32(x: Float32) -> Float32 { @intrinsic("exp2", x) }
+public fn exp2_f64(x: Float64) -> Float64 { @intrinsic("exp2", x) }
+public fn log2_f32(x: Float32) -> Float32 { @intrinsic("log2", x) }
+public fn log2_f64(x: Float64) -> Float64 { @intrinsic("log2", x) }
+public fn log10_f32(x: Float32) -> Float32 { @intrinsic("log10", x) }
+public fn log10_f64(x: Float64) -> Float64 { @intrinsic("log10", x) }
+public fn expm1_f32(x: Float32) -> Float32 { @intrinsic("expm1", x) }
+public fn expm1_f64(x: Float64) -> Float64 { @intrinsic("expm1", x) }
+public fn log1p_f32(x: Float32) -> Float32 { @intrinsic("log1p", x) }
+public fn log1p_f64(x: Float64) -> Float64 { @intrinsic("log1p", x) }
+public fn sincos_f32(x: Float32) -> (Float32, Float32) { @intrinsic("sincos", x) }
+public fn sincos_f64(x: Float64) -> (Float64, Float64) { @intrinsic("sincos", x) }
+public fn is_inf_f32(x: Float32) -> Bool { @intrinsic("is_inf", x) }
+public fn is_inf_f64(x: Float64) -> Bool { @intrinsic("is_inf", x) }
+public fn is_finite_f32(x: Float32) -> Bool { @intrinsic("is_finite", x) }
+public fn is_finite_f64(x: Float64) -> Bool { @intrinsic("is_finite", x) }
+public fn is_normal_f32(x: Float32) -> Bool { @intrinsic("is_normal", x) }
+public fn is_normal_f64(x: Float64) -> Bool { @intrinsic("is_normal", x) }
+public fn fmod_f32(x: Float32, y: Float32) -> Float32 { @intrinsic("fmod", x, y) }
+public fn fmod_f64(x: Float64, y: Float64) -> Float64 { @intrinsic("fmod", x, y) }
+
+// =============================================================================
+// SECTION 10: Aliases and Convenience Functions
+// =============================================================================
+
+/// Alias: is_infinite (same as is_inf)
+public fn is_infinite<T>(x: T) -> Bool { @intrinsic("is_inf", x) }
+
+/// Generic infinity (Float64)
+public fn infinity() -> Float { @intrinsic("f64_infinity") }
+
+/// Generic NaN (Float64)
+public fn nan() -> Float { @intrinsic("f64_nan") }
+
+/// Machine epsilon for Float64
+public fn epsilon() -> Float { @intrinsic("f64_epsilon") }
+
+/// Smallest positive normal Float64
+public fn min_positive() -> Float { @intrinsic("f64_min_positive") }
+
+/// Largest finite Float64
+public fn max_float() -> Float { @intrinsic("f64_max") }

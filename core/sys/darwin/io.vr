@@ -1,0 +1,879 @@
+module sys.darwin.io;
+
+// =============================================================================
+// sys/darwin/io.vr - macOS Completion-Based I/O (kqueue)
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/darwin/libsystem, sys/common
+// Platform: macOS (x86_64, arm64)
+// =============================================================================
+//
+// This module provides completion-based I/O using kqueue on macOS.
+// kqueue is the macOS/BSD equivalent of Linux's epoll/io_uring, providing
+// efficient event notification for file descriptors, timers, signals, etc.
+//
+// Key concepts:
+// - kqueue: The event queue (like epoll fd or io_uring ring)
+// - kevent: Register interest and receive events (struct + syscall)
+// - Filters: EVFILT_READ, EVFILT_WRITE, EVFILT_TIMER, etc.
+// - Flags: EV_ADD, EV_DELETE, EV_ONESHOT, EV_CLEAR, etc.
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.5
+// =============================================================================
+
+mount sys.common.{OSError, FileDesc};
+mount sys.io_engine.{
+    IOEngine, CompletionOp, CompletionResult, Duration,
+    ValidFd, Fd, SocketAddr, TimeSpec as EngineTimeSpec, MsgHdr,
+    IoError as EngineIoError,
+};
+mount super.libsystem.{
+    kqueue as raw_kqueue, kevent, kevent64, close as raw_close, read, write,
+    KEvent, KEvent64, Timespec,
+    EVFILT_READ, EVFILT_WRITE, EVFILT_TIMER, EVFILT_USER,
+    EVFILT_VNODE, EVFILT_SIGNAL, EVFILT_PROC,
+    EV_ADD, EV_DELETE, EV_ENABLE, EV_DISABLE, EV_ONESHOT, EV_CLEAR,
+    EV_RECEIPT, EV_DISPATCH, EV_EOF, EV_ERROR,
+    NOTE_TRIGGER, NOTE_SECONDS, NOTE_NSECONDS, NOTE_USECONDS, NOTE_ABSOLUTE,
+    errno, set_errno,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum events to process in a single poll
+public const MAX_EVENTS: Int = 256;
+
+/// Default timeout for polling (1 second)
+public const DEFAULT_TIMEOUT_NS: Int = 1_000_000_000;
+
+// =============================================================================
+// Error Type
+// =============================================================================
+
+/// I/O operation error
+public type IoDriverError is
+    | WouldBlock
+    | Interrupted
+    | NotFound { path: Text }
+    | AlreadyExists
+    | InvalidInput { reason: Text }
+    | PermissionDenied
+    | ConnectionRefused
+    | ConnectionReset
+    | BrokenPipe
+    | TimedOut
+    | QueueFull
+    | Closed
+    | Other { code: Int, message: Text }
+    ;
+
+implement IoDriverError {
+    public fn from_errno(err: Int) -> IoDriverError {
+        match err {
+            35 => WouldBlock,                                              // EAGAIN
+            4 => Interrupted,                                              // EINTR
+            2 => NotFound { path: "" },                                    // ENOENT
+            17 => AlreadyExists,                                           // EEXIST
+            22 => InvalidInput { reason: "Invalid argument" },             // EINVAL
+            13 => PermissionDenied,                                        // EACCES
+            61 => ConnectionRefused,                                       // ECONNREFUSED
+            54 => ConnectionReset,                                         // ECONNRESET
+            32 => BrokenPipe,                                              // EPIPE
+            60 => TimedOut,                                                // ETIMEDOUT
+            _ => Other { code: err, message: "Unknown error" },
+        }
+    }
+
+    public fn message(&self) -> Text {
+        match self {
+            WouldBlock => "Resource temporarily unavailable",
+            Interrupted => "Interrupted system call",
+            NotFound { path } => f"Not found: {path}",
+            AlreadyExists => "Already exists",
+            InvalidInput { reason } => f"Invalid input: {reason}",
+            PermissionDenied => "Permission denied",
+            ConnectionRefused => "Connection refused",
+            ConnectionReset => "Connection reset by peer",
+            BrokenPipe => "Broken pipe",
+            TimedOut => "Operation timed out",
+            QueueFull => "Event queue is full",
+            Closed => "I/O driver is closed",
+            Other { code, message } => f"Error {code}: {message}",
+        }
+    }
+
+    public fn is_retryable(&self) -> Bool {
+        match self {
+            WouldBlock => true,
+            Interrupted => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Operation Types
+// =============================================================================
+
+/// Type of I/O operation
+public type IoOpKind is
+    | Read
+    | Write
+    | Accept
+    | Connect
+    | Send
+    | Recv
+    | Timer
+    | Signal
+    | User
+    ;
+
+/// I/O completion token
+public type IoToken is (UInt64);
+
+/// I/O operation submission
+public type IoOp is {
+    /// Operation kind
+    kind: IoOpKind,
+    /// File descriptor (or timer id for timers)
+    fd: Int,
+    /// User token for completion identification
+    token: IoToken,
+    /// Buffer address (for read/write)
+    buf_addr: Int,
+    /// Buffer length (for read/write) or timeout (for timer)
+    buf_len: Int,
+    /// Flags (operation-specific)
+    flags: Int,
+};
+
+/// I/O completion result
+public type IoCqe is {
+    /// User token from submission
+    token: IoToken,
+    /// Result (bytes transferred, or error code if negative)
+    result: Int,
+    /// Flags from completion
+    flags: UInt32,
+};
+
+// =============================================================================
+// KqueueDriver
+// =============================================================================
+
+/// Well-known ident for wake notifications via EVFILT_USER
+const WAKE_IDENT: Int = 0x56524D57;  // "VRMW" — Verum Wake
+
+/// kqueue-based I/O driver for macOS
+public type KqueueDriver is {
+    /// kqueue file descriptor
+    kq: Int,
+    /// Whether driver is open
+    open: Bool,
+    /// Number of pending operations
+    pending: Int,
+    /// Event buffer for kevent calls
+    events: [KEvent; 256],  // MAX_EVENTS
+    /// Change list for batched registrations
+    changes: [KEvent; 256],  // MAX_EVENTS
+    /// Number of pending changes
+    num_changes: Int,
+    /// Whether wake event has been registered
+    wake_registered: Bool,
+};
+
+implement KqueueDriver {
+    /// Create a new kqueue driver.
+    public fn new() -> Result<KqueueDriver, IoDriverError> {
+        let kq_fd = unsafe { raw_kqueue() };
+        if kq_fd < 0 {
+            return Err(IoDriverError.from_errno(errno()));
+        }
+
+        let mut driver = KqueueDriver {
+            kq: kq_fd,
+            open: true,
+            pending: 0,
+            events: [@zero<KEvent>(); 256],
+            changes: [@zero<KEvent>(); 256],
+            num_changes: 0,
+            wake_registered: false,
+        };
+
+        // Register a dedicated EVFILT_USER event for cross-thread wake notifications.
+        // This allows wake(&self) to trigger it without &mut self.
+        let wake_ev = KEvent {
+            ident: WAKE_IDENT,
+            filter: EVFILT_USER,
+            flags: EV_ADD | EV_CLEAR,
+            fflags: 0,
+            data: 0,
+            udata: 0 as &unsafe Byte,
+        };
+        let no_timeout = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let reg_result = unsafe {
+            kevent(
+                kq_fd,
+                &wake_ev,
+                1,
+                0 as &unsafe KEvent,
+                0,
+                &no_timeout,
+            )
+        };
+        if reg_result >= 0 {
+            driver.wake_registered = true;
+        }
+
+        Ok(driver)
+    }
+
+    /// Close the kqueue driver.
+    public fn close(&mut self) -> Result<(), IoDriverError> {
+        if !self.open {
+            return Ok(());
+        }
+
+        let result = unsafe { raw_close(self.kq) };
+        self.open = false;
+        self.kq = -1;
+
+        if result < 0 {
+            Err(IoDriverError.from_errno(errno()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check if driver is open.
+    public fn is_open(&self) -> Bool {
+        self.open
+    }
+
+    /// Get the kqueue file descriptor.
+    public fn fd(&self) -> Int {
+        self.kq
+    }
+
+    // =========================================================================
+    // Event Registration
+    // =========================================================================
+
+    /// Add interest in read events for a file descriptor.
+    public fn add_read(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, token)
+    }
+
+    /// Add interest in write events for a file descriptor.
+    public fn add_write(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, token)
+    }
+
+    /// Add a one-shot read event.
+    public fn add_read_oneshot(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, token)
+    }
+
+    /// Add a one-shot write event.
+    public fn add_write_oneshot(&mut self, fd: Int, token: IoToken) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, token)
+    }
+
+    /// Remove interest in read events.
+    public fn remove_read(&mut self, fd: Int) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_READ, EV_DELETE, 0, IoToken(0))
+    }
+
+    /// Remove interest in write events.
+    public fn remove_write(&mut self, fd: Int) -> Result<(), IoDriverError> {
+        self.add_event(fd, EVFILT_WRITE, EV_DELETE, 0, IoToken(0))
+    }
+
+    /// Add a timer event.
+    ///
+    /// # Arguments
+    /// * `ident` - Timer identifier
+    /// * `timeout_ms` - Timeout in milliseconds
+    /// * `token` - Completion token
+    /// * `oneshot` - If true, timer fires once; otherwise repeats
+    public fn add_timer(
+        &mut self,
+        ident: Int,
+        timeout_ms: Int,
+        token: IoToken,
+        oneshot: Bool,
+    ) -> Result<(), IoDriverError> {
+        let flags = if oneshot {
+            EV_ADD | EV_ONESHOT
+        } else {
+            EV_ADD
+        };
+        self.add_event_with_data(ident, EVFILT_TIMER, flags, 0, timeout_ms as Int, token)
+    }
+
+    /// Add a timer with nanosecond precision.
+    public fn add_timer_ns(
+        &mut self,
+        ident: Int,
+        timeout_ns: Int,
+        token: IoToken,
+        oneshot: Bool,
+    ) -> Result<(), IoDriverError> {
+        let flags = if oneshot {
+            EV_ADD | EV_ONESHOT
+        } else {
+            EV_ADD
+        };
+        self.add_event_with_data(ident, EVFILT_TIMER, flags, NOTE_NSECONDS, timeout_ns, token)
+    }
+
+    /// Remove a timer.
+    public fn remove_timer(&mut self, ident: Int) -> Result<(), IoDriverError> {
+        self.add_event(ident, EVFILT_TIMER, EV_DELETE, 0, IoToken(0))
+    }
+
+    /// Add a user event (for cross-thread signaling).
+    public fn add_user_event(&mut self, ident: Int, token: IoToken) -> Result<(), IoDriverError> {
+        self.add_event(ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, token)
+    }
+
+    /// Trigger a user event.
+    public fn trigger_user_event(&mut self, ident: Int) -> Result<(), IoDriverError> {
+        self.add_event(ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, IoToken(0))
+    }
+
+    /// Internal: Add event to change list.
+    fn add_event(
+        &mut self,
+        ident: Int,
+        filter: Int16,
+        flags: UInt16,
+        fflags: UInt32,
+        token: IoToken,
+    ) -> Result<(), IoDriverError> {
+        self.add_event_with_data(ident, filter, flags, fflags, 0, token)
+    }
+
+    fn add_event_with_data(
+        &mut self,
+        ident: Int,
+        filter: Int16,
+        flags: UInt16,
+        fflags: UInt32,
+        data: Int,
+        token: IoToken,
+    ) -> Result<(), IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        if self.num_changes >= MAX_EVENTS {
+            // Flush pending changes first
+            self.flush_changes()?;
+        }
+
+        self.changes[self.num_changes] = KEvent {
+            ident: ident,
+            filter: filter,
+            flags: flags,
+            fflags: fflags,
+            data: data,
+            udata: token.0 as &unsafe Byte,
+        };
+        self.num_changes += 1;
+
+        Ok(())
+    }
+
+    /// Flush pending changes to kqueue.
+    fn flush_changes(&mut self) -> Result<(), IoDriverError> {
+        if self.num_changes == 0 {
+            return Ok(());
+        }
+
+        let no_timeout = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let result = unsafe {
+            kevent(
+                self.kq,
+                &self.changes[0],
+                self.num_changes,
+                0 as &unsafe KEvent,
+                0,
+                &no_timeout,
+            )
+        };
+
+        self.num_changes = 0;
+
+        if result < 0 {
+            Err(IoDriverError.from_errno(errno()))
+        } else {
+            Ok(())
+        }
+    }
+
+    // =========================================================================
+    // Polling
+    // =========================================================================
+
+    /// Poll for events with timeout.
+    ///
+    /// # Arguments
+    /// * `timeout_ms` - Timeout in milliseconds (0 = no wait, -1 = infinite)
+    ///
+    /// # Returns
+    /// Number of events ready
+    public fn poll(&mut self, timeout_ms: Int) -> Result<Int, IoDriverError> {
+        if !self.open {
+            return Err(Closed);
+        }
+
+        let timeout = if timeout_ms < 0 {
+            // Infinite wait - pass null pointer
+            0 as &Timespec
+        } else {
+            let ts = Timespec {
+                tv_sec: timeout_ms / 1000,
+                tv_nsec: (timeout_ms % 1000) * 1_000_000,
+            };
+            &ts
+        };
+
+        // Include pending changes in the kevent call
+        let (changelist, nchanges) = if self.num_changes > 0 {
+            (&self.changes[0], self.num_changes)
+        } else {
+            (0 as &KEvent, 0)
+        };
+
+        let result = unsafe {
+            kevent(
+                self.kq,
+                changelist,
+                nchanges,
+                &mut self.events[0] as &unsafe KEvent,
+                MAX_EVENTS,
+                timeout,
+            )
+        };
+
+        self.num_changes = 0;
+
+        if result < 0 {
+            let err = errno();
+            if err == 4 {  // EINTR
+                Ok(0)
+            } else {
+                Err(IoDriverError.from_errno(err))
+            }
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// Poll without waiting.
+    public fn poll_nowait(&mut self) -> Result<Int, IoDriverError> {
+        self.poll(0)
+    }
+
+    /// Get a completed event by index.
+    ///
+    /// Only valid after poll() returns > 0, and for indices 0..n-1
+    /// where n is the return value.
+    public fn get_event(&self, index: Int) -> Maybe<IoCqe> {
+        if index < 0 || index >= MAX_EVENTS {
+            return None;
+        }
+
+        let ev = &self.events[index];
+
+        // Check for error
+        let result = if (ev.flags & EV_ERROR) != 0 {
+            -(ev.data as Int)
+        } else {
+            ev.data as Int
+        };
+
+        Some(IoCqe {
+            token: IoToken(ev.udata as UInt64),
+            result: result,
+            flags: ev.fflags,
+        })
+    }
+
+    /// Iterate over completed events.
+    public fn events(&self, count: Int) -> KqueueEventIter {
+        KqueueEventIter {
+            driver: self,
+            index: 0,
+            count: count,
+        }
+    }
+
+    // =========================================================================
+    // Convenience Methods
+    // =========================================================================
+
+    /// Submit an I/O operation and poll immediately.
+    public fn submit_and_poll(&mut self, ops: &[IoOp], timeout_ms: Int) -> Result<Int, IoDriverError> {
+        for op in ops {
+            match op.kind {
+                Read => {
+                    self.add_read_oneshot(op.fd, op.token)?;
+                }
+                Write => {
+                    self.add_write_oneshot(op.fd, op.token)?;
+                }
+                Timer => {
+                    self.add_timer(op.fd, op.buf_len, op.token, true)?;
+                }
+                _ => {
+                    // Other operations need actual I/O, not just event notification
+                    self.add_read_oneshot(op.fd, op.token)?;
+                }
+            }
+        }
+
+        self.poll(timeout_ms)
+    }
+
+    /// Get event filter name for debugging.
+    public fn filter_name(filter: Int16) -> Text {
+        match filter {
+            -1 => "READ",
+            -2 => "WRITE",
+            -3 => "AIO",
+            -4 => "VNODE",
+            -5 => "PROC",
+            -6 => "SIGNAL",
+            -7 => "TIMER",
+            -8 => "MACHPORT",
+            -10 => "USER",
+            _ => "UNKNOWN",
+        }
+    }
+}
+
+// =============================================================================
+// Event Iterator
+// =============================================================================
+
+/// Iterator over kqueue events
+public type KqueueEventIter is {
+    driver: &KqueueDriver,
+    index: Int,
+    count: Int,
+};
+
+implement KqueueEventIter {
+    public fn next(&mut self) -> Maybe<IoCqe> {
+        if self.index >= self.count {
+            None
+        } else {
+            let event = self.driver.get_event(self.index);
+            self.index += 1;
+            event
+        }
+    }
+}
+
+// =============================================================================
+// IoDriver Unified Interface
+// =============================================================================
+
+/// Unified I/O driver interface (macOS only has kqueue)
+public type IoDriver is {
+    kqueue: KqueueDriver,
+};
+
+implement IoDriver {
+    public fn kqueue(&self) -> &KqueueDriver {
+        &self.kqueue
+    }
+
+    public fn kqueue_mut(&mut self) -> &mut KqueueDriver {
+        &mut self.kqueue
+    }
+}
+
+/// Create the best available I/O driver.
+///
+/// On macOS, this always returns a kqueue-based driver.
+public fn create_io_driver() -> Result<IoDriver, IoDriverError> {
+    let kqueue = KqueueDriver.new()?;
+    Ok(IoDriver { kqueue: kqueue })
+}
+
+/// Check if kqueue is available.
+///
+/// Always returns true on macOS.
+public fn is_kqueue_available() -> Bool {
+    true
+}
+
+// =============================================================================
+// IOEngine Protocol Implementation
+// =============================================================================
+//
+// This section implements the unified IOEngine protocol from sys/io_engine.vr
+// for the macOS-specific KqueueDriver.
+//
+// Note: kqueue is a readiness-based API, so we wrap it in completion semantics.
+// This means we register interest and perform actual I/O when fd is ready.
+
+/// Convert local IoDriverError to IOEngine's IoError
+fn convert_error(err: IoDriverError) -> EngineIoError {
+    match err {
+        WouldBlock => IoError.WouldBlock,
+        Interrupted => IoError.Interrupted,
+        NotFound { path } => IoError.NotFound { path: path },
+        AlreadyExists => IoError.AlreadyExists,
+        InvalidInput { reason } => IoError.InvalidInput { reason: reason },
+        PermissionDenied => IoError.PermissionDenied,
+        ConnectionRefused => IoError.ConnectionRefused,
+        ConnectionReset => IoError.ConnectionReset,
+        BrokenPipe => IoError.BrokenPipe,
+        TimedOut => IoError.TimedOut,
+        QueueFull => IoError.SubmissionQueueFull,
+        Closed => IoError.Closed,
+        Other { code, message } => IoError.Other(message),
+    }
+}
+
+/// Pending operation for kqueue completion wrapping
+type PendingOp is {
+    op: CompletionOp,
+    user_data: UInt64,
+};
+
+/// Implement IOEngine for KqueueDriver
+///
+/// Note: kqueue is readiness-based, so this implementation:
+/// 1. Registers interest in fd readiness
+/// 2. When fd is ready, performs the actual I/O
+/// 3. Returns the completion result
+implement IOEngine for KqueueDriver {
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
+        let mut submitted = 0;
+
+        for (op, user_data) in ops {
+            let result = match op {
+                CompletionOp.Read { fd, .. } => {
+                    // Register read interest
+                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Write { fd, .. } => {
+                    // Register write interest
+                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Accept { fd, .. } => {
+                    // Accept = read on listening socket
+                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Connect { fd, .. } => {
+                    // Connect completion = write ready
+                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Recv { fd, .. } => {
+                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Send { fd, .. } => {
+                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.RecvMsg { fd, .. } => {
+                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.SendMsg { fd, .. } => {
+                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Fsync { fd, .. } => {
+                    // fsync is synchronous on kqueue — just perform it directly
+                    // kqueue notifies when data has been synced
+                    self.add_event(fd.as_raw() as Int, EVFILT_VNODE, EV_ADD | EV_ONESHOT, 0, IoToken(user_data))
+                }
+                CompletionOp.Poll { fd, events } => {
+                    // Register appropriate filter based on poll events
+                    if (events & 0x0001) != 0 {  // POLLIN
+                        self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    } else {
+                        self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                    }
+                }
+                CompletionOp.Cancel { user_data: target } => {
+                    // kqueue doesn't have cancel — remove any registered events
+                    let _ = self.remove_read(target as Int);
+                    let _ = self.remove_write(target as Int);
+                    Ok(())
+                }
+                CompletionOp.Timeout { ts } => {
+                    // Use kqueue timer for timeout
+                    let timeout_ms = (ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000) as Int;
+                    self.add_timer(user_data as Int, timeout_ms, IoToken(user_data), true)
+                }
+                CompletionOp.Close { fd } => {
+                    // Close is synchronous, but we'll return it as completion
+                    // Remove any registered events first
+                    let _ = self.remove_read(fd.as_raw() as Int);
+                    let _ = self.remove_write(fd.as_raw() as Int);
+                    Ok(())
+                }
+                CompletionOp.ReadV { fd, .. } => {
+                    self.add_read_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.WriteV { fd, .. } => {
+                    self.add_write_oneshot(fd.as_raw() as Int, IoToken(user_data))
+                }
+                CompletionOp.Nop => {
+                    // Use user event for NOP
+                    self.trigger_user_event(user_data as Int)
+                }
+            };
+
+            match result {
+                Ok(()) => submitted += 1,
+                Err(_) => {}  // Continue with other ops
+            }
+        }
+
+        // Flush changes to kqueue
+        match self.flush_changes() {
+            Ok(()) => Ok(submitted),
+            Err(e) => {
+                if submitted > 0 {
+                    Ok(submitted)
+                } else {
+                    Err(convert_error(e))
+                }
+            }
+        }
+    }
+
+    fn wait(
+        &mut self,
+        results: &mut [CompletionResult],
+        min_complete: UInt32,
+        timeout: Maybe<Duration>,
+    ) -> Result<Int{>= 0}, EngineIoError> {
+        let timeout_ms = match timeout {
+            Some(d) => d.as_millis() as Int,
+            None => -1,  // Infinite wait
+        };
+
+        // If min_complete is 0, use poll (no wait)
+        let actual_timeout = if min_complete == 0 { 0 } else { timeout_ms };
+
+        match self.poll(actual_timeout) {
+            Ok(count) => {
+                // Convert kqueue events to CompletionResults
+                let result_count = count.min(results.len() as Int);
+                for i in 0..result_count {
+                    match self.get_event(i) {
+                        Some(cqe) => {
+                            results[i] = CompletionResult {
+                                user_data: cqe.token.0,
+                                result: cqe.result as Int32,
+                                flags: cqe.flags,
+                            };
+                        }
+                        None => break,
+                    }
+                }
+                Ok(result_count)
+            }
+            Err(e) => Err(convert_error(e)),
+        }
+    }
+
+    fn wake(&self) -> Result<(), EngineIoError> {
+        if !self.wake_registered {
+            return Err(EngineIoError.NotSupported);
+        }
+
+        // Trigger the EVFILT_USER event to wake a blocked kevent() call.
+        // This uses a direct kevent() syscall with NOTE_TRIGGER, which is
+        // safe to call from any thread (kevent is thread-safe for triggers).
+        let trigger_ev = KEvent {
+            ident: WAKE_IDENT,
+            filter: EVFILT_USER,
+            flags: 0,
+            fflags: NOTE_TRIGGER,
+            data: 0,
+            udata: 0 as &unsafe Byte,
+        };
+        let no_timeout = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let result = unsafe {
+            kevent(
+                self.kq,
+                &trigger_ev,
+                1,
+                0 as &unsafe KEvent,
+                0,
+                &no_timeout,
+            )
+        };
+
+        if result < 0 {
+            Err(EngineIoError.Other("kqueue wake failed"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pure fn pending(&self) -> UInt32 {
+        self.num_changes as UInt32
+    }
+
+    fn flush(&mut self) -> Result<(), EngineIoError> {
+        self.flush_changes().map_err(convert_error)
+    }
+
+    fn shutdown(&mut self) -> Result<(), EngineIoError> {
+        self.close().map_err(convert_error)
+    }
+
+    pure fn is_open(&self) -> Bool {
+        self.open
+    }
+}
+
+/// Implement IOEngine for IoDriver (wrapper)
+implement IOEngine for IoDriver {
+    fn submit(&mut self, ops: &[(CompletionOp, UInt64)]) -> Result<Int{>= 0}, EngineIoError> {
+        self.kqueue.submit(ops)
+    }
+
+    fn submit_one(&mut self, op: CompletionOp, user_data: UInt64) -> Result<(), EngineIoError> {
+        self.kqueue.submit_one(op, user_data)
+    }
+
+    fn wait(
+        &mut self,
+        results: &mut [CompletionResult],
+        min_complete: UInt32,
+        timeout: Maybe<Duration>,
+    ) -> Result<Int{>= 0}, EngineIoError> {
+        self.kqueue.wait(results, min_complete, timeout)
+    }
+
+    fn wake(&self) -> Result<(), EngineIoError> {
+        self.kqueue.wake()
+    }
+
+    pure fn pending(&self) -> UInt32 {
+        self.kqueue.pending()
+    }
+
+    fn flush(&mut self) -> Result<(), EngineIoError> {
+        self.kqueue.flush()
+    }
+
+    fn shutdown(&mut self) -> Result<(), EngineIoError> {
+        self.kqueue.shutdown()
+    }
+
+    pure fn is_open(&self) -> Bool {
+        self.kqueue.is_open()
+    }
+}

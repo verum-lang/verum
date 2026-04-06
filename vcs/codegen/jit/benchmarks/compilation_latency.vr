@@ -1,0 +1,73 @@
+// @test: benchmark
+// @tier: 1, 2
+// @level: L2
+// @tags: jit, benchmark, latency
+// @timeout: 60000
+// @benchmark-metric: compilation_time_ns
+// @benchmark-target: < 50000000 (50ms per function)
+// @description: Benchmark JIT compilation latency for various function complexities
+
+// Simple function - should compile very fast
+fn simple_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Medium complexity - basic control flow
+fn medium_factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * medium_factorial(n - 1) }
+}
+
+// Higher complexity - loops and arrays
+fn complex_matrix_trace(size: Int) -> Int {
+    let matrix = List.new();
+    for i in 0..size {
+        let row = List.new();
+        for j in 0..size {
+            row.push(i * size + j);
+        }
+        matrix.push(row);
+    }
+
+    let mut trace = 0;
+    for i in 0..size {
+        trace = trace + matrix[i][i];
+    }
+    trace
+}
+
+// Very complex - multiple branches and patterns
+fn very_complex_pattern(value: Int) -> Text {
+    match value {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        n if n < 0 => "negative",
+        n if n < 10 => "small",
+        n if n < 100 => "medium",
+        n if n < 1000 => "large",
+        _ => "huge",
+    }
+}
+
+fn main() -> Int {
+    // Warm up JIT
+    for _ in 0..10 {
+        simple_add(1, 2);
+        medium_factorial(5);
+        complex_matrix_trace(3);
+        very_complex_pattern(42);
+    }
+
+    // Results for verification
+    let r1 = simple_add(100, 200);
+    let r2 = medium_factorial(10);
+    let r3 = complex_matrix_trace(5);
+    let r4 = very_complex_pattern(50);
+
+    assert_eq(r1, 300);
+    assert_eq(r2, 3628800);
+    assert_eq(r4, "medium");
+
+    0
+}

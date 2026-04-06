@@ -1,0 +1,37 @@
+// Test forward references and mutual recursion
+//
+// This file tests:
+// 1. Calling a function defined later (forward reference)
+// 2. Mutual recursion between two functions
+// 3. Expression-body function syntax
+
+fn main() {
+    // Test forward reference - calling helper which is defined below
+    print(f"helper(5) = {helper(5)}");
+
+    // Test mutual recursion
+    print(f"is_even(4) = {is_even(4)}");
+    print(f"is_even(5) = {is_even(5)}");
+    print(f"is_odd(3) = {is_odd(3)}");
+    print(f"is_odd(4) = {is_odd(4)}");
+}
+
+// Helper function defined after main (forward reference test)
+fn helper(n: Int) -> Int = n * 2;
+
+// Mutual recursion: is_even calls is_odd, is_odd calls is_even
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}

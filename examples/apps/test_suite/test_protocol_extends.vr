@@ -1,0 +1,31 @@
+// Test 9: Protocol Extension/Inheritance
+// Tests: protocol extending another protocol
+
+type Named is protocol {
+    fn name(&self) -> Int;
+}
+
+type Greeter is protocol extends Named {
+    fn greet(&self) -> Int;
+}
+
+type Person is {
+    id: Int
+}
+
+implement Named for Person {
+    fn name(&self) -> Int {
+        self.id
+    }
+}
+
+implement Greeter for Person {
+    fn greet(&self) -> Int {
+        self.name() + 1
+    }
+}
+
+fn main() -> Int {
+    let p = Person { id: 41 };
+    p.greet()
+}

@@ -1,0 +1,107 @@
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Person is {
+    name: Text,
+    age: Int
+};
+
+fn get_value(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(x) => x,
+        None => 0
+    }
+}
+
+fn main() {
+    print("=== Optional Operators Test ===");
+    print("Testing ?. (optional chaining) and ?? (null coalescing) operators");
+    print("");
+
+    // ========================================
+    // STATUS SUMMARY
+    // ========================================
+    print("IMPLEMENTATION STATUS:");
+    print("?. operator - PARTIALLY IMPLEMENTED (works with Records, not Variants)");
+    print("?? operator - PARTIALLY IMPLEMENTED (works with Value.Maybe, not Variant.Maybe)");
+    print("");
+
+    // ========================================
+    // Test 1: Baseline - Match-based access
+    // ========================================
+    print("--- Test 1: Baseline (Match-based) ---");
+
+    let some_val = Some(42);
+    let none_val: Maybe<Int> = None;
+
+    let v1 = get_value(some_val);
+    print(f"Match Some(42): {v1}");
+
+    let v2 = get_value(none_val);
+    print(f"Match None: {v2}");
+    print("");
+
+    // ========================================
+    // Test 2: Null Coalescing with Records
+    // ========================================
+    print("--- Test 2: ?? with Records ---");
+
+    let alice = Person { name: "Alice", age: 30 };
+    let bob = Person { name: "Bob", age: 25 };
+
+    // Test ?? with record values
+    let person1 = alice ?? bob;
+    print("alice ?? bob:");
+    print(f"  Result: Person with name={person1.name}, age={person1.age}");
+
+    print("");
+
+    // ========================================
+    // Test 3: Optional Chaining with Records
+    // ========================================
+    print("--- Test 3: ?. with Records ---");
+
+    // Test ?. on regular records (not wrapped in Maybe)
+    let name_opt = alice?.name;
+    print(f"alice?.name = {name_opt}");
+
+    let age_opt = alice?.age;
+    print(f"alice?.age = {age_opt}");
+
+    print("");
+
+    // ========================================
+    // Test 4: Combining ?. and ??
+    // ========================================
+    print("--- Test 4: Combining ?. and ?? ---");
+
+    // Chain operators
+    let name_with_fallback = alice?.name ?? "Unknown";
+    print(f"alice?.name ?? 'Unknown' = {name_with_fallback}");
+
+    let age_with_fallback = alice?.age ?? 0;
+    print(f"alice?.age ?? 0 = {age_with_fallback}");
+
+    print("");
+
+    // ========================================
+    // Test 5: KNOWN LIMITATIONS
+    // ========================================
+    print("--- Test 5: Known Limitations ---");
+    print("The following do NOT work as expected:");
+    print("");
+    print("1. ?? with user-defined Maybe variants:");
+    print("   some_val ?? 100  -> Returns Some(42), not 42");
+    print("   none_val ?? 999  -> Returns None, not 999");
+    print("   Reason: ?? checks for Value.Maybe, but user type creates Variant");
+    print("");
+    print("2. ?. with Maybe-wrapped records:");
+    print("   Some(person)?.name  -> Runtime error");
+    print("   Reason: ?. expects Record, but Some(record) is a Variant");
+    print("");
+    print("WORKAROUND: Use match expressions instead");
+
+    print("");
+    print("=== Test Complete ===");
+}

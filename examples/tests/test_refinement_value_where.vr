@@ -1,0 +1,7 @@
+// Test 4: Where clause with explicit 'value' keyword
+type Temperature is Float where value >= -273.15;
+
+fn main() {
+    let temp: Temperature = 25.5;
+    let _ = println(f"Temperature: {temp}°C");
+}

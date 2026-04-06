@@ -1,0 +1,335 @@
+// file_operations.vr
+// Demonstrates file I/O, directory operations, and error handling
+
+link std.fs.*;
+link std.io.*;
+link std.time.*;
+
+// Read entire file
+async fn read_file_example() -> Result<(), Text> {
+    print("=== Reading File ===")
+
+    let content = FS.read_file("/etc/hosts").await?
+    print(f"File content ({content.len()} bytes):")
+    print(content)
+
+    Ok(())
+}
+
+// Write file
+async fn write_file_example() -> Result<(), Text> {
+    print("\n=== Writing File ===")
+
+    let content = "Hello from Verum!\nThis is a test file.\n"
+    let path = "/tmp/verum_test.txt"
+
+    FS.write_file(path, content).await?
+    print(f"✓ Wrote {content.len()} bytes to {path}")
+
+    // Verify
+    let read_back = FS.read_file(path).await?
+    print(f"✓ Verified: {read_back}")
+
+    Ok(())
+}
+
+// Append to file
+async fn append_file_example() -> Result<(), Text> {
+    print("\n=== Appending to File ===")
+
+    let path = "/tmp/verum_log.txt"
+
+    // Write initial content
+    FS.write_file(path, "Log started\n").await?
+
+    // Append multiple times
+    for i in 1..5 {
+        let timestamp = Time.now().format("%Y-%m-%d %H:%M:%S")
+        let line = f"[{timestamp}] Log entry {i}\n"
+        FS.append_file(path, line).await?
+        print(f"✓ Appended entry {i}")
+    }
+
+    // Read final content
+    let content = FS.read_file(path).await?
+    print("\nFinal log content:")
+    print(content)
+
+    Ok(())
+}
+
+// Directory operations
+async fn directory_operations() -> Result<(), Text> {
+    print("\n=== Directory Operations ===")
+
+    let base_dir = "/tmp/verum_test_dir"
+
+    // Create directory
+    FS.create_dir(base_dir).await?
+    print(f"✓ Created directory: {base_dir}")
+
+    // Create subdirectories
+    FS.create_dir(f"{base_dir}/subdir1").await?
+    FS.create_dir(f"{base_dir}/subdir2").await?
+    print("✓ Created subdirectories")
+
+    // Create files in directory
+    FS.write_file(f"{base_dir}/file1.txt", "Content 1").await?
+    FS.write_file(f"{base_dir}/file2.txt", "Content 2").await?
+    FS.write_file(f"{base_dir}/subdir1/file3.txt", "Content 3").await?
+    print("✓ Created test files")
+
+    // List directory
+    print(f"\nContents of {base_dir}:")
+    let entries = FS.list_dir(base_dir).await?
+
+    for entry in entries {
+        let type_str = if entry.is_dir() { "DIR " } else { "FILE" }
+        let size = if entry.is_file() { f"{entry.size} bytes" } else { "" }
+        print(f"  [{type_str}] {entry.name} {size}")
+    }
+
+    // Recursive listing
+    print(f"\nRecursive listing:")
+    list_recursively(base_dir, 0).await?
+
+    // Clean up
+    FS.remove_dir_all(base_dir).await?
+    print(f"\n✓ Cleaned up {base_dir}")
+
+    Ok(())
+}
+
+// Recursive directory listing
+async fn list_recursively(path: Text, depth: Int) -> Result<(), Text> {
+    let indent = "  ".repeat(depth)
+    let entries = FS.list_dir(path).await?
+
+    for entry in entries {
+        let full_path = f"{path}/{entry.name}"
+
+        if entry.is_dir() {
+            print(f"{indent}📁 {entry.name}/")
+            list_recursively(full_path, depth + 1).await?
+        } else {
+            print(f"{indent}📄 {entry.name} ({entry.size} bytes)")
+        }
+    }
+
+    Ok(())
+}
+
+// File metadata
+async fn file_metadata_example() -> Result<(), Text> {
+    print("\n=== File Metadata ===")
+
+    let path = "/tmp/verum_metadata_test.txt"
+
+    // Create test file
+    FS.write_file(path, "Test content for metadata").await?
+
+    // Get metadata
+    let metadata = FS.metadata(path).await?
+
+    print(f"File: {path}")
+    print(f"Size: {metadata.size} bytes")
+    print(f"Is file: {metadata.is_file()}")
+    print(f"Is directory: {metadata.is_dir()}")
+    print(f"Created: {metadata.created.format('%Y-%m-%d %H:%M:%S')}")
+    print(f"Modified: {metadata.modified.format('%Y-%m-%d %H:%M:%S')}")
+    print(f"Accessed: {metadata.accessed.format('%Y-%m-%d %H:%M:%S')}")
+
+    // Check if read-only
+    if metadata.is_readonly() {
+        print("Permissions: Read-only")
+    } else {
+        print("Permissions: Read-write")
+    }
+
+    // Clean up
+    FS.remove_file(path).await?
+
+    Ok(())
+}
+
+// Stream reading for large files
+async fn stream_large_file(path: Text) -> Result<(), Text> {
+    print(f"\n=== Streaming Large File: {path} ===")
+
+    // Open file for reading
+    let file = FS.open(path).await?
+
+    let mut line_count = 0
+    let mut byte_count = 0
+
+    // Read line by line
+    while let Some(line) = file.read_line().await? {
+        line_count = line_count + 1
+        byte_count = byte_count + line.len()
+
+        // Process line (e.g., print first 5 lines)
+        if line_count <= 5 {
+            print(f"Line {line_count}: {line.trim()}")
+        }
+    }
+
+    print(f"\nTotal lines: {line_count}")
+    print(f"Total bytes: {byte_count}")
+
+    Ok(())
+}
+
+// Buffered writing
+async fn buffered_write_example() -> Result<(), Text> {
+    print("\n=== Buffered Writing ===")
+
+    let path = "/tmp/verum_buffered.txt"
+    let file = FS.create(path).await?
+
+    // Write multiple lines
+    for i in 0..1000 {
+        file.write_line(f"Line {i}: Some content here").await?
+    }
+
+    // Flush ensures all data is written
+    file.flush().await?
+
+    print(f"✓ Wrote 1000 lines to {path}")
+
+    // Verify file size
+    let metadata = FS.metadata(path).await?
+    print(f"✓ File size: {metadata.size} bytes")
+
+    Ok(())
+}
+
+// Temporary files
+async fn temporary_file_example() -> Result<(), Text> {
+    print("\n=== Temporary Files ===")
+
+    // Create temporary file
+    let temp = FS.create_temp_file().await?
+    print(f"✓ Created temp file: {temp.path()}")
+
+    // Write to temp file
+    temp.write_all("Temporary data").await?
+
+    // Read back
+    let content = temp.read_all().await?
+    print(f"✓ Temp file content: {content}")
+
+    // Temp file is automatically deleted when dropped
+    print("✓ Temp file will be auto-deleted")
+
+    Ok(())
+}
+
+// File copying
+async fn copy_file_example() -> Result<(), Text> {
+    print("\n=== File Copying ===")
+
+    let source = "/tmp/verum_source.txt"
+    let dest = "/tmp/verum_dest.txt"
+
+    // Create source file
+    FS.write_file(source, "Content to copy").await?
+    print(f"✓ Created source: {source}")
+
+    // Copy file
+    FS.copy_file(source, dest).await?
+    print(f"✓ Copied to: {dest}")
+
+    // Verify
+    let content = FS.read_file(dest).await?
+    print(f"✓ Verified: {content}")
+
+    // Clean up
+    FS.remove_file(source).await?
+    FS.remove_file(dest).await?
+
+    Ok(())
+}
+
+// Error handling example
+async fn error_handling_example() {
+    print("\n=== Error Handling ===")
+
+    // Attempt to read non-existent file
+    match FS.read_file("/nonexistent/file.txt").await {
+        Ok(content) => print(f"Content: {content}"),
+        Err(e) => print(f"✓ Expected error: {e}")
+    }
+
+    // Attempt to write to invalid path
+    match FS.write_file("/invalid/path/file.txt", "data").await {
+        Ok(_) => print("Should not succeed"),
+        Err(e) => print(f"✓ Expected error: {e}")
+    }
+
+    // Attempt to list non-existent directory
+    match FS.list_dir("/nonexistent/directory").await {
+        Ok(entries) => print(f"Entries: {entries}"),
+        Err(e) => print(f"✓ Expected error: {e}")
+    }
+}
+
+// Search files by pattern
+async fn search_files(dir: Text, pattern: Text) -> Result<List<Text>, Text> {
+    let mut matches = []
+
+    let entries = FS.list_dir(dir).await?
+
+    for entry in entries {
+        let full_path = f"{dir}/{entry.name}"
+
+        if entry.is_file() && entry.name.contains(pattern) {
+            matches = matches.push(full_path)
+        } else if entry.is_dir() {
+            // Recursive search
+            let submatches = search_files(full_path, pattern).await?
+            matches = matches.extend(submatches)
+        }
+    }
+
+    Ok(matches)
+}
+
+async fn main() {
+    print("=== File Operations Demo ===\n")
+
+    // Run all examples
+    let examples = [
+        ("Read File", read_file_example),
+        ("Write File", write_file_example),
+        ("Append File", append_file_example),
+        ("Directory Operations", directory_operations),
+        ("File Metadata", file_metadata_example),
+        ("Buffered Writing", buffered_write_example),
+        ("Temporary Files", temporary_file_example),
+        ("File Copying", copy_file_example)
+    ]
+
+    for (name, example) in examples {
+        match example().await {
+            Ok(_) => print(f"\n✓ {name} completed successfully"),
+            Err(e) => print(f"\n✗ {name} failed: {e}")
+        }
+    }
+
+    // Error handling
+    error_handling_example().await
+
+    // File search example
+    print("\n=== File Search ===")
+    match search_files("/tmp", "verum").await {
+        Ok(files) => {
+            print(f"Found {files.len()} files matching 'verum':")
+            for file in files {
+                print(f"  - {file}")
+            }
+        },
+        Err(e) => print(f"Search error: {e}")
+    }
+
+    print("\n=== All examples completed ===")
+}

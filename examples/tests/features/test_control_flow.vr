@@ -1,0 +1,127 @@
+// Comprehensive Control Flow Test
+// Tests Verum's control flow constructs:
+// 1. If/else expressions
+// 2. Match expressions with pattern guards
+// 3. While loops
+// 4. For loops over ranges and lists
+// 5. Loop with break and continue
+// 6. Return expressions
+
+// Type definitions
+type Maybe<T> is | Some(T) | None;
+
+type Result<T, E> is | Ok(T) | Err(E);
+
+// Helper functions
+fn abs(x: Int) -> Int {
+    if x >= 0 { x } else { -x }
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn unwrap_or_default(m: Maybe<Int>, default: Int) -> Int {
+    match m {
+        Some(value) => value,
+        None => default
+    }
+}
+
+fn classify_number(x: Int) -> Int {
+    match x {
+        n where n > 100 => 3,
+        n where n > 50 => 2,
+        n where n > 0 => 1,
+        _ => 0
+    }
+}
+
+fn count_to_n(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn main() {
+    let _ = print("=== Verum Control Flow Tests ===");
+    let _ = print("");
+
+    // Test 1: If/Else Expressions
+    let _ = print("Test 1: If/Else Expressions");
+    let _ = print(f"  abs(-5) = {abs(-5)}");
+    let _ = print(f"  max(10, 25) = {max(10, 25)}");
+    let _ = print("");
+
+    // Test 2: Match Expressions
+    let _ = print("Test 2: Match Expressions");
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    let _ = print(f"  unwrap_or_default(Some(42), 0) = {unwrap_or_default(some_val, 0)}");
+    let _ = print(f"  unwrap_or_default(None, 0) = {unwrap_or_default(none_val, 0)}");
+    let _ = print("");
+
+    // Test 3: Match with Pattern Guards
+    let _ = print("Test 3: Match with Pattern Guards");
+    let _ = print(f"  classify_number(75) = {classify_number(75)}");
+    let _ = print(f"  classify_number(25) = {classify_number(25)}");
+    let _ = print("");
+
+    // Test 4: While Loops
+    let _ = print("Test 4: While Loops");
+    let _ = print(f"  count_to_n(5) = {count_to_n(5)}");
+    let _ = print(f"  factorial(5) = {factorial(5)}");
+    let _ = print("");
+
+    // Test 5: For Loops (using lists)
+    let _ = print("Test 5: For Loops");
+    let numbers = [0, 1, 2, 3, 4];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        sum = sum + numbers[i];
+        i = i + 1;
+    }
+    let _ = print(f"  sum of [0,1,2,3,4] = {sum}");
+    let _ = print("");
+
+    // Test 6: Break and Continue
+    let _ = print("Test 6: Break and Continue");
+    let mut count = 0;
+    let mut j = 0;
+    while j < 100 {
+        if j >= 10 {
+            break;
+        }
+        count = count + 1;
+        j = j + 1;
+    }
+    let _ = print(f"  while with break at 10: count = {count}");
+
+    let mut skip_count = 0;
+    let mut k = 0;
+    while k < 10 {
+        k = k + 1;
+        if k % 2 == 0 {
+            continue;
+        }
+        skip_count = skip_count + 1;
+    }
+    let _ = print(f"  while with continue (odds): count = {skip_count}");
+    let _ = print("");
+
+    // Test 7: Early Return
+    let _ = print("Test 7: Early Return");
+    let _ = print(f"  factorial uses early return: {factorial(6)}");
+    let _ = print("");
+
+    let _ = print("=== All Tests Complete ===");
+}

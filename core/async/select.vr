@@ -1,0 +1,612 @@
+// =============================================================================
+// async/select.vr - Async Selection Combinators
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/future, async/poll
+// =============================================================================
+//
+// This module provides selection combinators for async operations:
+//
+// - select: Wait for the first of multiple futures to complete
+// - select_all: Wait for any of a collection of futures
+// - race: Race two futures, cancel the loser
+// - join: Wait for all futures to complete
+// - join_all: Wait for a collection of futures
+// - timeout: Add timeout to a future
+//
+// These combinators enable structured concurrency patterns and efficient
+// multiplexing of async operations.
+//
+// =============================================================================
+
+module select;
+
+mount core.{Maybe, Result, List};
+mount super.future.{Future, FutureExt};
+mount super.poll.Poll;
+mount super.waker.Context;
+mount time.{Duration, Instant};
+
+// =============================================================================
+// Select2 - Select between two futures
+// =============================================================================
+
+/// Result of a select operation between two futures.
+///
+/// Indicates which future completed first and its result.
+public type Either<A, B> is
+    | Left(A)
+    | Right(B);
+
+/// Select between two futures, returning when the first completes.
+///
+/// The non-completing future is NOT cancelled automatically.
+/// Use `race` if you want automatic cancellation.
+///
+/// # Example
+///
+/// ```verum
+/// let res = select(
+///     async { fetch_from_cache().await },
+///     async { fetch_from_network().await }
+/// ).await;
+///
+/// match result {
+///     Either.Left(cached) => println("Got from cache"),
+///     Either.Right(network) => println("Got from network"),
+/// }
+/// ```
+public async fn select_either<A, B, FA: Future<Output>, FB: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+) -> Either<A, B> {
+    SelectPair {
+        fut_a: Some(fut_a),
+        fut_b: Some(fut_b),
+    }.await
+}
+
+/// Future that completes when either of two futures completes.
+type SelectPair<A, B, FA: Future<Output>, FB: Future<Output>> is {
+    fut_a: Maybe<FA>,
+    fut_b: Maybe<FB>,
+};
+
+implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A, B, FA, FB> {
+    type Output = Either<A, B>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Either<A, B>> {
+        // Poll first future
+        if let Some(ref mut a) = self.fut_a {
+            match a.poll(cx) {
+                Poll.Ready(val) => {
+                    self.fut_a = None;
+                    return Poll.Ready(Either.Left(val));
+                }
+                Poll.Pending => {}
+            }
+        }
+
+        // Poll second future
+        if let Some(ref mut b) = self.fut_b {
+            match b.poll(cx) {
+                Poll.Ready(val) => {
+                    self.fut_b = None;
+                    return Poll.Ready(Either.Right(val));
+                }
+                Poll.Pending => {}
+            }
+        }
+
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// Race - Race with cancellation
+// =============================================================================
+
+/// Race two futures, cancelling the loser.
+///
+/// Unlike `select`, `race` will drop the losing future when the winner
+/// completes. This is useful when the losing future's result is not needed.
+///
+/// # Example
+///
+/// ```verum
+/// // Race cache lookup against network fetch
+/// let data = race(
+///     async { cache.get(key).await },
+///     async { network.fetch(key).await }
+/// ).await;
+/// ```
+public async fn race<T, FA: Future<Output>, FB: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+) -> T {
+    match select_either(fut_a, fut_b).await {
+        Either.Left(a) => a,
+        Either.Right(b) => b,
+    }
+}
+
+// =============================================================================
+// Select All - Select from collection
+// =============================================================================
+
+/// Result of select_all operation.
+public type SelectAllResult<T> is {
+    /// The completed value
+    value: T,
+    /// Index of the future that completed
+    index: Int,
+    /// Remaining uncompleted futures
+    remaining: List<T>,
+};
+
+/// Select from a collection of futures, completing when any one finishes.
+///
+/// Returns the result along with the index && remaining futures.
+///
+/// # Example
+///
+/// ```verum
+/// let futures = List.from([
+///     fetch_server_1(),
+///     fetch_server_2(),
+///     fetch_server_3(),
+/// ]);
+///
+/// let res = select_all(futures).await;
+/// println(f"Server {result.index} responded first");
+/// ```
+public async fn select_all<T, F: Future<Output>>(
+    mut futures: List<F>,
+) -> SelectAllResult<T> {
+    SelectAll { futures: futures }.await
+}
+
+type SelectAll<T, F: Future<Output>> is {
+    futures: List<F>,
+};
+
+implement<T, F: Future<Output>> Future for SelectAll<T, F> {
+    type Output = SelectAllResult<T>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<SelectAllResult<T>> {
+        for i in 0..self.futures.len() {
+            match self.futures[i].poll(cx) {
+                Poll.Ready(val) => {
+                    // Remove the completed future
+                    let completed = self.futures.remove(i);
+                    let remaining = self.futures.clone();
+
+                    return Poll.Ready(SelectAllResult {
+                        value: val,
+                        index: i,
+                        remaining: remaining,
+                    });
+                }
+                Poll.Pending => {}
+            }
+        }
+
+        if self.futures.is_empty() {
+            panic("select_all called with empty list");
+        }
+
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// Join - Wait for all
+// =============================================================================
+
+/// Wait for both futures to complete, returning both results.
+///
+/// # Example
+///
+/// ```verum
+/// let (user, posts) = join(
+///     fetch_user(user_id),
+///     fetch_posts(user_id),
+/// ).await;
+/// ```
+public async fn join<A, B, FA: Future<Output>, FB: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+) -> (A, B) {
+    JoinPair {
+        fut_a: Some(fut_a),
+        fut_b: Some(fut_b),
+        result_a: None,
+        result_b: None,
+    }.await
+}
+
+type JoinPair<A, B, FA: Future<Output>, FB: Future<Output>> is {
+    fut_a: Maybe<FA>,
+    fut_b: Maybe<FB>,
+    result_a: Maybe<A>,
+    result_b: Maybe<B>,
+};
+
+implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B, FA, FB> {
+    type Output = (A, B);
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<(A, B)> {
+        // Poll first future if !done
+        if self.result_a.is_none() {
+            if let Some(ref mut a) = self.fut_a {
+                match a.poll(cx) {
+                    Poll.Ready(val) => {
+                        self.result_a = Some(val);
+                        self.fut_a = None;
+                    }
+                    Poll.Pending => {}
+                }
+            }
+        }
+
+        // Poll second future if !done
+        if self.result_b.is_none() {
+            if let Some(ref mut b) = self.fut_b {
+                match b.poll(cx) {
+                    Poll.Ready(val) => {
+                        self.result_b = Some(val);
+                        self.fut_b = None;
+                    }
+                    Poll.Pending => {}
+                }
+            }
+        }
+
+        // Check if both done
+        if self.result_a.is_some() && self.result_b.is_some() {
+            let a = self.result_a.take().unwrap();
+            let b = self.result_b.take().unwrap();
+            Poll.Ready((a, b))
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+/// Wait for three futures to complete.
+public async fn join3<A, B, C, FA: Future<Output>, FB: Future<Output>, FC: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+    fut_c: FC,
+) -> (A, B, C) {
+    // First join A and B
+    let ab: (A, B) = join(fut_a, fut_b).await;
+    // Then wait for C
+    let c: C = fut_c.await;
+    (ab.0, ab.1, c)
+}
+
+/// Wait for four futures to complete.
+public async fn join4<A, B, C, D,
+    FA: Future<Output>,
+    FB: Future<Output>,
+    FC: Future<Output>,
+    FD: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+    fut_c: FC,
+    fut_d: FD,
+) -> (A, B, C, D) {
+    // Join pairs concurrently
+    let ab: (A, B) = join(fut_a, fut_b).await;
+    let cd: (C, D) = join(fut_c, fut_d).await;
+    (ab.0, ab.1, cd.0, cd.1)
+}
+
+// =============================================================================
+// Join All - Wait for collection
+// =============================================================================
+
+/// Wait for all futures in a collection to complete.
+///
+/// Returns results in the same order as the input futures.
+///
+/// # Example
+///
+/// ```verum
+/// let futures = urls.iter().map(|url| fetch(url)).collect();
+/// let ress = join_all(futures).await;
+/// ```
+public async fn join_all<T, F: Future<Output>>(
+    futures: List<F>,
+) -> List<T> {
+    JoinAll {
+        futures: futures.iter().map(|f| Some(f)).collect(),
+        results: List.with_capacity(futures.len()),
+        completed: 0,
+    }.await
+}
+
+type JoinAll<T, F: Future<Output>> is {
+    futures: List<Maybe<F>>,
+    results: List<Maybe<T>>,
+    completed: Int,
+};
+
+implement<T, F: Future<Output>> Future for JoinAll<T, F> {
+    type Output = List<T>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<List<T>> {
+        // Initialize results if needed
+        while self.results.len() < self.futures.len() {
+            self.results.push(None);
+        }
+
+        // Poll all pending futures
+        for i in 0..self.futures.len() {
+            if self.results[i].is_none() {
+                if let Some(ref mut fut) = self.futures[i] {
+                    match fut.poll(cx) {
+                        Poll.Ready(val) => {
+                            self.results[i] = Some(val);
+                            self.futures[i] = None;
+                            self.completed = self.completed + 1;
+                        }
+                        Poll.Pending => {}
+                    }
+                }
+            }
+        }
+
+        // Check if all done
+        if self.completed == self.futures.len() {
+            let ress = self.results.iter()
+                .map(|opt| opt.take().unwrap())
+                .collect();
+            Poll.Ready(ress)
+        } else {
+            Poll.Pending
+        }
+    }
+}
+
+// =============================================================================
+// Timeout
+// =============================================================================
+
+/// Error returned when a timeout expires.
+public type TimeoutError is ();
+
+/// Add a timeout to a future.
+///
+/// If the future doesn't complete within the timeout, returns TimeoutError.
+///
+/// # Example
+///
+/// ```verum
+/// match timeout(Duration.from_secs(5), slow_operation()).await {
+///     Ok(res) => println(f"Got: {result}"),
+///     Err(_) => println("Operation timed out"),
+/// }
+/// ```
+public async fn timeout<T, F: Future<Output>>(
+    duration: Duration,
+    future: F,
+) -> Result<T, TimeoutError> {
+    let now = Instant.now();
+    let deadline = now.checked_add(duration).unwrap_or(now);
+    SelectTimeout {
+        future: Some(future),
+        deadline: deadline,
+    }.await
+}
+
+type SelectTimeout<T, F: Future<Output>> is {
+    future: Maybe<F>,
+    deadline: Instant,
+};
+
+implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
+    type Output = Result<T, TimeoutError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, TimeoutError>> {
+        // Check timeout first
+        if Instant.now() >= self.deadline {
+            return Poll.Ready(Err(TimeoutError()));
+        }
+
+        // Poll the inner future
+        if let Some(ref mut fut) = self.future {
+            match fut.poll(cx) {
+                Poll.Ready(val) => {
+                    self.future = None;
+                    return Poll.Ready(Ok(val));
+                }
+                Poll.Pending => {}
+            }
+        }
+
+        // Register wake at deadline
+        // Note: Real implementation would use timer registration
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// First Successful
+// =============================================================================
+
+/// Try futures in order, returning the first successful result.
+///
+/// Unlike `race`, this tries futures sequentially && returns on first success.
+///
+/// # Example
+///
+/// ```verum
+/// let res = try_first(List.from([
+///     || fetch_primary().await,
+///     || fetch_secondary().await,
+///     || fetch_fallback().await,
+/// ])).await;
+/// ```
+public async fn try_first<T, E, F: Future<Output = Result<T, E>>>(
+    futures: List<F>,
+) -> Result<T, E> {
+    TryFirst {
+        futures: futures,
+        current: 0,
+    }.await
+}
+
+type TryFirst<T, E, F: Future<Output = Result<T, E>>> is {
+    futures: List<F>,
+    current: Int,
+};
+
+implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
+    type Output = Result<T, E>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, E>> {
+        while self.current < self.futures.len() {
+            match self.futures[self.current].poll(cx) {
+                Poll.Ready(Ok(val)) => {
+                    return Poll.Ready(Ok(val));
+                }
+                Poll.Ready(Err(e)) => {
+                    self.current = self.current + 1;
+                    if self.current >= self.futures.len() {
+                        return Poll.Ready(Err(e));
+                    }
+                    // Continue to next future
+                }
+                Poll.Pending => {
+                    return Poll.Pending;
+                }
+            }
+        }
+
+        panic("try_first called with empty list");
+    }
+}
+
+// =============================================================================
+// Yield Now
+// =============================================================================
+
+/// Yield control back to the executor.
+///
+/// This allows other tasks to run before this task continues.
+///
+/// # Example
+///
+/// ```verum
+/// for i in 0..1000000 {
+///     // Yield periodically to avoid starving other tasks
+///     if i % 1000 == 0 {
+///         yield_now().await;
+///     }
+///     process(i);
+/// }
+/// ```
+public async fn yield_now() {
+    YieldNow { yielded: false }.await
+}
+
+type YieldNow is {
+    yielded: Bool,
+};
+
+implement Future for YieldNow {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.yielded {
+            Poll.Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+// =============================================================================
+// Pending Forever
+// =============================================================================
+
+/// A future that never completes.
+///
+/// Useful as a placeholder || for testing.
+public fn pending_forever<T>() -> NeverFuture<T> {
+    NeverFuture { _marker: () }
+}
+
+/// A future that never resolves.
+type NeverFuture<T> is {
+    _marker: (),
+};
+
+implement<T> Future for NeverFuture<T> {
+    type Output = T;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// Ready
+// =============================================================================
+
+/// Create a future that immediately returns a value.
+///
+/// # Example
+///
+/// ```verum
+/// let fut = ready(42);
+/// assert_eq(fut.await, 42);
+/// ```
+public fn ready<T>(value: T) -> ReadyFuture<T> {
+    ReadyFuture { value: Some(value) }
+}
+
+public type ReadyFuture<T> is {
+    value: Maybe<T>,
+};
+
+implement<T> Future for ReadyFuture<T> {
+    type Output = T;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
+        match self.value.take() {
+            Some(v) => Poll.Ready(v),
+            None => panic("ReadyFuture polled after completion"),
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+@test
+fn test_ready_future() {
+    let fut = ready(42);
+    // Would need executor to test properly
+}
+
+@test
+fn test_either() {
+    let left: Either<Int, Text> = Either.Left(42);
+    let right: Either<Int, Text> = Either.Right("hello");
+
+    match left {
+        Either.Left(n) => assert_eq(n, 42),
+        Either.Right(_) => panic("expected Left"),
+    }
+
+    match right {
+        Either.Left(_) => panic("expected Right"),
+        Either.Right(s) => assert_eq(s, "hello"),
+    }
+}

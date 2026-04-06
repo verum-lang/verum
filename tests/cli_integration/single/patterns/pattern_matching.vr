@@ -1,0 +1,80 @@
+// Test: PM-001 through PM-010 - Pattern matching
+// Priority: Critical/High
+// Expected output: Various pattern matching results
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int);
+
+type Point is { x: Int, y: Int };
+
+fn main() {
+    // Basic match
+    let x = 2;
+    match x {
+        1 => print(f"one"),
+        2 => print(f"two"),
+        _ => print(f"other"),
+    }
+
+    // Match on variant
+    let color = Color.Rgb(255, 128, 0);
+    match color {
+        Color.Red => print(f"Red"),
+        Color.Green => print(f"Green"),
+        Color.Blue => print(f"Blue"),
+        Color.Rgb(r, g, b) => print(f"RGB: {r}, {g}, {b}"),
+    }
+
+    // Match with guard
+    let n = 5;
+    match n {
+        v if v > 10 => print(f"big"),
+        v if v > 0 => print(f"positive"),
+        _ => print(f"other"),
+    }
+
+    // Or patterns
+    let digit = 3;
+    match digit {
+        1 | 2 | 3 => print(f"small"),
+        _ => print(f"big"),
+    }
+
+    // Range pattern
+    let score = 50;
+    match score {
+        0..=10 => print(f"F"),
+        11..=50 => print(f"C"),
+        51..=100 => print(f"A"),
+        _ => print(f"Invalid"),
+    }
+
+    // If let
+    let maybe: Maybe<Int> = Maybe.Some(42);
+    if let Maybe.Some(v) = maybe {
+        print(f"Got {v}");
+    } else {
+        print(f"None");
+    }
+
+    // For pattern
+    let pairs = [(1, "a"), (2, "b"), (3, "c")];
+    for (num, letter) in pairs {
+        print(f"{num}: {letter}");
+    }
+
+    // Record destructuring
+    let p = Point { x: 10, y: 20 };
+    let Point { x, y } = p;
+    print(f"Point: {x}, {y}");
+
+    // Slice pattern
+    let nums = [1, 2, 3, 4, 5];
+    match nums {
+        [first, .., last] => print(f"First: {first}, Last: {last}"),
+        _ => print(f"empty"),
+    }
+}

@@ -1,0 +1,750 @@
+// =============================================================================
+// random.vr - Random Number Generation Module
+// =============================================================================
+// Layer: 4 (Random Numbers)
+//
+// Provides pseudorandom number generation and probability distributions:
+// - Key-based PRNG (functional, reproducible, parallelizable)
+// - High-quality generators (XorShift128+, PCG, SplitMix64)
+// - Probability distributions (uniform, normal, exponential, etc.)
+// - Shuffling and permutation utilities
+//
+// # Design Philosophy
+//
+// This module uses a functional, key-based approach similar to JAX's PRNG.
+// Each operation consumes a key and produces deterministic output.
+// Keys should be split before use to maintain reproducibility and
+// enable parallel sampling.
+//
+// # Usage
+//
+// ```verum
+// let key = RandomKey.new(42);          // Create from seed
+// let (k1, k2) = key.split();           // Split before use
+// let x = uniform(k1, 0.0, 1.0);        // Sample
+// let y = normal(k2, 0.0, 1.0);         // Independent sample
+// ```
+//
+// Spec: docs/architecture/math-spec.md Section 30
+// =============================================================================
+
+module core.math.random;
+
+mount super.constants.{PI, E};
+mount super.elementary.{sqrt, log, cos, sin, exp, abs, floor};
+mount super.linalg.{Vector};
+
+// =============================================================================
+// Random Key (Functional PRNG State)
+// =============================================================================
+
+// Random key for functional PRNG
+// Uses 128-bit state for high quality randomness
+public type RandomKey is {
+    high: UInt64,
+    low: UInt64,
+};
+
+implement RandomKey {
+    // Create a new random key from a 64-bit seed
+    public fn new(seed: UInt64) -> Self {
+        // Use SplitMix64 to initialize both halves
+        let z1 = splitmix64(seed);
+        let z2 = splitmix64(z1);
+        RandomKey { high: z1, low: z2 }
+    }
+
+    // Split a key into two independent subkeys
+    // CRITICAL: Never reuse keys. Always split before use.
+    public fn split(self) -> (RandomKey, RandomKey) {
+        let z1 = splitmix64(self.low);
+        let z2 = splitmix64(self.high ^ z1);
+        let z3 = splitmix64(z1 ^ z2);
+        let z4 = splitmix64(z2 ^ z3);
+
+        let key1 = RandomKey { high: z1, low: z2 };
+        let key2 = RandomKey { high: z3, low: z4 };
+        (key1, key2)
+    }
+
+    // Split into n independent subkeys
+    public fn split_n(self, n: USize) -> List<RandomKey> {
+        let mut keys = List.with_capacity(n);
+        let mut current = self;
+
+        for _ in 0..n {
+            let (k1, k2) = current.split();
+            keys.push(k1);
+            current = k2;
+        }
+
+        keys
+    }
+
+    // Fold data into key for deterministic subkey generation
+    // Useful for per-sample or per-iteration keys
+    public fn fold_in(self, data: UInt64) -> RandomKey {
+        let mixed = splitmix64(self.low ^ data);
+        RandomKey {
+            high: self.high ^ mixed,
+            low: mixed,
+        }
+    }
+
+    // Generate next random 64-bit value using XorShift128+
+    fn next_u64(&mut self) -> UInt64 {
+        let mut s1 = self.high;
+        let s0 = self.low;
+
+        let result = s0 + s1;
+
+        self.high = s0;
+        s1 ^= s1 << 23;  // a
+        self.low = s1 ^ s0 ^ (s1 >> 18) ^ (s0 >> 5);  // b, c
+
+        result
+    }
+
+    // Generate random Float in [0, 1)
+    fn next_f64(&mut self) -> Float {
+        let bits = self.next_u64();
+        // Use top 53 bits for full double precision
+        (bits >> 11) as Float * (1.0 / 9007199254740992.0)  // 2^53
+    }
+}
+
+// =============================================================================
+// SplitMix64 (Used for Initialization)
+// =============================================================================
+
+// SplitMix64 hash function - good for seeding other PRNGs
+@inline(always)
+fn splitmix64(x: UInt64) -> UInt64 {
+    let mut z = x + 0x9e3779b97f4a7c15;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
+    z ^ (z >> 31)
+}
+
+// =============================================================================
+// XorShift128+ Generator
+// =============================================================================
+
+// XorShift128+ generator state
+// Fast, high-quality PRNG with 2^128-1 period
+public type XorShift128 is {
+    s0: UInt64,
+    s1: UInt64,
+};
+
+implement XorShift128 {
+    // Create from seed
+    public fn new(seed: UInt64) -> Self {
+        let s0 = splitmix64(seed);
+        let s1 = splitmix64(s0);
+        XorShift128 { s0, s1 }
+    }
+
+    // Generate next 64-bit random value
+    @inline(always)
+    public fn next_u64(&mut self) -> UInt64 {
+        let mut s1 = self.s0;
+        let s0 = self.s1;
+
+        let result = s0 + s1;
+
+        self.s0 = s0;
+        s1 ^= s1 << 23;
+        self.s1 = s1 ^ s0 ^ (s1 >> 18) ^ (s0 >> 5);
+
+        result
+    }
+
+    // Generate random Float in [0, 1)
+    @inline(always)
+    public fn next_f64(&mut self) -> Float {
+        let bits = self.next_u64();
+        (bits >> 11) as Float * (1.0 / 9007199254740992.0)
+    }
+
+    // Generate random Float32 in [0, 1)
+    @inline(always)
+    public fn next_f32(&mut self) -> Float32 {
+        let bits = self.next_u64();
+        (bits >> 40) as Float32 * ((1.0 as Float32) / (16777216.0 as Float32))  // 2^24
+    }
+
+    // Generate random integer in [0, bound)
+    public fn next_bounded(&mut self, bound: UInt64) -> UInt64 {
+        if bound == 0 {
+            return 0;
+        }
+
+        // Rejection sampling to avoid modulo bias
+        let threshold = (0 - bound) % bound;
+        loop {
+            let r = self.next_u64();
+            if r >= threshold {
+                return r % bound;
+            }
+        }
+    }
+
+    // Generate random Bool
+    @inline(always)
+    public fn next_bool(&mut self) -> Bool {
+        (self.next_u64() >> 63) == 1
+    }
+}
+
+// =============================================================================
+// PCG-XSH-RR Generator (Permuted Congruential Generator)
+// =============================================================================
+
+// PCG-XSH-RR 32/64 generator
+// Excellent statistical properties, good for simulations
+public type PCG is {
+    state: UInt64,
+    inc: UInt64,
+};
+
+implement PCG {
+    // Create from seed and stream
+    public fn new(seed: UInt64, stream: UInt64) -> Self {
+        let inc = (stream << 1) | 1;  // Ensure odd increment
+        let mut pcg = PCG { state: 0, inc };
+
+        // Advance state once and mix with seed
+        pcg.next_u32();
+        pcg.state = pcg.state + seed;
+        pcg.next_u32();
+
+        pcg
+    }
+
+    // Generate next 32-bit random value
+    @inline(always)
+    public fn next_u32(&mut self) -> UInt32 {
+        let old_state = self.state;
+
+        // LCG step
+        self.state = old_state * 6364136223846793005 + self.inc;
+
+        // XSH-RR output function
+        let xorshifted = (((old_state >> 18) ^ old_state) >> 27) as UInt32;
+        let rot = (old_state >> 59) as UInt32;
+
+        (xorshifted >> rot) | (xorshifted << ((-(rot as Int32)) & 31))
+    }
+
+    // Generate 64-bit value by combining two 32-bit values
+    @inline(always)
+    public fn next_u64(&mut self) -> UInt64 {
+        let high = self.next_u32() as UInt64;
+        let low = self.next_u32() as UInt64;
+        (high << 32) | low
+    }
+
+    // Generate random Float in [0, 1)
+    @inline(always)
+    public fn next_f64(&mut self) -> Float {
+        let bits = self.next_u64();
+        (bits >> 11) as Float * (1.0 / 9007199254740992.0)
+    }
+}
+
+// =============================================================================
+// Uniform Distribution
+// =============================================================================
+
+// Sample uniform Float in [0, 1) using key
+public fn uniform_01(key: RandomKey) -> Float {
+    let mut k = key;
+    k.next_f64()
+}
+
+// Sample uniform Float in [low, high)
+public fn uniform(key: RandomKey, low: Float, high: Float) -> Float {
+    low + (high - low) * uniform_01(key)
+}
+
+// Sample n uniform values in [0, 1)
+public fn uniform_vec(key: RandomKey, n: USize) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, uniform_01(keys[i]));
+    }
+    v
+}
+
+// Sample n uniform values in [low, high)
+public fn uniform_range_vec(key: RandomKey, n: USize, low: Float, high: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, uniform(keys[i], low, high));
+    }
+    v
+}
+
+// Sample uniform integer in [0, bound)
+public fn uniform_int(key: RandomKey, bound: UInt64) -> UInt64 {
+    let mut gen = XorShift128.new(key.low ^ key.high);
+    gen.next_bounded(bound)
+}
+
+// Sample uniform integer in [low, high)
+public fn uniform_int_range(key: RandomKey, low: Int, high: Int) -> Int {
+    let range = (high - low) as UInt64;
+    low + uniform_int(key, range) as Int
+}
+
+// =============================================================================
+// Normal (Gaussian) Distribution
+// =============================================================================
+
+// Sample from standard normal distribution N(0, 1) using Box-Muller transform
+public fn normal_01(key: RandomKey) -> Float {
+    let (k1, k2) = key.split();
+    let u1 = uniform_01(k1);
+    let u2 = uniform_01(k2);
+
+    // Box-Muller transform
+    sqrt(-2.0 * log(u1 + 1e-300)) * cos(2.0 * PI * u2)
+}
+
+// Sample from normal distribution N(mean, std²)
+public fn normal(key: RandomKey, mean: Float, std: Float) -> Float {
+    mean + std * normal_01(key)
+}
+
+// Sample n values from standard normal distribution
+public fn normal_vec(key: RandomKey, n: USize) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, normal_01(keys[i]));
+    }
+    v
+}
+
+// Sample n values from normal distribution
+public fn normal_vec_params(key: RandomKey, n: USize, mean: Float, std: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, normal(keys[i], mean, std));
+    }
+    v
+}
+
+// Sample from truncated normal distribution
+// Values are rejection-sampled to be in [low, high]
+public fn truncated_normal(
+    key: RandomKey,
+    mean: Float,
+    std: Float,
+    low: Float,
+    high: Float,
+    max_attempts: USize,
+) -> Float {
+    let mut current_key = key;
+
+    for _ in 0..max_attempts {
+        let (k1, k2) = current_key.split();
+        current_key = k2;
+
+        let sample = normal(k1, mean, std);
+        if sample >= low && sample <= high {
+            return sample;
+        }
+    }
+
+    // Fall back to clamping
+    let sample = normal(current_key, mean, std);
+    if sample < low { low } else if sample > high { high } else { sample }
+}
+
+// =============================================================================
+// Exponential Distribution
+// =============================================================================
+
+// Sample from exponential distribution with rate λ
+// Mean = 1/λ, Variance = 1/λ²
+public fn exponential(key: RandomKey, rate: Float) -> Float {
+    let u = uniform_01(key);
+    let ln_u: Float = log(u + 1e-300);
+    (-1.0 * ln_u) / rate
+}
+
+// Sample n values from exponential distribution
+public fn exponential_vec(key: RandomKey, n: USize, rate: Float) -> Vector<Float> {
+    let keys = key.split_n(n);
+    let mut v = Vector.zeros(n);
+    for i in 0..n {
+        v.set(i, exponential(keys[i], rate));
+    }
+    v
+}
+
+// =============================================================================
+// Other Distributions
+// =============================================================================
+
+// Sample from Bernoulli distribution (coin flip with probability p)
+public fn bernoulli(key: RandomKey, p: Float) -> Bool {
+    uniform_01(key) < p
+}
+
+// Sample n Bernoulli values
+public fn bernoulli_vec(key: RandomKey, n: USize, p: Float) -> List<Bool> {
+    let keys = key.split_n(n);
+    let mut v = List.with_capacity(n);
+    for i in 0..n {
+        v.push(bernoulli(keys[i], p));
+    }
+    v
+}
+
+// Sample from geometric distribution (number of failures before first success)
+// Parameter p is success probability
+public fn geometric(key: RandomKey, p: Float) -> UInt64 {
+    assert(p > 0.0 && p <= 1.0, "p must be in (0, 1]");
+
+    // Use inverse CDF: ceil(ln(U) / ln(1-p)) - 1
+    let u = uniform_01(key);
+    let result = floor(log(u + 1e-300) / log(1.0 - p));
+    if result < 0.0 { 0 } else { result as UInt64 }
+}
+
+// Sample from Poisson distribution with mean λ
+// Uses Knuth's algorithm for small λ, rejection for large λ
+public fn poisson(key: RandomKey, lambda: Float) -> UInt64 {
+    assert(lambda >= 0.0, "lambda must be non-negative");
+
+    if lambda < 30.0 {
+        // Knuth's algorithm
+        let l = exp(-lambda);
+        let mut k = 0;
+        let mut p = 1.0;
+        let mut current_key = key;
+
+        loop {
+            let (k1, k2) = current_key.split();
+            current_key = k2;
+            p = p * uniform_01(k1);
+            if p <= l {
+                break;
+            }
+            k = k + 1;
+        }
+
+        k
+    } else {
+        // For large λ, use normal approximation with rejection
+        let sqrt_lambda = sqrt(lambda);
+        let mut current_key = key;
+
+        loop {
+            let (k1, k2) = current_key.split();
+            current_key = k2;
+
+            let z = normal_01(k1);
+            let x = lambda + sqrt_lambda * z;
+
+            if x >= 0.0 {
+                return floor(x + 0.5) as UInt64;
+            }
+        }
+    }
+}
+
+// Sample from gamma distribution with shape α and rate β
+// Mean = α/β, Variance = α/β²
+// Note: Named `gamma_sample` to avoid conflict with the mathematical gamma function Γ(x)
+// from core.math.special.
+public fn gamma_sample(key: RandomKey, shape: Float, rate: Float) -> Float {
+    assert(shape > 0.0 && rate > 0.0, "shape and rate must be positive");
+
+    if shape < 1.0 {
+        // Ahrens-Dieter method for shape < 1
+        let (k1, k2) = key.split();
+        let u = uniform_01(k1);
+        gamma_sample(k2, shape + 1.0, rate) * pow(u, 1.0 / shape)
+    } else {
+        // Marsaglia and Tsang's method for shape >= 1
+        let d = shape - 1.0 / 3.0;
+        let c = 1.0 / sqrt(9.0 * d);
+        let mut current_key = key;
+
+        loop {
+            let (k1, k2) = current_key.split();
+            current_key = k2;
+
+            let z = normal_01(k1);
+            let v = 1.0 + c * z;
+
+            if v > 0.0 {
+                let v3 = v * v * v;
+                let (k3, k4) = current_key.split();
+                current_key = k4;
+                let u = uniform_01(k3);
+
+                // Squeeze test
+                if u < 1.0 - 0.0331 * z * z * z * z {
+                    return d * v3 / rate;
+                }
+
+                // Full test
+                if log(u + 1e-300) < 0.5 * z * z + d * (1.0 - v3 + log(v3)) {
+                    return d * v3 / rate;
+                }
+            }
+        }
+    }
+}
+
+// Sample from beta distribution with parameters α and β
+// Support: [0, 1], Mean = α/(α+β)
+// Note: Named `beta_sample` to avoid conflict with the mathematical beta function B(a,b)
+// from core.math.special.
+public fn beta_sample(key: RandomKey, alpha: Float, beta_param: Float) -> Float {
+    let (k1, k2) = key.split();
+    let x = gamma_sample(k1, alpha, 1.0);
+    let y = gamma_sample(k2, beta_param, 1.0);
+    x / (x + y)
+}
+
+// Sample from chi-squared distribution with k degrees of freedom
+public fn chi_squared(key: RandomKey, k: Float) -> Float {
+    gamma_sample(key, k / 2.0, 0.5)
+}
+
+// Sample from Student's t-distribution with ν degrees of freedom
+public fn student_t(key: RandomKey, nu: Float) -> Float {
+    let (k1, k2) = key.split();
+    let z = normal_01(k1);
+    let chi2 = chi_squared(k2, nu);
+    z * sqrt(nu / chi2)
+}
+
+// Sample from Cauchy distribution
+public fn cauchy(key: RandomKey, location: Float, scale: Float) -> Float {
+    let u = uniform_01(key);
+    location + scale * tan(PI * (u - 0.5))
+}
+
+// Import tan from elementary (it's not in the mount list)
+fn tan(x: Float) -> Float {
+    sin(x) / cos(x)
+}
+
+// Power function (import helper)
+fn pow(base: Float, exp: Float) -> Float {
+    super.elementary.pow(base, exp)
+}
+
+// =============================================================================
+// Categorical and Discrete Distributions
+// =============================================================================
+
+// Sample from categorical distribution given probabilities
+// Returns index in [0, probs.len())
+public fn categorical(key: RandomKey, probs: &Vector<Float>) -> USize {
+    let u = uniform_01(key);
+    let mut cumsum = 0.0;
+
+    for i in 0..probs.len() {
+        cumsum = cumsum + probs.get(i);
+        if u < cumsum {
+            return i;
+        }
+    }
+
+    // Edge case: return last index
+    probs.len() - 1
+}
+
+// Sample from categorical distribution given log-probabilities (numerically stable)
+public fn categorical_logits(key: RandomKey, logits: &Vector<Float>) -> USize {
+    // Gumbel-max trick: argmax(logits + gumbel_noise)
+    let n = logits.len();
+    let keys = key.split_n(n);
+
+    let mut max_val = -1e300;
+    let mut max_idx = 0;
+
+    for i in 0..n {
+        let u = uniform_01(keys[i]);
+        let ln_u: Float = log(u + 1e-300);
+        let ln_neg_ln_u: Float = log((-1.0 * ln_u) + 1e-300);
+        let gumbel = -1.0 * ln_neg_ln_u;
+        let val = logits.get(i) + gumbel;
+        if val > max_val {
+            max_val = val;
+            max_idx = i;
+        }
+    }
+
+    max_idx
+}
+
+// Sample from multinomial distribution
+// Returns counts for each category
+public fn multinomial(key: RandomKey, probs: &Vector<Float>, n: USize) -> Vector<Float> {
+    let k = probs.len();
+    let mut counts = Vector.zeros(k);
+    let keys = key.split_n(n);
+
+    for i in 0..n {
+        let idx = categorical(keys[i], probs);
+        counts.set(idx, counts.get(idx) + 1.0);
+    }
+
+    counts
+}
+
+// =============================================================================
+// Shuffling and Permutation
+// =============================================================================
+
+// Generate random permutation of [0, n)
+public fn permutation(key: RandomKey, n: USize) -> List<USize> {
+    // Fisher-Yates shuffle
+    let mut perm = List.with_capacity(n);
+    for i in 0..n {
+        perm.push(i);
+    }
+
+    let mut gen = XorShift128.new(key.low ^ key.high);
+
+    for i in (1..n).rev() {
+        let j = gen.next_bounded((i + 1) as UInt64) as USize;
+        let tmp = perm[i];
+        perm[i] = perm[j];
+        perm[j] = tmp;
+    }
+
+    perm
+}
+
+// Shuffle a vector in place
+public fn shuffle_vec<T: Copy>(key: RandomKey, v: &mut List<T>) {
+    let n = v.len();
+    let mut gen = XorShift128.new(key.low ^ key.high);
+
+    for i in (1..n).rev() {
+        let j = gen.next_bounded((i + 1) as UInt64) as USize;
+        let tmp = v[i];
+        v[i] = v[j];
+        v[j] = tmp;
+    }
+}
+
+// Random choice from vector (single sample)
+public fn choice<T: Copy>(key: RandomKey, v: &List<T>) -> T {
+    let idx = uniform_int(key, v.len() as UInt64) as USize;
+    v[idx]
+}
+
+// Random choice with replacement
+public fn choice_with_replacement<T: Copy>(key: RandomKey, v: &List<T>, n: USize) -> List<T> {
+    let keys = key.split_n(n);
+    let mut result = List.with_capacity(n);
+
+    for i in 0..n {
+        result.push(choice(keys[i], v));
+    }
+
+    result
+}
+
+// Random choice without replacement
+public fn choice_without_replacement<T: Copy>(key: RandomKey, v: &List<T>, n: USize) -> List<T> {
+    assert(n <= v.len(), "cannot choose more elements than available");
+
+    let perm = permutation(key, v.len());
+    let mut result = List.with_capacity(n);
+
+    for i in 0..n {
+        result.push(v[perm[i]]);
+    }
+
+    result
+}
+
+// =============================================================================
+// Random Context (for imperative-style usage)
+// =============================================================================
+
+// Context for random number generation
+// Provides imperative-style interface by managing key splitting automatically
+public type Rng is {
+    key: RandomKey,
+};
+
+implement Rng {
+    // Create from seed
+    public fn new(seed: UInt64) -> Self {
+        Rng { key: RandomKey.new(seed) }
+    }
+
+    // Create from key
+    public fn from_key(key: RandomKey) -> Self {
+        Rng { key }
+    }
+
+    // Get a fresh key (automatically advances state)
+    public fn next_key(&mut self) -> RandomKey {
+        let (k1, k2) = self.key.split();
+        self.key = k2;
+        k1
+    }
+
+    // Sample uniform Float in [0, 1)
+    public fn uniform_01(&mut self) -> Float {
+        uniform_01(self.next_key())
+    }
+
+    // Sample uniform Float in [low, high)
+    public fn uniform(&mut self, low: Float, high: Float) -> Float {
+        uniform(self.next_key(), low, high)
+    }
+
+    // Sample from standard normal distribution
+    public fn normal_01(&mut self) -> Float {
+        normal_01(self.next_key())
+    }
+
+    // Sample from normal distribution
+    public fn normal(&mut self, mean: Float, std: Float) -> Float {
+        normal(self.next_key(), mean, std)
+    }
+
+    // Sample from exponential distribution
+    public fn exponential(&mut self, rate: Float) -> Float {
+        exponential(self.next_key(), rate)
+    }
+
+    // Sample Bernoulli
+    public fn bernoulli(&mut self, p: Float) -> Bool {
+        bernoulli(self.next_key(), p)
+    }
+
+    // Sample uniform integer in [0, bound)
+    public fn uniform_int(&mut self, bound: UInt64) -> UInt64 {
+        uniform_int(self.next_key(), bound)
+    }
+
+    // Generate permutation
+    public fn permutation(&mut self, n: USize) -> List<USize> {
+        permutation(self.next_key(), n)
+    }
+
+    // Shuffle a list
+    public fn shuffle<T: Copy>(&mut self, v: &mut List<T>) {
+        shuffle_vec(self.next_key(), v)
+    }
+}
+

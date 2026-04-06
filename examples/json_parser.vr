@@ -1,0 +1,373 @@
+// json_parser.vr
+// Demonstrates JSON parsing, serialization, and error handling
+
+link std.json.*;
+link std.io.*;
+
+// Domain types
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text,
+    address: Address
+};
+
+type Address is {
+    street: Text,
+    city: Text,
+    country: Text,
+    postal_code: Text
+};
+
+type Company is {
+    name: Text,
+    founded: Int,
+    employees: List<Person>
+};
+
+// Parse JSON into domain types
+fn parse_address(json: JsonValue) -> Result<Address, Text> {
+    let obj = json.as_object()
+        .map_err(|_| "Address must be an object")?
+
+    Ok(Address {
+        street: obj.get("street").as_text()?,
+        city: obj.get("city").as_text()?,
+        country: obj.get("country").as_text()?,
+        postal_code: obj.get("postal_code").as_text()?
+    })
+}
+
+fn parse_person(json: JsonValue) -> Result<Person, Text> {
+    let obj = json.as_object()
+        .map_err(|_| "Person must be an object")?
+
+    let address_json = obj.get("address")?
+    let address = parse_address(address_json)?
+
+    Ok(Person {
+        name: obj.get("name").as_text()?,
+        age: obj.get("age").as_int()?,
+        email: obj.get("email").as_text()?,
+        address: address
+    })
+}
+
+fn parse_company(json: JsonValue) -> Result<Company, Text> {
+    let obj = json.as_object()
+        .map_err(|_| "Company must be an object")?
+
+    let employees_json = obj.get("employees").as_array()?
+    let employees = employees_json
+        .map(|e| parse_person(e))
+        .collect.<Result<List<Person>, Text>>()?
+
+    Ok(Company {
+        name: obj.get("name").as_text()?,
+        founded: obj.get("founded").as_int()?,
+        employees: employees
+    })
+}
+
+// Serialize domain types to JSON
+fn address_to_json(addr: Address) -> JsonValue {
+    Json.object([
+        ("street", Json.text(addr.street)),
+        ("city", Json.text(addr.city)),
+        ("country", Json.text(addr.country)),
+        ("postal_code", Json.text(addr.postal_code))
+    ])
+}
+
+fn person_to_json(person: Person) -> JsonValue {
+    Json.object([
+        ("name", Json.text(person.name)),
+        ("age", Json.int(person.age)),
+        ("email", Json.text(person.email)),
+        ("address", address_to_json(person.address))
+    ])
+}
+
+fn company_to_json(company: Company) -> JsonValue {
+    Json.object([
+        ("name", Json.text(company.name)),
+        ("founded", Json.int(company.founded)),
+        ("employees", Json.array(
+            company.employees.map(person_to_json)
+        ))
+    ])
+}
+
+// Pretty-print JSON
+fn pretty_print_json(value: JsonValue, indent: Int) -> Text {
+    let spaces = " ".repeat(indent)
+
+    match value {
+        Json.Null => "null",
+        Json.Bool(b) => if b { "true" } else { "false" },
+        Json.Int(i) => i.to_string(),
+        Json.Float(f) => f.to_string(),
+        Json.Text(s) => f"\"{s}\"",
+        Json.Array(items) => {
+            if items.is_empty() {
+                "[]"
+            } else {
+                let inner = items
+                    .map(|item| f"{spaces}  {pretty_print_json(item, indent + 2)}")
+                    .join(",\n")
+                f"[\n{inner}\n{spaces}]"
+            }
+        },
+        Json.Object(entries) => {
+            if entries.is_empty() {
+                "{}"
+            } else {
+                let inner = entries
+                    .map(|(k, v)| f"{spaces}  \"{k}\": {pretty_print_json(v, indent + 2)}")
+                    .join(",\n")
+                f"{{\n{inner}\n{spaces}}}"
+            }
+        }
+    }
+}
+
+// JSON validation
+fn validate_person_json(json: JsonValue) -> Result<(), List<Text>> {
+    let mut errors = []
+
+    match json.as_object() {
+        Err(_) => {
+            errors = errors.push("Must be an object")
+            return Err(errors)
+        },
+        Ok(obj) => {
+            // Validate required fields
+            if !obj.contains_key("name") {
+                errors = errors.push("Missing required field: name")
+            }
+            if !obj.contains_key("age") {
+                errors = errors.push("Missing required field: age")
+            }
+            if !obj.contains_key("email") {
+                errors = errors.push("Missing required field: email")
+            }
+            if !obj.contains_key("address") {
+                errors = errors.push("Missing required field: address")
+            }
+
+            // Validate types
+            if let Some(age) = obj.get("age") {
+                if !age.is_int() {
+                    errors = errors.push("Field 'age' must be an integer")
+                }
+            }
+
+            // Validate email format (simplified)
+            if let Some(email) = obj.get("email") {
+                if let Ok(email_str) = email.as_text() {
+                    if !email_str.contains("@") {
+                        errors = errors.push("Invalid email format")
+                    }
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+// Stream processing for large JSON files
+async fn process_large_json_file(path: Text) -> Result<(), Text> {
+    // Read file in chunks
+    let content = read_file(path).await?
+
+    // Parse JSON
+    let json = Json.parse(content)?
+
+    // Process as stream
+    if let Ok(array) = json.as_array() {
+        for item in array {
+            // Process each item
+            match parse_person(item) {
+                Ok(person) => {
+                    print(f"Processed: {person.name}")
+                },
+                Err(e) => {
+                    print(f"Error: {e}")
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// JSON transformation
+fn transform_json(json: JsonValue, transformer: JsonValue -> JsonValue) -> JsonValue {
+    match json {
+        Json.Object(entries) => {
+            let transformed = entries
+                .map(|(k, v)| (k, transform_json(v, transformer)))
+            Json.object(transformed)
+        },
+        Json.Array(items) => {
+            let transformed = items.map(|item| transform_json(item, transformer))
+            Json.array(transformed)
+        },
+        _ => transformer(json)
+    }
+}
+
+// Example transformers
+fn uppercase_strings(json: JsonValue) -> JsonValue {
+    match json {
+        Json.Text(s) => Json.text(s.to_uppercase()),
+        _ => json
+    }
+}
+
+fn double_numbers(json: JsonValue) -> JsonValue {
+    match json {
+        Json.Int(i) => Json.int(i * 2),
+        Json.Float(f) => Json.float(f * 2.0),
+        _ => json
+    }
+}
+
+fn main() {
+    print("=== JSON Parsing Demo ===\n")
+
+    // Sample JSON data
+    let json_string = r#"{
+        "name": "Acme Corp",
+        "founded": 2010,
+        "employees": [
+            {
+                "name": "Alice Smith",
+                "age": 30,
+                "email": "alice@acme.com",
+                "address": {
+                    "street": "123 Main St",
+                    "city": "San Francisco",
+                    "country": "USA",
+                    "postal_code": "94102"
+                }
+            },
+            {
+                "name": "Bob Johnson",
+                "age": 35,
+                "email": "bob@acme.com",
+                "address": {
+                    "street": "456 Oak Ave",
+                    "city": "New York",
+                    "country": "USA",
+                    "postal_code": "10001"
+                }
+            }
+        ]
+    }"#
+
+    // Parse JSON
+    print("Parsing JSON...")
+    let json = Json.parse(json_string)
+
+    match json {
+        Ok(value) => {
+            print("✓ Successfully parsed JSON\n")
+
+            // Parse into domain type
+            match parse_company(value) {
+                Ok(company) => {
+                    print(f"Company: {company.name}")
+                    print(f"Founded: {company.founded}")
+                    print(f"Employees: {company.employees.len()}\n")
+
+                    for employee in company.employees {
+                        print(f"- {employee.name} ({employee.age})")
+                        print(f"  Email: {employee.email}")
+                        print(f"  Location: {employee.address.city}, {employee.address.country}\n")
+                    }
+
+                    // Serialize back to JSON
+                    print("--- Serialized JSON ---")
+                    let serialized = company_to_json(company)
+                    let pretty = pretty_print_json(serialized, 0)
+                    print(pretty)
+                },
+                Err(e) => print(f"✗ Parse error: {e}")
+            }
+        },
+        Err(e) => print(f"✗ JSON error: {e}")
+    }
+
+    // Validation example
+    print("\n=== JSON Validation ===")
+
+    let valid_json = Json.object([
+        ("name", Json.text("Charlie")),
+        ("age", Json.int(28)),
+        ("email", Json.text("charlie@example.com")),
+        ("address", Json.object([
+            ("street", Json.text("789 Elm St")),
+            ("city", Json.text("Boston")),
+            ("country", Json.text("USA")),
+            ("postal_code", Json.text("02101"))
+        ]))
+    ])
+
+    let invalid_json = Json.object([
+        ("name", Json.text("Dave")),
+        ("age", Json.text("not a number")),  // Wrong type
+        ("email", Json.text("invalid-email"))  // Invalid format
+        // Missing address field
+    ])
+
+    print("Validating valid JSON...")
+    match validate_person_json(valid_json) {
+        Ok(_) => print("✓ Valid"),
+        Err(errors) => {
+            print("✗ Validation errors:")
+            for error in errors {
+                print(f"  - {error}")
+            }
+        }
+    }
+
+    print("\nValidating invalid JSON...")
+    match validate_person_json(invalid_json) {
+        Ok(_) => print("✓ Valid"),
+        Err(errors) => {
+            print("✗ Validation errors:")
+            for error in errors {
+                print(f"  - {error}")
+            }
+        }
+    }
+
+    // Transformation example
+    print("\n=== JSON Transformation ===")
+
+    let data = Json.object([
+        ("name", Json.text("test")),
+        ("value", Json.int(42)),
+        ("nested", Json.object([
+            ("text", Json.text("hello")),
+            ("number", Json.float(3.14))
+        ]))
+    ])
+
+    print("Original:")
+    print(pretty_print_json(data, 0))
+
+    print("\nTransformed (uppercase strings):")
+    let transformed = transform_json(data, uppercase_strings)
+    print(pretty_print_json(transformed, 0))
+
+    print("\nTransformed (double numbers):")
+    let transformed = transform_json(data, double_numbers)
+    print(pretty_print_json(transformed, 0))
+}

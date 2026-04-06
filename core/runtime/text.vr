@@ -1,0 +1,73 @@
+module runtime.text;
+
+/// Create a Text from a static string pointer.
+@intrinsic("verum.runtime.text_from_static")
+public fn text_from_static(ptr: *const UInt8, len: USize) -> Text;
+
+/// Decode a UTF-8 character from bytes.
+@intrinsic("verum.runtime.utf8_decode_char")
+public fn utf8_decode_char(bytes: &[UInt8]) -> Int;
+
+/// Get the length of a UTF-8 character.
+@intrinsic("verum.runtime.utf8_decode_char_len")
+public fn utf8_decode_char_len(byte: UInt8) -> Int;
+
+/// Parse an integer from text.
+@intrinsic("verum.runtime.text_parse_int")
+public fn text_parse_int(s: &Text) -> Maybe<Int>;
+
+/// Parse a float from text.
+@intrinsic("verum.runtime.text_parse_float")
+public fn text_parse_float(s: &Text) -> Maybe<Float>;
+
+/// Convert an integer to text.
+@intrinsic("verum.runtime.int_to_text")
+public fn int_to_text(n: Int) -> Text;
+
+/// Convert a float to text.
+@intrinsic("verum.runtime.float_to_text")
+public fn float_to_text(f: Float) -> Text;
+
+/// Check if a character is alphabetic.
+@intrinsic("verum.runtime.char_is_alphabetic")
+public fn char_is_alphabetic(c: Char) -> Bool;
+
+/// Check if a character is numeric.
+@intrinsic("verum.runtime.char_is_numeric")
+public fn char_is_numeric(c: Char) -> Bool;
+
+/// Check if a character is whitespace.
+@intrinsic("verum.runtime.char_is_whitespace")
+public fn char_is_whitespace(c: Char) -> Bool;
+
+/// Check if a character is a control character.
+@intrinsic("verum.runtime.char_is_control")
+public fn char_is_control(c: Char) -> Bool;
+
+/// Check if a character is uppercase.
+@intrinsic("verum.runtime.char_is_uppercase")
+public fn char_is_uppercase(c: Char) -> Bool;
+
+/// Check if a character is lowercase.
+@intrinsic("verum.runtime.char_is_lowercase")
+public fn char_is_lowercase(c: Char) -> Bool;
+
+/// Convert a character to uppercase.
+@intrinsic("verum.runtime.char_to_uppercase")
+public fn char_to_uppercase(c: Char) -> Char;
+
+/// Convert a character to lowercase.
+@intrinsic("verum.runtime.char_to_lowercase")
+public fn char_to_lowercase(c: Char) -> Char;
+
+/// Encode a character as UTF-8.
+@intrinsic("verum.runtime.char_encode_utf8")
+public fn char_encode_utf8(c: Char, buf: &mut [UInt8]) -> Int;
+
+/// Get the Unicode general category of a character.
+@intrinsic("verum.runtime.char_escape_debug")
+public fn char_escape_debug(c: Char) -> Text;
+
+/// Get the Unicode general category.
+@intrinsic("verum.runtime.char_general_category")
+public fn char_general_category(c: Char) -> Int;

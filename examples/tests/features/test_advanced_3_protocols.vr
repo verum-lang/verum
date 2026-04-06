@@ -1,0 +1,28 @@
+// Test 3: Protocol Definitions and Implementations
+
+type Show is protocol {
+    fn show(self) -> Text;
+};
+
+type Person is {
+    name: Text,
+    age: Int
+};
+
+impl Show for Person {
+    fn show(self) -> Text {
+        f"{self.name} ({self.age})"
+    }
+}
+
+fn main() {
+    let _ = println("=== Testing Protocols ===");
+
+    let person = Person { name: "Bob", age: 30 };
+
+    let person_text = person.show();
+
+    let _ = println(f"Person.show(): {person_text}");
+
+    let _ = println("=== PASSED ===");
+}

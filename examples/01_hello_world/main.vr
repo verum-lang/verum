@@ -1,0 +1,11 @@
+// 01 — Hello World
+// The simplest Verum program: print a greeting to the console.
+
+fn main() {
+    // print() is a built-in function (no `!` suffix like Rust)
+    print("Hello, World!")
+
+    // f-strings use the f"..." syntax for interpolation
+    let language = "Verum"
+    print(f"Welcome to {language}!")
+}

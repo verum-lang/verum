@@ -1,0 +1,14 @@
+[package]
+name = "test_generics"
+version = "1.0.0"
+authors = ["Verum Team"]
+description = "Comprehensive test of Verum generic types and functions"
+
+[language]
+profile = "application"
+
+[dependencies]
+stdlib = "0.1"
+
+[features]
+default = []

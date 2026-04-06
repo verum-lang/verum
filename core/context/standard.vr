@@ -1,0 +1,659 @@
+// =============================================================================
+// context/standard.vr - Standard Context Type Definitions
+// =============================================================================
+// Layer: 3 (depends on: base, collections, io, time)
+// Spec: docs/detailed/16-context-system.md
+// =============================================================================
+//
+// Defines the standard context types that form the foundation of Verum's
+// dependency injection system. These contexts represent common cross-cutting
+// concerns that applications need.
+//
+// # Standard Contexts
+//
+// | Context    | Purpose                  | Typical Implementation       |
+// |------------|--------------------------|------------------------------|
+// | Logger     | Structured logging       | ConsoleLogger, FileLogger    |
+// | Database   | Database access           | PostgresPool, SqliteConn     |
+// | Auth       | Authentication/authz      | JwtAuth, SessionAuth         |
+// | Config     | Application configuration | EnvConfig, FileConfig        |
+// | Cache      | Caching layer             | MemoryCache, RedisCache      |
+// | Metrics    | Metrics collection        | PrometheusMetrics, StatsD    |
+// | Tracer     | Distributed tracing       | OpenTelemetryTracer          |
+// | Clock      | Time provider (testable)  | SystemClock, MockClock       |
+// | Random     | Random number generation  | SecureRandom, MockRandom     |
+// | FileSystem | File system operations    | OsFileSystem, MemoryFs       |
+//
+// # Usage Pattern
+//
+// ```verum
+// // Declare what your function needs
+// fn handle_request(req: Request) -> Response using [Database, Logger, Auth] {
+//     let user = Auth.current_user()?;
+//     Logger.info(f"Request from {user.name}");
+//     let data = Database.query("SELECT * FROM items WHERE user_id = ?", [user.id])?;
+//     Response.json(data)
+// }
+//
+// // Provide at application boundary
+// fn main() {
+//     provide Logger = ConsoleLogger.new(LogLevel.Info);
+//     provide Database = PostgresPool.connect("postgres://localhost/mydb");
+//     provide Auth = JwtAuth.new(secret: env.var("JWT_SECRET"));
+//
+//     serve(handle_request);
+// }
+// ```
+//
+// =============================================================================
+
+module context.standard;
+
+mount core.*;
+mount core.time.{Duration, Instant, SystemTime};
+mount core.io.{Read, Write};
+
+// =============================================================================
+// Logger Context
+// =============================================================================
+
+/// Log severity levels.
+public type LogLevel is
+    | Trace
+    | Debug
+    | Info
+    | Warn
+    | Error
+    | Fatal;
+
+implement LogLevel {
+    /// Get the numeric severity (higher = more severe).
+    public fn severity(&self) -> Int {
+        match self {
+            Trace => 0,
+            Debug => 1,
+            Info  => 2,
+            Warn  => 3,
+            Error => 4,
+            Fatal => 5,
+        }
+    }
+
+    /// Get the level name as a string.
+    public fn name(&self) -> Text {
+        match self {
+            Trace => "TRACE",
+            Debug => "DEBUG",
+            Info  => "INFO",
+            Warn  => "WARN",
+            Error => "ERROR",
+            Fatal => "FATAL",
+        }
+    }
+
+    /// Check if this level is at least as severe as the given level.
+    public fn is_enabled(&self, min_level: LogLevel) -> Bool {
+        self.severity() >= min_level.severity()
+    }
+}
+
+implement Eq for LogLevel {
+    fn eq(&self, other: &LogLevel) -> Bool {
+        self.severity() == other.severity()
+    }
+}
+
+implement Ord for LogLevel {
+    fn cmp(&self, other: &LogLevel) -> Ordering {
+        self.severity().cmp(&other.severity())
+    }
+}
+
+implement Clone for LogLevel {
+    fn clone(&self) -> LogLevel { *self }
+}
+
+implement Copy for LogLevel {}
+
+implement Debug for LogLevel {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+implement Display for LogLevel {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+/// A structured log record.
+public type LogRecord is {
+    level: LogLevel,
+    message: Text,
+    target: Text,
+    timestamp: SystemTime,
+    fields: List<(Text, Text)>,
+};
+
+/// Logger context for structured logging.
+///
+/// # Example
+/// ```verum
+/// fn process(item: Item) using [Logger] {
+///     Logger.info(f"Processing item {item.id}");
+///     Logger.debug(f"Item details: {item}");
+///     if item.is_expired() {
+///         Logger.warn(f"Item {item.id} has expired");
+///     }
+/// }
+/// ```
+public context Logger {
+    /// Log a message at the given level.
+    fn log(level: LogLevel, message: Text);
+
+    /// Log a structured record.
+    fn log_record(record: LogRecord);
+
+    /// Check if the given log level is enabled.
+    fn is_enabled(level: LogLevel) -> Bool;
+
+    /// Log at TRACE level.
+    fn trace(message: Text);
+
+    /// Log at DEBUG level.
+    fn debug(message: Text);
+
+    /// Log at INFO level.
+    fn info(message: Text);
+
+    /// Log at WARN level.
+    fn warn(message: Text);
+
+    /// Log at ERROR level.
+    fn error(message: Text);
+
+    /// Log at FATAL level.
+    fn fatal(message: Text);
+}
+
+// =============================================================================
+// Database Context
+// =============================================================================
+
+/// A row of results from a database query.
+public type Row is {
+    columns: List<Text>,
+    values: List<Maybe<Text>>,
+};
+
+implement Row {
+    /// Get a column value by name.
+    public fn get(&self, column: &Text) -> Maybe<&Text> {
+        for i in 0..self.columns.len() {
+            if &self.columns[i] == column {
+                return self.values[i].as_ref();
+            }
+        }
+        None
+    }
+
+    /// Get a column value by index.
+    public fn get_index(&self, index: Int) -> Maybe<&Text> {
+        if index >= 0 && index < self.values.len() {
+            self.values[index].as_ref()
+        } else {
+            None
+        }
+    }
+}
+
+/// Database query result.
+public type QueryResult is {
+    rows: List<Row>,
+    rows_affected: Int,
+};
+
+/// Database context for data access.
+///
+/// # Example
+/// ```verum
+/// fn get_user(id: Int) -> Maybe<User> using [Database] {
+///     let result = Database.query(
+///         "SELECT name, email FROM users WHERE id = ?",
+///         [id.to_string()],
+///     )?;
+///
+///     result.rows.first().map(|row| User {
+///         name: row.get("name").unwrap_or(""),
+///         email: row.get("email").unwrap_or(""),
+///     })
+/// }
+/// ```
+public context Database {
+    /// Execute a query and return results.
+    fn query(sql: Text, params: List<Text>) -> Result<QueryResult, Text>;
+
+    /// Execute a statement (INSERT, UPDATE, DELETE) and return rows affected.
+    fn execute(sql: Text, params: List<Text>) -> Result<Int, Text>;
+
+    /// Begin a transaction.
+    fn begin() -> Result<(), Text>;
+
+    /// Commit the current transaction.
+    fn commit() -> Result<(), Text>;
+
+    /// Rollback the current transaction.
+    fn rollback() -> Result<(), Text>;
+
+    /// Check if a connection is alive.
+    fn is_connected() -> Bool;
+}
+
+// =============================================================================
+// Auth Context
+// =============================================================================
+
+/// Authenticated user information.
+public type AuthUser is {
+    id: Text,
+    name: Text,
+    roles: List<Text>,
+};
+
+implement AuthUser {
+    /// Check if the user has a specific role.
+    public fn has_role(&self, role: &Text) -> Bool {
+        self.roles.contains(role)
+    }
+}
+
+/// Authentication and authorization context.
+///
+/// # Example
+/// ```verum
+/// fn admin_only() using [Auth] {
+///     let user = Auth.current_user()
+///         .ok_or("Not authenticated")?;
+///     if !Auth.has_permission("admin:write") {
+///         return Err("Forbidden");
+///     }
+///     // ... admin operation ...
+/// }
+/// ```
+public context Auth {
+    /// Get the currently authenticated user, if any.
+    fn current_user() -> Maybe<AuthUser>;
+
+    /// Check if a user is authenticated.
+    fn is_authenticated() -> Bool;
+
+    /// Check if the current user has a specific permission.
+    fn has_permission(permission: Text) -> Bool;
+
+    /// Check if the current user has a specific role.
+    fn has_role(role: Text) -> Bool;
+}
+
+// =============================================================================
+// Config Context
+// =============================================================================
+
+/// Application configuration context.
+///
+/// Provides access to configuration values from any source
+/// (environment variables, config files, remote config).
+///
+/// # Example
+/// ```verum
+/// fn connect_db() using [Config] {
+///     let url = Config.get("database.url")
+///         .unwrap_or("postgres://localhost/default");
+///     let pool_size = Config.get_int("database.pool_size")
+///         .unwrap_or(10);
+///     // ...
+/// }
+/// ```
+public context Config {
+    /// Get a configuration value as text.
+    fn get(key: Text) -> Maybe<Text>;
+
+    /// Get a configuration value as an integer.
+    fn get_int(key: Text) -> Maybe<Int>;
+
+    /// Get a configuration value as a boolean.
+    fn get_bool(key: Text) -> Maybe<Bool>;
+
+    /// Get a configuration value or a default.
+    fn get_or(key: Text, default: Text) -> Text;
+
+    /// Check if a configuration key exists.
+    fn has(key: Text) -> Bool;
+}
+
+// =============================================================================
+// Cache Context
+// =============================================================================
+
+/// Cache context for key-value caching.
+///
+/// # Example
+/// ```verum
+/// fn get_user_profile(id: Int) -> Profile using [Cache, Database] {
+///     let key = f"user:{id}:profile";
+///     if let Some(cached) = Cache.get(key) {
+///         return cached.deserialize::<Profile>();
+///     }
+///     let profile = Database.query(...)?;
+///     Cache.set(key, profile.serialize(), Duration.mins(5));
+///     profile
+/// }
+/// ```
+public context Cache {
+    /// Get a cached value by key.
+    fn get(key: Text) -> Maybe<Text>;
+
+    /// Set a cached value with an optional TTL (time-to-live).
+    fn set(key: Text, value: Text, ttl: Maybe<Duration>);
+
+    /// Delete a cached value.
+    fn delete(key: Text) -> Bool;
+
+    /// Check if a key exists in the cache.
+    fn exists(key: Text) -> Bool;
+
+    /// Clear all cached values.
+    fn clear();
+}
+
+// =============================================================================
+// Metrics Context
+// =============================================================================
+
+/// Metrics context for application instrumentation.
+///
+/// # Example
+/// ```verum
+/// fn handle_request(req: Request) -> Response using [Metrics] {
+///     let start = Instant.now();
+///     Metrics.increment("http.requests.total");
+///
+///     let response = process_request(req);
+///
+///     let elapsed = start.elapsed();
+///     Metrics.histogram("http.request.duration_ms", elapsed.as_millis() as Float);
+///     Metrics.increment(f"http.responses.{response.status.code}");
+///
+///     response
+/// }
+/// ```
+public context Metrics {
+    /// Increment a counter by 1.
+    fn increment(name: Text);
+
+    /// Increment a counter by a specific amount.
+    fn increment_by(name: Text, amount: Float);
+
+    /// Set a gauge value.
+    fn gauge(name: Text, value: Float);
+
+    /// Record a histogram observation.
+    fn histogram(name: Text, value: Float);
+
+    /// Record timing in milliseconds.
+    fn timing(name: Text, duration_ms: Int);
+}
+
+// =============================================================================
+// Tracer Context
+// =============================================================================
+
+/// A span representing a unit of work in distributed tracing.
+public type Span is {
+    trace_id: Text,
+    span_id: Text,
+    parent_id: Maybe<Text>,
+    name: Text,
+    start_time: Instant,
+};
+
+/// Distributed tracing context.
+///
+/// # Example
+/// ```verum
+/// fn process_order(order: Order) using [Tracer, Database] {
+///     let span = Tracer.start_span("process_order");
+///     defer Tracer.end_span(span);
+///
+///     Tracer.add_attribute("order.id", order.id.to_string());
+///     // ...
+/// }
+/// ```
+public context Tracer {
+    /// Start a new span.
+    fn start_span(name: Text) -> Span;
+
+    /// End a span.
+    fn end_span(span: Span);
+
+    /// Add an attribute to the current span.
+    fn add_attribute(key: Text, value: Text);
+
+    /// Add an event to the current span.
+    fn add_event(name: Text);
+
+    /// Get the current trace ID (for propagation).
+    fn current_trace_id() -> Maybe<Text>;
+}
+
+// =============================================================================
+// Clock Context (for testable time)
+// =============================================================================
+
+/// Clock context providing testable time operations.
+///
+/// In production, delegates to the system clock. In tests, can be
+/// replaced with a mock clock for deterministic time behavior.
+///
+/// # Example
+/// ```verum
+/// fn is_expired(token: Token) -> Bool using [Clock] {
+///     let now = Clock.now();
+///     now > token.expires_at
+/// }
+///
+/// // In tests:
+/// provide Clock = MockClock.at(SystemTime.from_timestamp(1000));
+/// assert(is_expired(token_expiring_at_500));
+/// ```
+public context Clock {
+    /// Get the current monotonic time.
+    fn now() -> Instant;
+
+    /// Get the current wall-clock time.
+    fn system_time() -> SystemTime;
+
+    /// Sleep for the given duration.
+    fn sleep(duration: Duration);
+}
+
+// =============================================================================
+// Random Context (for testable randomness)
+// =============================================================================
+
+/// Random number generation context.
+///
+/// In production, uses a cryptographically secure random source.
+/// In tests, can be replaced with a seeded deterministic generator.
+///
+/// # Example
+/// ```verum
+/// fn generate_token() -> Text using [Random] {
+///     let bytes = Random.bytes(32);
+///     hex_encode(bytes)
+/// }
+/// ```
+public context Random {
+    /// Generate a random integer in [0, max).
+    fn int(max: Int) -> Int;
+
+    /// Generate a random integer in [min, max).
+    fn int_range(min: Int, max: Int) -> Int;
+
+    /// Generate a random floating-point number in [0.0, 1.0).
+    fn float() -> Float;
+
+    /// Generate random bytes.
+    fn bytes(count: Int) -> List<Byte>;
+
+    /// Generate a random boolean.
+    fn bool() -> Bool;
+}
+
+// =============================================================================
+// FileSystem Context (for testable I/O)
+// =============================================================================
+
+/// File system context for testable file operations.
+///
+/// In production, delegates to the OS file system. In tests, can be
+/// replaced with an in-memory file system.
+///
+/// # Example
+/// ```verum
+/// fn read_config() -> Config using [FileSystem] {
+///     let content = FileSystem.read_text("config.toml")?;
+///     parse_toml(content)
+/// }
+/// ```
+public context FileSystem {
+    /// Read file contents as text.
+    fn read_text(path: Text) -> Result<Text, Text>;
+
+    /// Read file contents as bytes.
+    fn read_bytes(path: Text) -> Result<List<Byte>, Text>;
+
+    /// Write text to a file.
+    fn write_text(path: Text, content: Text) -> Result<(), Text>;
+
+    /// Write bytes to a file.
+    fn write_bytes(path: Text, content: List<Byte>) -> Result<(), Text>;
+
+    /// Check if a file exists.
+    fn exists(path: Text) -> Bool;
+
+    /// Delete a file.
+    fn remove(path: Text) -> Result<(), Text>;
+
+    /// List directory contents.
+    fn list_dir(path: Text) -> Result<List<Text>, Text>;
+
+    /// Create a directory (and parents if needed).
+    fn create_dir(path: Text) -> Result<(), Text>;
+}
+
+// =============================================================================
+// Context Groups (Convenience)
+// =============================================================================
+
+// =============================================================================
+// Debug/Display Implementations for Data Types
+// =============================================================================
+
+implement Debug for LogRecord {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"LogRecord {{ level: {self.level:?}, message: \"{self.message}\", target: \"{self.target}\" }}")
+    }
+}
+
+implement Display for LogRecord {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"[{self.level}] {self.target}: {self.message}")
+    }
+}
+
+implement Debug for Row {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Row {{ columns: {self.columns:?}, values: {self.values:?} }}")
+    }
+}
+
+implement Display for Row {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        for i in 0..self.columns.len() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            let value = match self.values[i].as_ref() {
+                Some(v) => v.clone(),
+                None => "NULL",
+            };
+            f.write_str(f"{self.columns[i]}={value}")?;
+        }
+        Ok(())
+    }
+}
+
+implement Debug for QueryResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"QueryResult {{ rows: {self.rows.len()}, rows_affected: {self.rows_affected} }}")
+    }
+}
+
+implement Display for QueryResult {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"QueryResult({self.rows.len()} rows, {self.rows_affected} affected)")
+    }
+}
+
+implement Debug for AuthUser {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"AuthUser {{ id: \"{self.id}\", name: \"{self.name}\", roles: {self.roles:?} }}")
+    }
+}
+
+implement Display for AuthUser {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.name} ({self.id})")
+    }
+}
+
+implement Debug for Span {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Span {{ trace_id: \"{self.trace_id}\", span_id: \"{self.span_id}\", name: \"{self.name}\" }}")
+    }
+}
+
+implement Display for Span {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"[{self.trace_id}:{self.span_id}] {self.name}")
+    }
+}
+
+// =============================================================================
+// Context Groups (Convenience)
+// =============================================================================
+
+/// Common context group for web applications.
+///
+/// ```verum
+/// using WebContext = [Logger, Database, Auth, Config, Cache, Metrics];
+///
+/// fn handle(req: Request) -> Response using [WebContext] { ... }
+/// ```
+
+/// Common context group for background workers.
+///
+/// ```verum
+/// using WorkerContext = [Logger, Database, Config, Metrics];
+///
+/// fn process_job(job: Job) using [WorkerContext] { ... }
+/// ```
+
+/// Common context group for testing.
+///
+/// ```verum
+/// using TestContext = [Logger, Clock, Random, FileSystem];
+///
+/// fn test_something() using [TestContext] { ... }
+/// ```

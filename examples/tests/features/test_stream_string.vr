@@ -1,0 +1,5 @@
+fn main() {
+    let words = ["hello", "world", "test"];
+    let result = stream [w for w in words];
+    println("Stream with strings");
+}

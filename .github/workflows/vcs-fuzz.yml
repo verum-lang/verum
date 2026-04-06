@@ -1,0 +1,1077 @@
+# Verum Compliance Suite - Continuous Fuzzing Campaign
+#
+# Runs comprehensive fuzzing tests to discover edge cases, crashes, and
+# security vulnerabilities. Implements continuous fuzzing with:
+# - Nightly short campaigns (1 hour)
+# - Weekend extended campaigns (8 hours)
+# - PR smoke tests (10 minutes)
+# - On-demand extended fuzzing via workflow_dispatch
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# OSS-Fuzz integration patterns: https://google.github.io/oss-fuzz/
+
+name: VCS Continuous Fuzzing
+
+on:
+  schedule:
+    # Nightly fuzzing at 1:00 AM UTC (continuous)
+    - cron: '0 1 * * *'
+    # Weekend extended fuzzing (8 hours) on Saturday at midnight
+    - cron: '0 0 * * 6'
+    # Mid-week deep dive on Wednesday at 2:00 AM UTC (4 hours)
+    - cron: '0 2 * * 3'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/verum_parser/**'
+      - 'crates/verum_lexer/**'
+      - 'crates/verum_cbgr/**'
+      - 'crates/verum_types/**'
+      - 'vcs/runner/vfuzz/**'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration'
+        required: false
+        default: '1h'
+        type: choice
+        options:
+          - '30m'
+          - '1h'
+          - '2h'
+          - '4h'
+          - '8h'
+          - 'overnight'
+      targets:
+        description: 'Fuzz targets to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - lexer
+          - parser
+          - cbgr
+          - types
+          - smt
+      parallel:
+        description: 'Number of parallel fuzzers'
+        required: false
+        default: '4'
+        type: string
+      regression_only:
+        description: 'Only run regression tests with known crash seeds'
+        required: false
+        default: false
+        type: boolean
+      coverage:
+        description: 'Generate coverage report'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  # Address sanitizer options
+  ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1:allocator_may_return_null=1
+  # Undefined behavior sanitizer
+  UBSAN_OPTIONS: print_stacktrace=1
+  # Memory sanitizer (when applicable)
+  MSAN_OPTIONS: print_stats=1
+
+# Only run one fuzzing workflow at a time
+concurrency:
+  group: vcs-fuzz
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================================================
+  # Determine Fuzzing Configuration
+  # ==========================================================================
+  setup:
+    name: Setup Fuzzing Campaign
+    runs-on: ubuntu-latest
+    outputs:
+      duration: ${{ steps.config.outputs.duration }}
+      duration_seconds: ${{ steps.config.outputs.duration_seconds }}
+      targets: ${{ steps.config.outputs.targets }}
+      parallel: ${{ steps.config.outputs.parallel }}
+      is_weekend: ${{ steps.config.outputs.is_weekend }}
+      regression_only: ${{ steps.config.outputs.regression_only }}
+      enable_coverage: ${{ steps.config.outputs.enable_coverage }}
+
+    steps:
+      - name: Determine Configuration
+        id: config
+        run: |
+          # Check if this is the weekend extended run or mid-week deep dive
+          DAY_OF_WEEK=$(date +%u)
+          if [ "$DAY_OF_WEEK" == "6" ] && [ "${{ github.event_name }}" == "schedule" ]; then
+            # Saturday: extended 8-hour campaign
+            echo "is_weekend=true" >> $GITHUB_OUTPUT
+            echo "duration=8h" >> $GITHUB_OUTPUT
+            echo "duration_seconds=28800" >> $GITHUB_OUTPUT
+            echo "parallel=8" >> $GITHUB_OUTPUT
+          elif [ "$DAY_OF_WEEK" == "3" ] && [ "${{ github.event_name }}" == "schedule" ]; then
+            # Wednesday: mid-week 4-hour deep dive
+            echo "is_weekend=false" >> $GITHUB_OUTPUT
+            echo "duration=4h" >> $GITHUB_OUTPUT
+            echo "duration_seconds=14400" >> $GITHUB_OUTPUT
+            echo "parallel=6" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            DURATION="${{ github.event.inputs.duration }}"
+            if [ "$DURATION" == "overnight" ]; then
+              echo "duration=8h" >> $GITHUB_OUTPUT
+              echo "duration_seconds=28800" >> $GITHUB_OUTPUT
+            elif [ "$DURATION" == "8h" ]; then
+              echo "duration=8h" >> $GITHUB_OUTPUT
+              echo "duration_seconds=28800" >> $GITHUB_OUTPUT
+            elif [ "$DURATION" == "4h" ]; then
+              echo "duration=4h" >> $GITHUB_OUTPUT
+              echo "duration_seconds=14400" >> $GITHUB_OUTPUT
+            elif [ "$DURATION" == "2h" ]; then
+              echo "duration=2h" >> $GITHUB_OUTPUT
+              echo "duration_seconds=7200" >> $GITHUB_OUTPUT
+            elif [ "$DURATION" == "30m" ]; then
+              echo "duration=30m" >> $GITHUB_OUTPUT
+              echo "duration_seconds=1800" >> $GITHUB_OUTPUT
+            else
+              echo "duration=1h" >> $GITHUB_OUTPUT
+              echo "duration_seconds=3600" >> $GITHUB_OUTPUT
+            fi
+            echo "parallel=${{ github.event.inputs.parallel || '4' }}" >> $GITHUB_OUTPUT
+            echo "is_weekend=false" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            # Quick smoke test for PRs
+            echo "is_weekend=false" >> $GITHUB_OUTPUT
+            echo "duration=10m" >> $GITHUB_OUTPUT
+            echo "duration_seconds=600" >> $GITHUB_OUTPUT
+            echo "parallel=2" >> $GITHUB_OUTPUT
+          else
+            # Default nightly: 1 hour
+            echo "is_weekend=false" >> $GITHUB_OUTPUT
+            echo "duration=1h" >> $GITHUB_OUTPUT
+            echo "duration_seconds=3600" >> $GITHUB_OUTPUT
+            echo "parallel=4" >> $GITHUB_OUTPUT
+          fi
+
+          # Set targets
+          TARGETS="${{ github.event.inputs.targets || 'all' }}"
+          echo "targets=$TARGETS" >> $GITHUB_OUTPUT
+
+          # Regression mode
+          if [ "${{ github.event.inputs.regression_only }}" == "true" ]; then
+            echo "regression_only=true" >> $GITHUB_OUTPUT
+          else
+            echo "regression_only=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Coverage
+          if [ "${{ github.event.inputs.coverage }}" != "false" ]; then
+            echo "enable_coverage=true" >> $GITHUB_OUTPUT
+          else
+            echo "enable_coverage=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ==========================================================================
+  # Regression Testing - Run against known crash seeds first
+  # ==========================================================================
+  regression-tests:
+    name: Fuzz Regression Tests
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Fuzz Corpus and Seeds
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcs/fuzz/corpus/
+            vcs/fuzz/seeds/
+            vcs/fuzz/regression/
+          key: fuzz-regression-${{ github.sha }}
+          restore-keys: |
+            fuzz-regression-
+
+      - name: Download Previous Crash Seeds
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-fuzz.yml
+          name: fuzz-crashes-*
+          path: vcs/fuzz/regression/
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Run Regression Tests
+        id: regression
+        run: |
+          cd vcs/fuzz
+          mkdir -p reports regression
+
+          REGRESSION_FAILED=0
+
+          # Test each crash seed to ensure they no longer crash
+          if [ -d "regression" ] && [ "$(ls -A regression 2>/dev/null)" ]; then
+            for crash_dir in regression/*/; do
+              if [ -d "$crash_dir" ]; then
+                TARGET=$(basename "$crash_dir" | sed 's/fuzz-crashes-//')
+                echo "Testing regression for target: $TARGET"
+
+                for crash_file in "$crash_dir"*; do
+                  if [ -f "$crash_file" ]; then
+                    echo "Testing: $crash_file"
+                    # Run the crash through the target
+                    if ! cargo +nightly fuzz run "${TARGET}_fuzz" -- -runs=1 "$crash_file" 2>/dev/null; then
+                      echo "REGRESSION: $crash_file still crashes!"
+                      REGRESSION_FAILED=1
+                    fi
+                  fi
+                done
+              fi
+            done
+          else
+            echo "No regression tests to run"
+          fi
+
+          if [ "$REGRESSION_FAILED" -eq 1 ]; then
+            echo "::error::Regression tests failed - known crashes still reproduce"
+            echo "regression_status=failed" >> $GITHUB_OUTPUT
+          else
+            echo "regression_status=passed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Regression Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-regression-results
+          path: vcs/fuzz/reports/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # Lexer Fuzzing - Token boundary issues, invalid UTF-8, etc.
+  # ==========================================================================
+  fuzz-lexer:
+    name: Fuzz Lexer
+    needs: [setup, regression-tests]
+    if: (needs.setup.outputs.targets == 'all' || needs.setup.outputs.targets == 'lexer') && needs.setup.outputs.regression_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 540  # 9 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz and tools
+        run: |
+          cargo install cargo-fuzz --locked
+          rustup component add llvm-tools-preview --toolchain nightly
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-fuzz-v1"
+          shared-key: lexer
+
+      - name: Cache Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcs/fuzz/corpus/lexer_fuzz
+            vcs/fuzz/corpus/lexer_unicode_fuzz
+          key: fuzz-corpus-lexer-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-lexer-
+
+      - name: Seed Corpus from Test Cases
+        run: |
+          cd vcs/fuzz
+          mkdir -p corpus/lexer_fuzz corpus/lexer_unicode_fuzz
+
+          # Copy valid source files as seeds
+          if [ -d "../specs" ]; then
+            find ../specs -name "*.vr" -exec cp {} corpus/lexer_fuzz/ \; 2>/dev/null || true
+          fi
+
+          # Copy custom seeds
+          if [ -d "seeds/lexer" ]; then
+            cp seeds/lexer/* corpus/lexer_fuzz/ 2>/dev/null || true
+          fi
+
+      - name: Run Lexer Fuzzer
+        id: fuzz
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts corpus coverage
+
+          # Run main lexer fuzzer
+          echo "Running lexer fuzz target for ${{ needs.setup.outputs.duration }}..."
+          timeout ${{ needs.setup.outputs.duration_seconds }} \
+            cargo +nightly fuzz run lexer_fuzz \
+              --jobs ${{ needs.setup.outputs.parallel }} \
+              -- \
+              -max_len=4096 \
+              -max_total_time=${{ needs.setup.outputs.duration_seconds }} \
+              -dict=dictionaries/verum_lexer.dict \
+              -artifact_prefix=artifacts/lexer/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/lexer_fuzz.log || true
+
+          # Run Unicode-specific fuzzer (quarter of the time)
+          UNICODE_DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 4))
+          echo "Running Unicode lexer fuzz target for ${UNICODE_DURATION}s..."
+          timeout $UNICODE_DURATION \
+            cargo +nightly fuzz run lexer_unicode_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=2048 \
+              -max_total_time=$UNICODE_DURATION \
+              -artifact_prefix=artifacts/lexer_unicode/ \
+            2>&1 | tee reports/lexer_unicode_fuzz.log || true
+
+          # Check for crashes
+          CRASH_COUNT=$(find artifacts/lexer* -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "crashes_found=true" >> $GITHUB_OUTPUT
+            echo "crash_count=$CRASH_COUNT" >> $GITHUB_OUTPUT
+            echo "::error::Lexer fuzzing found $CRASH_COUNT crash(es)!"
+          else
+            echo "crashes_found=false" >> $GITHUB_OUTPUT
+            echo "crash_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Minimize Crashes
+        if: steps.fuzz.outputs.crashes_found == 'true'
+        run: |
+          cd vcs/fuzz
+          mkdir -p minimized
+
+          for crash in artifacts/lexer*/*; do
+            if [ -f "$crash" ]; then
+              TARGET_DIR=$(basename $(dirname "$crash"))
+              TARGET_NAME="${TARGET_DIR%_*}_fuzz"
+              MINIMIZED_NAME="minimized/$(basename $crash).min"
+
+              echo "Minimizing: $crash -> $MINIMIZED_NAME"
+              timeout 300 cargo +nightly fuzz tmin "$TARGET_NAME" "$crash" -o "$MINIMIZED_NAME" || true
+            fi
+          done
+
+      - name: Generate Coverage Report
+        if: needs.setup.outputs.enable_coverage == 'true'
+        run: |
+          cd vcs/fuzz
+          mkdir -p coverage
+
+          # Generate coverage using cargo-fuzz coverage
+          cargo +nightly fuzz coverage lexer_fuzz -- \
+            -max_total_time=60 2>/dev/null || true
+
+          # Export coverage data
+          if [ -d "coverage/lexer_fuzz" ]; then
+            llvm-profdata merge -sparse coverage/lexer_fuzz/raw -o coverage/lexer.profdata 2>/dev/null || true
+          fi
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-lexer
+          path: |
+            vcs/fuzz/artifacts/lexer*/
+            vcs/fuzz/minimized/
+            vcs/fuzz/crashes/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload Corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-lexer
+          path: vcs/fuzz/corpus/lexer*/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        if: needs.setup.outputs.enable_coverage == 'true'
+        with:
+          name: fuzz-coverage-lexer
+          path: vcs/fuzz/coverage/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # Parser Fuzzing - Syntax errors, malformed AST, etc.
+  # ==========================================================================
+  fuzz-parser:
+    name: Fuzz Parser
+    needs: [setup, regression-tests]
+    if: (needs.setup.outputs.targets == 'all' || needs.setup.outputs.targets == 'parser') && needs.setup.outputs.regression_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-fuzz-v1"
+          shared-key: parser
+
+      - name: Cache Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcs/fuzz/corpus/parser_fuzz
+            vcs/fuzz/corpus/parser_expr_fuzz
+            vcs/fuzz/corpus/parser_type_fuzz
+          key: fuzz-corpus-parser-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-parser-
+
+      - name: Seed Corpus from Specs
+        run: |
+          cd vcs/fuzz
+          mkdir -p corpus/parser_fuzz corpus/parser_expr_fuzz corpus/parser_type_fuzz
+
+          # Seed with valid programs from VCS specs
+          if [ -d "../specs" ]; then
+            find ../specs -name "*.vr" -exec cp {} corpus/parser_fuzz/ \; 2>/dev/null || true
+          fi
+
+          # Copy edge case seeds
+          if [ -d "seeds/parser" ]; then
+            cp seeds/parser/*.vr corpus/parser_fuzz/ 2>/dev/null || true
+          fi
+          if [ -d "seeds/edge_cases" ]; then
+            cp seeds/edge_cases/*.vr corpus/parser_fuzz/ 2>/dev/null || true
+          fi
+
+      - name: Run Parser Fuzzer
+        id: fuzz
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts corpus
+
+          # Main parser fuzzer
+          echo "Running parser fuzz target..."
+          timeout ${{ needs.setup.outputs.duration_seconds }} \
+            cargo +nightly fuzz run parser_fuzz \
+              --jobs ${{ needs.setup.outputs.parallel }} \
+              -- \
+              -max_len=16384 \
+              -max_total_time=${{ needs.setup.outputs.duration_seconds }} \
+              -dict=dictionaries/verum_parser.dict \
+              -artifact_prefix=artifacts/parser/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/parser_fuzz.log || true
+
+          # Expression-specific fuzzer (1/3 of time)
+          EXPR_DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 3))
+          echo "Running expression parser fuzz target for ${EXPR_DURATION}s..."
+          timeout $EXPR_DURATION \
+            cargo +nightly fuzz run parser_expr_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=8192 \
+              -max_total_time=$EXPR_DURATION \
+              -artifact_prefix=artifacts/parser_expr/ \
+            2>&1 | tee reports/parser_expr_fuzz.log || true
+
+          # Type-specific fuzzer (1/3 of time)
+          TYPE_DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 3))
+          echo "Running type parser fuzz target for ${TYPE_DURATION}s..."
+          timeout $TYPE_DURATION \
+            cargo +nightly fuzz run parser_type_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=4096 \
+              -max_total_time=$TYPE_DURATION \
+              -artifact_prefix=artifacts/parser_type/ \
+            2>&1 | tee reports/parser_type_fuzz.log || true
+
+          CRASH_COUNT=$(find artifacts/parser* -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "crashes_found=true" >> $GITHUB_OUTPUT
+            echo "crash_count=$CRASH_COUNT" >> $GITHUB_OUTPUT
+            echo "::error::Parser fuzzing found $CRASH_COUNT crash(es)!"
+          else
+            echo "crashes_found=false" >> $GITHUB_OUTPUT
+            echo "crash_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Minimize Crashes
+        if: steps.fuzz.outputs.crashes_found == 'true'
+        run: |
+          cd vcs/fuzz
+          mkdir -p minimized
+
+          for crash in artifacts/parser*/*; do
+            if [ -f "$crash" ]; then
+              TARGET_DIR=$(basename $(dirname "$crash"))
+              TARGET_NAME="${TARGET_DIR}"
+              MINIMIZED_NAME="minimized/$(basename $crash).min"
+
+              echo "Minimizing: $crash"
+              timeout 300 cargo +nightly fuzz tmin "$TARGET_NAME" "$crash" -o "$MINIMIZED_NAME" || true
+            fi
+          done
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-parser
+          path: |
+            vcs/fuzz/artifacts/parser*/
+            vcs/fuzz/minimized/
+            vcs/fuzz/crashes/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload Corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-parser
+          path: vcs/fuzz/corpus/parser*/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # CBGR Fuzzing - Memory safety, generation wraparound, etc.
+  # ==========================================================================
+  fuzz-cbgr:
+    name: Fuzz CBGR (${{ matrix.target }})
+    needs: [setup, regression-tests]
+    if: (needs.setup.outputs.targets == 'all' || needs.setup.outputs.targets == 'cbgr') && needs.setup.outputs.regression_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - cbgr_allocate_deallocate
+          - cbgr_concurrent_access
+          - cbgr_generation_wraparound
+          - cbgr_capability_checks
+          - cbgr_stress
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-fuzz-v1"
+          shared-key: cbgr-${{ matrix.target }}
+
+      - name: Cache Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: vcs/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Run CBGR Fuzzer (${{ matrix.target }})
+        id: fuzz
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts corpus
+
+          # Calculate per-target duration (divided by number of targets)
+          DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 5))
+
+          echo "Running ${{ matrix.target }} for ${DURATION}s..."
+
+          # Run with sanitizers
+          RUSTFLAGS="-Zsanitizer=address" \
+          timeout $DURATION \
+            cargo +nightly fuzz run ${{ matrix.target }} \
+              --jobs 2 \
+              --sanitizer address \
+              -- \
+              -max_len=4096 \
+              -max_total_time=$DURATION \
+              -artifact_prefix=artifacts/${{ matrix.target }}/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/${{ matrix.target }}.log || true
+
+          CRASH_COUNT=$(find artifacts/${{ matrix.target }}/* -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "crashes_found=true" >> $GITHUB_OUTPUT
+            echo "crash_count=$CRASH_COUNT" >> $GITHUB_OUTPUT
+            echo "::error::CBGR fuzzing (${{ matrix.target }}) found $CRASH_COUNT crash(es)!"
+          else
+            echo "crashes_found=false" >> $GITHUB_OUTPUT
+            echo "crash_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-cbgr-${{ matrix.target }}
+          path: vcs/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload Corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-cbgr-${{ matrix.target }}
+          path: vcs/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # Type System Fuzzing - Type inference, unification, etc.
+  # ==========================================================================
+  fuzz-types:
+    name: Fuzz Type System
+    needs: [setup, regression-tests]
+    if: (needs.setup.outputs.targets == 'all' || needs.setup.outputs.targets == 'types') && needs.setup.outputs.regression_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz and Z3
+        run: |
+          cargo install cargo-fuzz --locked
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-fuzz-v1"
+          shared-key: types
+
+      - name: Cache Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcs/fuzz/corpus/types_inference_fuzz
+            vcs/fuzz/corpus/types_unify_fuzz
+          key: fuzz-corpus-types-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-types-
+
+      - name: Run Type System Fuzzer
+        id: fuzz
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts corpus
+
+          # Type inference fuzzer (half the time)
+          INF_DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 2))
+          echo "Running type inference fuzz target for ${INF_DURATION}s..."
+          timeout $INF_DURATION \
+            cargo +nightly fuzz run types_inference_fuzz \
+              --jobs ${{ needs.setup.outputs.parallel }} \
+              -- \
+              -max_len=8192 \
+              -max_total_time=$INF_DURATION \
+              -artifact_prefix=artifacts/types_inference/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/types_inference_fuzz.log || true
+
+          # Type unification fuzzer (half the time)
+          UNIFY_DURATION=$((${{ needs.setup.outputs.duration_seconds }} / 2))
+          echo "Running type unification fuzz target for ${UNIFY_DURATION}s..."
+          timeout $UNIFY_DURATION \
+            cargo +nightly fuzz run types_unify_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=4096 \
+              -max_total_time=$UNIFY_DURATION \
+              -artifact_prefix=artifacts/types_unify/ \
+            2>&1 | tee reports/types_unify_fuzz.log || true
+
+          CRASH_COUNT=$(find artifacts/types_* -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "crashes_found=true" >> $GITHUB_OUTPUT
+            echo "crash_count=$CRASH_COUNT" >> $GITHUB_OUTPUT
+            echo "::error::Type system fuzzing found $CRASH_COUNT crash(es)!"
+          else
+            echo "crashes_found=false" >> $GITHUB_OUTPUT
+            echo "crash_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-types
+          path: vcs/fuzz/artifacts/types_*/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload Corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-types
+          path: vcs/fuzz/corpus/types_*/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # SMT Fuzzing - Refinement type verification
+  # ==========================================================================
+  fuzz-smt:
+    name: Fuzz SMT Solver
+    needs: [setup, regression-tests]
+    if: (needs.setup.outputs.targets == 'all' || needs.setup.outputs.targets == 'smt') && needs.setup.outputs.regression_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install dependencies
+        run: |
+          cargo install cargo-fuzz --locked
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "vcs-fuzz-v1"
+          shared-key: smt
+
+      - name: Cache Fuzz Corpus
+        uses: actions/cache@v4
+        with:
+          path: vcs/fuzz/corpus/smt_fuzz
+          key: fuzz-corpus-smt-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-smt-
+
+      - name: Run SMT Fuzzer
+        id: fuzz
+        run: |
+          cd vcs/fuzz
+          mkdir -p crashes artifacts corpus
+
+          echo "Running SMT fuzz target..."
+          timeout ${{ needs.setup.outputs.duration_seconds }} \
+            cargo +nightly fuzz run smt_fuzz \
+              --jobs 2 \
+              -- \
+              -max_len=4096 \
+              -max_total_time=${{ needs.setup.outputs.duration_seconds }} \
+              -timeout=60 \
+              -artifact_prefix=artifacts/smt/ \
+              -print_final_stats=1 \
+            2>&1 | tee reports/smt_fuzz.log || true
+
+          CRASH_COUNT=$(find artifacts/smt/* -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "crashes_found=true" >> $GITHUB_OUTPUT
+            echo "crash_count=$CRASH_COUNT" >> $GITHUB_OUTPUT
+            echo "::error::SMT fuzzing found $CRASH_COUNT crash(es)!"
+          else
+            echo "crashes_found=false" >> $GITHUB_OUTPUT
+            echo "crash_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes-smt
+          path: vcs/fuzz/artifacts/smt/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload Corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-corpus-smt
+          path: vcs/fuzz/corpus/smt_fuzz/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # Fuzz Report - Aggregate all results
+  # ==========================================================================
+  fuzz-report:
+    name: Fuzzing Report
+    needs: [setup, regression-tests, fuzz-lexer, fuzz-parser, fuzz-cbgr, fuzz-types, fuzz-smt]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all crash artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-crashes-*
+          path: all-crashes/
+          merge-multiple: false
+
+      - name: Download all corpus artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-corpus-*
+          path: all-corpus/
+          merge-multiple: false
+
+      - name: Generate Fuzz Report
+        id: report
+        run: |
+          echo "# VCS Fuzzing Campaign Report" > fuzz-report.md
+          echo "" >> fuzz-report.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> fuzz-report.md
+          echo "**Duration:** ${{ needs.setup.outputs.duration }}" >> fuzz-report.md
+          echo "**Parallelism:** ${{ needs.setup.outputs.parallel }} jobs" >> fuzz-report.md
+          echo "**Weekend Extended:** ${{ needs.setup.outputs.is_weekend }}" >> fuzz-report.md
+          echo "**Commit:** ${{ github.sha }}" >> fuzz-report.md
+          echo "**Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+
+          echo "## Regression Tests" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+          echo "| Status |" >> fuzz-report.md
+          echo "|--------|" >> fuzz-report.md
+          if [ "${{ needs.regression-tests.result }}" == "success" ]; then
+            echo "| PASSED |" >> fuzz-report.md
+          else
+            echo "| FAILED |" >> fuzz-report.md
+          fi
+          echo "" >> fuzz-report.md
+
+          echo "## Results by Target" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+          echo "| Target | Status | Crashes Found | Corpus Size |" >> fuzz-report.md
+          echo "|--------|--------|---------------|-------------|" >> fuzz-report.md
+
+          TOTAL_CRASHES=0
+
+          for target in lexer parser cbgr types smt; do
+            CRASH_DIR="all-crashes/fuzz-crashes-$target"
+            CORPUS_DIR="all-corpus/fuzz-corpus-$target"
+
+            # Count crashes
+            CRASH_COUNT=0
+            if [ -d "$CRASH_DIR" ]; then
+              CRASH_COUNT=$(find "$CRASH_DIR" -type f 2>/dev/null | wc -l || echo "0")
+            fi
+            TOTAL_CRASHES=$((TOTAL_CRASHES + CRASH_COUNT))
+
+            # Count corpus entries
+            CORPUS_SIZE=0
+            if [ -d "$CORPUS_DIR" ]; then
+              CORPUS_SIZE=$(find "$CORPUS_DIR" -type f 2>/dev/null | wc -l || echo "0")
+            fi
+
+            if [ "$CRASH_COUNT" -gt 0 ]; then
+              STATUS="FAIL"
+            else
+              STATUS="PASS"
+            fi
+
+            echo "| $target | $STATUS | $CRASH_COUNT | $CORPUS_SIZE |" >> fuzz-report.md
+          done
+
+          # Handle CBGR matrix targets
+          for cbgr_target in cbgr_allocate_deallocate cbgr_concurrent_access cbgr_generation_wraparound cbgr_capability_checks cbgr_stress; do
+            CRASH_DIR="all-crashes/fuzz-crashes-cbgr-$cbgr_target"
+            CORPUS_DIR="all-corpus/fuzz-corpus-cbgr-$cbgr_target"
+
+            CRASH_COUNT=0
+            if [ -d "$CRASH_DIR" ]; then
+              CRASH_COUNT=$(find "$CRASH_DIR" -type f 2>/dev/null | wc -l || echo "0")
+            fi
+            TOTAL_CRASHES=$((TOTAL_CRASHES + CRASH_COUNT))
+
+            CORPUS_SIZE=0
+            if [ -d "$CORPUS_DIR" ]; then
+              CORPUS_SIZE=$(find "$CORPUS_DIR" -type f 2>/dev/null | wc -l || echo "0")
+            fi
+
+            if [ "$CRASH_COUNT" -gt 0 ]; then
+              STATUS="FAIL"
+            else
+              STATUS="PASS"
+            fi
+
+            echo "| $cbgr_target | $STATUS | $CRASH_COUNT | $CORPUS_SIZE |" >> fuzz-report.md
+          done
+
+          echo "" >> fuzz-report.md
+          echo "## Summary" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+
+          if [ $TOTAL_CRASHES -gt 0 ]; then
+            echo "**Total crashes found: $TOTAL_CRASHES**" >> fuzz-report.md
+            echo "" >> fuzz-report.md
+            echo "Crash artifacts have been uploaded and retained for 90 days." >> fuzz-report.md
+            echo "Please investigate and fix these issues immediately." >> fuzz-report.md
+            echo "total_crashes=$TOTAL_CRASHES" >> $GITHUB_OUTPUT
+            echo "status=failed" >> $GITHUB_OUTPUT
+          else
+            echo "No crashes found during this fuzzing campaign." >> fuzz-report.md
+            echo "total_crashes=0" >> $GITHUB_OUTPUT
+            echo "status=passed" >> $GITHUB_OUTPUT
+          fi
+
+          echo "" >> fuzz-report.md
+          echo "## Corpus Statistics" >> fuzz-report.md
+          echo "" >> fuzz-report.md
+          TOTAL_CORPUS=$(find all-corpus -type f 2>/dev/null | wc -l || echo "0")
+          echo "Total corpus entries: $TOTAL_CORPUS" >> fuzz-report.md
+
+      - name: Upload Fuzz Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-fuzz-report
+          path: fuzz-report.md
+          retention-days: 90
+
+      - name: Post Summary
+        run: cat fuzz-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for Critical Crashes
+        run: |
+          CRASH_COUNT=$(find all-crashes -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "::warning::Fuzzing found $CRASH_COUNT crash(es) - review required"
+            # For PRs, fail the workflow
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              echo "::error::Fuzzing found crashes - PR cannot be merged until fixed"
+              exit 1
+            fi
+          fi
+
+  # ==========================================================================
+  # Notification on Crashes
+  # ==========================================================================
+  notify-crashes:
+    name: Notify on Crashes
+    needs: [fuzz-report]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,workflow
+          text: 'VCS Fuzzing discovered crashes - immediate review required'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Issue for Crashes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `[SECURITY] VCS Fuzzing Crashes - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Fuzzing Campaign Found Crashes
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Date:** ${new Date().toISOString()}
+
+            Crash artifacts have been uploaded. Please investigate immediately as these may indicate:
+            - Memory safety violations
+            - Undefined behavior
+            - Potential security vulnerabilities
+
+            ### Priority: HIGH
+
+            Download the crash artifacts from the workflow run to reproduce and debug.
+
+            ### Steps to Reproduce
+            1. Download the crash artifact
+            2. Run: \`cargo +nightly fuzz run <target> <crash_file>\`
+            3. Use \`cargo +nightly fuzz tmin <target> <crash_file>\` to minimize
+
+            ### Regression Prevention
+            After fixing, add the minimized crash to \`vcs/fuzz/seeds/\` to prevent regression.
+            `;
+
+            // Check if similar issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'fuzzing'
+            });
+
+            const todayStr = new Date().toISOString().split('T')[0];
+            const existing = issues.data.find(i => i.title.includes('Fuzzing Crashes') && i.title.includes(todayStr));
+
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['security', 'fuzzing', 'high-priority', 'bug']
+              });
+            }

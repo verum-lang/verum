@@ -1,0 +1,445 @@
+// =============================================================================
+// test_lexer.vr - Minimal bootstrap lexer test (single file)
+// =============================================================================
+// Tests the lexer by tokenizing a small Verum program.
+// All types and functions are inline — no module imports needed.
+// =============================================================================
+
+mount core.*;
+
+// =============================================================================
+// Token Kind Constants (subset for testing)
+// =============================================================================
+const TK_EOF: Int = 0;
+const TK_ERROR: Int = 1;
+const TK_IDENT: Int = 2;
+const TK_INTEGER: Int = 3;
+const TK_FLOAT: Int = 4;
+const TK_STRING: Int = 5;
+const TK_FSTRING: Int = 6;
+const TK_CHAR: Int = 7;
+
+// Keywords
+const TK_LET: Int = 10;
+const TK_FN: Int = 11;
+const TK_IS: Int = 12;
+const TK_TYPE: Int = 13;
+const TK_MATCH: Int = 14;
+const TK_MOUNT: Int = 15;
+const TK_IF: Int = 17;
+const TK_ELSE: Int = 18;
+const TK_WHILE: Int = 19;
+const TK_FOR: Int = 20;
+const TK_RETURN: Int = 24;
+const TK_MUT: Int = 31;
+const TK_CONST: Int = 32;
+const TK_IMPLEMENT: Int = 40;
+const TK_TRUE: Int = 52;
+const TK_FALSE: Int = 53;
+const TK_SELF_VALUE: Int = 58;
+const TK_SELF_TYPE: Int = 59;
+const TK_AS: Int = 60;
+const TK_IN: Int = 61;
+
+// Operators
+const TK_PLUS: Int = 120;
+const TK_MINUS: Int = 121;
+const TK_STAR: Int = 122;
+const TK_SLASH: Int = 123;
+const TK_EQ_EQ: Int = 126;
+const TK_BANG_EQ: Int = 127;
+const TK_LT: Int = 128;
+const TK_GT: Int = 129;
+const TK_LT_EQ: Int = 130;
+const TK_GT_EQ: Int = 131;
+const TK_AMP_AMP: Int = 132;
+const TK_PIPE_PIPE: Int = 133;
+const TK_BANG: Int = 134;
+const TK_AMP: Int = 135;
+const TK_EQ: Int = 141;
+const TK_R_ARROW: Int = 156;
+const TK_FAT_ARROW: Int = 157;
+const TK_QUESTION: Int = 160;
+
+// Delimiters
+const TK_LPAREN: Int = 161;
+const TK_RPAREN: Int = 162;
+const TK_LBRACKET: Int = 163;
+const TK_RBRACKET: Int = 164;
+const TK_LBRACE: Int = 165;
+const TK_RBRACE: Int = 166;
+
+// Punctuation
+const TK_COMMA: Int = 167;
+const TK_SEMI: Int = 168;
+const TK_COLON: Int = 169;
+const TK_COLON_COLON: Int = 170;
+const TK_DOT: Int = 171;
+const TK_AT: Int = 173;
+
+// =============================================================================
+// Token type
+// =============================================================================
+
+type LexToken is {
+    kind: Int,
+    start: Int,
+    end_pos: Int,
+    line: Int,
+    col: Int,
+    val: Text,
+};
+
+// =============================================================================
+// Lexer
+// =============================================================================
+
+type BootLexer is {
+    source: Text,
+    pos: Int,
+    len: Int,
+    line: Int,
+    col: Int,
+};
+
+// Character classification
+fn is_alpha(b: Int) -> Bool {
+    (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+}
+
+fn is_digit(b: Int) -> Bool {
+    b >= 48 && b <= 57
+}
+
+fn is_id_start(b: Int) -> Bool {
+    is_alpha(b) || b == 95
+}
+
+fn is_id_cont(b: Int) -> Bool {
+    is_alpha(b) || is_digit(b) || b == 95
+}
+
+fn is_ws(b: Int) -> Bool {
+    b == 32 || b == 9 || b == 10 || b == 13
+}
+
+// Keyword lookup
+fn kw_lookup(s: Text) -> Int {
+    if s == "let" { return TK_LET; }
+    if s == "fn" { return TK_FN; }
+    if s == "is" { return TK_IS; }
+    if s == "type" { return TK_TYPE; }
+    if s == "match" { return TK_MATCH; }
+    if s == "mount" { return TK_MOUNT; }
+    if s == "if" { return TK_IF; }
+    if s == "else" { return TK_ELSE; }
+    if s == "while" { return TK_WHILE; }
+    if s == "for" { return TK_FOR; }
+    if s == "return" { return TK_RETURN; }
+    if s == "mut" { return TK_MUT; }
+    if s == "const" { return TK_CONST; }
+    if s == "implement" { return TK_IMPLEMENT; }
+    if s == "true" { return TK_TRUE; }
+    if s == "false" { return TK_FALSE; }
+    if s == "self" { return TK_SELF_VALUE; }
+    if s == "Self" { return TK_SELF_TYPE; }
+    if s == "as" { return TK_AS; }
+    if s == "in" { return TK_IN; }
+    TK_IDENT
+}
+
+fn tok_name(kind: Int) -> Text {
+    if kind == TK_EOF { return "EOF"; }
+    if kind == TK_ERROR { return "ERROR"; }
+    if kind == TK_IDENT { return "IDENT"; }
+    if kind == TK_INTEGER { return "INT"; }
+    if kind == TK_FLOAT { return "FLOAT"; }
+    if kind == TK_STRING { return "STR"; }
+    if kind == TK_LET { return "let"; }
+    if kind == TK_FN { return "fn"; }
+    if kind == TK_IS { return "is"; }
+    if kind == TK_TYPE { return "type"; }
+    if kind == TK_IF { return "if"; }
+    if kind == TK_ELSE { return "else"; }
+    if kind == TK_WHILE { return "while"; }
+    if kind == TK_FOR { return "for"; }
+    if kind == TK_RETURN { return "return"; }
+    if kind == TK_MUT { return "mut"; }
+    if kind == TK_CONST { return "const"; }
+    if kind == TK_IMPLEMENT { return "implement"; }
+    if kind == TK_TRUE { return "true"; }
+    if kind == TK_FALSE { return "false"; }
+    if kind == TK_PLUS { return "+"; }
+    if kind == TK_MINUS { return "-"; }
+    if kind == TK_STAR { return "*"; }
+    if kind == TK_EQ { return "="; }
+    if kind == TK_EQ_EQ { return "=="; }
+    if kind == TK_R_ARROW { return "->"; }
+    if kind == TK_LPAREN { return "("; }
+    if kind == TK_RPAREN { return ")"; }
+    if kind == TK_LBRACE { return "{"; }
+    if kind == TK_RBRACE { return "}"; }
+    if kind == TK_COMMA { return ","; }
+    if kind == TK_SEMI { return ";"; }
+    if kind == TK_COLON { return ":"; }
+    if kind == TK_DOT { return "."; }
+    if kind == TK_AT { return "@"; }
+    "?"
+}
+
+// Returns the byte value at idx as Int. Returns -1 for out-of-bounds.
+fn get_byte(s: Text, idx: Int) -> Int {
+    match s.char_at(idx) {
+        Some(c) => c as Int,
+        None => -1,
+    }
+}
+
+implement BootLexer {
+    fn create(source: Text) -> BootLexer {
+        BootLexer {
+            source: source,
+            pos: 0,
+            len: source.len(),
+            line: 1,
+            col: 1,
+        }
+    }
+
+    fn peek(&self) -> Int {
+        if self.pos >= self.len { return -1; }
+        get_byte(self.source, self.pos)
+    }
+
+    fn peek_at(&self, idx: Int) -> Int {
+        if idx >= self.len { return -1; }
+        get_byte(self.source, idx)
+    }
+
+    fn advance(&mut self) -> Int {
+        if self.pos >= self.len { return -1; }
+        let b = get_byte(self.source, self.pos);
+        self.pos = self.pos + 1;
+        if b == 10 {
+            self.line = self.line + 1;
+            self.col = 1;
+        } else {
+            self.col = self.col + 1;
+        }
+        b
+    }
+
+    fn mk_tok(&self, kind: Int, start: Int, sl: Int, sc: Int) -> LexToken {
+        LexToken { kind: kind, start: start, end_pos: self.pos, line: sl, col: sc, val: "" }
+    }
+
+    fn mk_tok_v(&self, kind: Int, start: Int, sl: Int, sc: Int, v: Text) -> LexToken {
+        LexToken { kind: kind, start: start, end_pos: self.pos, line: sl, col: sc, val: v }
+    }
+
+    fn skip_ws(&mut self) {
+        loop {
+            while self.pos < self.len && is_ws(self.peek()) {
+                self.advance();
+            }
+            if self.pos >= self.len { return; }
+            let b = self.peek();
+            let nx = self.peek_at(self.pos + 1);
+            // Line comment
+            if b == 47 && nx == 47 {
+                while self.pos < self.len && self.peek() != 10 {
+                    self.advance();
+                }
+                continue;
+            }
+            // Block comment
+            if b == 47 && nx == 42 {
+                self.advance();
+                self.advance();
+                let mut depth = 1;
+                while self.pos < self.len && depth > 0 {
+                    let c = self.peek();
+                    let c2 = self.peek_at(self.pos + 1);
+                    if c == 47 && c2 == 42 { self.advance(); self.advance(); depth = depth + 1; }
+                    else if c == 42 && c2 == 47 { self.advance(); self.advance(); depth = depth - 1; }
+                    else { self.advance(); }
+                }
+                continue;
+            }
+            return;
+        }
+    }
+
+    fn next_token(&mut self) -> LexToken {
+        self.skip_ws();
+        if self.pos >= self.len {
+            return self.mk_tok(TK_EOF, self.pos, self.line, self.col);
+        }
+
+        let start = self.pos;
+        let sl = self.line;
+        let sc = self.col;
+        let b = self.peek();
+
+        // Identifier or keyword
+        if is_id_start(b) {
+            while self.pos < self.len && is_id_cont(self.peek()) {
+                self.advance();
+            }
+            let text = self.source.slice(start, self.pos);
+            let kind = kw_lookup(text);
+            if kind == TK_IDENT {
+                return self.mk_tok_v(TK_IDENT, start, sl, sc, text);
+            }
+            return self.mk_tok(kind, start, sl, sc);
+        }
+
+        // Number
+        if is_digit(b) {
+            while self.pos < self.len && (is_digit(self.peek()) || self.peek() == 95) {
+                self.advance();
+            }
+            let mut is_float = false;
+            // Check for decimal point
+            if self.pos < self.len && self.peek() == 46 {
+                let after = self.peek_at(self.pos + 1);
+                if after != 46 && is_digit(after) {
+                    is_float = true;
+                    self.advance(); // consume .
+                    while self.pos < self.len && (is_digit(self.peek()) || self.peek() == 95) {
+                        self.advance();
+                    }
+                }
+            }
+            let text = self.source.slice(start, self.pos);
+            let kind = if is_float { TK_FLOAT } else { TK_INTEGER };
+            return self.mk_tok_v(kind, start, sl, sc, text);
+        }
+
+        // String
+        if b == 34 {
+            self.advance(); // consume "
+            let content_start = self.pos;
+            while self.pos < self.len && self.peek() != 34 {
+                if self.peek() == 92 { self.advance(); } // skip escape
+                self.advance();
+            }
+            let content = self.source.slice(content_start, self.pos);
+            if self.pos < self.len { self.advance(); } // consume "
+            return self.mk_tok_v(TK_STRING, start, sl, sc, content);
+        }
+
+        // Single character operators
+        let ch = self.advance();
+
+        // Two-char operators
+        let nx = self.peek();
+
+        if ch == 43 { return self.mk_tok(TK_PLUS, start, sl, sc); }
+        if ch == 42 { return self.mk_tok(TK_STAR, start, sl, sc); }
+        if ch == 47 { return self.mk_tok(TK_SLASH, start, sl, sc); }
+
+        if ch == 45 {
+            if nx == 62 { self.advance(); return self.mk_tok(TK_R_ARROW, start, sl, sc); }
+            return self.mk_tok(TK_MINUS, start, sl, sc);
+        }
+
+        if ch == 61 {
+            if nx == 61 { self.advance(); return self.mk_tok(TK_EQ_EQ, start, sl, sc); }
+            if nx == 62 { self.advance(); return self.mk_tok(TK_FAT_ARROW, start, sl, sc); }
+            return self.mk_tok(TK_EQ, start, sl, sc);
+        }
+
+        if ch == 33 {
+            if nx == 61 { self.advance(); return self.mk_tok(TK_BANG_EQ, start, sl, sc); }
+            return self.mk_tok(TK_BANG, start, sl, sc);
+        }
+
+        if ch == 60 {
+            if nx == 61 { self.advance(); return self.mk_tok(TK_LT_EQ, start, sl, sc); }
+            return self.mk_tok(TK_LT, start, sl, sc);
+        }
+
+        if ch == 62 {
+            if nx == 61 { self.advance(); return self.mk_tok(TK_GT_EQ, start, sl, sc); }
+            return self.mk_tok(TK_GT, start, sl, sc);
+        }
+
+        if ch == 38 {
+            if nx == 38 { self.advance(); return self.mk_tok(TK_AMP_AMP, start, sl, sc); }
+            return self.mk_tok(TK_AMP, start, sl, sc);
+        }
+
+        if ch == 124 {
+            if nx == 124 { self.advance(); return self.mk_tok(TK_PIPE_PIPE, start, sl, sc); }
+            return self.mk_tok(136, start, sl, sc); // TK_PIPE
+        }
+
+        if ch == 63 { return self.mk_tok(TK_QUESTION, start, sl, sc); }
+
+        // Delimiters
+        if ch == 40 { return self.mk_tok(TK_LPAREN, start, sl, sc); }
+        if ch == 41 { return self.mk_tok(TK_RPAREN, start, sl, sc); }
+        if ch == 91 { return self.mk_tok(TK_LBRACKET, start, sl, sc); }
+        if ch == 93 { return self.mk_tok(TK_RBRACKET, start, sl, sc); }
+        if ch == 123 { return self.mk_tok(TK_LBRACE, start, sl, sc); }
+        if ch == 125 { return self.mk_tok(TK_RBRACE, start, sl, sc); }
+
+        // Punctuation
+        if ch == 44 { return self.mk_tok(TK_COMMA, start, sl, sc); }
+        if ch == 59 { return self.mk_tok(TK_SEMI, start, sl, sc); }
+        if ch == 58 {
+            if nx == 58 { self.advance(); return self.mk_tok(TK_COLON_COLON, start, sl, sc); }
+            return self.mk_tok(TK_COLON, start, sl, sc);
+        }
+        if ch == 46 { return self.mk_tok(TK_DOT, start, sl, sc); }
+        if ch == 64 { return self.mk_tok(TK_AT, start, sl, sc); }
+
+        self.mk_tok_v(TK_ERROR, start, sl, sc, "unexpected")
+    }
+
+    fn tokenize_all(&mut self) -> List<LexToken> {
+        let mut result: List<LexToken> = [];
+        loop {
+            let tok = self.next_token();
+            let done = tok.kind == TK_EOF;
+            result.push(tok);
+            if done { break; }
+        }
+        result
+    }
+}
+
+// =============================================================================
+// Main — test the lexer
+// =============================================================================
+
+fn main() -> Int {
+    let source = "fn main() -> Int {\n    let x: Int = 42;\n    let y = x + 1;\n    if y > 0 {\n        return y;\n    }\n    0\n}\n";
+
+    print("Verum Bootstrap Lexer Test");
+    print(f"Source length: {source.len()} bytes");
+    print("---");
+
+    let mut lexer = BootLexer.create(source);
+    let tokens = lexer.tokenize_all();
+    let count = tokens.len();
+    print(f"Token count: {count}");
+    print("---");
+
+    let mut i = 0;
+    while i < count {
+        let tok: LexToken = tokens[i];
+        let name = tok_name(tok.kind);
+        if tok.val.len() > 0 {
+            print(f"{tok.line}:{tok.col} {name} '{tok.val}'");
+        } else {
+            print(f"{tok.line}:{tok.col} {name}");
+        }
+        i = i + 1;
+    }
+
+    print("---");
+    print("PASS");
+    0
+}

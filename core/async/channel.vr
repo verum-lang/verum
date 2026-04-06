@@ -1,0 +1,645 @@
+// =============================================================================
+// channel.vr - Async MPSC channels
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, collections, sync
+// =============================================================================
+//
+// Multi-producer, single-consumer channels for message passing.
+// Provides both bounded and unbounded variants.
+//
+// =============================================================================
+
+module core.async.channel;
+mount core.*;
+mount collections.*;
+mount sync.*;
+mount .poll.*;
+mount .waker.*;
+mount .future.*;
+
+// Cross-platform futex for blocking recv
+@cfg(target_os = "linux")
+mount sys.linux.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+@cfg(target_os = "macos")
+mount sys.darwin.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
+// =============================================================================
+// Channel<T> - Bounded channel for interpreter/AOT
+// =============================================================================
+//
+// Simple bounded channel with ring buffer storage.
+// In the interpreter/AOT, Channel.new(cap) is intercepted by the C runtime
+// (verum_chan_new), and send/recv dispatch through CallM to C builtins.
+//
+// This implementation provides correct behavior when the stdlib is compiled
+// natively (self-hosting), using a ring buffer with futex-based blocking.
+//
+// Layout: [len, cap, head, tail, buffer_ptr, closed, notify_seq]
+//
+public type Channel<T> is {
+    len: AtomicInt,
+    cap: Int,
+    head: Int,
+    tail: Int,
+    data: &unsafe T,
+    closed: AtomicInt,
+    /// Notification counter for futex-based blocking
+    notify_seq: AtomicInt,
+    /// Lock for ring buffer mutations
+    lock: FutexLock,
+};
+
+implement Channel<T> {
+    public fn new(capacity: Int) -> Channel<T> {
+        assert(capacity > 0, "Channel capacity must be positive");
+        // Allocate backing ring buffer
+        let buf_size = capacity * 8;  // sizeof(T) assumed 8 bytes (Int-sized)
+        let buf = alloc(buf_size) as &unsafe T;
+        Channel {
+            len: AtomicInt.new(0),
+            cap: capacity,
+            head: 0,
+            tail: 0,
+            data: buf,
+            closed: AtomicInt.new(0),
+            notify_seq: AtomicInt.new(0),
+            lock: FutexLock.new(),
+        }
+    }
+
+    /// Send a value into the channel. Returns false if closed or full.
+    public fn send(&mut self, value: T) -> Bool {
+        if self.closed.load(MemoryOrdering.Acquire) != 0 { return false; }
+
+        self.lock.lock();
+        if self.len.load(MemoryOrdering.Relaxed) >= self.cap {
+            self.lock.unlock();
+            return false;
+        }
+        // Store value at tail position in ring buffer
+        let offset = self.tail * 8;
+        let dst = (self.data as Int + offset) as &mut T;
+        *dst = value;
+        self.tail = (self.tail + 1) % self.cap;
+        self.len.fetch_add(1, MemoryOrdering.Release);
+        self.lock.unlock();
+
+        // Wake blocked receiver
+        self.notify_seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.notify_seq.value, 1);
+        true
+    }
+
+    /// Receive a value from the channel, blocking via futex if empty.
+    public fn recv(&mut self) -> Maybe<T> {
+        loop {
+            let seq = self.notify_seq.load(MemoryOrdering.Acquire);
+
+            self.lock.lock();
+            if self.len.load(MemoryOrdering.Relaxed) > 0 {
+                // Read value from head position
+                let offset = self.head * 8;
+                let src = (self.data as Int + offset) as &T;
+                let value = *src;
+                self.head = (self.head + 1) % self.cap;
+                self.len.fetch_sub(1, MemoryOrdering.Release);
+                self.lock.unlock();
+                return Some(value);
+            }
+            self.lock.unlock();
+
+            // Check if closed
+            if self.closed.load(MemoryOrdering.Acquire) != 0 {
+                return None;
+            }
+
+            // Block until sender wakes us
+            let _ = sys_futex_wait(&self.notify_seq.value, seq, None);
+        }
+    }
+
+    /// Try to receive without blocking.
+    public fn try_recv(&mut self) -> Maybe<T> {
+        self.lock.lock();
+        if self.len.load(MemoryOrdering.Relaxed) > 0 {
+            let offset = self.head * 8;
+            let src = (self.data as Int + offset) as &T;
+            let value = *src;
+            self.head = (self.head + 1) % self.cap;
+            self.len.fetch_sub(1, MemoryOrdering.Release);
+            self.lock.unlock();
+            return Some(value);
+        }
+        self.lock.unlock();
+        None
+    }
+
+    public fn close(&mut self) {
+        self.closed.store(1, MemoryOrdering.Release);
+        // Wake any blocked receiver
+        self.notify_seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.notify_seq.value, 1);
+    }
+
+    public fn is_closed(&self) -> Bool {
+        self.closed.load(MemoryOrdering.Relaxed) != 0
+    }
+
+    public fn len(&self) -> Int {
+        self.len.load(MemoryOrdering.Relaxed)
+    }
+
+    public fn is_empty(&self) -> Bool {
+        self.len.load(MemoryOrdering.Relaxed) == 0
+    }
+
+    public fn is_full(&self) -> Bool {
+        self.len.load(MemoryOrdering.Relaxed) >= self.cap
+    }
+
+    public fn capacity(&self) -> Int {
+        self.cap
+    }
+}
+
+// =============================================================================
+// Channel Core (Internal MPSC implementation)
+// =============================================================================
+
+// Shared state for channel.
+type ChannelInner<T> is {
+    queue: Deque<T>,
+    capacity: Maybe<Int>,  // None = unbounded
+    closed: AtomicBool,
+    sender_count: AtomicInt,
+    receiver_waker: Mutex<Maybe<Waker>>,
+    sender_wakers: Mutex<List<Waker>>,
+    /// Notification counter — incremented by send(), waited on by recv()
+    notify_seq: AtomicInt,
+};
+
+// =============================================================================
+// Sender<T>
+// =============================================================================
+
+// Sending end of a channel. Can be cloned for multiple senders.
+public type Sender<T> is {
+    inner: Shared<ChannelInner<T>>,
+};
+
+implement<T> Sender<T> {
+    // Send value, waiting if channel is full.
+    public fn send(&self, value: T) -> Result<(), SendError<T>> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Err(SendError(value));
+        }
+
+        // For unbounded, just push
+        // For bounded, would need to wait
+        let mut guard = self.inner.queue.lock().unwrap();
+        guard.push_back(value);
+
+        // Notify receiver — increment seq and wake via futex
+        self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+
+        // Also wake async receiver if registered
+        let waker_guard = self.inner.receiver_waker.lock().unwrap();
+        if let Some(waker) = waker_guard.as_ref() {
+            waker.wake_by_ref();
+        }
+
+        Ok(())
+    }
+
+    // Try to send without waiting.
+    public fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Err(TrySendError.Disconnected(value));
+        }
+
+        // Check capacity for bounded channel
+        if let Some(cap) = self.inner.capacity {
+            let guard = self.inner.queue.lock().unwrap();
+            if guard.len() >= cap {
+                return Err(TrySendError.Full(value));
+            }
+        }
+
+        let mut guard = self.inner.queue.lock().unwrap();
+        guard.push_back(value);
+
+        // Wake receiver
+        let waker_guard = self.inner.receiver_waker.lock().unwrap();
+        if let Some(waker) = waker_guard.as_ref() {
+            waker.wake_by_ref();
+        }
+
+        Ok(())
+    }
+
+    // Check if receiver has been dropped.
+    public fn is_closed(&self) -> Bool {
+        self.inner.closed.load(MemoryOrdering.Relaxed)
+    }
+
+    // Get number of messages in channel.
+    public fn len(&self) -> Int {
+        self.inner.queue.lock().unwrap().len()
+    }
+
+    // Check if channel is empty.
+    public fn is_empty(&self) -> Bool {
+        self.inner.queue.lock().unwrap().is_empty()
+    }
+
+    // Get capacity (None for unbounded).
+    public fn capacity(&self) -> Maybe<Int> {
+        self.inner.capacity
+    }
+}
+
+implement<T> Clone for Sender<T> {
+    fn clone(&self) -> Sender<T> {
+        self.inner.sender_count.fetch_add(1, MemoryOrdering.Relaxed);
+        Sender { inner: self.inner.clone() }
+    }
+}
+
+implement<T> Debug for Sender<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Sender { .. }")
+    }
+}
+
+implement<T> Drop for Sender<T> {
+    fn drop(&mut self) {
+        let count = self.inner.sender_count.fetch_sub(1, MemoryOrdering.Relaxed) - 1;
+        if count == 0 {
+            // Last sender dropped - close channel
+            self.inner.closed.store(true, MemoryOrdering.Release);
+
+            // Wake receiver via futex so it notices closure
+            self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+            let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+
+            // Also wake async receiver
+            let waker_guard = self.inner.receiver_waker.lock().unwrap();
+            if let Some(waker) = waker_guard.as_ref() {
+                waker.wake_by_ref();
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Receiver<T>
+// =============================================================================
+
+// Receiving end of a channel. Only one receiver per channel.
+public type Receiver<T> is {
+    inner: Shared<ChannelInner<T>>,
+};
+
+implement<T> Receiver<T> {
+    // Receive value, blocking via futex if empty.
+    public fn recv(&mut self) -> Maybe<T> {
+        loop {
+            // Snapshot notification counter before checking queue
+            let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
+
+            let mut guard = self.inner.queue.lock().unwrap();
+            if let Some(value) = guard.pop_front() {
+                // Wake a waiting sender
+                let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                if let Some(waker) = wakers.pop() {
+                    waker.wake();
+                }
+                return Some(value);
+            }
+
+            // Check if closed
+            if self.inner.closed.load(MemoryOrdering.Acquire) {
+                return None;
+            }
+
+            // Release lock before blocking
+            drop(guard);
+
+            // Block until a sender increments notify_seq — real OS sleep
+            let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, None);
+        }
+    }
+
+    // Try to receive without waiting.
+    public fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        let mut guard = self.inner.queue.lock().unwrap();
+        match guard.pop_front() {
+            Some(value) => Ok(value),
+            None => {
+                if self.inner.closed.load(MemoryOrdering.Acquire) {
+                    Err(TryRecvError.Disconnected)
+                } else {
+                    Err(TryRecvError.Empty)
+                }
+            }
+        }
+    }
+
+    // Check if channel is closed && empty.
+    public fn is_closed(&self) -> Bool {
+        self.inner.closed.load(MemoryOrdering.Relaxed) && self.inner.queue.lock().unwrap().is_empty()
+    }
+
+    // Get number of messages in channel.
+    public fn len(&self) -> Int {
+        self.inner.queue.lock().unwrap().len()
+    }
+
+    // Check if channel is empty.
+    public fn is_empty(&self) -> Bool {
+        self.inner.queue.lock().unwrap().is_empty()
+    }
+
+    // Close the channel, preventing further sends.
+    public fn close(&mut self) {
+        self.inner.closed.store(true, MemoryOrdering.Release);
+    }
+}
+
+implement<T> Future for Receiver<T> {
+    type Output = Maybe<T>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        // Try to receive
+        let mut guard = self.inner.queue.lock().unwrap();
+        if let Some(value) = guard.pop_front() {
+            return Poll.Ready(Some(value));
+        }
+
+        // Check if closed
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Poll.Ready(None);
+        }
+
+        // Register waker for when data arrives
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        *waker_guard = Some(cx.waker().clone());
+
+        Poll.Pending
+    }
+}
+
+implement<T> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        // Close channel
+        self.inner.closed.store(true, MemoryOrdering.Release);
+    }
+}
+
+implement<T> Debug for Receiver<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Receiver { .. }")
+    }
+}
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+// Error when sending fails because receiver was dropped.
+public type SendError<T> is (T);
+
+implement<T: Debug> Debug for SendError<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("SendError(..)")
+    }
+}
+
+// Error when trying to send.
+public type TrySendError<T> is
+    | Full(T)           // Channel is full (bounded)
+    | Disconnected(T);  // Receiver was dropped
+
+implement<T: Debug> Debug for TrySendError<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Full(_) => f.write_str("TrySendError.Full"),
+            Disconnected(_) => f.write_str("TrySendError.Disconnected"),
+        }
+    }
+}
+
+// Error when trying to receive.
+public type TryRecvError is
+    | Empty         // Channel is empty
+    | Disconnected; // All senders dropped
+
+// Error when receiving fails.
+public type RecvError is ();
+
+implement Debug for TryRecvError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty => f.write_str("TryRecvError.Empty"),
+            Disconnected => f.write_str("TryRecvError.Disconnected"),
+        }
+    }
+}
+
+implement Debug for RecvError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("RecvError")
+    }
+}
+
+implement<T> Display for SendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("sending on a closed channel")
+    }
+}
+
+implement<T> Display for TrySendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Full(_) => f.write_str("sending on a full channel"),
+            Disconnected(_) => f.write_str("sending on a disconnected channel"),
+        }
+    }
+}
+
+implement Display for TryRecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty => f.write_str("receiving on an empty channel"),
+            Disconnected => f.write_str("receiving from a disconnected channel"),
+        }
+    }
+}
+
+implement Display for RecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("receiving on a closed channel")
+    }
+}
+
+implement<T: Clone> Clone for SendError<T> {
+    fn clone(&self) -> SendError<T> {
+        SendError(self.0.clone())
+    }
+}
+
+implement<T: Clone> Clone for TrySendError<T> {
+    fn clone(&self) -> TrySendError<T> {
+        match self {
+            Full(v) => TrySendError.Full(v.clone()),
+            Disconnected(v) => TrySendError.Disconnected(v.clone()),
+        }
+    }
+}
+
+implement Clone for TryRecvError {
+    fn clone(&self) -> TryRecvError {
+        match self {
+            Empty => TryRecvError.Empty,
+            Disconnected => TryRecvError.Disconnected,
+        }
+    }
+}
+
+implement Clone for RecvError {
+    fn clone(&self) -> RecvError {
+        RecvError
+    }
+}
+
+// =============================================================================
+// Channel Constructors
+// =============================================================================
+
+// Create unbounded channel.
+public fn channel<T>() -> (Sender<T>, Receiver<T>) {
+    let inner = Shared.new(ChannelInner {
+        queue: Deque.new(),
+        capacity: None,
+        closed: AtomicBool.new(false),
+        sender_count: AtomicInt.new(1),
+        receiver_waker: sync.mutex.Mutex.new(None as Maybe<Waker>),
+        sender_wakers: sync.mutex.Mutex.new(List.new() as List<Waker>),
+        notify_seq: AtomicInt.new(0),
+    });
+
+    (Sender { inner: inner.clone() }, Receiver { inner: inner })
+}
+
+// Create bounded channel with capacity.
+public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
+    assert(capacity > 0, "Channel capacity must be positive");
+
+    let inner = Shared.new(ChannelInner {
+        queue: Deque.with_capacity(capacity),
+        capacity: Some(capacity),
+        closed: AtomicBool.new(false),
+        sender_count: AtomicInt.new(1),
+        receiver_waker: sync.mutex.Mutex.new(None as Maybe<Waker>),
+        sender_wakers: sync.mutex.Mutex.new(List.new() as List<Waker>),
+        notify_seq: AtomicInt.new(0),
+    });
+
+    (Sender { inner: inner.clone() }, Receiver { inner: inner })
+}
+
+// =============================================================================
+// oneshot - Single value channel
+// =============================================================================
+
+// Shared inner state for oneshot channel.
+type OneshotInner<T> is {
+    sent: AtomicBool,
+    value: Mutex<Maybe<T>>,
+    waker: Mutex<Maybe<Waker>>,
+};
+
+// Sender for oneshot channel.
+public type OneshotSender<T> is {
+    inner: Shared<OneshotInner<T>>,
+};
+
+// Receiver for oneshot channel.
+public type OneshotReceiver<T> is {
+    inner: Shared<OneshotInner<T>>,
+};
+
+implement<T> Debug for OneshotSender<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("OneshotSender { .. }")
+    }
+}
+
+implement<T> Debug for OneshotReceiver<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("OneshotReceiver { .. }")
+    }
+}
+
+implement<T> OneshotSender<T> {
+    // Send value. Can only be called once.
+    public fn send(self, value: T) -> Result<(), T> {
+        if self.inner.sent.swap(true, MemoryOrdering.AcqRel) {
+            return Err(value);
+        }
+
+        *self.inner.value.lock().unwrap() = Some(value);
+
+        // Wake receiver
+        if let Some(waker) = self.inner.waker.lock().unwrap().take() {
+            waker.wake();
+        }
+
+        Ok(())
+    }
+}
+
+implement<T> Future for OneshotReceiver<T> {
+    type Output = Result<T, RecvError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
+        // Check if value is available
+        let mut value_guard = self.inner.value.lock().unwrap();
+        if let Some(value) = value_guard.take() {
+            return Poll.Ready(Ok(value));
+        }
+
+        // Check if sender was dropped without sending
+        if self.inner.sent.load(MemoryOrdering.Acquire) {
+            return Poll.Ready(Err(RecvError()));
+        }
+
+        // Register waker
+        *self.inner.waker.lock().unwrap() = Some(cx.waker().clone());
+
+        Poll.Pending
+    }
+}
+
+// Create oneshot channel.
+public fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
+    let inner = Shared.new(OneshotInner {
+        sent: AtomicBool.new(false),
+        value: sync.mutex.Mutex.new(None as Maybe<T>),
+        waker: sync.mutex.Mutex.new(None as Maybe<Waker>),
+    });
+
+    (
+        OneshotSender { inner: inner.clone() },
+        OneshotReceiver { inner: inner }
+    )
+}

@@ -1,0 +1,520 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run quality checks daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Automatically cancel previous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # FORMATTING: Code Style Check
+  # ============================================================================
+
+  format:
+    name: Code Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Check code formatting
+        run: |
+          echo "## Formatting Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo fmt --all -- --check; then
+            echo "✅ All code is properly formatted" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Code formatting issues detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run \`cargo fmt\` to fix formatting" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check for trailing whitespace
+        run: |
+          if git grep -I --line-number '\s$' -- '*.rs' '*.toml' '*.md' | grep -v 'Binary file'; then
+            echo "❌ Trailing whitespace found" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ No trailing whitespace" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # LINTING: Clippy Analysis
+  # ============================================================================
+
+  clippy:
+    name: Clippy Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev clang-14
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: clippy
+
+      - name: Run Clippy (all targets)
+        run: |
+          echo "## Clippy Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cargo clippy --workspace --all-targets --all-features -- \
+            -D warnings \
+            -D clippy::all \
+            -D clippy::pedantic \
+            -D clippy::nursery \
+            -W clippy::cargo \
+            -A clippy::module_name_repetitions \
+            -A clippy::missing_errors_doc \
+            -A clippy::missing_panics_doc \
+            2>&1 | tee clippy-output.txt
+
+          if [ $? -eq 0 ]; then
+            echo "✅ No Clippy warnings" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Clippy found issues" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Upload Clippy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-results
+          path: clippy-output.txt
+          retention-days: 30
+
+  # ============================================================================
+  # SECURITY: Vulnerability Scanning
+  # ============================================================================
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit
+        id: cache-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit
+
+      - name: Install cargo-audit
+        if: steps.cache-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+
+      - name: Run security audit
+        run: |
+          echo "## Security Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cargo audit --json > audit-report.json || true
+
+          # Parse and display results
+          if [ -s audit-report.json ]; then
+            VULNERABILITIES=$(jq '.vulnerabilities.count // 0' audit-report.json)
+            WARNINGS=$(jq '.warnings.count // 0' audit-report.json)
+
+            echo "- Vulnerabilities: **$VULNERABILITIES**" >> $GITHUB_STEP_SUMMARY
+            echo "- Warnings: **$WARNINGS**" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$VULNERABILITIES" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "❌ Security vulnerabilities detected!" >> $GITHUB_STEP_SUMMARY
+              jq '.vulnerabilities.list' audit-report.json >> $GITHUB_STEP_SUMMARY || true
+              exit 1
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "✅ No security vulnerabilities" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ No vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-report
+          path: audit-report.json
+          retention-days: 90
+
+  # ============================================================================
+  # DEPENDENCIES: Cargo Deny
+  # ============================================================================
+
+  cargo-deny:
+    name: Dependency Policy Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-deny
+        id: cache-deny
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: ${{ runner.os }}-cargo-deny
+
+      - name: Install cargo-deny
+        if: steps.cache-deny.outputs.cache-hit != 'true'
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo deny (advisories)
+        run: |
+          echo "## Dependency Advisories" >> $GITHUB_STEP_SUMMARY
+          cargo deny check advisories 2>&1 | tee deny-advisories.txt
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Advisories checked" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run cargo deny (licenses)
+        run: |
+          echo "## License Compliance" >> $GITHUB_STEP_SUMMARY
+          cargo deny check licenses 2>&1 | tee deny-licenses.txt
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Licenses checked" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run cargo deny (bans)
+        run: |
+          echo "## Banned Dependencies" >> $GITHUB_STEP_SUMMARY
+          cargo deny check bans 2>&1 | tee deny-bans.txt
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Bans checked" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run cargo deny (sources)
+        run: |
+          echo "## Source Verification" >> $GITHUB_STEP_SUMMARY
+          cargo deny check sources 2>&1 | tee deny-sources.txt
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Sources checked" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload deny reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-deny-reports
+          path: deny-*.txt
+          retention-days: 30
+
+  # ============================================================================
+  # DEPENDENCIES: Outdated Check
+  # ============================================================================
+
+  outdated:
+    name: Outdated Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked || true
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "## Outdated Dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cargo outdated --workspace --root-deps-only > outdated.txt || true
+
+          if [ -s outdated.txt ]; then
+            cat outdated.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ All dependencies are up to date" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload outdated report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outdated-dependencies
+          path: outdated.txt
+          retention-days: 30
+
+  # ============================================================================
+  # SEMANTIC TYPE COMPLIANCE: Verum-Specific
+  # ============================================================================
+
+  semantic-types:
+    name: Semantic Type Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check semantic type compliance
+        run: |
+          echo "## Semantic Type Compliance" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "scripts/verify_compliance.py" ]; then
+            python3 scripts/verify_compliance.py > compliance-report.txt 2>&1 || true
+
+            if grep -q "✅" compliance-report.txt; then
+              echo "✅ Semantic type compliance verified" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ Compliance check completed with warnings" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            cat compliance-report.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Compliance script not found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload compliance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-type-compliance
+          path: compliance-report.txt
+          retention-days: 30
+
+  # ============================================================================
+  # DOCUMENTATION: Doc Tests and Checks
+  # ============================================================================
+
+  documentation:
+    name: Documentation Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-14-dev libz3-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: docs
+
+      - name: Check documentation
+        run: |
+          echo "## Documentation Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps 2>&1 | tee doc-output.txt
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Documentation builds without warnings" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Documentation has warnings or errors" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check for missing documentation
+        run: |
+          echo "## Missing Documentation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          RUSTDOCFLAGS="-D missing_docs" cargo check --workspace 2>&1 | tee missing-docs.txt || true
+
+          MISSING_COUNT=$(grep -c "missing documentation" missing-docs.txt || echo "0")
+          echo "- Missing doc comments: **$MISSING_COUNT**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run documentation tests
+        run: |
+          cargo test --workspace --doc --all-features
+
+          if [ $? -eq 0 ]; then
+            echo "✅ All doc tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Doc tests failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check documentation script
+        if: always()
+        run: |
+          if [ -f "scripts/check_docs.sh" ]; then
+            bash scripts/check_docs.sh || echo "Documentation check completed with warnings"
+          fi
+
+      - name: Upload documentation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-quality
+          path: |
+            doc-output.txt
+            missing-docs.txt
+          retention-days: 30
+
+  # ============================================================================
+  # CODE COMPLEXITY: Metrics and Analysis
+  # ============================================================================
+
+  complexity:
+    name: Code Complexity Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked || true
+
+      - name: Analyze unsafe code usage
+        run: |
+          echo "## Unsafe Code Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cargo geiger --all-features --output-format GitHubMarkdown >> $GITHUB_STEP_SUMMARY || true
+
+      - name: Count lines of code
+        run: |
+          echo "## Lines of Code" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          TOTAL_LINES=$(find crates -name "*.rs" -exec wc -l {} \; | awk '{sum+=$1} END {print sum}')
+          FILE_COUNT=$(find crates -name "*.rs" | wc -l)
+
+          echo "- Total Rust files: **$FILE_COUNT**" >> $GITHUB_STEP_SUMMARY
+          echo "- Total lines: **$TOTAL_LINES**" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # SUMMARY: Quality Check Status
+  # ============================================================================
+
+  quality-success:
+    name: Quality Checks Complete
+    needs: [format, clippy, security-audit, cargo-deny, semantic-types, documentation]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check all quality jobs
+        run: |
+          echo "## Quality Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FAILED=""
+
+          if [ "${{ needs.format.result }}" != "success" ]; then
+            echo "❌ Code formatting failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Code formatting passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.clippy.result }}" != "success" ]; then
+            echo "❌ Clippy lint failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Clippy lint passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.security-audit.result }}" != "success" ]; then
+            echo "❌ Security audit failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Security audit passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.cargo-deny.result }}" != "success" ]; then
+            echo "❌ Dependency policy check failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Dependency policy check passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.semantic-types.result }}" != "success" ]; then
+            echo "❌ Semantic type compliance failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Semantic type compliance passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.documentation.result }}" != "success" ]; then
+            echo "❌ Documentation quality failed" >> $GITHUB_STEP_SUMMARY
+            FAILED="true"
+          else
+            echo "✅ Documentation quality passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "$FAILED" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Quality checks failed - please review and fix issues" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ All quality checks passed!" >> $GITHUB_STEP_SUMMARY
+          fi

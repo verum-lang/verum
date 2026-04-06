@@ -1,0 +1,65 @@
+// 05 — Collections
+// List, Map, and Set — Verum's core collection types.
+// Verum uses semantic names: List (not Vec), Text (not String), Map (not HashMap).
+
+fn main() {
+    // ========================
+    // List<T>
+    // ========================
+    let mut numbers = [1, 2, 3, 4, 5]
+    print(f"numbers = {numbers}")
+    print(f"length  = {numbers.len()}")
+
+    // Indexing
+    print(f"first = {numbers[0]}")
+
+    // Push (appends an element)
+    numbers.push(6)
+    print(f"after push(6): {numbers}")
+
+    // Functional combinators
+    let doubled = numbers.map(|x| x * 2)
+    print(f"doubled = {doubled}")
+
+    let evens = numbers.filter(|x| x % 2 == 0)
+    print(f"evens   = {evens}")
+
+    let total = numbers.fold(0, |acc, x| acc + x)
+    print(f"sum     = {total}")
+
+    // ========================
+    // Map<K, V>
+    // ========================
+    let mut scores = Map.new()
+    scores.insert("Alice", 95)
+    scores.insert("Bob", 87)
+    scores.insert("Carol", 92)
+
+    print(f"scores length = {scores.len()}")
+
+    match scores.get("Alice") {
+        Some(s) => print(f"Alice's score: {s}"),
+        None    => print("Alice not found")
+    }
+
+    // Check membership
+    print(f"contains Bob: {scores.contains_key("Bob")}")
+
+    // ========================
+    // Set<T>
+    // ========================
+    let mut tags = Set.new()
+    tags.insert("verum")
+    tags.insert("language")
+    tags.insert("verum")  // duplicate — no effect
+
+    print(f"tags length = {tags.len()}")  // 2
+    print(f"has 'verum': {tags.contains("verum")}")
+
+    // ========================
+    // List of records
+    // ========================
+    let names = ["Alice", "Bob", "Carol", "Dave"]
+    let short_names = names.filter(|n| n.len() <= 4)
+    print(f"short names: {short_names}")
+}

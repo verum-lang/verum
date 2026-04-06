@@ -1,0 +1,81 @@
+// ============================================================================
+// FFI Edge Cases and Advanced Features Test
+// Tests corner cases and advanced FFI features
+// ============================================================================
+
+// Edge Case 1: FFI with generics (from grammar line 2274)
+ffi GenericFFI<T> {
+    @extern("generic_func")
+    fn generic_func(data: *const T) -> Int;
+}
+
+// Edge Case 2: Multiple ownership transfer modes
+ffi OwnershipTransfer {
+    @extern("give_ownership")
+    fn give_ownership(ptr: *mut u8) -> ();
+
+    @ownership(transfer_to = "ptr")
+}
+
+ffi OwnershipReceive {
+    @extern("take_ownership")
+    fn take_ownership() -> *mut u8;
+
+    @ownership(transfer_from = "return")
+}
+
+// Edge Case 3: Complex error protocol combinations
+ffi ComplexErrors {
+    @extern("complex_error_func")
+    fn complex_error_func(x: Int) -> Int;
+
+    errors_via = ReturnValue(-1) with Errno;
+}
+
+// Edge Case 4: Empty FFI boundary
+ffi EmptyBoundary {
+}
+
+// Edge Case 5: FFI with very long parameter lists
+ffi ManyParams {
+    @extern("many_params")
+    fn many_params(
+        a: Int,
+        b: Int,
+        c: Int,
+        d: Int,
+        e: Int,
+        f: Int,
+        g: Int,
+        h: Int
+    ) -> Int;
+}
+
+// Edge Case 6: FFI with all safety annotations
+ffi CompleteSafety {
+    @extern("safe_func")
+    fn safe_func(input: *const u8, output: *mut u8) -> Int;
+
+    requires input != 0;
+    requires output != 0;
+    ensures result >= 0;
+    memory_effects = Reads(input) + Writes(output);
+    thread_safe = true;
+    errors_via = None;
+    @ownership(borrow)
+}
+
+// Edge Case 7: Nested FFI with extends
+ffi Base {
+    @extern("base_func")
+    fn base_func() -> Int;
+}
+
+ffi Derived extends Base {
+    @extern("derived_func")
+    fn derived_func() -> Int;
+}
+
+fn main() -> Int {
+    0
+}

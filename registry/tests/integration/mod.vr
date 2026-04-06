@@ -1,0 +1,34 @@
+// Verum Registry - Integration Tests Module
+//
+// Exports all integration test modules for the verum-registry.
+// These tests verify end-to-end functionality across all API endpoints.
+
+// Package lifecycle tests
+pub mod package_tests;
+
+// User authentication and profile tests
+pub mod user_tests;
+
+// Token-based authentication tests
+pub mod auth_tests;
+
+// Package ownership management tests
+pub mod ownership_tests;
+
+// Admin operations tests
+pub mod admin_tests;
+
+// Resilience patterns tests
+pub mod resilience_tests;
+
+// Input validation tests
+pub mod validation_tests;
+
+// Publish flow end-to-end tests
+pub mod publish_flow_test;
+
+// Security service tests
+pub mod security_test;
+
+// Sumdb transparent log tests
+pub mod sumdb_test;

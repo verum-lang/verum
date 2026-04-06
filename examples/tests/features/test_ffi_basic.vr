@@ -1,0 +1,85 @@
+// Test: Basic FFI declarations
+// Tests FFI boundary declarations with external C functions
+// According to grammar: ffi_declaration = visibility , 'ffi' , identifier , [ 'extends' , identifier ] , '{' , ffi_items , '}'
+
+// Basic FFI block - declares external functions from libc
+ffi LibC {
+    // Basic C function: int abs(int x)
+    @extern("abs")
+    fn abs(x: Int) -> Int;
+
+    // C function with no return: void exit(int status)
+    @extern("exit")
+    fn exit(status: Int);
+
+    // C function with float: double sqrt(double x)
+    @extern("sqrt")
+    fn sqrt(x: Float) -> Float;
+
+    // C function with multiple params: int pow(int base, int exp)
+    @extern("pow")
+    fn pow(base: Float, exp: Float) -> Float;
+}
+
+// FFI block with pure memory effects
+ffi Math {
+    @extern("sin")
+    fn sin(x: Float) -> Float;
+
+    @extern("cos")
+    fn cos(x: Float) -> Float;
+
+    // Specify pure functions have no side effects
+    memory_effects = Pure;
+    thread_safe = true;
+}
+
+// FFI with explicit calling convention
+ffi WinAPI {
+    @extern("GetCurrentProcessId", calling_convention = "stdcall")
+    fn get_process_id() -> Int;
+
+    thread_safe = true;
+}
+
+// Test using FFI functions
+fn test_basic_ffi() -> Int {
+    // Test abs function
+    let neg_value = -42;
+    let pos_value = LibC.abs(neg_value);
+
+    // Test sqrt function
+    let num = 16.0;
+    let root = LibC.sqrt(num);
+
+    // Test pow function
+    let base = 2.0;
+    let result = LibC.pow(base, 3.0);
+
+    pos_value
+}
+
+// Test math FFI
+fn test_math_ffi() -> Float {
+    let angle = 0.0;
+    let sin_val = Math.sin(angle);
+    let cos_val = Math.cos(angle);
+
+    sin_val + cos_val
+}
+
+fn main() {
+    let _ = print("=== FFI Basic Tests ===");
+
+    // Test 1: Basic FFI function calls
+    let _ = print("\nTest 1: Basic FFI calls");
+    let result = test_basic_ffi();
+    let _ = print(f"Result: {result}");
+
+    // Test 2: Math FFI calls
+    let _ = print("\nTest 2: Math FFI calls");
+    let math_result = test_math_ffi();
+    let _ = print(f"Math result: {math_result}");
+
+    let _ = print("\n=== All FFI basic tests completed ===");
+}

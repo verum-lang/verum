@@ -1,0 +1,34 @@
+// Test edge cases for refinement types
+
+// === Empty refinement (should work - no constraint) ===
+type AnyInt is Int{};
+
+// === Nested type aliases with refinements ===
+type Natural is Int{>= 0};
+type PositiveNatural is Natural{> 0};
+
+// === Complex boolean expressions ===
+type ValidPort is Int{>= 1024, <= 65535};
+type OddNumber is Int{% 2 != 0};
+
+// === String refinements ===
+type NonEmptyText is Text{len(it) > 0};
+
+// === Refinements with arithmetic ===
+type PowerOfTwo is Int{it == 1 || it == 2 || it == 4 || it == 8 || it == 16};
+
+fn main() {
+    let any: AnyInt = 0;
+    let nat: Natural = 10;
+    let pos_nat: PositiveNatural = 5;
+    let port: ValidPort = 8080;
+    let odd: OddNumber = 7;
+
+    let _ = println(f"Any: {any}");
+    let _ = println(f"Natural: {nat}");
+    let _ = println(f"Positive Natural: {pos_nat}");
+    let _ = println(f"Valid Port: {port}");
+    let _ = println(f"Odd: {odd}");
+
+    any + nat + pos_nat + port + odd
+}

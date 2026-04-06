@@ -1,0 +1,80 @@
+// 13 — Refinement Types
+// Types with compile-time constraints verified by the SMT solver (Z3).
+// These eliminate entire classes of bugs at compile time.
+
+// --- Basic refinement types ---
+// Int{predicate} restricts the set of valid values.
+
+type Positive is Int{> 0};
+type NonZero is Int{!= 0};
+type Percentage is Float where |x| x >= 0.0 && x <= 100.0;
+
+// --- Named predicates ---
+// Reusable predicates for complex constraints.
+
+predicate valid_port(p: Int) -> Bool {
+    p >= 1 && p <= 65535
+}
+
+type Port is Int where valid_port;
+
+predicate valid_email(s: Text) -> Bool {
+    s.contains("@") && s.contains(".") && s.len() >= 5
+}
+
+type Email is Text where valid_email;
+
+// --- Refinements eliminate runtime checks ---
+
+// Division by zero is IMPOSSIBLE here: the type system guarantees b != 0.
+fn safe_divide(a: Int, b: NonZero) -> Int {
+    a / b
+}
+
+// Index is guaranteed in bounds.
+type BoundedIndex is Int where |i| i >= 0;
+
+fn first_n(items: List<Int>, n: Positive) -> List<Int> {
+    let mut result = []
+    let limit = if n > items.len() { items.len() } else { n }
+    for i in 0..limit {
+        result.push(items[i])
+    }
+    result
+}
+
+// --- Refined record fields ---
+type ServerConfig is {
+    host: Text,
+    port: Port,
+    max_connections: Positive
+};
+
+type UserProfile is {
+    name: Text,
+    age: Int where |a| a >= 0 && a <= 150,
+    email: Email
+};
+
+fn main() {
+    print("=== Refinement Types ===")
+
+    // The compiler verifies these satisfy the predicates:
+    // let p: Positive = 42     // OK
+    // let p: Positive = -1     // COMPILE ERROR: -1 does not satisfy > 0
+
+    // safe_divide(10, 0)       // COMPILE ERROR: 0 is not NonZero
+    // safe_divide(10, 2)       // OK: 2 satisfies != 0
+
+    print("type Positive is Int{> 0};")
+    print("type NonZero  is Int{!= 0};")
+    print("type Port     is Int where valid_port;")
+    print("")
+    print("fn safe_divide(a: Int, b: NonZero) -> Int")
+    print("  // Division by zero is impossible by construction")
+    print("")
+    print("Refinements are checked at compile time via Z3 SMT solver.")
+    print("No runtime overhead for validated constraints.")
+
+    print("\nRefinement types demo complete")
+}

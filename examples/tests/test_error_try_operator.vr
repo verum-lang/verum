@@ -1,0 +1,56 @@
+// Test ? operator with Result type
+
+// Define Result type
+type Result<T, E> is
+  | Ok(T)
+  | Err(E)
+
+// Simple function returning Result
+fn divide(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Test using ? operator to propagate errors
+fn test_question_operator() -> Result<Int, Text> {
+    let result = divide(10, 2)?;
+    Ok(result)
+}
+
+// Test using ? operator with error
+fn test_question_operator_error() -> Result<Int, Text> {
+    let result = divide(10, 0)?;
+    Ok(result)
+}
+
+// Test chaining operations with ?
+fn test_chained() -> Result<Int, Text> {
+    let a = divide(100, 10)?;
+    let b = divide(a, 2)?;
+    Ok(b)
+}
+
+fn main() -> Int {
+    // Test success case
+    let t1 = match test_question_operator() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    // Test error case
+    let t2 = match test_question_operator_error() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    // Test chaining
+    let t3 = match test_chained() {
+        Ok(v) => v,
+        Err(_) => -1
+    };
+
+    0
+}

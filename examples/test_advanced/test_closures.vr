@@ -1,0 +1,22 @@
+// Test closures and higher-order functions
+// This test verifies that closures capture variables and can be passed as arguments
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn main() {
+    let multiplier = 3
+
+    // Closure that captures multiplier
+    let multiply = |x| x * multiplier
+
+    // Test closure directly
+    let result1 = multiply(5)
+    println(f"multiply(5) = {result1}")
+
+    // Test higher-order function
+    let add_one = |x| x + 1
+    let result2 = apply_twice(add_one, 10)
+    println(f"apply_twice(add_one, 10) = {result2}")
+}

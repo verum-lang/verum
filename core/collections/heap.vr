@@ -1,0 +1,925 @@
+// =============================================================================
+// heap.vr - Binary heap (priority queue)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, collections/list
+// =============================================================================
+//
+// BinaryHeap<T> is a max-heap implementation providing priority queue
+// operations. The largest element (by Ord) is always at the front.
+//
+// Performance characteristics:
+// - push: O(log n)
+// - pop: O(log n)
+// - peek: O(1)
+// - heapify: O(n)
+//
+// For min-heap behavior, use Reverse<T> wrapper or custom Ord impl.
+//
+// =============================================================================
+
+module core.collections.heap;
+mount core.*;
+mount .list.*;
+
+// =============================================================================
+// BinaryHeap<T>
+// =============================================================================
+
+// Max-heap priority queue.
+public type BinaryHeap<T: Ord> is {
+    data: List<T>,
+};
+
+implement<T: Ord> BinaryHeap<T> {
+    // Create empty heap.
+    public fn new() -> BinaryHeap<T> {
+        BinaryHeap { data: List.new() }
+    }
+
+    // Create with pre-allocated capacity.
+    public fn with_capacity(capacity: Int) -> BinaryHeap<T> {
+        BinaryHeap { data: List.with_capacity(capacity) }
+    }
+
+    // Create heap from list (heapify in O(n)).
+    public fn from_list(list: List<T>) -> BinaryHeap<T> {
+        let mut heap = BinaryHeap { data: list };
+        heap.heapify();
+        heap
+    }
+
+    // Number of elements.
+    public fn len(&self) -> Int {
+        self.data.len()
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.data.is_empty()
+    }
+
+    // Current capacity.
+    public fn capacity(&self) -> Int {
+        self.data.capacity()
+    }
+
+    // Get reference to maximum element.
+    public fn peek(&self) -> Maybe<&T> {
+        self.data.first()
+    }
+
+    /// Get a mutable reference to the maximum element.
+    ///
+    /// Returns a `PeekMut` guard. When the guard is consumed via `PeekMut.pop()`
+    /// or simply dropped, the heap invariant is restored by sifting down.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut heap = BinaryHeap.from_list([5, 3, 1]);
+    /// if let Some(mut top) = heap.peek_mut() {
+    ///     top.replace(0);  // Replace top with 0, heap re-heapifies
+    /// }
+    /// ```
+    public fn peek_mut(&mut self) -> Maybe<PeekMut<T>> {
+        if self.data.is_empty() {
+            None
+        } else {
+            Some(PeekMut { heap: self, sift: true })
+        }
+    }
+
+    // Internal: get mutable ref without guard.
+    fn peek_mut_internal(&mut self) -> Maybe<&mut T> {
+        self.data.first_mut()
+    }
+
+    // Push element onto heap.
+    public fn push(&mut self, value: T) {
+        self.data.push(value);
+        self.sift_up(self.data.len() - 1);
+    }
+
+    // Pop && return maximum element.
+    public fn pop(&mut self) -> Maybe<T> {
+        if self.data.is_empty() {
+            return None;
+        }
+
+        let len = self.data.len();
+        if len == 1 {
+            return self.data.pop();
+        }
+
+        // Swap first && last, then sift down
+        self.data.swap(0, len - 1);
+        let res = self.data.pop();
+        if !self.data.is_empty() {
+            self.sift_down(0);
+        }
+        res
+    }
+
+    // Push && pop in single operation (more efficient than push then pop).
+    public fn push_pop(&mut self, value: T) -> T {
+        if self.data.is_empty() || value >= self.data.get(0).unwrap() {
+            return value;
+        }
+
+        // Replace root && sift down
+        let res = unsafe {
+            let ptr = self.data.as_mut_slice().as_mut_ptr();
+            let old = ptr_read(ptr);
+            ptr_write(ptr, value);
+            old
+        };
+        self.sift_down(0);
+        res
+    }
+
+    // Pop && push in single operation (more efficient than pop then push).
+    public fn replace(&mut self, value: T) -> Maybe<T> {
+        if self.data.is_empty() {
+            self.data.push(value);
+            return None;
+        }
+
+        // Replace root && sift down
+        let res = unsafe {
+            let ptr = self.data.as_mut_slice().as_mut_ptr();
+            let old = ptr_read(ptr);
+            ptr_write(ptr, value);
+            old
+        };
+        self.sift_down(0);
+        Some(res)
+    }
+
+    // Clear all elements.
+    public fn clear(&mut self) {
+        self.data.clear();
+    }
+
+    // Reserve capacity for additional elements.
+    public fn reserve(&mut self, additional: Int) {
+        self.data.reserve(additional);
+    }
+
+    // Shrink capacity to fit current length.
+    public fn shrink_to_fit(&mut self) {
+        self.data.shrink_to_fit();
+    }
+
+    /// Shrink capacity to at least the specified minimum.
+    /// The capacity will be at least max(min_capacity, len).
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        self.data.shrink_to(min_capacity);
+    }
+
+    // Convert to sorted list (consumes heap).
+    public fn into_sorted_list(mut self) -> List<T> {
+        let mut res = List.with_capacity(self.len());
+        while let Some(v) = self.pop() {
+            res.push(v);
+        }
+        // Result is in descending order, reverse for ascending
+        res.reverse();
+        res
+    }
+
+    // Get a copy of elements as a list (heap order, not sorted).
+    public fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        self.data.clone()
+    }
+
+    // Get underlying list (breaks heap invariant!).
+    public fn into_list(self) -> List<T> {
+        self.data
+    }
+
+    // View as slice (heap order, not sorted).
+    public fn as_slice(&self) -> &[T] {
+        self.data.as_slice()
+    }
+
+    // Drain iterator - removes && yields all elements (not in sorted order).
+    public fn drain(&mut self) -> HeapDrain<T> {
+        HeapDrain { heap: self }
+    }
+
+    // Drain in sorted order (descending).
+    public fn drain_sorted(&mut self) -> HeapDrainSorted<T> {
+        HeapDrainSorted { heap: self }
+    }
+
+    // Retain only elements satisfying predicate (rebuilds heap).
+    public fn retain<F: fn(&T) -> Bool>(&mut self, f: F) {
+        self.data.retain(f);
+        self.heapify();
+    }
+
+    /// Remove and return all elements matching the predicate.
+    /// The heap property is maintained after extraction.
+    public fn extract_if<F: fn(&T) -> Bool>(&mut self, f: F) -> List<T>
+    where T: Clone
+    {
+        let mut extracted: List<T> = List.new();
+        let mut kept: List<T> = List.new();
+        let mut i = 0;
+        while i < self.data.len() {
+            let item = &self.data[i];
+            if f(item) {
+                extracted.push(item.clone());
+            } else {
+                kept.push(item.clone());
+            }
+            i = i + 1;
+        }
+        self.data = kept;
+        self.heapify();
+        extracted
+    }
+
+    // Append all elements from other heap.
+    public fn append(&mut self, other: &mut BinaryHeap<T>) {
+        self.data.append(&mut other.data);
+        self.heapify();
+    }
+
+    // Iterator over elements (heap order, not sorted).
+    public fn iter(&self) -> HeapIter<T> {
+        HeapIter { iter: self.data.iter() }
+    }
+
+    // ==========================================================================
+    // Search & Removal
+    // ==========================================================================
+
+    /// Returns true if the heap contains the given value.
+    /// O(n) linear scan.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut h = BinaryHeap.new();
+    /// h.push(10);
+    /// h.push(20);
+    /// assert(h.contains(&10));
+    /// assert(!h.contains(&5));
+    /// ```
+    public fn contains(&self, value: &T) -> Bool
+    where T: Eq
+    {
+        self.data.contains(value)
+    }
+
+    /// Remove a specific value from the heap. Returns true if the value was found
+    /// and removed. O(n) to find, O(log n) to restore heap property.
+    ///
+    /// If the value appears multiple times, only one occurrence is removed.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut h = BinaryHeap.new();
+    /// h.push(10);
+    /// h.push(20);
+    /// h.push(30);
+    /// assert(h.remove_value(&20));
+    /// assert_eq(h.len(), 2);
+    /// assert(!h.remove_value(&99));
+    /// ```
+    public fn remove_value(&mut self, value: &T) -> Bool
+    where T: Eq
+    {
+        // Find the index of the value
+        let mut idx: Maybe<Int> = None;
+        for i in range(0, self.data.len()) {
+            if self.data.get(i).unwrap() == *value {
+                idx = Some(i);
+                break;
+            }
+        }
+
+        match idx {
+            None => false,
+            Some(i) => {
+                self.remove_at(i);
+                true
+            }
+        }
+    }
+
+    /// Remove element at a specific index and restore heap property.
+    fn remove_at(&mut self, idx: Int) {
+        let last = self.data.len() - 1;
+        if idx == last {
+            self.data.pop();
+        } else {
+            self.data.swap(idx, last);
+            self.data.pop();
+            // Try sifting down first, then up
+            self.sift_down(idx);
+            self.sift_up(idx);
+        }
+    }
+
+    // ==========================================================================
+    // Top-K Operations
+    // ==========================================================================
+
+    /// Return the k largest elements in descending order.
+    /// Uses a partial sort approach: pop k times from the heap clone.
+    /// O(k log n) time complexity.
+    ///
+    /// If k >= len(), returns all elements sorted in descending order.
+    ///
+    /// # Example
+    /// ```verum
+    /// let h = BinaryHeap.from_list([1, 5, 3, 8, 2]);
+    /// let top3 = h.top_k(3); // [8, 5, 3]
+    /// ```
+    public fn top_k(&self, k: Int) -> List<T>
+    where T: Clone
+    {
+        let mut clone = self.clone();
+        let count = if k < clone.len() { k } else { clone.len() };
+        let mut result = List.with_capacity(count);
+        let mut i = 0;
+        while i < count {
+            match clone.pop() {
+                Some(val) => result.push(val),
+                None => { break; },
+            }
+            i = i + 1;
+        }
+        result
+    }
+
+    /// Return the k smallest elements in ascending order.
+    /// O(n + k log n) — rebuilds as min-heap, then pops k times.
+    ///
+    /// If k >= len(), returns all elements sorted in ascending order.
+    ///
+    /// # Example
+    /// ```verum
+    /// let h = BinaryHeap.from_list([1, 5, 3, 8, 2]);
+    /// let bottom3 = h.bottom_k(3); // [1, 2, 3]
+    /// ```
+    public fn bottom_k(&self, k: Int) -> List<T>
+    where T: Clone
+    {
+        // Use into_sorted_list then take first k
+        let sorted = self.clone().into_sorted_list();
+        let count = if k < sorted.len() { k } else { sorted.len() };
+        let mut result = List.with_capacity(count);
+        let mut i = 0;
+        while i < count {
+            result.push(sorted[i].clone());
+            i = i + 1;
+        }
+        result
+    }
+
+    /// Merge another heap into this one. The other heap is drained.
+    /// O(n + m) amortized — appends data then rebuilds heap.
+    ///
+    /// Note: `append` already provides this functionality. This is an alias
+    /// with clearer semantics for the merge operation.
+    ///
+    /// # Example
+    /// ```verum
+    /// let mut h1 = BinaryHeap.from_list([1, 5, 3]);
+    /// let mut h2 = BinaryHeap.from_list([8, 2, 6]);
+    /// h1.merge(&mut h2);
+    /// assert_eq(h1.len(), 6);
+    /// assert(h2.is_empty());
+    /// ```
+    public fn merge(&mut self, other: &mut BinaryHeap<T>) {
+        self.data.append(&mut other.data);
+        self.heapify();
+    }
+
+    // ==========================================================================
+    // Functional Utilities
+    // ==========================================================================
+
+    /// Return a new BinaryHeap containing only elements matching the predicate.
+    public fn filter<F: fn(&T) -> Bool>(&self, f: F) -> BinaryHeap<T>
+    where T: Clone
+    {
+        let mut result = BinaryHeap.new();
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            if f(item) {
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+
+    /// Return a new BinaryHeap with each element transformed by the function.
+    public fn map<U: Ord, F: fn(&T) -> U>(&self, f: F) -> BinaryHeap<U> {
+        let mut result: BinaryHeap<U> = BinaryHeap.new();
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            result.push(f(item));
+        }
+        result
+    }
+
+    /// Fold over all elements, accumulating a result.
+    /// Note: iteration order is NOT sorted — it traverses the internal array.
+    public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
+        let mut acc = init;
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            acc = f(acc, item);
+        }
+        acc
+    }
+
+    /// Apply a function to each element for its side effects.
+    /// Note: iteration order is NOT sorted.
+    public fn for_each<F: fn(&T)>(&self, f: F) {
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            f(item);
+        }
+    }
+
+    /// Count elements matching a predicate.
+    public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
+        let mut count = 0;
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            if f(item) {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    /// Filter and transform in one pass. Keeps elements for which the function returns Some.
+    public fn filter_map<U: Ord, F: fn(&T) -> Maybe<U>>(&self, f: F) -> BinaryHeap<U> {
+        let mut result: BinaryHeap<U> = BinaryHeap.new();
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            match f(item) {
+                Some(v) => result.push(v),
+                None => {}
+            }
+        }
+        result
+    }
+
+    /// Check if any element satisfies the predicate.
+    public fn any<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            if f(item) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if all elements satisfy the predicate.
+    public fn all<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
+        for i in range(0, self.data.len()) {
+            let item = self.data.get(i).unwrap();
+            if !f(item) {
+                return false;
+            }
+        }
+        true
+    }
+
+    // ==========================================================================
+    // Internal heap operations
+    // ==========================================================================
+
+    // Build heap from arbitrary data (Floyd's algorithm).
+    fn heapify(&mut self) {
+        let len = self.data.len();
+        if len <= 1 {
+            return;
+        }
+
+        // Start from last non-leaf node
+        let mut i = (len / 2) - 1;
+        while i >= 0 {
+            self.sift_down(i);
+            i = i - 1;
+        }
+    }
+
+    // Move element at idx up to restore heap property.
+    fn sift_up(&mut self, idx: Int) {
+        let mut current = idx;
+        while current > 0 {
+            let parent = (current - 1) / 2;
+            if self.data.get(current).unwrap() > self.data.get(parent).unwrap() {
+                self.data.swap(current, parent);
+                current = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Move element at idx down to restore heap property.
+    fn sift_down(&mut self, idx: Int) {
+        let len = self.data.len();
+        let mut current = idx;
+
+        loop {
+            let left = 2 * current + 1;
+            let right = 2 * current + 2;
+            let mut largest = current;
+
+            if left < len && self.data.get(left).unwrap() > self.data.get(largest).unwrap() {
+                largest = left;
+            }
+            if right < len && self.data.get(right).unwrap() > self.data.get(largest).unwrap() {
+                largest = right;
+            }
+
+            if largest == current {
+                break;
+            }
+
+            self.data.swap(current, largest);
+            current = largest;
+        }
+    }
+}
+
+// =============================================================================
+// PeekMut Guard
+// =============================================================================
+
+/// Guard that provides mutable access to the top element of a BinaryHeap.
+/// When consumed via `replace()` or `pop()`, the heap invariant is automatically
+/// restored.
+public type PeekMut<T: Ord> is {
+    heap: &mut BinaryHeap<T>,
+    sift: Bool,
+};
+
+implement<T: Ord> PeekMut<T> {
+    /// Get a reference to the top element.
+    public fn value(&self) -> &T {
+        self.heap.data.first().unwrap()
+    }
+
+    /// Replace the top element with a new value.
+    /// Returns the old top element. Restores heap invariant.
+    public fn replace(self, new_value: T) -> T {
+        let old = self.heap.data.swap_remove(0);
+        self.heap.data.insert(0, new_value);
+        self.heap.sift_down(0);
+        old
+    }
+
+    /// Pop the top element. Equivalent to `heap.pop()` but through the guard.
+    public fn pop(self) -> T {
+        self.heap.pop().unwrap()
+    }
+}
+
+implement<T: Ord> Deref for PeekMut<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.heap.data.first().unwrap()
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+// Iterator over heap elements (heap order).
+public type HeapIter<T: Ord> is {
+    iter: ListIter<T>,
+};
+
+implement<T: Ord> Iterator for HeapIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        self.iter.next()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        self.iter.size_hint()
+    }
+}
+
+// IntoIterator for HeapIter so it can be used in for loops
+implement<T: Ord> IntoIterator for HeapIter<T> {
+    type Item = &T;
+    type IntoIter = HeapIter<T>;
+
+    fn into_iter(self) -> HeapIter<T> {
+        self
+    }
+}
+
+// Drain iterator (removes all, heap order).
+public type HeapDrain<T: Ord> is {
+    heap: &mut BinaryHeap<T>,
+};
+
+implement<T: Ord> Iterator for HeapDrain<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.heap.data.pop()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.heap.len(), Some(self.heap.len()))
+    }
+}
+
+// IntoIterator for HeapDrain so it can be used in for loops
+implement<T: Ord> IntoIterator for HeapDrain<T> {
+    type Item = T;
+    type IntoIter = HeapDrain<T>;
+
+    fn into_iter(self) -> HeapDrain<T> {
+        self
+    }
+}
+
+// Drain iterator in sorted order (descending).
+public type HeapDrainSorted<T: Ord> is {
+    heap: &mut BinaryHeap<T>,
+};
+
+implement<T: Ord> Iterator for HeapDrainSorted<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.heap.pop()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.heap.len(), Some(self.heap.len()))
+    }
+}
+
+// IntoIterator for HeapDrainSorted so it can be used in for loops
+implement<T: Ord> IntoIterator for HeapDrainSorted<T> {
+    type Item = T;
+    type IntoIter = HeapDrainSorted<T>;
+
+    fn into_iter(self) -> HeapDrainSorted<T> {
+        self
+    }
+}
+
+// Into iterator (consumes heap, heap order).
+public type HeapIntoIter<T: Ord> is {
+    data: List<T>,
+};
+
+implement<T: Ord> Iterator for HeapIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        self.data.pop()
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (self.data.len(), Some(self.data.len()))
+    }
+}
+
+// IntoIterator for HeapIntoIter so it can be used in for loops
+implement<T: Ord> IntoIterator for HeapIntoIter<T> {
+    type Item = T;
+    type IntoIter = HeapIntoIter<T>;
+
+    fn into_iter(self) -> HeapIntoIter<T> {
+        self
+    }
+}
+
+// =============================================================================
+// ExactSizeIterator implementations
+// =============================================================================
+
+implement<T: Ord> ExactSizeIterator for HeapIter<T> {
+    fn len(&self) -> Int { self.iter.len() }
+}
+
+implement<T: Ord> ExactSizeIterator for HeapDrain<T> {
+    fn len(&self) -> Int { self.heap.len() }
+}
+
+implement<T: Ord> ExactSizeIterator for HeapDrainSorted<T> {
+    fn len(&self) -> Int { self.heap.len() }
+}
+
+implement<T: Ord> ExactSizeIterator for HeapIntoIter<T> {
+    fn len(&self) -> Int { self.data.len() }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<T: Ord> FusedIterator for HeapIter<T> {}
+implement<T: Ord> FusedIterator for HeapDrain<T> {}
+implement<T: Ord> FusedIterator for HeapDrainSorted<T> {}
+implement<T: Ord> FusedIterator for HeapIntoIter<T> {}
+
+// =============================================================================
+// Protocol Implementations
+// =============================================================================
+
+implement<T: Ord> IntoIterator for BinaryHeap<T> {
+    type Item = T;
+    type IntoIter = HeapIntoIter<T>;
+
+    fn into_iter(self) -> HeapIntoIter<T> {
+        HeapIntoIter { data: self.data }
+    }
+}
+
+implement<T: Ord + Eq> Eq for BinaryHeap<T> {
+    fn eq(&self, other: &BinaryHeap<T>) -> Bool {
+        if self.data.len() != other.data.len() {
+            return false;
+        }
+        // Compare sorted contents since heap order may differ
+        let mut a = self.data.clone();
+        let mut b = other.data.clone();
+        a.sort();
+        b.sort();
+        for i in range(0, a.len()) {
+            if a[i] != b[i] {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+implement<T: Ord + Clone> Clone for BinaryHeap<T> {
+    fn clone(&self) -> BinaryHeap<T> {
+        BinaryHeap { data: self.data.clone() }
+    }
+}
+
+implement<T: Ord> Default for BinaryHeap<T> {
+    fn default() -> BinaryHeap<T> {
+        BinaryHeap.new()
+    }
+}
+
+implement<T: Ord + Debug> Debug for BinaryHeap<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("BinaryHeap[")?;
+        let mut first = true;
+        for item in self.iter() {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            item.fmt_debug(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
+implement<T: Ord + Display> Display for BinaryHeap<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Heap[")?;
+        let mut first = true;
+        for item in self.iter() {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            item.fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
+implement<T: Ord> FromIterator<T> for BinaryHeap<T> {
+    fn from_iter<I: Iterator<Item>>(iter: I) -> BinaryHeap<T> {
+        let list: List<T> = iter.collect();
+        BinaryHeap.from_list(list)
+    }
+}
+
+implement<T: Ord> Extend<T> for BinaryHeap<T> {
+    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+        for v in iter {
+            self.push(v);
+        }
+    }
+}
+
+// =============================================================================
+// MinHeap wrapper
+// =============================================================================
+
+// Wrapper for min-heap behavior.
+public type Reverse<T: Ord> is {
+    value: T,
+};
+
+implement<T: Ord> Reverse<T> {
+    public fn new(value: T) -> Reverse<T> {
+        Reverse { value: value }
+    }
+
+    public fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+implement<T: Ord> Ord for Reverse<T> {
+    fn cmp(&self, other: &Reverse<T>) -> Ordering {
+        // Reverse the comparison
+        other.value.cmp(&self.value)
+    }
+}
+
+implement<T: Ord> Eq for Reverse<T> {
+    fn eq(&self, other: &Reverse<T>) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement<T: Ord + Clone> Clone for Reverse<T> {
+    fn clone(&self) -> Reverse<T> {
+        Reverse { value: self.value.clone() }
+    }
+}
+
+implement<T: Ord + Debug> Debug for Reverse<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Reverse(")?;
+        self.value.fmt_debug(f)?;
+        f.write_str(")")
+    }
+}
+
+// =============================================================================
+// From conversions
+// =============================================================================
+
+implement<T: Ord> From<List<T>> for BinaryHeap<T> {
+    fn from(list: List<T>) -> BinaryHeap<T> {
+        BinaryHeap.from_list(list)
+    }
+}
+
+// =============================================================================
+// Convenience Functions && Type Aliases
+// =============================================================================
+
+// Type alias for min-heap.
+public type MinHeap<T: Ord> = BinaryHeap<Reverse<T>>;
+
+// Create heap from values.
+public fn heap<T: Ord>(values: &[T]) -> BinaryHeap<T>
+where T: Clone
+{
+    let list: List<T> = values.iter().map(|v| v.clone()).collect();
+    BinaryHeap.from_list(list)
+}
+
+// Create min-heap from values.
+public fn min_heap<T: Ord>(values: &[T]) -> MinHeap<T>
+where T: Clone
+{
+    let mut list: List<Reverse<T>> = List.with_capacity(values.len());
+    for i in range(0, values.len()) {
+        let v: &T = &values[i];
+        list.push(Reverse.new(v.clone()));
+    }
+    BinaryHeap.from_list(list)
+}
+
+// Heap sort (ascending order).
+public fn list_heap_sort<T: Ord>(list: &mut List<T>) {
+    let mut heap = BinaryHeap.from_list(list.clone());
+    list.clear();
+    while let Some(v) = heap.pop() {
+        list.push(v);
+    }
+    list.reverse();
+}
+
+/// Alias for list_heap_sort for convenience.
+public fn heap_sort<T: Ord>(list: &mut List<T>) {
+    list_heap_sort(list);
+}

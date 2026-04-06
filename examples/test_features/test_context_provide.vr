@@ -1,0 +1,15 @@
+// Test provide statement parsing
+
+context Logger {
+    fn log(message: Text);
+}
+
+fn main() {
+    // Test provide statement parsing
+    let my_logger = "SimpleLogger"
+
+    // This should parse correctly
+    provide Logger = my_logger
+
+    println("Provide statement parsed successfully")
+}

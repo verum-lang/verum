@@ -1,0 +1,2941 @@
+// =============================================================================
+// list.vr - Dynamic array (List<T>)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core (memory, maybe, result, protocols, iterator)
+// =============================================================================
+//
+// # V-LLSI Migration Status
+//
+// This module has been migrated to use native V-LLSI memory operations:
+// - Uses core/memory.vr native allocator (CBGR-backed)
+// - No FFI dependencies on verum_runtime
+//
+// =============================================================================
+//
+// List<T> is Verum's primary dynamic array type, corresponding to Vec<T>
+// in Rust but with semantic naming.
+//
+// =============================================================================
+
+module core.collections.list;
+mount core.*;
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// List<T>
+// =============================================================================
+
+// Dynamic array that grows as needed.
+//
+// # Performance
+//
+// - Push: O(1) amortized
+// - Pop: O(1)
+// - Insert: O(n)
+// - Remove: O(n)
+// - Index access: O(1)
+//
+// # Capacity Management
+//
+// List uses exponential growth (factor 2) when capacity is exceeded.
+// Initial capacity is 0 (no allocation until first element).
+//
+public type List<T> is {
+    // Pointer to data (null when cap == 0)
+    ptr: &unsafe T,
+    // Number of elements
+    len: Int,
+    // Allocated capacity
+    cap: Int,
+};
+
+implement<T> List<T> {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    // Create empty list.
+    public fn new() -> List<T> {
+        List {
+            ptr: null_ptr(),
+            len: 0,
+            cap: 0,
+        }
+    }
+
+    // Create list with preallocated capacity.
+    public fn with_capacity(capacity: Int) -> List<T> {
+        if capacity == 0 {
+            return List.new();
+        }
+
+        let ptr = unsafe {
+            alloc(capacity * T.size, T.alignment) as &unsafe T
+        };
+
+        List {
+            ptr: ptr,
+            len: 0,
+            cap: capacity,
+        }
+    }
+
+    // Create list from slice.
+    public fn from_slice(slice: &[T]) -> List<T>
+    where T: Clone
+    {
+        let mut list = List.with_capacity(slice.len());
+        for item in slice.iter() {
+            list.push(item.clone());
+        }
+        list
+    }
+
+    // Create list with n copies of value.
+    public fn from_elem(value: T, n: Int) -> List<T>
+    where T: Clone
+    {
+        let mut list = List.with_capacity(n);
+        for _ in range(0, n) {
+            list.push(value.clone());
+        }
+        list
+    }
+
+    // Create list from array/slice.
+    // Enables List.from([1, 2, 3]) syntax.
+    public fn from(array: [T; _]) -> List<T> {
+        let mut l = List.with_capacity(array.len());
+        for item in array {
+            l.push(item);
+        }
+        l
+    }
+
+    // =========================================================================
+    // Properties
+    // =========================================================================
+
+    // Number of elements.
+    public fn len(&self) -> Int {
+        self.len
+    }
+
+    // Allocated capacity.
+    public fn capacity(&self) -> Int {
+        self.cap
+    }
+
+    // Check if empty.
+    public fn is_empty(&self) -> Bool {
+        self.len == 0
+    }
+
+    // Check if !empty.
+    public fn is_not_empty(&self) -> Bool {
+        self.len > 0
+    }
+
+    // Get raw pointer to data.
+    // # Safety
+    // The returned pointer is valid only while the List is not mutated.
+    public fn as_ptr(&self) -> &unsafe T {
+        self.ptr
+    }
+
+    // Get mutable raw pointer to data.
+    // # Safety
+    // The returned pointer is valid only while no other references exist.
+    // Takes &mut self to ensure exclusive access to the list.
+    public fn as_mut_ptr(&mut self) -> &unsafe T {
+        self.ptr
+    }
+
+    // =========================================================================
+    // Element Access
+    // =========================================================================
+
+    // Get element by index (returns copy of element value).
+    public fn get(&self, idx: Int) -> Maybe<T> {
+        if idx >= 0 && idx < self.len {
+            unsafe { Some(*self.ptr.offset(idx)) }
+        } else {
+            None
+        }
+    }
+
+    // Get mutable element by index (returns copy of element value).
+    public fn get_mut(&mut self, idx: Int) -> Maybe<T> {
+        if idx >= 0 && idx < self.len {
+            unsafe { Some(*self.ptr.offset(idx)) }
+        } else {
+            None
+        }
+    }
+
+    // Set element at index.
+    public fn set(&mut self, idx: Int, value: T) {
+        assert(idx >= 0 && idx < self.len, "set index out of bounds");
+        unsafe {
+            ptr_write(self.ptr.offset(idx), value);
+        }
+    }
+
+    // Get element without bounds check.
+    // # Safety
+    // Index must be in bounds.
+    public unsafe fn get_unchecked(&self, idx: Int) -> &T {
+        &*self.ptr.offset(idx)
+    }
+
+    // Get mutable element without bounds check.
+    public unsafe fn get_unchecked_mut(&mut self, idx: Int) -> &mut T {
+        &mut *self.ptr.offset(idx)
+    }
+
+    // First element.
+    public fn first(&self) -> Maybe<T> {
+        self.get(0)
+    }
+
+    // Last element.
+    public fn last(&self) -> Maybe<T> {
+        if self.len > 0 {
+            self.get(self.len - 1)
+        } else {
+            None
+        }
+    }
+
+    // First element mutable.
+    public fn first_mut(&mut self) -> Maybe<T> {
+        self.get_mut(0)
+    }
+
+    // Last element mutable.
+    public fn last_mut(&mut self) -> Maybe<T> {
+        if self.len > 0 {
+            self.get_mut(self.len - 1)
+        } else {
+            None
+        }
+    }
+
+    // =========================================================================
+    // Modification
+    // =========================================================================
+
+    // Push element to end.
+    public fn push(&mut self, value: T) {
+        if self.len == self.cap {
+            self.grow();
+        }
+        unsafe {
+            ptr_write(self.ptr.offset(self.len), value);
+        }
+        self.len = self.len + 1;
+    }
+
+    // Pop element from end.
+    public fn pop(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            return None;
+        }
+        self.len = self.len - 1;
+        unsafe {
+            Some(ptr_read(self.ptr.offset(self.len)))
+        }
+    }
+
+    // Pop element from front (index 0), shifting elements left.
+    public fn pop_front(&mut self) -> Maybe<T> {
+        if self.len == 0 {
+            return None;
+        }
+        unsafe {
+            let value = ptr_read(self.ptr);
+            // Shift elements left
+            if self.len > 1 {
+                let dst = self.ptr as &unsafe Byte;
+                let src = self.ptr.offset(1) as &unsafe Byte;
+                memmove(dst, src, (self.len - 1) * T.size);
+            }
+            self.len = self.len - 1;
+            Some(value)
+        }
+    }
+
+    // Insert at index, shifting elements right.
+    public fn insert(&mut self, idx: Int, value: T) {
+        assert(idx >= 0 && idx <= self.len, "insert index out of bounds");
+
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        unsafe {
+            // Shift elements right
+            if idx < self.len {
+                let dst = self.ptr.offset(idx + 1) as &unsafe Byte;
+                let src = self.ptr.offset(idx) as &unsafe Byte;
+                memmove(dst, src, (self.len - idx) * T.size);
+            }
+            ptr_write(self.ptr.offset(idx), value);
+        }
+        self.len = self.len + 1;
+    }
+
+    // Remove at index, shifting elements left.
+    public fn remove(&mut self, idx: Int) -> T {
+        assert(idx >= 0 && idx < self.len, "remove index out of bounds");
+
+        unsafe {
+            let value = ptr_read(self.ptr.offset(idx));
+
+            // Shift elements left
+            if idx < self.len - 1 {
+                memmove(
+                    self.ptr.offset(idx) as &unsafe Byte,
+                    self.ptr.offset(idx + 1) as &unsafe Byte,
+                    (self.len - idx - 1) * T.size,
+                );
+            }
+
+            self.len = self.len - 1;
+            value
+        }
+    }
+
+    // Remove at index without preserving order (swap with last).
+    public fn swap_remove(&mut self, idx: Int) -> T {
+        assert(idx >= 0 && idx < self.len, "swap_remove index out of bounds");
+
+        unsafe {
+            let last_idx = self.len - 1;
+            if idx != last_idx {
+                let tmp = ptr_read(self.ptr.offset(idx));
+                ptr_write(self.ptr.offset(idx), ptr_read(self.ptr.offset(last_idx)));
+                self.len = self.len - 1;
+                tmp
+            } else {
+                self.pop().unwrap()
+            }
+        }
+    }
+
+    // Clear all elements.
+    public fn clear(&mut self) {
+        while self.pop().is_some() {}
+    }
+
+    // Truncate to len elements.
+    public fn truncate(&mut self, new_len: Int) {
+        if new_len >= self.len {
+            return;
+        }
+        while self.len > new_len {
+            self.pop();
+        }
+    }
+
+    /// Retain only elements satisfying predicate.
+    /// Preserves the relative order of retained elements.
+    public fn retain<F: fn(&T) -> Bool>(&mut self, f: F) {
+        let mut write = 0;
+        let mut read = 0;
+        while read < self.len {
+            let elem: &T = unsafe { &*self.ptr.offset(read) };
+            if f(elem) {
+                if write != read {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(read));
+                        ptr_write(self.ptr.offset(write), val);
+                    }
+                }
+                write = write + 1;
+            }
+            read = read + 1;
+        }
+        self.len = write;
+    }
+
+    // Swap two elements.
+    public fn swap(&mut self, a: Int, b: Int) {
+        assert(a >= 0 && a < self.len && b >= 0 && b < self.len,
+               "swap indices out of bounds");
+        if a != b {
+            unsafe {
+                let tmp = ptr_read(self.ptr.offset(a));
+                ptr_write(self.ptr.offset(a), ptr_read(self.ptr.offset(b)));
+                ptr_write(self.ptr.offset(b), tmp);
+            }
+        }
+    }
+
+    // Reverse in place.
+    public fn reverse(&mut self) {
+        let mut i = 0;
+        let mut j = self.len - 1;
+        while i < j {
+            self.swap(i, j);
+            i = i + 1;
+            j = j - 1;
+        }
+    }
+
+    // =========================================================================
+    // Capacity Management
+    // =========================================================================
+
+    // Reserve space for at least additional more elements.
+    public fn reserve(&mut self, additional: Int) {
+        let required = self.len + additional;
+        if required > self.cap {
+            self.resize_buffer(required);
+        }
+    }
+
+    // Reserve exact capacity.
+    public fn reserve_exact(&mut self, additional: Int) {
+        let required = self.len + additional;
+        if required > self.cap {
+            self.resize_buffer(required);
+        }
+    }
+
+    // Shrink capacity to fit current length.
+    public fn shrink_to_fit(&mut self) {
+        if self.cap > self.len {
+            if self.len == 0 {
+                self.free_buffer();
+            } else {
+                self.resize_buffer(self.len);
+            }
+        }
+    }
+
+    // Shrink capacity to at least min_capacity.
+    // Does nothing if current capacity is already less than or equal to min_capacity,
+    // or if min_capacity is less than current length.
+    public fn shrink_to(&mut self, min_capacity: Int) {
+        let target = if min_capacity < self.len { self.len } else { min_capacity };
+        if self.cap > target {
+            if target == 0 {
+                self.free_buffer();
+            } else {
+                self.resize_buffer(target);
+            }
+        }
+    }
+
+    // Grow capacity (double || minimum 4).
+    fn grow(&mut self) {
+        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        self.resize_buffer(new_cap);
+    }
+
+    // Resize internal buffer.
+    fn resize_buffer(&mut self, new_cap: Int) {
+        let new_size = new_cap * T.size;
+        let align = T.alignment;
+
+        unsafe {
+            if self.cap == 0 {
+                self.ptr = alloc(new_size, align) as &unsafe T;
+            } else {
+                let old_size = self.cap * T.size;
+                self.ptr = realloc(
+                    self.ptr as &unsafe Byte,
+                    old_size,
+                    new_size,
+                    align,
+                ) as &unsafe T;
+            }
+        }
+        self.cap = new_cap;
+    }
+
+    // Free internal buffer.
+    fn free_buffer(&mut self) {
+        if self.cap > 0 {
+            unsafe {
+                dealloc(
+                    self.ptr as &unsafe Byte,
+                    self.cap * T.size,
+                    T.alignment,
+                );
+            }
+            self.ptr = null_ptr();
+            self.cap = 0;
+        }
+    }
+
+    // =========================================================================
+    // Iteration
+    // =========================================================================
+
+    // Iterator over references.
+    public fn iter(&self) -> ListIter<T> {
+        ListIter {
+            ptr: self.ptr,
+            end: unsafe { self.ptr.offset(self.len) },
+        }
+    }
+
+    // Iterator over mutable references.
+    public fn iter_mut(&mut self) -> ListIterMut<T> {
+        ListIterMut {
+            ptr: self.ptr,
+            end: unsafe { self.ptr.offset(self.len) },
+        }
+    }
+
+    // =========================================================================
+    // Slicing
+    // =========================================================================
+
+    // Get as slice.
+    public fn as_slice(&self) -> &[T] {
+        unsafe {
+            slice_from_raw_parts(self.ptr, self.len)
+        }
+    }
+
+    // Get as mutable slice.
+    public fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe {
+            slice_from_raw_parts_mut(self.ptr, self.len)
+        }
+    }
+
+    // =========================================================================
+    // Searching
+    // =========================================================================
+
+    // Check if contains element.
+    public fn contains(&self, value: &T) -> Bool
+    where T: Eq
+    {
+        // Direct iteration to avoid associated type issues
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if *item == *value {
+                return true;
+            }
+        }
+        false
+    }
+
+    // Find index of element.
+    public fn position(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        // Direct iteration to avoid associated type issues
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if *item == *value {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    // Alias for position — find index of element, returns -1 if not found.
+    public fn index_of(&self, value: &T) -> Int
+    where T: Eq
+    {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if *item == *value {
+                return i;
+            }
+        }
+        -1
+    }
+
+    // =========================================================================
+    // Sorting
+    // =========================================================================
+
+    // Sort in ascending order.
+    public fn sort(&mut self)
+    where T: Ord
+    {
+        self.as_mut_slice().sort();
+    }
+
+    // Sort with comparator.
+    public fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        self.as_mut_slice().sort_by(compare);
+    }
+
+    /// Sort by a key extraction function.
+    public fn sort_by_key<K: Ord>(&mut self, key_fn: fn(&T) -> K) {
+        self.sort_by(|a, b| key_fn(a).cmp(&key_fn(b)));
+    }
+
+    /// Return a new sorted list using a custom comparator, leaving the
+    /// original unchanged.
+    public fn sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> List<T>
+    where T: Clone
+    {
+        let mut copy = self.clone();
+        copy.sort_by(compare);
+        copy
+    }
+
+    // =========================================================================
+    // Unstable Sort (introsort — typically faster than stable mergesort)
+    // =========================================================================
+
+    /// Sort in ascending order using an unstable algorithm.
+    /// Unstable sort does not preserve the relative order of equal elements,
+    /// but is typically faster than stable sort, especially for primitive types.
+    /// Uses introsort: quicksort with fallback to heapsort to guarantee O(n log n).
+    public fn sort_unstable(&mut self)
+    where T: Ord
+    {
+        if self.len <= 1 {
+            return;
+        }
+        let depth_limit = 2 * ilog2(self.len);
+        self.introsort_loop(0, self.len, depth_limit, |a, b| a.cmp(b));
+    }
+
+    /// Sort using an unstable algorithm with a custom comparator.
+    public fn sort_unstable_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+        if self.len <= 1 {
+            return;
+        }
+        let depth_limit = 2 * ilog2(self.len);
+        self.introsort_loop(0, self.len, depth_limit, compare);
+    }
+
+    /// Sort using an unstable algorithm with a key extraction function.
+    public fn sort_unstable_by_key<K: Ord>(&mut self, key_fn: fn(&T) -> K) {
+        self.sort_unstable_by(|a, b| key_fn(a).cmp(&key_fn(b)));
+    }
+
+    /// Reorder the list so that the element at `index` is the same as if
+    /// the list were fully sorted. All elements before `index` will be <= it,
+    /// and all elements after will be >= it.
+    ///
+    /// Uses quickselect (Hoare's selection) with median-of-three pivot.
+    /// Average O(n), worst case O(n^2) but very unlikely with good pivoting.
+    ///
+    /// Panics if `index >= len()`.
+    ///
+    /// Returns a reference to the element at the given index after partitioning.
+    public fn select_nth_unstable(&mut self, index: Int) -> &T
+    where T: Ord
+    {
+        assert(index >= 0 && index < self.len, "select_nth_unstable index out of bounds");
+        self.quickselect(0, self.len - 1, index, |a, b| a.cmp(b));
+        unsafe { &*self.ptr.offset(index) }
+    }
+
+    /// Like `select_nth_unstable`, but with a custom comparator.
+    public fn select_nth_unstable_by(&mut self, index: Int, compare: fn(&T, &T) -> Ordering) -> &T {
+        assert(index >= 0 && index < self.len, "select_nth_unstable_by index out of bounds");
+        self.quickselect(0, self.len - 1, index, compare);
+        unsafe { &*self.ptr.offset(index) }
+    }
+
+    // Quickselect: find the k-th smallest element in [lo, hi].
+    fn quickselect(&mut self, lo: Int, hi: Int, k: Int, compare: fn(&T, &T) -> Ordering) {
+        let mut lo = lo;
+        let mut hi = hi;
+        while lo < hi {
+            // Median-of-three pivot for better performance
+            if hi - lo >= 2 {
+                let mid = lo + (hi - lo) / 2;
+                self.sort3(lo, mid, hi, compare);
+                self.swap(mid, hi - 1);
+                let pivot_idx = hi - 1;
+
+                let mut i = lo;
+                let mut j = hi - 1;
+                loop {
+                    i = i + 1;
+                    while i < hi {
+                        let item_i: &T = unsafe { &*self.ptr.offset(i) };
+                        let pivot: &T = unsafe { &*self.ptr.offset(pivot_idx) };
+                        match compare(item_i, pivot) {
+                            Ordering.Less => { i = i + 1; },
+                            _ => { break; },
+                        }
+                    }
+                    j = j - 1;
+                    while j > lo {
+                        let item_j: &T = unsafe { &*self.ptr.offset(j) };
+                        let pivot: &T = unsafe { &*self.ptr.offset(pivot_idx) };
+                        match compare(pivot, item_j) {
+                            Ordering.Less => { j = j - 1; },
+                            _ => { break; },
+                        }
+                    }
+                    if i >= j {
+                        break;
+                    }
+                    self.swap(i, j);
+                }
+                self.swap(i, pivot_idx);
+
+                if i == k {
+                    return;
+                } else if k < i {
+                    hi = i - 1;
+                } else {
+                    lo = i + 1;
+                }
+            } else {
+                // Two elements: just compare and swap if needed
+                let a_val: &T = unsafe { &*self.ptr.offset(lo) };
+                let b_val: &T = unsafe { &*self.ptr.offset(hi) };
+                match compare(a_val, b_val) {
+                    Ordering.Greater => { self.swap(lo, hi); },
+                    _ => {},
+                }
+                return;
+            }
+        }
+    }
+
+    // Introsort: quicksort with depth limit, falling back to heapsort.
+    fn introsort_loop(&mut self, lo: Int, hi: Int, depth_limit: Int, compare: fn(&T, &T) -> Ordering) {
+        let mut lo = lo;
+        let mut hi = hi;
+        let mut depth = depth_limit;
+
+        while hi - lo > 16 {
+            if depth == 0 {
+                // Fallback to heapsort for this partition
+                self.heapsort_range(lo, hi, compare);
+                return;
+            }
+            depth = depth - 1;
+
+            // Median-of-three pivot selection
+            let mid = lo + (hi - lo) / 2;
+            self.sort3(lo, mid, hi - 1, compare);
+            self.swap(mid, hi - 2);
+            let pivot_idx = hi - 2;
+
+            // Partition
+            let mut i = lo;
+            let mut j = hi - 2;
+            loop {
+                i = i + 1;
+                while i < hi {
+                    let item_i: &T = unsafe { &*self.ptr.offset(i) };
+                    let pivot: &T = unsafe { &*self.ptr.offset(pivot_idx) };
+                    match compare(item_i, pivot) {
+                        Ordering.Less => { i = i + 1; },
+                        _ => { break; },
+                    }
+                }
+                j = j - 1;
+                while j >= lo {
+                    let item_j: &T = unsafe { &*self.ptr.offset(j) };
+                    let pivot: &T = unsafe { &*self.ptr.offset(pivot_idx) };
+                    match compare(pivot, item_j) {
+                        Ordering.Less => { j = j - 1; },
+                        _ => { break; },
+                    }
+                }
+                if i >= j {
+                    break;
+                }
+                self.swap(i, j);
+            }
+            self.swap(i, pivot_idx);
+
+            // Recurse on smaller partition, iterate on larger
+            if i - lo < hi - i {
+                self.introsort_loop(lo, i, depth, compare);
+                lo = i + 1;
+            } else {
+                self.introsort_loop(i + 1, hi, depth, compare);
+                hi = i;
+            }
+        }
+
+        // Insertion sort for small partitions
+        self.insertion_sort_range(lo, hi, compare);
+    }
+
+    // Sort 3 elements and place median at mid.
+    fn sort3(&mut self, a: Int, b: Int, c: Int, compare: fn(&T, &T) -> Ordering) {
+        let va: &T = unsafe { &*self.ptr.offset(a) };
+        let vb: &T = unsafe { &*self.ptr.offset(b) };
+        match compare(va, vb) {
+            Ordering.Greater => { self.swap(a, b); },
+            _ => {},
+        }
+        let va: &T = unsafe { &*self.ptr.offset(a) };
+        let vc: &T = unsafe { &*self.ptr.offset(c) };
+        match compare(va, vc) {
+            Ordering.Greater => { self.swap(a, c); },
+            _ => {},
+        }
+        let vb: &T = unsafe { &*self.ptr.offset(b) };
+        let vc: &T = unsafe { &*self.ptr.offset(c) };
+        match compare(vb, vc) {
+            Ordering.Greater => { self.swap(b, c); },
+            _ => {},
+        }
+    }
+
+    // Insertion sort for small ranges [lo, hi).
+    fn insertion_sort_range(&mut self, lo: Int, hi: Int, compare: fn(&T, &T) -> Ordering) {
+        for i in range(lo + 1, hi) {
+            let mut j = i;
+            while j > lo {
+                let curr: &T = unsafe { &*self.ptr.offset(j) };
+                let prev: &T = unsafe { &*self.ptr.offset(j - 1) };
+                match compare(curr, prev) {
+                    Ordering.Less => {
+                        self.swap(j, j - 1);
+                        j = j - 1;
+                    },
+                    _ => { break; },
+                }
+            }
+        }
+    }
+
+    // Heapsort for a range [lo, hi). Guaranteed O(n log n) worst case.
+    fn heapsort_range(&mut self, lo: Int, hi: Int, compare: fn(&T, &T) -> Ordering) {
+        let n = hi - lo;
+        // Build max-heap
+        let mut i = n / 2 - 1;
+        while i >= 0 {
+            self.sift_down(lo, i, n, compare);
+            i = i - 1;
+        }
+        // Extract elements
+        let mut end = n - 1;
+        while end > 0 {
+            self.swap(lo + end, lo);
+            self.sift_down(lo, 0, end, compare);
+            end = end - 1;
+        }
+    }
+
+    // Sift down in heap rooted at lo, for element at position pos, heap size n.
+    fn sift_down(&mut self, lo: Int, pos: Int, n: Int, compare: fn(&T, &T) -> Ordering) {
+        let mut parent = pos;
+        loop {
+            let left = 2 * parent + 1;
+            if left >= n {
+                break;
+            }
+            let right = left + 1;
+            let mut largest = parent;
+
+            let parent_val: &T = unsafe { &*self.ptr.offset(lo + largest) };
+            let left_val: &T = unsafe { &*self.ptr.offset(lo + left) };
+            match compare(left_val, parent_val) {
+                Ordering.Greater => { largest = left; },
+                _ => {},
+            }
+
+            if right < n {
+                let largest_val: &T = unsafe { &*self.ptr.offset(lo + largest) };
+                let right_val: &T = unsafe { &*self.ptr.offset(lo + right) };
+                match compare(right_val, largest_val) {
+                    Ordering.Greater => { largest = right; },
+                    _ => {},
+                }
+            }
+
+            if largest == parent {
+                break;
+            }
+            self.swap(lo + parent, lo + largest);
+            parent = largest;
+        }
+    }
+
+    // =========================================================================
+    // Binary Search by Key
+    // =========================================================================
+
+    /// Binary search by extracting a key from each element.
+    /// The list must be sorted by the key. Returns Ok(index) if found,
+    /// or Err(insertion_point) if not found.
+    public fn binary_search_by_key<B: Ord>(&self, key: &B, key_fn: fn(&T) -> B) -> Result<Int, Int> {
+        self.binary_search_by(|item| key_fn(item).cmp(key))
+    }
+
+    // =========================================================================
+    // retain_mut — retain with mutable access
+    // =========================================================================
+
+    /// Retain only elements for which the predicate returns true,
+    /// giving mutable access to each element before the decision.
+    /// Elements can be modified in-place during retention.
+    public fn retain_mut<F: fn(&mut T) -> Bool>(&mut self, f: F) {
+        let mut write_idx = 0;
+        let mut read_idx = 0;
+        while read_idx < self.len {
+            let item: &mut T = unsafe { &mut *self.ptr.offset(read_idx) };
+            if f(item) {
+                if write_idx != read_idx {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(read_idx) as &unsafe T);
+                        ptr_write(self.ptr.offset(write_idx) as &unsafe T, val);
+                    }
+                }
+                write_idx = write_idx + 1;
+            }
+            read_idx = read_idx + 1;
+        }
+        self.len = write_idx;
+    }
+
+    // =========================================================================
+    // splice — replace a range with replacement elements
+    // =========================================================================
+
+    /// Replace elements in the range [start, end) with the replacement elements.
+    /// Returns the removed elements as a new list.
+    ///
+    /// # Panics
+    /// Panics if start > end or end > len.
+    public fn splice<I: IntoIterator<Item = T>>(&mut self, start: Int, end: Int, replacement: I) -> List<T> {
+        assert(start >= 0 && start <= end && end <= self.len,
+               "splice range out of bounds");
+
+        // Collect removed elements
+        let removed_count = end - start;
+        let mut removed: List<T> = List.with_capacity(removed_count);
+        for i in range(start, end) {
+            unsafe {
+                removed.push(ptr_read(self.ptr.offset(i)));
+            }
+        }
+
+        // Collect replacement into a temporary list
+        let mut replacement_list: List<T> = List.new();
+        for item in replacement {
+            replacement_list.push(item);
+        }
+        let replacement_count = replacement_list.len();
+
+        let tail_count = self.len - end;
+        let new_len = start + replacement_count + tail_count;
+
+        // Ensure capacity
+        if new_len > self.cap {
+            self.reserve(new_len - self.len);
+        }
+
+        // Move tail if replacement size differs from removed size
+        if replacement_count != removed_count && tail_count > 0 {
+            unsafe {
+                let src = self.ptr.offset(end) as &unsafe Byte;
+                let dst = self.ptr.offset(start + replacement_count) as &unsafe Byte;
+                memmove(dst, src, tail_count * T.size);
+            }
+        }
+
+        // Copy replacement elements into place
+        for i in range(0, replacement_count) {
+            unsafe {
+                ptr_write(
+                    self.ptr.offset(start + i) as &unsafe T,
+                    ptr_read(replacement_list.ptr.offset(i) as &unsafe T)
+                );
+            }
+        }
+        // Prevent replacement_list from dropping moved elements
+        replacement_list.len = 0;
+
+        self.len = new_len;
+        removed
+    }
+
+    // =========================================================================
+    // Extend
+    // =========================================================================
+
+    // Append elements from iterator.
+    public fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
+    }
+
+    // Append elements from slice.
+    public fn extend_from_slice(&mut self, slice: &[T])
+    where T: Clone
+    {
+        self.reserve(slice.len());
+        for item in slice.iter() {
+            self.push(item.clone());
+        }
+    }
+
+    /// Append all elements from another list, leaving the other list empty.
+    public fn append(&mut self, other: &mut List<T>) {
+        self.reserve(other.len());
+        for i in range(0, other.len) {
+            unsafe {
+                self.push(ptr_read(other.ptr.offset(i)));
+            }
+        }
+        other.len = 0;
+    }
+
+    // =========================================================================
+    // Drain
+    // =========================================================================
+
+    // Remove && return range as iterator.
+    public fn drain(&mut self, start: Int, end: Int) -> Drain<T> {
+        assert(start >= 0 && start <= end && end <= self.len,
+               "drain range out of bounds");
+        Drain {
+            list: self,
+            start: start,
+            end: end,
+            current: start,
+        }
+    }
+
+    // =========================================================================
+    // Binary Search
+    // =========================================================================
+
+    // Binary search in a sorted list. Returns Ok(index) if found, or Err(insertion_point).
+    public fn binary_search(&self, value: &T) -> Result<Int, Int>
+    where T: Ord
+    {
+        let mut low = 0;
+        let mut high = self.len;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let item: &T = unsafe { &*self.ptr.offset(mid) };
+            match item.cmp(value) {
+                Ordering.Less => { low = mid + 1; },
+                Ordering.Greater => { high = mid; },
+                Ordering.Equal => { return Ok(mid); },
+            }
+        }
+        Err(low)
+    }
+
+    // Binary search with comparator. Returns Ok(index) if found, or Err(insertion_point).
+    public fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
+        let mut low = 0;
+        let mut high = self.len;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let item: &T = unsafe { &*self.ptr.offset(mid) };
+            match f(item) {
+                Ordering.Less => { low = mid + 1; },
+                Ordering.Greater => { high = mid; },
+                Ordering.Equal => { return Ok(mid); },
+            }
+        }
+        Err(low)
+    }
+
+    // Find the partition point in a sorted list.
+    // Assumes the list is partitioned: all elements where predicate returns false
+    // come before all elements where predicate returns true.
+    // Returns the index of the first element where predicate returns true,
+    // or len() if predicate never returns true.
+    public fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
+        let mut low = 0;
+        let mut high = self.len;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let item: &T = unsafe { &*self.ptr.offset(mid) };
+            if predicate(item) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        low
+    }
+
+    // =========================================================================
+    // Deduplication
+    // =========================================================================
+
+    // Remove consecutive duplicates in place.
+    public fn dedup(&mut self)
+    where T: Eq
+    {
+        if self.len <= 1 {
+            return;
+        }
+        let mut write = 1;
+        for read in range(1, self.len) {
+            let prev: &T = unsafe { &*self.ptr.offset(write - 1) };
+            let curr: &T = unsafe { &*self.ptr.offset(read) };
+            if *prev != *curr {
+                if write != read {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(read));
+                        ptr_write(self.ptr.offset(write), val);
+                    }
+                }
+                write = write + 1;
+            }
+        }
+        self.len = write;
+    }
+
+    // Remove consecutive duplicates using custom equality.
+    public fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) {
+        if self.len <= 1 {
+            return;
+        }
+        let mut write = 1;
+        for read in range(1, self.len) {
+            let prev: &T = unsafe { &*self.ptr.offset(write - 1) };
+            let curr: &T = unsafe { &*self.ptr.offset(read) };
+            if !same(prev, curr) {
+                if write != read {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(read));
+                        ptr_write(self.ptr.offset(write), val);
+                    }
+                }
+                write = write + 1;
+            }
+        }
+        self.len = write;
+    }
+
+    // =========================================================================
+    // Split and Rotate
+    // =========================================================================
+
+    // Split the list into two at the given index.
+    public fn split_at(&self, mid: Int) -> (List<T>, List<T>)
+    where T: Clone
+    {
+        assert(mid >= 0 && mid <= self.len, "split_at index out of bounds");
+        let mut left = List.with_capacity(mid);
+        let mut right = List.with_capacity(self.len - mid);
+        for i in range(0, mid) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            left.push(item.clone());
+        }
+        for i in range(mid, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            right.push(item.clone());
+        }
+        (left, right)
+    }
+
+    // Rotate elements left by n positions.
+    public fn rotate_left(&mut self, n: Int) {
+        if self.len <= 1 || n == 0 {
+            return;
+        }
+        let n = n % self.len;
+        if n == 0 {
+            return;
+        }
+        // Three-reversal algorithm
+        self.reverse_range(0, n);
+        self.reverse_range(n, self.len);
+        self.reverse();
+    }
+
+    // Rotate elements right by n positions.
+    public fn rotate_right(&mut self, n: Int) {
+        if self.len <= 1 || n == 0 {
+            return;
+        }
+        let n = n % self.len;
+        if n == 0 {
+            return;
+        }
+        self.rotate_left(self.len - n);
+    }
+
+    // Reverse a range within the list [start, end).
+    fn reverse_range(&mut self, start: Int, end: Int) {
+        let mut lo = start;
+        let mut hi = end - 1;
+        while lo < hi {
+            self.swap(lo, hi);
+            lo = lo + 1;
+            hi = hi - 1;
+        }
+    }
+
+    // =========================================================================
+    // Windows and Chunks (eager)
+    // =========================================================================
+
+    // Return sliding windows as a list of lists.
+    public fn windows(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "window size must be positive");
+        let mut result: List<List<T>> = [];
+        if size <= self.len {
+            for i in range(0, self.len - size + 1) {
+                let mut window: List<T> = List.with_capacity(size);
+                for j in range(i, i + size) {
+                    let item: &T = unsafe { &*self.ptr.offset(j) };
+                    window.push(item.clone());
+                }
+                result.push(window);
+            }
+        }
+        result
+    }
+
+    // Return fixed-size chunks as a list of lists.
+    public fn chunks(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = [];
+        let mut i = 0;
+        while i < self.len {
+            let chunk_end = if i + size > self.len { self.len } else { i + size };
+            let mut chunk: List<T> = List.with_capacity(chunk_end - i);
+            for j in range(i, chunk_end) {
+                let item: &T = unsafe { &*self.ptr.offset(j) };
+                chunk.push(item.clone());
+            }
+            result.push(chunk);
+            i = i + size;
+        }
+        result
+    }
+
+    // =========================================================================
+    // Production-Grade Methods
+    // =========================================================================
+
+    /// Find the first element matching a predicate.
+    public fn find_by(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    /// Find the index of the first element matching a predicate.
+    public fn position_by(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Find the index of the last occurrence of a value.
+    public fn rposition(&self, value: &T) -> Maybe<Int>
+    where T: Eq
+    {
+        let mut i = self.len - 1;
+        while i >= 0 {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if *item == *value {
+                return Some(i);
+            }
+            i = i - 1;
+        }
+        None
+    }
+
+    /// Check if any element matches a predicate.
+    public fn any(&self, predicate: fn(&T) -> Bool) -> Bool {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if all elements match a predicate.
+    public fn all(&self, predicate: fn(&T) -> Bool) -> Bool {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if !predicate(item) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if the list starts with the given prefix.
+    public fn starts_with(&self, prefix: &List<T>) -> Bool
+    where T: Eq
+    {
+        if prefix.len > self.len {
+            return false;
+        }
+        for i in range(0, prefix.len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*prefix.ptr.offset(i) };
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if the list ends with the given suffix.
+    public fn ends_with(&self, suffix: &List<T>) -> Bool
+    where T: Eq
+    {
+        if suffix.len > self.len {
+            return false;
+        }
+        let offset = self.len - suffix.len;
+        for i in range(0, suffix.len) {
+            let a: &T = unsafe { &*self.ptr.offset(offset + i) };
+            let b: &T = unsafe { &*suffix.ptr.offset(i) };
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Fill all elements with a value.
+    public fn fill(&mut self, value: T)
+    where T: Clone
+    {
+        for i in range(0, self.len) {
+            unsafe {
+                ptr_write(self.ptr.offset(i) as &unsafe T, value.clone());
+            }
+        }
+    }
+
+    /// Resize the list, filling new elements with the given value.
+    public fn resize(&mut self, new_len: Int, value: T)
+    where T: Clone
+    {
+        if new_len < self.len {
+            self.truncate(new_len);
+        } else {
+            self.reserve(new_len - self.len);
+            while self.len < new_len {
+                self.push(value.clone());
+            }
+        }
+    }
+
+    /// Split the list at the given index, returning the tail.
+    /// The original list is truncated to `at`.
+    public fn split_off(&mut self, at: Int) -> List<T> {
+        assert(at <= self.len, "split_off index out of bounds");
+        let tail_len = self.len - at;
+        let mut tail = List.with_capacity(tail_len);
+        for i in range(at, self.len) {
+            unsafe {
+                let item: T = ptr_read(self.ptr.offset(i) as &unsafe T);
+                tail.push(item);
+            }
+        }
+        self.len = at;
+        tail
+    }
+
+    /// Partition elements by predicate into (matching, non-matching).
+    public fn partition_by(&self, predicate: fn(&T) -> Bool) -> (List<T>, List<T>)
+    where T: Clone
+    {
+        let mut matching: List<T> = List.new();
+        let mut non_matching: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                matching.push(item.clone());
+            } else {
+                non_matching.push(item.clone());
+            }
+        }
+        (matching, non_matching)
+    }
+
+    /// Group consecutive elements by a predicate.
+    /// Adjacent elements a, b are in the same group while predicate(a, b) returns true.
+    /// Returns a list of groups (each group is a List<T>).
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let list = [1, 1, 2, 3, 3, 3, 1];
+    /// let groups = list.chunk_by(|a, b| *a == *b);
+    /// // groups = [[1, 1], [2], [3, 3, 3], [1]]
+    /// ```
+    public fn chunk_by(&self, predicate: fn(&T, &T) -> Bool) -> List<List<T>>
+    where T: Clone
+    {
+        let mut result: List<List<T>> = [];
+        if self.len > 0 {
+            let mut current: List<T> = List.new();
+            let first: &T = unsafe { &*self.ptr.offset(0) };
+            current.push(first.clone());
+
+            for i in range(1, self.len) {
+                let prev: &T = unsafe { &*self.ptr.offset(i - 1) };
+                let curr: &T = unsafe { &*self.ptr.offset(i) };
+                if predicate(prev, curr) {
+                    current.push(curr.clone());
+                } else {
+                    result.push(current);
+                    current = List.new();
+                    current.push(curr.clone());
+                }
+            }
+            result.push(current);
+        }
+        result
+    }
+
+    /// Repeat the list n times.
+    public fn repeat_list(&self, n: Int) -> List<T>
+    where T: Clone
+    {
+        if n <= 0 {
+            return List.new();
+        }
+        let mut result: List<T> = List.with_capacity(self.len * n);
+        for _ in range(0, n) {
+            for i in range(0, self.len) {
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+
+    /// Zip this list with another, producing pairs up to the shorter length.
+    public fn zip<U>(&self, other: &List<U>) -> List<(T, U)>
+    where T: Clone, U: Clone
+    {
+        let min_len = if self.len < other.len() { self.len } else { other.len() };
+        let mut result: List<(T, U)> = List.with_capacity(min_len);
+        for i in range(0, min_len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &U = other.get(i).unwrap();
+            result.push((a.clone(), b.clone()));
+        }
+        result
+    }
+
+    /// Zip with index: produce (index, element) pairs.
+    public fn enumerate_list(&self) -> List<(Int, T)>
+    where T: Clone
+    {
+        let mut result: List<(Int, T)> = List.with_capacity(self.len);
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push((i, item.clone()));
+        }
+        result
+    }
+
+    /// Apply a function to each element, producing a new list.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3]);
+    /// let doubled = nums.map(|x| x * 2);
+    /// assert_eq(doubled, list([2, 4, 6]));
+    /// ```
+    public fn map<U, F: fn(&T) -> U>(&self, f: F) -> List<U> {
+        let mut result: List<U> = List.with_capacity(self.len);
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(f(item));
+        }
+        result
+    }
+
+    /// Filter elements, keeping only those satisfying the predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// let evens = nums.filter(|x| *x % 2 == 0);
+    /// assert_eq(evens, list([2, 4]));
+    /// ```
+    public fn filter<F: fn(&T) -> Bool>(&self, f: F) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if f(item) {
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+
+    /// Filter and map in one pass — apply f to each element, keeping only Some results.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// let evens_doubled = nums.filter_map(|x| if *x % 2 == 0 { Some(*x * 2) } else { None });
+    /// assert_eq(evens_doubled, list([4, 8]));
+    /// ```
+    public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> List<U> {
+        let mut result: List<U> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            match f(item) {
+                Some(val) => result.push(val),
+                None => {},
+            }
+        }
+        result
+    }
+
+    /// Collect Some values from a List<Maybe<T>>, discarding None.
+    /// Returns a new list containing only the unwrapped Some values.
+    ///
+    /// # Example
+    /// ```verum
+    /// let maybes: List<Maybe<Int>> = list([Some(1), None, Some(3)]);
+    /// let collected = maybes.collect_some();
+    /// assert_eq(collected, list([1, 3]));
+    /// ```
+    public fn collect_some(&self) -> List<T> {
+        let mut result: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item = unsafe { ptr_read(self.ptr.offset(i)) };
+            match item {
+                Some(val) => result.push(val),
+                None => {},
+                _ => result.push(item),
+            }
+        }
+        result
+    }
+
+    /// Find the first element matching a predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4]);
+    /// let first_even = nums.find(|x| *x % 2 == 0);
+    /// assert_eq(first_even, Some(2));
+    /// ```
+    public fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<T>
+    where T: Clone
+    {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                return Some(item.clone());
+            }
+        }
+        None
+    }
+
+    /// Find the index of the first element matching a predicate.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([10, 20, 30, 40]);
+    /// let idx = nums.find_index(|x| *x > 25);
+    /// assert_eq(idx, Some(2));
+    /// ```
+    public fn find_index(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Take the first n elements.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// assert_eq(nums.take(3), list([1, 2, 3]));
+    /// ```
+    public fn take(&self, n: Int) -> List<T>
+    where T: Clone
+    {
+        let count = if n < self.len { n } else { self.len };
+        let mut result: List<T> = List.with_capacity(count);
+        for i in range(0, count) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Skip the first n elements.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// assert_eq(nums.skip(2), list([3, 4, 5]));
+    /// ```
+    public fn skip(&self, n: Int) -> List<T>
+    where T: Clone
+    {
+        let start = if n < self.len { n } else { self.len };
+        let mut result: List<T> = List.with_capacity(self.len - start);
+        for i in range(start, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Partition elements by predicate into (matching, non-matching).
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// let (evens, odds) = nums.partition(|x| *x % 2 == 0);
+    /// assert_eq(evens, list([2, 4]));
+    /// assert_eq(odds, list([1, 3, 5]));
+    /// ```
+    public fn partition(&self, predicate: fn(&T) -> Bool) -> (List<T>, List<T>)
+    where T: Clone
+    {
+        let mut matching: List<T> = List.new();
+        let mut non_matching: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if predicate(item) {
+                matching.push(item.clone());
+            } else {
+                non_matching.push(item.clone());
+            }
+        }
+        (matching, non_matching)
+    }
+
+    /// Group elements by a key function, returning a Map from keys to lists of elements.
+    ///
+    /// # Example
+    /// ```verum
+    /// let words = list(["hello", "hi", "world", "wow"]);
+    /// let grouped = words.group_by(|w| w.char_at(0).unwrap());
+    /// // 'h' => ["hello", "hi"], 'w' => ["world", "wow"]
+    /// ```
+    public fn group_by<K: Hash + Eq, F: fn(&T) -> K>(&self, key_fn: F) -> Map<K, List<T>>
+    where T: Clone
+    {
+        let mut result: Map<K, List<T>> = Map.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            let key = key_fn(item);
+            match result.get_mut(&key) {
+                Some(group) => {
+                    group.push(item.clone());
+                },
+                None => {
+                    let mut group: List<T> = List.new();
+                    group.push(item.clone());
+                    result.insert(key, group);
+                },
+            }
+        }
+        result
+    }
+
+    /// Map each element to a list and flatten into a single list.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nested = list([1, 2, 3]);
+    /// let result = nested.flat_map(|x| list([*x, *x * 10]));
+    /// assert_eq(result, list([1, 10, 2, 20, 3, 30]));
+    /// ```
+    public fn flat_map<U, F: fn(&T) -> List<U>>(&self, f: F) -> List<U> {
+        let mut result: List<U> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            let sub = f(item);
+            for j in range(0, sub.len()) {
+                result.push(sub[j]);
+            }
+        }
+        result
+    }
+
+    /// Fold all elements into a single accumulator value.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4]);
+    /// let total = nums.fold(0, |acc, x| acc + *x);
+    /// assert_eq(total, 10);
+    /// ```
+    public fn fold<B, F: fn(B, &T) -> B>(&self, init: B, f: F) -> B {
+        let mut acc = init;
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            acc = f(acc, item);
+        }
+        acc
+    }
+
+    /// Apply a function to each element for side effects.
+    public fn for_each<F: fn(&T)>(&self, f: F) {
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            f(item);
+        }
+    }
+
+    /// Reduce elements using a binary operation, returning None for empty lists.
+    public fn reduce<F: fn(T, &T) -> T>(&self, f: F) -> Maybe<T>
+    where T: Clone
+    {
+        if self.len == 0 {
+            return None;
+        }
+        let first: &T = unsafe { &*self.ptr.offset(0) };
+        let mut acc: T = first.clone();
+        for i in range(1, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            acc = f(acc, item);
+        }
+        Some(acc)
+    }
+
+    /// Find the minimum element.
+    public fn min(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.len == 0 {
+            return None;
+        }
+        let mut min_ref: &T = unsafe { &*self.ptr.offset(0) };
+        for i in range(1, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if item < min_ref {
+                min_ref = item;
+            }
+        }
+        Some(min_ref)
+    }
+
+    /// Find the maximum element.
+    public fn max(&self) -> Maybe<&T>
+    where T: Ord
+    {
+        if self.len == 0 {
+            return None;
+        }
+        let mut max_ref: &T = unsafe { &*self.ptr.offset(0) };
+        for i in range(1, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if item > max_ref {
+                max_ref = item;
+            }
+        }
+        Some(max_ref)
+    }
+
+    /// Returns the first element and the rest of the list as a slice,
+    /// or `None` if the list is empty.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let v = list([1, 2, 3]);
+    /// let (first, rest) = v.split_first().unwrap();
+    /// assert_eq(*first, 1);
+    /// assert_eq(rest.len(), 2);
+    /// ```
+    public fn split_first(&self) -> Maybe<(&T, &[T])> {
+        if self.len == 0 {
+            return None;
+        }
+        let first_ref: &T = unsafe { &*self.ptr.offset(0) };
+        let rest = unsafe {
+            slice_from_raw_parts(self.ptr.offset(1) as &T, self.len - 1)
+        };
+        Some((first_ref, rest))
+    }
+
+    /// Returns the last element and the rest of the list as a slice,
+    /// or `None` if the list is empty.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let v = list([1, 2, 3]);
+    /// let (last, init) = v.split_last().unwrap();
+    /// assert_eq(*last, 3);
+    /// assert_eq(init.len(), 2);
+    /// ```
+    public fn split_last(&self) -> Maybe<(&T, &[T])> {
+        if self.len == 0 {
+            return None;
+        }
+        let last_ref: &T = unsafe { &*self.ptr.offset(self.len - 1) };
+        let init = unsafe {
+            slice_from_raw_parts(self.ptr as &T, self.len - 1)
+        };
+        Some((last_ref, init))
+    }
+
+    /// Returns `true` if the list is sorted in ascending order.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// assert(list([1, 2, 3]).is_sorted());
+    /// assert(!list([1, 3, 2]).is_sorted());
+    /// assert(list([1]).is_sorted());
+    /// assert(List.new().is_sorted());
+    /// ```
+    public fn is_sorted(&self) -> Bool
+    where T: Ord
+    {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*self.ptr.offset(i + 1) };
+            if a > b {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns `true` if the list is sorted according to the given comparator.
+    public fn is_sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> Bool {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*self.ptr.offset(i + 1) };
+            match compare(a, b) {
+                Ordering.Greater => { return false; }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// Returns `true` if the list is sorted by the given key function.
+    public fn is_sorted_by_key<K: Ord>(&self, key_fn: fn(&T) -> K) -> Bool {
+        if self.len <= 1 {
+            return true;
+        }
+        for i in range(0, self.len - 1) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*self.ptr.offset(i + 1) };
+            if key_fn(a) > key_fn(b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Removes all elements matching the predicate and returns them.
+    ///
+    /// The retained elements preserve their order.
+    /// Similar to Rust's `extract_if` / `drain_filter`.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let mut v = list([1, 2, 3, 4, 5]);
+    /// let removed = v.extract_if(|x| *x % 2 == 0);
+    /// assert_eq(v, list([1, 3, 5]));
+    /// assert_eq(removed, list([2, 4]));
+    /// ```
+    public fn extract_if<F: fn(&T) -> Bool>(&mut self, f: F) -> List<T> {
+        let mut extracted: List<T> = List.new();
+        let mut write_idx = 0;
+        let mut read_idx = 0;
+        while read_idx < self.len {
+            let item: &T = unsafe { &*self.ptr.offset(read_idx) };
+            if f(item) {
+                // Extract this element
+                extracted.push(unsafe { ptr_read(self.ptr.offset(read_idx) as &unsafe T) });
+            } else {
+                // Keep this element
+                if write_idx != read_idx {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(read_idx) as &unsafe T);
+                        ptr_write(self.ptr.offset(write_idx) as &unsafe T, val);
+                    }
+                }
+                write_idx = write_idx + 1;
+            }
+            read_idx = read_idx + 1;
+        }
+        self.len = write_idx;
+        extracted
+    }
+
+    /// Fill all elements with values generated by a closure.
+    public fn fill_with<F: fn() -> T>(&mut self, f: F) {
+        for i in range(0, self.len) {
+            unsafe {
+                ptr_write(self.ptr.offset(i) as &unsafe T, f());
+            }
+        }
+    }
+
+    /// Resize the list using a generator function for new elements.
+    public fn resize_with<F: fn() -> T>(&mut self, new_len: Int, f: F) {
+        if new_len < self.len {
+            self.truncate(new_len);
+        } else {
+            self.reserve(new_len - self.len);
+            while self.len < new_len {
+                self.push(f());
+            }
+        }
+    }
+
+    /// Deduplicate consecutive elements using a key function.
+    ///
+    /// Only the first element in each group of consecutive equal keys is kept.
+    public fn dedup_by_key<K: Eq>(&mut self, key_fn: fn(&T) -> K) {
+        if self.len <= 1 {
+            return;
+        }
+        let mut write_idx = 1;
+        for i in range(1, self.len) {
+            let prev: &T = unsafe { &*self.ptr.offset(write_idx - 1) };
+            let curr: &T = unsafe { &*self.ptr.offset(i) };
+            if key_fn(prev) != key_fn(curr) {
+                if write_idx != i {
+                    unsafe {
+                        let val = ptr_read(self.ptr.offset(i) as &unsafe T);
+                        ptr_write(self.ptr.offset(write_idx) as &unsafe T, val);
+                    }
+                }
+                write_idx = write_idx + 1;
+            }
+        }
+        self.len = write_idx;
+    }
+
+    /// Returns exact-sized chunks. Unlike `chunks()`, this only returns
+    /// full chunks; any remainder at the end is excluded.
+    ///
+    /// # Example
+    ///
+    /// ```verum
+    /// let v = list([1, 2, 3, 4, 5]);
+    /// let c = v.chunks_exact(2);
+    /// // Returns [[1, 2], [3, 4]] — element 5 is excluded
+    /// assert_eq(c.len(), 2);
+    /// ```
+    public fn chunks_exact(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = List.new();
+        let full_chunks = self.len / size;
+        for chunk_idx in range(0, full_chunks) {
+            let mut chunk: List<T> = List.with_capacity(size);
+            let start = chunk_idx * size;
+            for i in range(start, start + size) {
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                chunk.push(item.clone());
+            }
+            result.push(chunk);
+        }
+        result
+    }
+
+    /// Returns the remainder after `chunks_exact()`.
+    /// This is the last incomplete chunk that `chunks_exact()` would exclude.
+    public fn chunks_exact_remainder(&self, size: Int) -> List<T>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let remainder_start = (self.len / size) * size;
+        let mut result: List<T> = List.new();
+        for i in range(remainder_start, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Returns chunks of the list starting from the end.
+    /// The last chunk (first returned) has at most `size` elements.
+    /// Remaining elements form the first returned chunk which may be smaller.
+    /// Example: `[1,2,3,4,5].rchunks(2)` → `[[5,4], [3,2], [1]]` (reversed chunk order)
+    /// Note: chunks are in reverse order — last elements first.
+    public fn rchunks(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = List.new();
+        let mut end = self.len;
+        while end > 0 {
+            let start = if end >= size { end - size } else { 0 };
+            let mut chunk: List<T> = List.with_capacity(end - start);
+            for i in range(start, end) {
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                chunk.push(item.clone());
+            }
+            result.push(chunk);
+            end = start;
+        }
+        result
+    }
+
+    /// Returns exact-sized chunks starting from the end.
+    /// Drops the initial remainder if the list length is not evenly divisible.
+    /// Example: `[1,2,3,4,5].rchunks_exact(2)` → `[[4,5], [2,3]]` (drops [1])
+    public fn rchunks_exact(&self, size: Int) -> List<List<T>>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let mut result: List<List<T>> = List.new();
+        let mut end = self.len;
+        while end >= size {
+            let start = end - size;
+            let mut chunk: List<T> = List.with_capacity(size);
+            for i in range(start, end) {
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                chunk.push(item.clone());
+            }
+            result.push(chunk);
+            end = start;
+        }
+        result
+    }
+
+    /// Returns the leftover elements that `rchunks_exact()` would not include.
+    /// These are the initial elements when the list length is not evenly divisible.
+    /// Example: `[1,2,3,4,5].rchunks_exact_remainder(2)` → `[1]`
+    public fn rchunks_exact_remainder(&self, size: Int) -> List<T>
+    where T: Clone
+    {
+        assert(size > 0, "chunk size must be positive");
+        let remainder_len = self.len % size;
+        let mut result: List<T> = List.new();
+        for i in range(0, remainder_len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Creates a new list with `separator` inserted between each pair of elements.
+    /// Example: `[1,2,3].intersperse(0)` → `[1, 0, 2, 0, 3]`
+    public fn intersperse(&self, separator: T) -> List<T>
+    where T: Clone
+    {
+        if self.len == 0 {
+            let empty: List<T> = List.new();
+            empty
+        } else {
+            let new_len = self.len * 2 - 1;
+            let mut result: List<T> = List.with_capacity(new_len);
+            for i in range(0, self.len) {
+                if i > 0 {
+                    result.push(separator.clone());
+                }
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                result.push(item.clone());
+            }
+            result
+        }
+    }
+
+    /// Creates a new list with values from `separator_fn()` inserted between elements.
+    /// Example: `[1,2,3].intersperse_with(|| 0)` → `[1, 0, 2, 0, 3]`
+    public fn intersperse_with<F: fn() -> T>(&self, separator_fn: F) -> List<T>
+    where T: Clone
+    {
+        if self.len == 0 {
+            let empty: List<T> = List.new();
+            empty
+        } else {
+            let new_len = self.len * 2 - 1;
+            let mut result: List<T> = List.with_capacity(new_len);
+            for i in range(0, self.len) {
+                if i > 0 {
+                    result.push(separator_fn());
+                }
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                result.push(item.clone());
+            }
+            result
+        }
+    }
+
+    // Join list elements into a Text with a separator.
+    // Works for List<Text> — concatenates all strings with sep between them.
+    public fn join(&self, separator: Text) -> Text
+    where T: Display
+    {
+        if self.len == 0 {
+            let empty_result: Text = "";
+            empty_result
+        } else {
+            let mut result: Text = "";
+            for i in range(0, self.len) {
+                if i > 0 {
+                    result = result + &separator;
+                }
+                let item: &T = unsafe { &*self.ptr.offset(i) };
+                result = result + &item.to_text();
+            }
+            result
+        }
+    }
+
+    // =========================================================================
+    // Additional Convenience Methods
+    // =========================================================================
+
+    /// Sum all elements in the list.
+    /// Returns 0 for an empty list.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4]);
+    /// assert_eq(nums.sum(), 10);
+    /// ```
+    public fn sum(&self) -> T
+    where T: Add + Default
+    {
+        let mut acc: T = T.default();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            acc = acc + *item;
+        }
+        acc
+    }
+
+    /// Multiply all elements together.
+    /// Returns the multiplicative identity (1) for empty lists.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([2, 3, 4]);
+    /// assert_eq(nums.product(), 24);
+    /// ```
+    public fn product(&self) -> T
+    where T: Mul + One
+    {
+        let mut acc: T = T.one();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            acc = acc * *item;
+        }
+        acc
+    }
+
+    /// Take elements from the front while the predicate returns true.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// let small = nums.take_while(|x| *x < 4);
+    /// assert_eq(small, list([1, 2, 3]));
+    /// ```
+    public fn take_while<F: fn(&T) -> Bool>(&self, f: F) -> List<T>
+    where T: Clone
+    {
+        let mut result: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if f(item) {
+                result.push(item.clone());
+            } else {
+                return result;
+            }
+        }
+        result
+    }
+
+    /// Skip elements from the front while the predicate returns true.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3, 4, 5]);
+    /// let rest = nums.skip_while(|x| *x < 3);
+    /// assert_eq(rest, list([3, 4, 5]));
+    /// ```
+    public fn skip_while<F: fn(&T) -> Bool>(&self, f: F) -> List<T>
+    where T: Clone
+    {
+        let mut skipping = true;
+        let mut result: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            if skipping {
+                if !f(item) {
+                    skipping = false;
+                    result.push(item.clone());
+                }
+            } else {
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+
+    /// Combine elements with a running accumulator, returning all intermediate results.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3]);
+    /// let sums = nums.scan(0, |acc, x| acc + *x);
+    /// assert_eq(sums, list([1, 3, 6]));
+    /// ```
+    public fn scan<B: Clone, F: fn(B, &T) -> B>(&self, init: B, f: F) -> List<B> {
+        let mut acc = init;
+        let mut result: List<B> = List.with_capacity(self.len);
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            acc = f(acc.clone(), item);
+            result.push(acc.clone());
+        }
+        result
+    }
+
+    /// Zip two lists together using a combining function.
+    ///
+    /// # Example
+    /// ```verum
+    /// let a = list([1, 2, 3]);
+    /// let b = list([10, 20, 30]);
+    /// let c = a.zip_with(&b, |x, y| *x + *y);
+    /// assert_eq(c, list([11, 22, 33]));
+    /// ```
+    public fn zip_with<U, R, F: fn(&T, &U) -> R>(&self, other: &List<U>, f: F) -> List<R> {
+        let min_len = if self.len < other.len { self.len } else { other.len };
+        let mut result: List<R> = List.with_capacity(min_len);
+        for i in range(0, min_len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &U = unsafe { &*other.ptr.offset(i) };
+            result.push(f(a, b));
+        }
+        result
+    }
+
+    /// Return all elements except the first.
+    /// Returns an empty list if the list has 0 or 1 elements.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 2, 3]);
+    /// assert_eq(nums.tail(), list([2, 3]));
+    /// ```
+    public fn tail(&self) -> List<T>
+    where T: Clone
+    {
+        if self.len <= 1 {
+            return List.new();
+        }
+        let mut result: List<T> = List.with_capacity(self.len - 1);
+        for i in range(1, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            result.push(item.clone());
+        }
+        result
+    }
+
+    /// Flatten a list of lists into a single list.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nested: List<List<Int>> = list([list([1, 2]), list([3, 4])]);
+    /// assert_eq(nested.flatten(), list([1, 2, 3, 4]));
+    /// ```
+    public fn flatten(&self) -> List<T>
+    where T: Clone
+    {
+        // This method works on List<List<U>> — at runtime T = List<U>.
+        // We use the standalone flatten_list helper.
+        flatten_list(self)
+    }
+
+    /// Get element by index, returning a default value if out of bounds.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([10, 20, 30]);
+    /// assert_eq(nums.get_or(1, 0), 20);
+    /// assert_eq(nums.get_or(5, 0), 0);
+    /// ```
+    public fn get_or(&self, idx: Int, default: T) -> T {
+        if idx >= 0 && idx < self.len {
+            unsafe { *self.ptr.offset(idx) }
+        } else {
+            default
+        }
+    }
+
+    /// Produce (index, element) pairs. Alias for enumerate_list.
+    ///
+    /// # Example
+    /// ```verum
+    /// let items = list(["a", "b", "c"]);
+    /// let pairs = items.enumerate();
+    /// assert_eq(pairs[0], (0, "a"));
+    /// ```
+    public fn enumerate(&self) -> List<(Int, T)>
+    where T: Clone
+    {
+        self.enumerate_list()
+    }
+
+    /// Remove all duplicate elements, keeping only the first occurrence.
+    /// Requires Eq on the element type.
+    ///
+    /// # Example
+    /// ```verum
+    /// let nums = list([1, 3, 2, 1, 3, 4]);
+    /// assert_eq(nums.unique(), list([1, 3, 2, 4]));
+    /// ```
+    public fn unique(&self) -> List<T>
+    where T: Eq + Clone
+    {
+        let mut result: List<T> = List.new();
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            let mut found = false;
+            for j in range(0, result.len()) {
+                let existing: &T = unsafe { &*result.ptr.offset(j) };
+                if *existing == *item {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+
+}
+
+// =============================================================================
+// Drop Implementation
+// =============================================================================
+
+implement<T> Drop for List<T> {
+    fn drop(&mut self) {
+        self.clear();
+        self.free_buffer();
+    }
+}
+
+// =============================================================================
+// Clone Implementation
+// =============================================================================
+
+implement<T: Clone> Clone for List<T> {
+    fn clone(&self) -> List<T> {
+        let mut new_list = List.with_capacity(self.len);
+        for item in self.iter() {
+            new_list.push(item.clone());
+        }
+        new_list
+    }
+}
+
+// =============================================================================
+// Index Implementations
+// =============================================================================
+
+implement<T> Index<Int> for List<T> {
+    type Output = T;
+
+    fn index(&self, idx: Int) -> &T {
+        assert(idx >= 0 && idx < self.len, "List index out of bounds");
+        unsafe { &*self.ptr.offset(idx) }
+    }
+}
+
+implement<T> IndexMut<Int> for List<T> {
+    fn index_mut(&mut self, idx: Int) -> &mut T {
+        assert(idx >= 0 && idx < self.len, "List index out of bounds");
+        unsafe { &mut *self.ptr.offset(idx) }
+    }
+}
+
+// =============================================================================
+// Eq && Debug
+// =============================================================================
+
+implement<T: Eq> Eq for List<T> {
+    fn eq(&self, other: &List<T>) -> Bool {
+        if self.len != other.len {
+            return false;
+        }
+        // Direct index-based comparison to avoid iterator type inference issues
+        for i in range(0, self.len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*other.ptr.offset(i) };
+            if !(*a == *b) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+implement<T: Debug> Debug for List<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let mut list = f.debug_list();
+        // Explicit iteration to avoid associated type inference issues
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            list.entry(item);
+        }
+        list.finish()
+    }
+}
+
+implement<T: Display> Display for List<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("[")?;
+        for i in range(0, self.len) {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            item.fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
+// =============================================================================
+// Default
+// =============================================================================
+
+implement<T> Default for List<T> {
+    fn default() -> List<T> {
+        List.new()
+    }
+}
+
+// =============================================================================
+// Lexicographic comparison (standalone, avoids Ord min/max shadowing List.min/max)
+// =============================================================================
+
+implement<T: Ord> List<T> {
+    /// Compare two lists lexicographically.
+    /// Returns Ordering.Less, Ordering.Equal, or Ordering.Greater.
+    public fn cmp_lexicographic(&self, other: &List<T>) -> Ordering {
+        let min_len = if self.len < other.len { self.len } else { other.len };
+        for i in range(0, min_len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*other.ptr.offset(i) };
+            let c = a.cmp(b);
+            match c {
+                Ordering.Equal => {}
+                _ => { return c; }
+            }
+        }
+        if self.len < other.len {
+            Ordering.Less
+        } else if self.len > other.len {
+            Ordering.Greater
+        } else {
+            Ordering.Equal
+        }
+    }
+}
+
+// =============================================================================
+// Hash
+// =============================================================================
+
+implement<T: Hash> Hash for List<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.len);
+        for i in range(0, self.len) {
+            let item: &T = unsafe { &*self.ptr.offset(i) };
+            item.hash(hasher);
+        }
+    }
+}
+
+// =============================================================================
+// IntoIterator
+// =============================================================================
+
+implement<T> IntoIterator for List<T> {
+    type Item = T;
+    type IntoIter = IntoList<T>;
+
+    fn into_iter(self) -> IntoList<T> {
+        let n = self.len;
+        IntoList {
+            list: self,
+            idx: 0,
+            back: n,
+        }
+    }
+}
+
+// =============================================================================
+// FromIterator
+// =============================================================================
+
+implement<T> FromIterator<T> for List<T> {
+    fn from_iter<I: Iterator<Item>>(iter: I) -> List<T> {
+        let mut list = List.new();
+        for item in iter {
+            list.push(item);
+        }
+        list
+    }
+}
+
+// =============================================================================
+// Extend
+// =============================================================================
+
+implement<T> Extend<T> for List<T> {
+    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+// Iterator over list references.
+public type ListIter<T> is {
+    ptr: &unsafe T,
+    end: &unsafe T,
+};
+
+implement<T> Iterator for ListIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<&T> {
+        if self.ptr == self.end {
+            return None;
+        }
+        unsafe {
+            let item = &*self.ptr;
+            self.ptr = self.ptr.offset(1);
+            Some(item)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = (self.end as Int - self.ptr as Int) / T.size;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for ListIter<T> {
+    fn next_back(&mut self) -> Maybe<&T> {
+        if self.ptr == self.end {
+            return None;
+        }
+        unsafe {
+            self.end = self.end.offset(-1);
+            Some(&*self.end)
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for ListIter<T> {
+    fn len(&self) -> Int {
+        (self.end as Int - self.ptr as Int) / T.size
+    }
+}
+
+// IntoIterator for ListIter so it can be used in for loops
+implement<T> IntoIterator for ListIter<T> {
+    type Item = &T;
+    type IntoIter = ListIter<T>;
+
+    fn into_iter(self) -> ListIter<T> {
+        self
+    }
+}
+
+// Mutable iterator.
+public type ListIterMut<T> is {
+    ptr: &unsafe T,
+    end: &unsafe T,
+};
+
+implement<T> Iterator for ListIterMut<T> {
+    type Item = &mut T;
+
+    fn next(&mut self) -> Maybe<&mut T> {
+        if self.ptr == self.end {
+            return None;
+        }
+        unsafe {
+            let item = &mut *self.ptr;
+            self.ptr = self.ptr.offset(1);
+            Some(item)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = (self.end as Int - self.ptr as Int) / T.size;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for ListIterMut<T> {
+    fn next_back(&mut self) -> Maybe<&mut T> {
+        if self.ptr == self.end {
+            return None;
+        }
+        unsafe {
+            self.end = self.end.offset(-1);
+            Some(&mut *self.end)
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for ListIterMut<T> {
+    fn len(&self) -> Int {
+        (self.end as Int - self.ptr as Int) / T.size
+    }
+}
+
+// IntoIterator for ListIterMut so it can be used in for loops
+implement<T> IntoIterator for ListIterMut<T> {
+    type Item = &mut T;
+    type IntoIter = ListIterMut<T>;
+
+    fn into_iter(self) -> ListIterMut<T> {
+        self
+    }
+}
+
+// Owning iterator.
+public type IntoList<T> is {
+    list: List<T>,
+    idx: Int,
+    back: Int,
+};
+
+implement<T> Iterator for IntoList<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.idx >= self.back {
+            return None;
+        }
+        unsafe {
+            let item = ptr_read(self.list.ptr.offset(self.idx));
+            self.idx = self.idx + 1;
+            Some(item)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.back - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for IntoList<T> {
+    fn next_back(&mut self) -> Maybe<T> {
+        if self.idx >= self.back {
+            return None;
+        }
+        self.back = self.back - 1;
+        unsafe {
+            Some(ptr_read(self.list.ptr.offset(self.back)))
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for IntoList<T> {
+    fn len(&self) -> Int {
+        self.back - self.idx
+    }
+}
+
+// IntoIterator for IntoList so it can be used in for loops
+implement<T> IntoIterator for IntoList<T> {
+    type Item = T;
+    type IntoIter = IntoList<T>;
+
+    fn into_iter(self) -> IntoList<T> {
+        self
+    }
+}
+
+implement<T> Drop for IntoList<T> {
+    fn drop(&mut self) {
+        // Drop remaining elements
+        while self.next().is_some() {}
+        // Free buffer without dropping (already dropped)
+        self.list.len = 0;
+    }
+}
+
+// Drain iterator.
+public type Drain<T> is {
+    list: &mut List<T>,
+    start: Int,
+    end: Int,
+    current: Int,
+};
+
+implement<T> Iterator for Drain<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Maybe<T> {
+        if self.current >= self.end {
+            return None;
+        }
+        unsafe {
+            let item = ptr_read(self.list.ptr.offset(self.current));
+            self.current = self.current + 1;
+            Some(item)
+        }
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let remaining = self.end - self.current;
+        (remaining, Some(remaining))
+    }
+}
+
+implement<T> DoubleEndedIterator for Drain<T> {
+    fn next_back(&mut self) -> Maybe<T> {
+        if self.current >= self.end {
+            return None;
+        }
+        self.end = self.end - 1;
+        unsafe {
+            Some(ptr_read(self.list.ptr.offset(self.end)))
+        }
+    }
+}
+
+implement<T> ExactSizeIterator for Drain<T> {
+    fn len(&self) -> Int {
+        self.end - self.current
+    }
+}
+
+implement<T> Drop for Drain<T> {
+    fn drop(&mut self) {
+        // Consume remaining
+        while self.next().is_some() {}
+
+        // Shift tail elements
+        let tail_len = self.list.len - self.end;
+        if tail_len > 0 {
+            unsafe {
+                let dst = self.list.ptr.offset(self.start) as &unsafe Byte;
+                let src = self.list.ptr.offset(self.end) as &unsafe Byte;
+                memmove(dst, src, tail_len * T.size);
+            }
+        }
+        self.list.len = self.start + tail_len;
+    }
+}
+
+implement<T> IntoIterator for Drain<T> {
+    type Item = T;
+    type IntoIter = Drain<T>;
+
+    fn into_iter(self) -> Drain<T> {
+        self
+    }
+}
+
+// =============================================================================
+// FusedIterator implementations
+// =============================================================================
+
+implement<T> FusedIterator for ListIter<T> {}
+implement<T> FusedIterator for ListIterMut<T> {}
+implement<T> FusedIterator for Drain<T> {}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+// Create list from array literal.
+public fn list<T>(items: [T; _]) -> List<T> {
+    let mut l = List.with_capacity(items.len());
+    for item in items {
+        l.push(item);
+    }
+    l
+}
+
+/// Flatten a list of lists into a single list.
+///
+/// # Example
+/// ```verum
+/// let nested = [[1, 2], [3, 4], [5]];
+/// assert_eq(flatten_list(&nested), [1, 2, 3, 4, 5]);
+/// ```
+public fn flatten_list<T: Clone>(lists: &List<List<T>>) -> List<T> {
+    let mut total = 0;
+    for i in range(0, lists.len()) {
+        total = total + lists[i].len();
+    }
+    let mut result: List<T> = List.with_capacity(total);
+    for i in range(0, lists.len()) {
+        for j in range(0, lists[i].len()) {
+            result.push(lists[i][j].clone());
+        }
+    }
+    result
+}
+
+/// Unzip a list of pairs into two separate lists.
+///
+/// # Example
+/// ```verum
+/// let pairs = [(1, "a"), (2, "b"), (3, "c")];
+/// let (nums, strs) = unzip_list(&pairs);
+/// assert_eq(nums, [1, 2, 3]);
+/// ```
+public fn unzip_list<A: Clone, B: Clone>(pairs: &List<(A, B)>) -> (List<A>, List<B>) {
+    let mut left: List<A> = List.with_capacity(pairs.len());
+    let mut right: List<B> = List.with_capacity(pairs.len());
+    for i in range(0, pairs.len()) {
+        let pair = pairs[i];
+        let a = pair.0;
+        let b = pair.1;
+        left.push(a.clone());
+        right.push(b.clone());
+    }
+    (left, right)
+}
+
+/// Join a list of Text values with a separator.
+///
+/// # Example
+/// ```verum
+/// let words = ["hello", "world", "foo"];
+/// assert_eq(join_text(&words, ", "), "hello, world, foo");
+/// ```
+public fn join_text(items: &List<Text>, separator: &Text) -> Text {
+    if items.is_empty() {
+        let result: Text = "";
+        result
+    } else {
+        let mut result: Text = items[0].clone();
+        for i in range(1, items.len()) {
+            result = result + separator;
+            result = result + &items[i];
+        }
+        result
+    }
+}
+
+/// Join a list of Int values with a separator, converting each to text.
+///
+/// # Example
+/// ```verum
+/// let nums = [1, 2, 3];
+/// assert_eq(join_ints(&nums, "-"), "1-2-3");
+/// ```
+public fn join_ints(items: &List<Int>, separator: &Text) -> Text {
+    if items.is_empty() {
+        let result: Text = "";
+        result
+    } else {
+        let mut result: Text = items[0].to_text();
+        for i in range(1, items.len()) {
+            result = result + separator;
+            result = result + &items[i].to_text();
+        }
+        result
+    }
+}
+
+/// Group consecutive elements by a key function.
+///
+/// Returns a list of (key, group) pairs where each group contains
+/// consecutive elements that share the same key.
+///
+/// # Example
+/// ```verum
+/// let items = [1, 1, 2, 2, 2, 3, 1, 1];
+/// let groups = group_by(&items, |x| *x);
+/// // groups = [(1, [1, 1]), (2, [2, 2, 2]), (3, [3]), (1, [1, 1])]
+/// ```
+public fn group_by<T: Clone, K: Eq + Clone>(items: &List<T>, key_fn: fn(&T) -> K) -> List<(K, List<T>)> {
+    let mut result: List<(K, List<T>)> = [];
+    if !items.is_empty() {
+        let mut current_key = key_fn(&items[0]);
+        let mut current_group: List<T> = [items[0].clone()];
+
+        for i in range(1, items.len()) {
+            let k = key_fn(&items[i]);
+            if k == current_key {
+                current_group.push(items[i].clone());
+            } else {
+                result.push((current_key, current_group));
+                current_key = k;
+                current_group = [items[i].clone()];
+            }
+        }
+        result.push((current_key, current_group));
+    }
+    result
+}
+
+/// Interleave two lists element by element.
+///
+/// If one list is longer, the remaining elements are appended.
+///
+/// # Example
+/// ```verum
+/// let a = [1, 3, 5];
+/// let b = [2, 4, 6];
+/// assert_eq(interleave_lists(&a, &b), [1, 2, 3, 4, 5, 6]);
+/// ```
+public fn interleave_lists<T: Clone>(a: &List<T>, b: &List<T>) -> List<T> {
+    let mut result: List<T> = List.with_capacity(a.len() + b.len());
+    let min_len = if a.len() < b.len() { a.len() } else { b.len() };
+    for i in range(0, min_len) {
+        result.push(a[i].clone());
+        result.push(b[i].clone());
+    }
+    for i in range(min_len, a.len()) {
+        result.push(a[i].clone());
+    }
+    for i in range(min_len, b.len()) {
+        result.push(b[i].clone());
+    }
+    result
+}

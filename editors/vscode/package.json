@@ -1,0 +1,885 @@
+{
+  "name": "verum-language",
+  "displayName": "Verum Language Support",
+  "description": "Language support for Verum with refinement type validation, CBGR profiling, and LSP integration",
+  "version": "0.1.1",
+  "publisher": "MaxSereda",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verum-lang/verum"
+  },
+  "icon": "icons/verum.png",
+  "engines": {
+    "vscode": "^1.110.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "verum",
+    "refinement types",
+    "formal verification",
+    "memory safety",
+    "CBGR"
+  ],
+  "activationEvents": [
+    "onLanguage:verum",
+    "onCommand:verum.runFile",
+    "onDebug"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "verum",
+        "aliases": [
+          "Verum",
+          "verum"
+        ],
+        "extensions": [
+          ".vr"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/verum.png",
+          "dark": "./icons/verum.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "verum",
+        "scopeName": "source.verum",
+        "path": "./syntaxes/verum.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.sql": "sql",
+          "meta.embedded.block.html": "html",
+          "meta.embedded.block.regex": "regex"
+        }
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "refinementType",
+        "description": "A refinement type constraint",
+        "superType": "type"
+      },
+      {
+        "id": "contextProvider",
+        "description": "A context provider (dependency injection)",
+        "superType": "class"
+      },
+      {
+        "id": "contextConsumer",
+        "description": "A context consumer (using clause)",
+        "superType": "variable"
+      },
+      {
+        "id": "protocol",
+        "description": "A protocol (trait/interface)",
+        "superType": "interface"
+      },
+      {
+        "id": "theorem",
+        "description": "A formal theorem declaration",
+        "superType": "function"
+      },
+      {
+        "id": "lemma",
+        "description": "A formal lemma declaration",
+        "superType": "function"
+      },
+      {
+        "id": "tactic",
+        "description": "A proof tactic",
+        "superType": "keyword"
+      },
+      {
+        "id": "cbgrReference",
+        "description": "A CBGR managed reference",
+        "superType": "variable"
+      },
+      {
+        "id": "checkedReference",
+        "description": "A compile-time verified reference",
+        "superType": "variable"
+      },
+      {
+        "id": "unsafeReference",
+        "description": "An unsafe raw reference",
+        "superType": "variable"
+      },
+      {
+        "id": "taggedLiteral",
+        "description": "A tagged literal (sql#, rx#, etc.)",
+        "superType": "string"
+      },
+      {
+        "id": "contractKeyword",
+        "description": "Contract keyword (requires, ensures, invariant)",
+        "superType": "keyword"
+      },
+      {
+        "id": "metaFunction",
+        "description": "A meta/compile-time function",
+        "superType": "function"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "refinement",
+        "description": "Has refinement type constraint"
+      },
+      {
+        "id": "checked",
+        "description": "Compile-time verified safe"
+      },
+      {
+        "id": "unsafe",
+        "description": "Requires manual safety proof"
+      },
+      {
+        "id": "managed",
+        "description": "CBGR managed reference"
+      },
+      {
+        "id": "pure",
+        "description": "Pure function (no side effects)"
+      },
+      {
+        "id": "async",
+        "description": "Async function"
+      },
+      {
+        "id": "fallible",
+        "description": "May fail (returns Result)"
+      },
+      {
+        "id": "contextual",
+        "description": "Requires context injection"
+      },
+      {
+        "id": "verified",
+        "description": "Formally verified"
+      },
+      {
+        "id": "proof",
+        "description": "Part of proof term"
+      },
+      {
+        "id": "meta",
+        "description": "Compile-time/meta level"
+      },
+      {
+        "id": "linear",
+        "description": "Linear type (must be used exactly once)"
+      },
+      {
+        "id": "affine",
+        "description": "Affine type (must be used at most once)"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "verum",
+        "scopes": {
+          "refinementType": [
+            "entity.name.type.refinement.verum"
+          ],
+          "contextProvider": [
+            "entity.name.type.context.verum"
+          ],
+          "contextConsumer": [
+            "variable.other.context.verum"
+          ],
+          "protocol": [
+            "entity.name.type.protocol.verum"
+          ],
+          "theorem": [
+            "entity.name.function.theorem.verum"
+          ],
+          "lemma": [
+            "entity.name.function.lemma.verum"
+          ],
+          "tactic": [
+            "keyword.other.tactic.verum"
+          ],
+          "cbgrReference": [
+            "variable.other.managed.verum"
+          ],
+          "checkedReference": [
+            "variable.other.checked.verum"
+          ],
+          "unsafeReference": [
+            "variable.other.unsafe.verum"
+          ],
+          "taggedLiteral": [
+            "string.tagged.verum"
+          ],
+          "contractKeyword": [
+            "keyword.control.contract.verum"
+          ],
+          "metaFunction": [
+            "entity.name.function.meta.verum"
+          ],
+          "*.refinement": [
+            "meta.refinement.verum"
+          ],
+          "*.checked": [
+            "meta.checked.verum"
+          ],
+          "*.unsafe": [
+            "meta.unsafe.verum"
+          ],
+          "*.managed": [
+            "meta.managed.verum"
+          ],
+          "*.pure": [
+            "meta.pure.verum"
+          ],
+          "*.async": [
+            "meta.async.verum"
+          ],
+          "*.fallible": [
+            "meta.fallible.verum"
+          ],
+          "*.contextual": [
+            "meta.contextual.verum"
+          ],
+          "*.verified": [
+            "meta.verified.verum"
+          ],
+          "*.proof": [
+            "meta.proof.verum"
+          ],
+          "*.meta": [
+            "meta.compile-time.verum"
+          ],
+          "*.linear": [
+            "meta.linear.verum"
+          ],
+          "*.affine": [
+            "meta.affine.verum"
+          ]
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "verum",
+        "path": "./snippets/verum.json"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "verum"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "verum",
+        "languages": ["verum"],
+        "label": "Verum Debug",
+        "runtime": "node",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .vr file to debug",
+                "default": "${file}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Pause execution on the first line",
+                "default": false
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Command-line arguments passed to the program",
+                "default": []
+              },
+              "tier": {
+                "type": "string",
+                "enum": ["interpreter", "aot"],
+                "description": "Execution tier: interpreter (VBC, full debug) or aot (LLVM, limited debug)",
+                "default": "interpreter"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the debugged program",
+                "default": "${workspaceFolder}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "verum",
+            "request": "launch",
+            "name": "Debug Verum Program",
+            "program": "${file}",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Verum: Debug Current File",
+            "description": "Debug the currently open .vr file using the VBC interpreter",
+            "body": {
+              "type": "verum",
+              "request": "launch",
+              "name": "Debug Current File",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": false
+            }
+          },
+          {
+            "label": "Verum: Debug with Arguments",
+            "description": "Debug a .vr file with command-line arguments",
+            "body": {
+              "type": "verum",
+              "request": "launch",
+              "name": "Debug with Args",
+              "program": "^\"\\${file}\"",
+              "args": ["^\"${1:arg1}\"", "^\"${2:arg2}\""],
+              "stopOnEntry": false
+            }
+          },
+          {
+            "label": "Verum: Debug (Stop on Entry)",
+            "description": "Debug and pause on the first line of main()",
+            "body": {
+              "type": "verum",
+              "request": "launch",
+              "name": "Debug (Stop on Entry)",
+              "program": "^\"\\${file}\"",
+              "stopOnEntry": true
+            }
+          }
+        ]
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "verum.profileDashboard",
+          "name": "Verum Profile",
+          "type": "webview",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "verum",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The Verum task (build, run, test, check)"
+          },
+          "file": {
+            "type": "string",
+            "description": "Target file path"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional arguments"
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "verum",
+        "owner": "verum",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^(error|warning|info)\\[([A-Z]\\d+)\\]:\\s+(.+)$",
+            "severity": 1,
+            "code": 2,
+            "message": 3
+          },
+          {
+            "regexp": "^\\s+-->\\s+(.+):(\\d+):(\\d+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Verum Language Server",
+      "properties": {
+        "verum.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Verum language server"
+        },
+        "verum.lsp.serverPath": {
+          "type": "string",
+          "default": "verum",
+          "description": "Path to verum CLI executable (LSP runs via 'verum lsp' subcommand)"
+        },
+        "verum.lsp.enableRefinementValidation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time refinement type validation"
+        },
+        "verum.lsp.validationMode": {
+          "type": "string",
+          "enum": [
+            "quick",
+            "thorough",
+            "complete"
+          ],
+          "default": "quick",
+          "description": "Validation mode: quick (<100ms), thorough (<1s), complete (unlimited)"
+        },
+        "verum.lsp.showCounterexamples": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show concrete counterexamples for refinement violations"
+        },
+        "verum.lsp.showInlayHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inlay hints for inferred refinement types"
+        },
+        "verum.lsp.diagnosticDelay": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "maximum": 2000,
+          "description": "Delay in milliseconds before showing diagnostics (debouncing)"
+        },
+        "verum.lsp.smtSolver": {
+          "type": "string",
+          "enum": [
+            "z3",
+            "cvc5",
+            "auto"
+          ],
+          "default": "z3",
+          "description": "SMT solver to use for refinement validation"
+        },
+        "verum.lsp.smtTimeout": {
+          "type": "number",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "SMT solver timeout in milliseconds"
+        },
+        "verum.lsp.cacheValidationResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Cache validation results for better performance"
+        },
+        "verum.lsp.cacheTtlSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 60,
+          "maximum": 3600,
+          "description": "Time-to-live for cached validation results in seconds"
+        },
+        "verum.lsp.cacheMaxEntries": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 10000,
+          "description": "Maximum number of cached validation results"
+        },
+        "verum.lsp.maxCounterexampleTraces": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum number of execution trace steps to show in counterexamples"
+        },
+        "verum.lsp.showBreakingFixes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show quick fixes that may break existing callers"
+        },
+        "verum.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server"
+        },
+        "verum.cbgr.enableProfiling": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable CBGR performance profiling (shows runtime overhead)"
+        },
+        "verum.cbgr.showOptimizationHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show hints for converting to &checked references"
+        },
+        "verum.verification.showCostWarnings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show warnings for slow verification (>5s)"
+        },
+        "verum.verification.slowThresholdMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 60000,
+          "description": "Threshold in milliseconds for slow verification warnings"
+        },
+        "verum.codeLens.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show code lens annotations"
+        },
+        "verum.codeLens.showReferences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show reference counts above functions"
+        },
+        "verum.codeLens.showRunButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show run button above main()"
+        },
+        "verum.codeLens.showTestButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show run button above test functions"
+        },
+        "verum.run.defaultArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Default arguments when running Verum programs"
+        },
+        "verum.formatting.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable format on save"
+        },
+        "verum.semanticHighlighting.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable semantic syntax highlighting from LSP"
+        },
+        "verum.debug.defaultTier": {
+          "type": "string",
+          "enum": ["interpreter", "aot"],
+          "default": "interpreter",
+          "description": "Default execution tier for debugging (interpreter has full debug support)"
+        },
+        "verum.debug.dapServerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to verum DAP server executable (leave empty to use verum.lsp.serverPath)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "verum.promoteToChecked",
+        "title": "Verum: Promote to &checked Reference",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.addRuntimeCheck",
+        "title": "Verum: Add Runtime Check (Result<T, E>)",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.inferRefinement",
+        "title": "Verum: Infer Refinement Type",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.validateRefinementAtCursor",
+        "title": "Verum: Validate Refinement at Cursor",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.showVerificationProfile",
+        "title": "Verum: Show Verification Performance Profile",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.showCbgrProfile",
+        "title": "Verum: Show CBGR Performance Profile",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.restartLanguageServer",
+        "title": "Verum: Restart Language Server",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.openProfile",
+        "title": "Verum: Open Profile Dashboard",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.profileCurrentFile",
+        "title": "Verum: Profile Current File",
+        "category": "Verum",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "verum.runFile",
+        "title": "Verum: Run Current File",
+        "category": "Verum",
+        "icon": "$(play)"
+      },
+      {
+        "command": "verum.runTest",
+        "title": "Verum: Run Test",
+        "category": "Verum",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "verum.verifyFunction",
+        "title": "Verum: Verify Function Contracts",
+        "category": "Verum",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "verum.showTypeHierarchy",
+        "title": "Verum: Show Type Hierarchy",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.formatDocument",
+        "title": "Verum: Format Document",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.findReferences",
+        "title": "Verum: Find All References",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.showImplementations",
+        "title": "Verum: Show Implementations",
+        "category": "Verum"
+      },
+      {
+        "command": "verum.showServerStatus",
+        "title": "Verum: Show Language Server Status",
+        "category": "Verum"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "verum",
+        "owner": "verum",
+        "fileLocation": ["autoDetect", "${workspaceFolder}"],
+        "pattern": [
+          {
+            "regexp": "^(error|warning|info)\\[([A-Z]\\d+)\\]:\\s+(.+)$",
+            "severity": 1,
+            "code": 2,
+            "message": 3
+          },
+          {
+            "regexp": "^\\s+-->\\s+(.+):(\\d+):(\\d+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "verum.promoteToChecked",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "when": "editorTextFocus && editorLangId == verum"
+      },
+      {
+        "command": "verum.inferRefinement",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus && editorLangId == verum"
+      },
+      {
+        "command": "verum.validateRefinementAtCursor",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v",
+        "when": "editorTextFocus && editorLangId == verum"
+      },
+      {
+        "command": "verum.runFile",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorTextFocus && editorLangId == verum"
+      },
+      {
+        "command": "verum.formatDocument",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f",
+        "when": "editorTextFocus && editorLangId == verum"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "verum.runFile",
+          "when": "editorLangId == verum",
+          "group": "navigation@1"
+        },
+        {
+          "command": "verum.profileCurrentFile",
+          "when": "editorLangId == verum",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "when": "editorLangId == verum",
+          "command": "verum.promoteToChecked",
+          "group": "1_verum@1"
+        },
+        {
+          "when": "editorLangId == verum",
+          "command": "verum.addRuntimeCheck",
+          "group": "1_verum@2"
+        },
+        {
+          "when": "editorLangId == verum",
+          "command": "verum.inferRefinement",
+          "group": "1_verum@3"
+        },
+        {
+          "when": "editorLangId == verum",
+          "command": "verum.validateRefinementAtCursor",
+          "group": "1_verum@4"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "verum.promoteToChecked",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.addRuntimeCheck",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.inferRefinement",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.validateRefinementAtCursor",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.showVerificationProfile",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.showCbgrProfile",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.restartLanguageServer"
+        },
+        {
+          "command": "verum.openProfile",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.profileCurrentFile",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.runFile",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.runTest",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.verifyFunction",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.showTypeHierarchy",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.formatDocument",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.findReferences",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.showImplementations",
+          "when": "editorLangId == verum"
+        },
+        {
+          "command": "verum.showServerStatus"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && node esbuild.js",
+    "watch": "tsc -watch -p ./",
+    "build": "npm run compile",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "npx @vscode/vsce package --no-dependencies",
+    "publish": "npx @vscode/vsce publish"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/glob": "^8.1.0",
+    "@types/node": "^25.5.0",
+    "@types/vscode": "^1.110.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.4",
+    "eslint": "^10.0.3",
+    "glob": "^13.0.6",
+    "globals": "^17.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

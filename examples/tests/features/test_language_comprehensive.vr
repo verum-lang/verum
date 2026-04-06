@@ -1,0 +1,554 @@
+// Comprehensive Verum Language Feature Test
+// This file tests all major language features in a single comprehensive test
+
+// ========================================
+// 1. TYPE DEFINITIONS
+// ========================================
+
+// Custom variant types
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Status is
+    | Idle
+    | Running
+    | Completed
+    | Failed;
+
+// Record types
+type Point is {
+    x: Float,
+    y: Float
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    score: Float
+};
+
+type Rectangle is {
+    top_left: Point,
+    width: Float,
+    height: Float
+};
+
+// ========================================
+// 2. BASIC TYPE TESTS
+// ========================================
+
+fn test_basic_types() {
+    let _ = print("\n=== Basic Types ===");
+
+    // Int
+    let int_val: Int = 42;
+    let _ = print(f"Int: {int_val}");
+
+    // Float
+    let float_val: Float = 3.14159;
+    let _ = print(f"Float: {float_val}");
+
+    // Bool
+    let bool_true: Bool = true;
+    let bool_false: Bool = false;
+    let _ = print(f"Bool true: {bool_true}, false: {bool_false}");
+
+    // Text
+    let text_val: Text = "Hello, Verum!";
+    let _ = print(f"Text: {text_val}");
+
+    // Char (if supported)
+    // let char_val: Char = 'A';
+    // let _ = print(f"Char: {char_val}");
+}
+
+// ========================================
+// 3. VARIANT TYPE TESTS
+// ========================================
+
+fn test_maybe_type(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(val) => val,
+        None => -1
+    }
+}
+
+fn test_result_type(res: Result<Float, Text>) -> Text {
+    match res {
+        Ok(value) => f"Success: {value}",
+        Err(msg) => f"Error: {msg}"
+    }
+}
+
+fn color_to_text(c: Color) -> Text {
+    match c {
+        Red => "Red",
+        Green => "Green",
+        Blue => "Blue"
+    }
+}
+
+fn status_message(s: Status) -> Text {
+    match s {
+        Idle => "System is idle",
+        Running => "System is running",
+        Completed => "System completed",
+        Failed => "System failed"
+    }
+}
+
+fn test_variants() {
+    let _ = print("\n=== Variant Types ===");
+
+    // Maybe tests
+    let some_val: Maybe<Int> = Some(100);
+    let none_val: Maybe<Int> = None;
+    let _ = print(f"Some(100): {test_maybe_type(some_val)}");
+    let _ = print(f"None: {test_maybe_type(none_val)}");
+
+    // Result tests
+    let ok_res: Result<Float, Text> = Ok(42.5);
+    let err_res: Result<Float, Text> = Err("Connection timeout");
+    let _ = print(test_result_type(ok_res));
+    let _ = print(test_result_type(err_res));
+
+    // Color tests - simple variants
+    let red = Red;
+    let green = Green;
+    let _ = print(f"Color: {color_to_text(red)}");
+    let _ = print(f"Color: {color_to_text(green)}");
+
+    // Status tests
+    let status1 = Running;
+    let status2 = Completed;
+    let status3 = Failed;
+    let _ = print(status_message(status1));
+    let _ = print(status_message(status2));
+    let _ = print(status_message(status3));
+}
+
+// ========================================
+// 4. RECORD TYPE TESTS
+// ========================================
+
+fn distance(p1: Point, p2: Point) -> Float {
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    (dx * dx + dy * dy)
+}
+
+fn area(rect: Rectangle) -> Float {
+    rect.width * rect.height
+}
+
+fn test_records() {
+    let _ = print("\n=== Record Types ===");
+
+    // Point record
+    let p1 = Point { x: 0.0, y: 0.0 };
+    let p2 = Point { x: 3.0, y: 4.0 };
+    let _ = print(f"Point 1: ({p1.x}, {p1.y})");
+    let _ = print(f"Point 2: ({p2.x}, {p2.y})");
+    let _ = print(f"Distance squared: {distance(p1, p2)}");
+
+    // Person record
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        score: 95.5
+    };
+    let _ = print(f"Person: {person.name}, age {person.age}, score {person.score}");
+
+    // Nested record
+    let rect = Rectangle {
+        top_left: Point { x: 10.0, y: 10.0 },
+        width: 20.0,
+        height: 15.0
+    };
+    let _ = print(f"Rectangle area: {area(rect)}");
+}
+
+// ========================================
+// 5. PATTERN MATCHING TESTS
+// ========================================
+
+fn classify_number(n: Int) -> Text {
+    match n {
+        x where x < 0 => "negative",
+        0 => "zero",
+        x where x > 0 && x <= 10 => "small positive",
+        x where x > 10 && x <= 100 => "medium positive",
+        _ => "large positive"
+    }
+}
+
+fn match_tuple(pair: (Int, Int)) -> Int {
+    match pair {
+        (0, 0) => 0,
+        (x, 0) => x,
+        (0, y) => y,
+        (x, y) => x + y
+    }
+}
+
+fn test_pattern_matching() {
+    let _ = print("\n=== Pattern Matching ===");
+
+    // Number classification
+    let _ = print(f"classify(-5): {classify_number(-5)}");
+    let _ = print(f"classify(5): {classify_number(5)}");
+    let _ = print(f"classify(50): {classify_number(50)}");
+    let _ = print(f"classify(200): {classify_number(200)}");
+
+    // Tuple matching
+    let _ = print(f"match (0, 0): {match_tuple((0, 0))}");
+    let _ = print(f"match (5, 0): {match_tuple((5, 0))}");
+    let _ = print(f"match (3, 7): {match_tuple((3, 7))}");
+}
+
+// ========================================
+// 6. LIST/ARRAY OPERATIONS
+// ========================================
+
+fn sum_array(arr: [Float; 5]) -> Float {
+    arr[0] + arr[1] + arr[2] + arr[3] + arr[4]
+}
+
+fn test_arrays() {
+    let _ = print("\n=== Array Operations ===");
+
+    // Array literals
+    let nums = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let _ = print(f"Array: [{nums[0]}, {nums[1]}, {nums[2]}, {nums[3]}, {nums[4]}]");
+
+    // Array sum
+    let total = sum_array(nums);
+    let _ = print(f"Sum: {total}");
+
+    // Array mutation
+    let mut arr = [10.0, 20.0, 30.0];
+    arr[1] = 25.0;
+    let _ = print(f"Modified array[1]: {arr[1]}");
+
+    // List comprehension (if supported)
+    // let squares = [x * x for x in nums];
+}
+
+// ========================================
+// 7. FUNCTION TESTS (Regular & Recursive)
+// ========================================
+
+fn add(a: Float, b: Float) -> Float {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+// Recursive function - factorial
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// Recursive function - fibonacci
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+// Higher-order function
+fn apply_binary(f: fn(Float, Float) -> Float, a: Float, b: Float) -> Float {
+    f(a, b)
+}
+
+fn test_functions() {
+    let _ = print("\n=== Functions ===");
+
+    // Regular functions
+    let _ = print(f"add(3.5, 2.5): {add(3.5, 2.5)}");
+    let _ = print(f"multiply(7, 8): {multiply(7, 8)}");
+
+    // Recursive functions
+    let _ = print(f"factorial(5): {factorial(5)}");
+    let _ = print(f"fibonacci(7): {fibonacci(7)}");
+
+    // Higher-order function
+    let result = apply_binary(add, 10.0, 5.0);
+    let _ = print(f"apply_binary(add, 10, 5): {result}");
+}
+
+// ========================================
+// 8. CLOSURE TESTS
+// ========================================
+
+fn make_multiplier(factor: Float) -> fn(Float) -> Float {
+    |x: Float| -> Float { x * factor }
+}
+
+fn test_closures() {
+    let _ = print("\n=== Closures ===");
+
+    // Simple closure
+    let double = |x: Float| -> Float { x * 2.0 };
+    let _ = print(f"double(5): {double(5.0)}");
+
+    // Closure with capture
+    let base = 100.0;
+    let add_base = |x: Float| -> Float { x + base };
+    let _ = print(f"add_base(50): {add_base(50.0)}");
+
+    // Nested closures
+    let outer_val = 10.0;
+    let outer = |x: Float| -> Float {
+        let inner = |y: Float| -> Float { y + outer_val };
+        inner(x) * 2.0
+    };
+    let _ = print(f"nested closure(5): {outer(5.0)}");
+
+    // Closure from function
+    let times_three = make_multiplier(3.0);
+    let _ = print(f"times_three(7): {times_three(7.0)}");
+
+    // Multiple captures
+    let a = 5.0;
+    let b = 10.0;
+    let compute = |x: Float| -> Float { a * x + b };
+    let _ = print(f"compute(3): {compute(3.0)}");
+}
+
+// ========================================
+// 9. CONTROL FLOW TESTS
+// ========================================
+
+fn test_if_else(x: Int) -> Text {
+    if x < 0 {
+        "negative"
+    } else if x == 0 {
+        "zero"
+    } else {
+        "positive"
+    }
+}
+
+fn test_while_loop(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_loop_with_break(n: Int) -> Int {
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count >= n {
+            break;
+        }
+    }
+    count
+}
+
+fn test_control_flow() {
+    let _ = print("\n=== Control Flow ===");
+
+    // If/else
+    let _ = print(f"test_if_else(-5): {test_if_else(-5)}");
+    let _ = print(f"test_if_else(0): {test_if_else(0)}");
+    let _ = print(f"test_if_else(10): {test_if_else(10)}");
+
+    // While loop
+    let sum = test_while_loop(10);
+    let _ = print(f"Sum 1 to 10: {sum}");
+
+    // Loop with break
+    let count = test_loop_with_break(5);
+    let _ = print(f"Loop count: {count}");
+
+    // Match expression (already tested above)
+    let color = Blue;
+    let _ = print(f"Match color: {color_to_text(color)}");
+}
+
+// ========================================
+// 10. ERROR HANDLING
+// ========================================
+
+fn divide_safe(a: Float, b: Float) -> Result<Float, Text> {
+    if b == 0.0 {
+        Err("Division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn try_operation() -> Result<Int, Text> {
+    Ok(42)
+}
+
+fn test_error_handling() {
+    let _ = print("\n=== Error Handling ===");
+
+    // Result type handling
+    let result1 = divide_safe(10.0, 2.0);
+    let result2 = divide_safe(10.0, 0.0);
+
+    let _ = print(test_result_type(result1));
+    let _ = print(test_result_type(result2));
+
+    // Try statement (if supported)
+    try {
+        let val = try_operation();
+        let _ = print("Try block executed");
+    };
+
+    // Pattern matching on Result
+    let res: Result<Int, Text> = Ok(100);
+    match res {
+        Ok(v) => {
+            let _ = print(f"Matched Ok: {v}");
+        },
+        Err(e) => {
+            let _ = print(f"Matched Err: {e}");
+        }
+    }
+}
+
+// ========================================
+// 11. STRING INTERPOLATION
+// ========================================
+
+fn test_string_interpolation() {
+    let _ = print("\n=== String Interpolation ===");
+
+    let name = "Verum";
+    let version = 1;
+    let pi = 3.14159;
+
+    let _ = print(f"Language: {name}");
+    let _ = print(f"Version: {version}");
+    let _ = print(f"Pi value: {pi}");
+    let _ = print(f"Expression: {2 + 2} = 4");
+    let _ = print(f"Complex: {name} v{version} with pi={pi}");
+}
+
+// ========================================
+// 12. GENERIC FUNCTIONS
+// ========================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first<T>(a: T, b: T) -> T {
+    a
+}
+
+fn test_generics() {
+    let _ = print("\n=== Generic Functions ===");
+
+    let int_id = identity(42);
+    let float_id = identity(3.14);
+    let text_id = identity("hello");
+
+    let _ = print(f"identity(42): {int_id}");
+    let _ = print(f"identity(3.14): {float_id}");
+    let _ = print(f"identity(hello): {text_id}");
+
+    let _ = print(f"first(10, 20): {first(10, 20)}");
+}
+
+// ========================================
+// 13. TUPLE TESTS
+// ========================================
+
+fn swap(pair: (Int, Int)) -> (Int, Int) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+fn test_tuples() {
+    let _ = print("\n=== Tuples ===");
+
+    let pair = (10, 20);
+    let (x, y) = pair;
+    let _ = print(f"Tuple: ({x}, {y})");
+
+    let swapped = swap(pair);
+    let (a, b) = swapped;
+    let _ = print(f"Swapped: ({a}, {b})");
+
+    let triple = (1.0, 2.0, 3.0);
+    let (p, q, r) = triple;
+    let _ = print(f"Triple: ({p}, {q}, {r})");
+}
+
+// ========================================
+// 14. MUTATION TESTS
+// ========================================
+
+fn test_mutation() {
+    let _ = print("\n=== Mutation ===");
+
+    let mut counter = 0;
+    let _ = print(f"Initial counter: {counter}");
+
+    counter = counter + 1;
+    let _ = print(f"After increment: {counter}");
+
+    counter = counter * 2;
+    let _ = print(f"After double: {counter}");
+
+    let mut value = 10.0;
+    value = value + 5.0;
+    value = value * 2.0;
+    let _ = print(f"Final value: {value}");
+}
+
+// ========================================
+// MAIN - Run all tests
+// ========================================
+
+fn main() {
+    let _ = print("========================================");
+    let _ = print("  COMPREHENSIVE VERUM LANGUAGE TEST");
+    let _ = print("========================================");
+
+    test_basic_types();
+    test_variants();
+    test_records();
+    test_pattern_matching();
+    test_arrays();
+    test_functions();
+    test_closures();
+    test_control_flow();
+    test_error_handling();
+    test_string_interpolation();
+    test_generics();
+    test_tuples();
+    test_mutation();
+
+    let _ = print("\n========================================");
+    let _ = print("  ALL TESTS COMPLETED SUCCESSFULLY!");
+    let _ = print("========================================");
+}

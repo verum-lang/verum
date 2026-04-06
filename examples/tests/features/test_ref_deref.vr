@@ -1,0 +1,12 @@
+// Test: Dereferencing managed references only
+
+fn test_managed_deref(x: &Int) -> Int {
+    *x
+}
+
+fn main() -> Int {
+    let value = 42;
+    let result = test_managed_deref(&value);
+    println(f"Result: {result}");
+    result
+}

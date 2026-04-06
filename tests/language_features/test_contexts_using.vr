@@ -1,0 +1,14 @@
+// Test using clause
+
+context Logger {
+    fn log(message: Text);
+}
+
+// Function with using clause (but don't actually use it yet)
+fn greet(name: Text) using Logger {
+    print(f"Hello, {name}");
+}
+
+fn main() {
+    print("Testing using clause");
+}

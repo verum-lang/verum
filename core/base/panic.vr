@@ -1,0 +1,442 @@
+// =============================================================================
+// panic.vr - Panic, assert, and control flow functions
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: None (self-contained)
+//
+// This module is self-contained to avoid circular dependencies.
+// All panic and exit functionality uses direct intrinsics and syscalls.
+//
+// =============================================================================
+
+module panic;
+
+// Import intrinsics as functions
+mount core.intrinsics.{spin_hint, unreachable, catch_unwind};
+
+// =============================================================================
+// File Descriptor Constants (local definition to avoid sys.common dependency)
+// =============================================================================
+
+/// Standard error file descriptor
+const STDERR: Int = 2;
+
+// =============================================================================
+// Platform-Specific FFI Declarations (local to avoid sys dependencies)
+// =============================================================================
+
+@cfg(target_os = "macos")
+@ffi("libSystem.B.dylib")
+extern {
+    /// Write to file descriptor (C library write)
+    fn write(fd: Int, buf: &Byte, nbyte: Int) -> Int;
+
+    /// Exit process (POSIX _exit - no stdio flush, avoids name collision with Verum exit())
+    fn _exit(status: Int) -> !;
+}
+
+@cfg(target_os = "windows")
+@ffi("kernel32.dll")
+extern {
+    /// Get standard handle
+    fn GetStdHandle(std_handle: UInt32) -> &Byte;
+
+    /// Write to file
+    fn WriteFile(handle: &Byte, buf: &Byte, len: UInt32, written: &mut UInt32, overlapped: &Byte) -> Int;
+
+    /// Exit process
+    fn ExitProcess(exit_code: UInt32) -> !;
+}
+
+// =============================================================================
+// Panic Functions
+// =============================================================================
+
+/// Unconditionally panic with the given message.
+/// This function never returns.
+public fn panic(msg: Text) -> ! {
+    panic_impl(msg, "", 0, 0)
+}
+
+/// Panic with location information.
+/// Called by the compiler when a panic occurs.
+public fn panic_at(msg: Text, file: Text, line: Int, column: Int) -> ! {
+    panic_impl(msg, file, line, column)
+}
+
+/// Internal panic implementation.
+/// Prints the panic message to stderr and exits.
+fn panic_impl(msg: Text, file: Text, line: Int, column: Int) -> ! {
+    // Write panic prefix
+    write_stderr("panic: ");
+    write_stderr(&msg);
+
+    // Write location if available
+    if file.len() > 0 {
+        write_stderr(" at ");
+        write_stderr(&file);
+        write_stderr(":");
+        write_int_stderr(line);
+        write_stderr(":");
+        write_int_stderr(column);
+    }
+
+    write_stderr("\n");
+
+    // Exit with panic code
+    exit_process(101)
+}
+
+/// Write a string to stderr using platform-specific syscalls.
+@intrinsic("verum.io.write_stderr")
+fn write_stderr(s: &Text);
+
+/// Write an integer to stderr.
+fn write_int_stderr(n: Int) {
+    if n == 0 {
+        write_stderr("0");
+        return;
+    }
+
+    let mut num = if n < 0 {
+        write_stderr("-");
+        -n
+    } else {
+        n
+    };
+
+    // Convert to digits (max 20 digits for 64-bit)
+    let mut buf: [Byte; 20] = [0; 20];
+    let mut i = 19;
+
+    while num > 0 {
+        buf[i] = ('0' as Byte) + ((num % 10) as Byte);
+        num = num / 10;
+        i = i - 1;
+    }
+
+    // Write digits as slice
+    let start = i + 1;
+    let digit_slice = &buf[start..20];
+    let digit_str = Text.from_utf8_unchecked(digit_slice);
+    write_stderr(&digit_str);
+}
+
+/// Exit the process with a status code.
+@intrinsic("verum.process.exit")
+fn exit_process(code: Int) -> !;
+
+/// Panic with a formatted message.
+public fn panic_fmt(args: FormatArgs) -> ! {
+    // Format the message
+    let msg = format_args(args);
+    panic(msg)
+}
+
+/// Abort the process immediately without cleanup.
+///
+/// This is more severe than panic - no unwinding, no cleanup.
+public fn abort() -> ! {
+    exit_process(134)  // SIGABRT equivalent
+}
+
+/// Exit the process with a status code (public).
+public fn exit(code: Int) -> ! {
+    exit_process(code)
+}
+
+// =============================================================================
+// Assert Functions
+// =============================================================================
+
+/// Assert that a condition is true.
+/// If false, panics with the given message.
+public fn assert(condition: Bool, msg: Text = "assertion failed") {
+    if !condition {
+        panic(msg);
+    }
+}
+
+/// Assert that two values are equal.
+public fn assert_eq<T: Eq + Debug>(left: T, right: T, msg: Text = "assertion failed: left != right") {
+    if left != right {
+        panic(msg);
+    }
+}
+
+/// Assert that two values are not equal.
+public fn assert_ne<T: Eq + Debug>(left: T, right: T, msg: Text = "assertion failed: left == right") {
+    if left == right {
+        panic(msg);
+    }
+}
+
+/// Assert that a value is Some.
+public fn assert_some<T>(value: Maybe<T>, msg: Text = "assertion failed: expected Some") -> T {
+    match value {
+        Some(v) => v,
+        None => panic(msg),
+    }
+}
+
+/// Assert that a value is None.
+public fn assert_none<T>(value: Maybe<T>, msg: Text = "assertion failed: expected None") {
+    match value {
+        Some(_) => panic(msg),
+        None => {},
+    }
+}
+
+/// Assert that a Result is Ok.
+public fn assert_ok<T, E: Debug>(result: Result<T, E>, msg: Text = "assertion failed: expected Ok") -> T {
+    match result {
+        Ok(v) => v,
+        Err(_) => panic(msg),
+    }
+}
+
+/// Assert that a Result is Err.
+public fn assert_err<T: Debug, E>(result: Result<T, E>, msg: Text = "assertion failed: expected Err") -> E {
+    match result {
+        Ok(_) => panic(msg),
+        Err(e) => e,
+    }
+}
+
+/// Assert that a condition is true (only in debug builds).
+@cfg(debug)
+public fn debug_assert(condition: Bool, msg: Text = "debug assertion failed") {
+    assert(condition, msg);
+}
+
+@cfg(not(debug))
+public fn debug_assert(_condition: Bool, _msg: Text = "debug assertion failed") {
+    // No-op in release builds
+}
+
+/// Debug-only equality assertion.
+@cfg(debug)
+public fn debug_assert_eq<T: Eq + Debug>(left: T, right: T, msg: Text = "debug assertion failed") {
+    assert_eq(left, right, msg);
+}
+
+@cfg(not(debug))
+public fn debug_assert_eq<T>(_left: T, _right: T, _msg: Text = "") {}
+
+/// Debug-only inequality assertion.
+@cfg(debug)
+public fn debug_assert_ne<T: Eq + Debug>(left: T, right: T, msg: Text = "debug assertion failed") {
+    assert_ne(left, right, msg);
+}
+
+@cfg(not(debug))
+public fn debug_assert_ne<T>(_left: T, _right: T, _msg: Text = "") {}
+
+// =============================================================================
+// Unreachable Code Markers
+// =============================================================================
+
+/// Marks code as unreachable.
+/// If this code is reached, the program will panic.
+public fn unreachable(msg: Text = "entered unreachable code") -> ! {
+    panic(msg)
+}
+
+/// Marks code as unreachable in a safe manner.
+/// In debug builds, panics. In release builds, undefined behavior hint.
+@cfg(debug)
+public fn unreachable_unchecked(msg: Text = "entered unreachable code") -> ! {
+    panic(msg)
+}
+
+@cfg(not(debug))
+public fn unreachable_unchecked(_msg: Text = "") -> ! {
+    unreachable()
+}
+
+/// Marks code as unimplemented.
+/// Use as a placeholder during development.
+public fn unimplemented(msg: Text = "not implemented") -> ! {
+    panic(msg)
+}
+
+/// Marks code as a work in progress.
+public fn todo(msg: Text = "not yet implemented") -> ! {
+    panic(msg)
+}
+
+// =============================================================================
+// Debug Output
+// =============================================================================
+
+/// Print a debug message to stderr.
+public fn debug_print(msg: &Text) {
+    write_stderr(msg);
+}
+
+/// Print a value using its Debug implementation.
+public fn dbg<T: Debug>(value: T) -> T {
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let _ = value.fmt_debug(&mut formatter);
+    }
+    debug_print(&buffer);
+    debug_print(&"\n");
+    value
+}
+
+// =============================================================================
+// Panic Hook
+// =============================================================================
+
+/// Information about a panic.
+public type PanicInfo is {
+    message: Text,
+    location: Maybe<Location>,
+};
+
+/// Source code location.
+public type Location is {
+    file: Text,
+    line: Int,
+    column: Int,
+};
+
+implement Location {
+    public fn new(file: Text, line: Int, column: Int) -> Location {
+        Location { file: file, line: line, column: column }
+    }
+}
+
+implement Debug for Location {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.file)?;
+        f.write_str(":")?;
+        f.write_int(self.line)?;
+        f.write_str(":")?;
+        f.write_int(self.column)
+    }
+}
+
+implement Display for Location {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.fmt_debug(f)
+    }
+}
+
+implement PanicInfo {
+    public fn message(&self) -> &Text {
+        &self.message
+    }
+
+    public fn location(&self) -> Maybe<&Location> {
+        self.location.as_ref()
+    }
+}
+
+implement Debug for PanicInfo {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("PanicInfo { message: ")?;
+        f.write_str(&self.message)?;
+        if let Some(loc) = self.location.as_ref() {
+            f.write_str(", at ")?;
+            loc.fmt_debug(f)?;
+        }
+        f.write_str(" }")
+    }
+}
+
+/// Type for panic hook functions.
+public type PanicHook is fn(&PanicInfo);
+
+/// Default panic hook that prints to stderr.
+public fn default_panic_hook(info: &PanicInfo) {
+    debug_print(&"panic: ");
+    debug_print(&info.message);
+    match info.location() {
+        Some(loc) => {
+            debug_print(&" at ");
+            debug_print(&loc.file);
+            debug_print(&":");
+            let line_str = f"{loc.line}";
+            debug_print(&line_str);
+        }
+        None => {}
+    }
+    debug_print(&"\n");
+}
+
+// =============================================================================
+// Catch Unwind (Panic Recovery)
+// =============================================================================
+
+/// Result of catching a panic.
+public type CatchResult<T> is Result<T, PanicInfo>;
+
+/// Attempt to run a function, catching any panic.
+/// Returns Ok(res) if successful, Err(panic_info) if a panic occurred.
+@intrinsic("catch_unwind")
+public fn catch_unwind<T, F: fn() -> T>(f: F) -> Result<T, PanicInfo> {
+    @vbc(CATCH_UNWIND, f)
+}
+
+/// Resume an unwinding panic.
+public fn resume_unwind(panic_info: PanicInfo) -> ! {
+    panic(panic_info.message)
+}
+
+// =============================================================================
+// Source Location Macros
+// =============================================================================
+
+/// Get the current file name.
+public meta fn file() -> Text {
+    @file
+}
+
+/// Get the current line number.
+public meta fn line() -> Int {
+    @line
+}
+
+/// Get the current column number.
+public meta fn column() -> Int {
+    @column
+}
+
+/// Get the current source location.
+public meta fn current_location() -> Location {
+    Location {
+        file: @file,
+        line: @line,
+        column: @column,
+    }
+}
+
+// =============================================================================
+// Format Args
+// =============================================================================
+
+/// Format argument container for panic_fmt.
+///
+/// Holds pre-formatted text pieces produced by the compiler from f-string
+/// or format macro expansion. The compiler lowers `panic(f"...")` into
+/// `panic_fmt(FormatArgs { pieces: &[...] })` with each piece already
+/// converted to Text.
+type FormatArgs is {
+    pieces: &[&Text],
+};
+
+/// Concatenate format argument pieces into a single Text.
+///
+/// This is the runtime half of format string handling. The compiler
+/// handles interpolation and type conversion at compile time; this
+/// function simply joins the resulting pieces.
+fn format_args(args: FormatArgs) -> Text {
+    let mut res = Text.new();
+    for piece in args.pieces {
+        res.push_str(piece);
+    }
+    res
+}

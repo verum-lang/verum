@@ -1,0 +1,13 @@
+// Test 7: Nested refinement types
+type NonZero is Int where it != 0;
+type PositiveNonZero is NonZero where it > 0;
+
+fn divide(dividend: Int, divisor: NonZero) -> Int {
+    dividend / divisor
+}
+
+fn main() {
+    let divisor: PositiveNonZero = 5;
+    let result = divide(100, divisor);
+    let _ = println(f"100 / {divisor} = {result}");
+}

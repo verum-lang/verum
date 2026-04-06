@@ -1,0 +1,7 @@
+// Test for-loops with references to iterables
+fn main() {
+    let range = 1..5;
+    for i in range {
+        print(i);
+    }
+}

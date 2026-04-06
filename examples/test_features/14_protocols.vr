@@ -1,0 +1,101 @@
+// Test protocol definitions and implementations
+// Tests protocol declaration, implementation, and associated types
+
+// Simple protocol without associated types
+type Printable is protocol {
+    fn to_string(self: &Self) -> Text;
+}
+
+// Protocol with associated type
+type Container is protocol {
+    type Item;
+    fn size(self: &Self) -> Int;
+    fn get(self: &Self, index: Int) -> Maybe<Self.Item>;
+}
+
+// Protocol with default methods would go here
+type Comparable is protocol {
+    fn compare(self: &Self, other: &Self) -> Int;
+}
+
+// Record type implementing Printable
+type Point is {
+    x: Float,
+    y: Float
+};
+
+implement Printable for Point {
+    fn to_string(self: &Self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Record type implementing Container
+type IntList is {
+    items: List<Int>
+};
+
+implement Container for IntList {
+    type Item is Int;
+
+    fn size(self: &Self) -> Int {
+        self.items.len()
+    }
+
+    fn get(self: &Self, index: Int) -> Maybe<Int> {
+        if index >= 0 && index < self.items.len() {
+            Some(self.items[index])
+        } else {
+            None
+        }
+    }
+}
+
+// Generic function using protocol bound
+fn print_item<T: Printable>(item: &T) {
+    let s = item.to_string()
+    print(s)
+}
+
+// Function using Container protocol
+fn first_element<C: Container>(container: &C) -> Maybe<C.Item> {
+    container.get(0)
+}
+
+fn main() {
+    print("=== Protocol Tests ===")
+
+    // Test 1: Printable protocol
+    print("\nTest 1: Printable protocol")
+    let p = Point { x: 3.0, y: 4.0 }
+    print_item(&p)
+
+    // Test 2: Container protocol with associated type
+    print("\nTest 2: Container protocol")
+    let list = IntList { items: [10, 20, 30].to_list() }
+    print(f"Size: {list.size()}")
+
+    match list.get(0) {
+        Some(val) => print(f"First element: {val}"),
+        None => print("Empty container")
+    }
+
+    match list.get(10) {
+        Some(val) => print(f"Element at 10: {val}"),
+        None => print("Index out of bounds (expected)")
+    }
+
+    // Test 3: Generic function with protocol bound
+    print("\nTest 3: Generic with protocol bound")
+    let p2 = Point { x: 1.0, y: 2.0 }
+    print_item(&p2)
+
+    // Test 4: Associated type usage
+    print("\nTest 4: Associated type")
+    match first_element(&list) {
+        Some(val) => print(f"First via generic: {val}"),
+        None => print("Empty")
+    }
+
+    print("\nProtocol tests complete")
+}

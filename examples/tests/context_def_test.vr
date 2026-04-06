@@ -1,0 +1,7 @@
+context Logger {
+    fn log(self, msg: Text)
+}
+
+fn main() {
+    let _ = print("Context def test");
+}

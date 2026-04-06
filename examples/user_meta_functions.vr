@@ -1,0 +1,379 @@
+// User-Defined Meta Functions Example
+// Demonstrates Verum's compile-time meta-programming capabilities
+
+// ============================================================================
+// Example 1: Simple compile-time computation
+// ============================================================================
+
+meta fn square(x: Integer) -> Integer {
+    x * x
+}
+
+meta fn factorial(n: Integer) -> Integer {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// Usage: These execute at compile time
+const SQUARE_5: Integer = square(5);      // 25
+const FACTORIAL_5: Integer = factorial(5); // 120
+
+// ============================================================================
+// Example 2: Type introspection and code generation
+// ============================================================================
+
+// Meta function that generates getter methods for a type
+meta fn generate_getters(ty: Type) -> List<Expr> {
+    let fields = type_fields(ty);
+    let mut getters = [];
+
+    for field in fields {
+        let (field_name, field_type) = field;
+
+        // Generate a getter function for each field
+        let getter = quote {
+            fn [field_name](&self) -> [field_type] {
+                self.[field_name]
+            }
+        };
+
+        getters.push(getter);
+    }
+
+    getters
+}
+
+// Apply the meta function via attribute
+@generate_getters
+type Person is {
+    name: Text,
+    age: Integer,
+    email: Text,
+}
+
+// The above expands to:
+// type Person is { name: Text, age: Integer, email: Text }
+//
+// fn name(&self) -> Text { self.name }
+// fn age(&self) -> Integer { self.age }
+// fn email(&self) -> Text { self.email }
+
+// ============================================================================
+// Example 3: Conditional compilation based on type properties
+// ============================================================================
+
+meta fn generate_debug_impl(ty: Type) -> Expr {
+    let type_name = type_name(ty);
+    let fields = type_fields(ty);
+
+    // Generate field formatters
+    let mut field_strs = [];
+    for field in fields {
+        let (fname, _ftype) = field;
+        field_strs.push(quote {
+            text_concat([fname], ": ", self.[fname].to_string())
+        });
+    }
+
+    quote {
+        impl Debug for [ty] {
+            fn debug(&self) -> Text {
+                text_concat([type_name], " { ",
+                    [field_strs].join(", "),
+                " }")
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Example 4: List comprehension at compile time
+// ============================================================================
+
+meta fn generate_test_cases(start: Integer, end: Integer) -> List<Expr> {
+    let cases = [x * 2 for x in range(start, end) if x % 2 == 0];
+
+    cases.map(|val| quote {
+        test "case_[val]" {
+            assert(compute(val) == expected(val))
+        }
+    })
+}
+
+// ============================================================================
+// Example 5: Builder pattern generator
+// ============================================================================
+
+meta fn generate_builder(ty: Type) -> Expr {
+    let fields = type_fields(ty);
+    let type_name = type_name(ty);
+    let builder_name = text_concat(type_name, "Builder");
+
+    // Generate builder struct
+    let builder_fields = fields.map(|f| {
+        let (fname, ftype) = f;
+        quote { [fname]: Maybe<[ftype]> }
+    });
+
+    // Generate with_* methods
+    let with_methods = fields.map(|f| {
+        let (fname, ftype) = f;
+        let method_name = text_concat("with_", fname);
+
+        quote {
+            fn [method_name](mut self, value: [ftype]) -> Self {
+                self.[fname] = Maybe.Some(value);
+                self
+            }
+        }
+    });
+
+    // Generate build method
+    let build_checks = fields.map(|f| {
+        let (fname, _) = f;
+        quote {
+            let [fname] = self.[fname].expect("Missing field: [fname]");
+        }
+    });
+
+    let field_inits = fields.map(|f| {
+        let (fname, _) = f;
+        quote { [fname] }
+    });
+
+    quote {
+        type [builder_name] is {
+            [builder_fields]
+        }
+
+        impl [builder_name] {
+            fn new() -> Self {
+                Self {
+                    [fields.map(|f| quote { [f.0]: Maybe.None })]
+                }
+            }
+
+            [with_methods]
+
+            fn build(self) -> Result<[ty], Text> {
+                [build_checks]
+
+                Ok([type_name] {
+                    [field_inits]
+                })
+            }
+        }
+
+        impl [ty] {
+            fn builder() -> [builder_name] {
+                [builder_name].new()
+            }
+        }
+    }
+}
+
+@generate_builder
+type Config is {
+    host: Text,
+    port: Integer,
+    timeout: Integer,
+}
+
+// Usage:
+// let config = Config.builder()
+//     .with_host("localhost")
+//     .with_port(8080)
+//     .with_timeout(30)
+//     .build()?;
+
+// ============================================================================
+// Example 6: Validation generator
+// ============================================================================
+
+meta fn generate_validator(ty: Type, rules: Map<Text, Expr>) -> Expr {
+    let type_name = type_name(ty);
+    let checks = [];
+
+    for (field_name, rule) in rules {
+        checks.push(quote {
+            if !([rule](self.[field_name])) {
+                return Err(text_concat("Validation failed for ", [field_name]));
+            }
+        });
+    }
+
+    quote {
+        impl [ty] {
+            fn validate(&self) -> Result<Unit, Text> {
+                [checks]
+                Ok(())
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Example 7: Enum variant counter
+// ============================================================================
+
+meta fn count_variants(enum_type: Type) -> Integer {
+    let variants = type_variants(enum_type);
+    list_len(variants)
+}
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Yellow
+
+const COLOR_COUNT: Integer = count_variants(Color); // 4
+
+// ============================================================================
+// Example 8: Performance optimization - unroll loops
+// ============================================================================
+
+meta fn unroll_loop(iterations: Integer, body: Expr) -> Expr {
+    let mut statements = [];
+
+    for i in range(0, iterations) {
+        // Substitute loop variable with constant
+        let specialized = substitute(body, "i", i);
+        statements.push(specialized);
+    }
+
+    quote { [statements] }
+}
+
+// Usage in hot path:
+fn compute_sum() -> Integer {
+    let mut sum = 0;
+
+    // This loop gets unrolled at compile time
+    unroll_loop(10, quote {
+        sum = sum + array[i];
+    })
+
+    sum
+}
+
+// ============================================================================
+// Example 9: Automatic serialization format selection
+// ============================================================================
+
+meta fn generate_serializer(ty: Type, format: Text) -> Expr {
+    let fields = type_fields(ty);
+
+    match format {
+        "json" => generate_json_serializer(ty, fields),
+        "binary" => generate_binary_serializer(ty, fields),
+        "xml" => generate_xml_serializer(ty, fields),
+        _ => error("Unknown serialization format")
+    }
+}
+
+meta fn generate_json_serializer(ty: Type, fields: List<(Text, Type)>) -> Expr {
+    quote {
+        impl Serialize for [ty] {
+            fn serialize(&self) -> Text {
+                let mut json = "{";
+                [fields.map(|f| {
+                    let (fname, _) = f;
+                    quote {
+                        json = text_concat(json, "\"", [fname], "\": ",
+                                         self.[fname].to_json(), ",");
+                    }
+                })]
+                json = text_concat(json, "}");
+                json
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Example 10: Compile-time assertions
+// ============================================================================
+
+meta fn static_assert(condition: Bool, message: Text) -> Expr {
+    if !condition {
+        compile_error(message)
+    } else {
+        quote { () }
+    }
+}
+
+// Ensure type size constraints at compile time
+static_assert(
+    type_size(Person) <= 128,
+    "Person type exceeds maximum size of 128 bytes"
+);
+
+// ============================================================================
+// Example 11: DSL transformation
+// ============================================================================
+
+meta fn transform_sql_like_syntax(query: Expr) -> Expr {
+    // Transform SQL-like syntax to safe query builder calls
+    match query {
+        Quote(Select(fields, From(table), Where(condition))) => {
+            quote {
+                QueryBuilder.new()
+                    .select([fields])
+                    .from([table])
+                    .where([condition])
+                    .build()
+            }
+        },
+        _ => query
+    }
+}
+
+// ============================================================================
+// Built-in Meta Functions Reference
+// ============================================================================
+
+// Type introspection:
+// - type_name(ty: Type) -> Text
+// - type_size(ty: Type) -> Integer
+// - type_fields(ty: Type) -> List<(Text, Type)>
+// - type_variants(ty: Type) -> List<Text>
+
+// List operations:
+// - list_len(list: List<T>) -> Integer
+// - list_push(list: List<T>, item: T) -> List<T>
+// - list_get(list: List<T>, index: Integer) -> T
+
+// Text operations:
+// - text_concat(parts: Text...) -> Text
+// - text_len(text: Text) -> Integer
+
+// Code generation:
+// - quote { ... } - Create AST node
+// - unquote(expr) - Splice AST node
+// - substitute(expr, var, value) - Variable substitution
+
+// Compilation control:
+// - compile_error(msg: Text) - Emit compile error
+// - compile_warning(msg: Text) - Emit compile warning
+
+fn main() {
+    // All the meta functions above execute at compile time
+    // Only the generated code runs at runtime
+
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com",
+    };
+
+    // These getters were generated by meta function
+    print(person.name());
+    print(person.age());
+
+    print("Factorial of 5: {}", FACTORIAL_5);
+    print("Square of 5: {}", SQUARE_5);
+}

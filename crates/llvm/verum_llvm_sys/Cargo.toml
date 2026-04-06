@@ -1,0 +1,55 @@
+[package]
+name = "verum_llvm_sys"
+version = "21.0.0"
+edition = "2024"
+description = "Low-level FFI bindings for LLVM and LLD, built from local sources"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/luxquant/axiom"
+readme = "README.md"
+
+# Tells cargo this crate links to native LLVM/LLD libraries
+# Prevents multiple crates from linking the same native library
+links = "verum-llvm"
+
+[features]
+default = ["llvm", "lld", "static"]
+
+# Core components
+llvm = []
+lld = []
+
+# Linking mode
+static = []      # Static linking (default, recommended)
+dynamic = []     # Dynamic linking (requires LLVM shared libs)
+
+# Individual LLVM targets (for smaller builds)
+targets-all = []
+target-x86 = []
+target-aarch64 = []
+target-arm = []
+target-riscv = []
+target-wasm = []
+
+# Optional features
+orc2 = []        # OrcV2 JIT API
+debuginfo = []   # Debug info generation
+remarks = []     # Optimization remarks
+
+# Linker modes
+lld-subprocess = []  # Use LLD via subprocess
+system-linker = []   # Use system linker (cc/ld)
+
+[build-dependencies]
+cc = { workspace = true }
+
+[dependencies]
+libc = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[lints.rust]
+# These cfg conditions are set by build.rs or are for documentation
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(LLVM_SYS_NOT_FOUND)'] }

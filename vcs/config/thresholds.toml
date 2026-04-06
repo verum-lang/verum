@@ -1,0 +1,385 @@
+# Verum Compliance Suite (VCS) - Performance Thresholds
+#
+# This file defines the performance targets and regression thresholds
+# for the VCS benchmark suite.
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# Reference: CLAUDE.md - Performance Targets
+#
+# Thresholds are validated during CI/CD and on-demand via:
+#   make bench-validate
+#   vbench validate --thresholds config/thresholds.toml
+
+# =============================================================================
+# Global Settings
+# =============================================================================
+
+[global]
+# Regression threshold as a percentage (relative to baseline)
+# If a metric degrades by more than this percentage, it's flagged as regression
+regression_threshold_percent = 10.0
+
+# Improvement threshold for notifications
+# If a metric improves by more than this percentage, it's flagged as improvement
+improvement_threshold_percent = 5.0
+
+# Statistical confidence level for benchmark comparisons (0.0 - 1.0)
+confidence_level = 0.95
+
+# Outlier detection: IQR multiplier for identifying outliers
+outlier_iqr_multiplier = 1.5
+
+# Minimum number of samples required for valid comparison
+min_samples = 100
+
+# =============================================================================
+# CBGR Memory Safety - Tier Latency
+# =============================================================================
+# Target: < 15ns check overhead for Tier 0 (full CBGR protection)
+
+[cbgr]
+# Tier 0: Full CBGR protection (~15ns overhead)
+[cbgr.tier0_check]
+target_ns = 15
+max_ns = 20
+description = "CBGR Tier 0 (ThinRef) check latency"
+critical = true
+
+# Tier 1: Compiler-proven safe (0ns overhead)
+[cbgr.tier1_check]
+target_ns = 0
+max_ns = 1
+description = "CBGR Tier 1 (checked ref) check latency"
+critical = true
+
+# Tier 2: Manual safety proof (0ns overhead)
+[cbgr.tier2_check]
+target_ns = 0
+max_ns = 1
+description = "CBGR Tier 2 (unsafe ref) check latency"
+critical = true
+
+# Memory layout sizes
+[cbgr.thin_ref_size]
+target_bytes = 16
+max_bytes = 24
+description = "ThinRef<T> memory footprint (ptr + gen + caps)"
+critical = false
+
+[cbgr.fat_ref_size]
+target_bytes = 24
+max_bytes = 32
+description = "FatRef<T> memory footprint (ptr + gen + caps + len)"
+critical = false
+
+# Generation wraparound handling
+[cbgr.generation_check]
+target_ns = 5
+max_ns = 10
+description = "Generation counter validation"
+critical = true
+
+# =============================================================================
+# Type Inference Performance
+# =============================================================================
+# Target: < 100ms for 10K LOC
+
+[type_inference]
+# Small files (< 1K LOC)
+[type_inference.1k_loc]
+target_ms = 10
+max_ms = 20
+description = "Type inference for 1K LOC"
+critical = false
+
+# Medium files (1K - 5K LOC)
+[type_inference.5k_loc]
+target_ms = 50
+max_ms = 75
+description = "Type inference for 5K LOC"
+critical = false
+
+# Standard target (10K LOC)
+[type_inference.10k_loc]
+target_ms = 100
+max_ms = 150
+description = "Type inference for 10K LOC (primary target)"
+critical = true
+
+# Large files (50K LOC)
+[type_inference.50k_loc]
+target_ms = 500
+max_ms = 750
+description = "Type inference for 50K LOC"
+critical = false
+
+# Unification operations
+[type_inference.unification]
+target_ns = 50
+max_ns = 100
+description = "Single type unification operation"
+critical = false
+
+# Constraint solving
+[type_inference.constraint_solve]
+target_us = 100
+max_us = 200
+description = "Constraint solving per function"
+critical = false
+
+# =============================================================================
+# Compilation Throughput
+# =============================================================================
+# Target: > 50K LOC/sec
+
+[compilation]
+# Overall throughput (LOC/sec)
+[compilation.throughput]
+target_loc_per_sec = 50000
+min_loc_per_sec = 40000
+description = "Compilation throughput (LOC/second)"
+critical = true
+
+# Lexer throughput
+[compilation.lexer_throughput]
+target_mb_per_sec = 100
+min_mb_per_sec = 80
+description = "Lexer throughput (MB/second)"
+critical = false
+
+# Parser throughput
+[compilation.parser_throughput]
+target_loc_per_sec = 100000
+min_loc_per_sec = 80000
+description = "Parser throughput (LOC/second)"
+critical = false
+
+# IR generation
+[compilation.ir_generation]
+target_loc_per_sec = 75000
+min_loc_per_sec = 60000
+description = "IR generation throughput"
+critical = false
+
+# LLVM codegen
+[compilation.llvm_codegen]
+target_loc_per_sec = 20000
+min_loc_per_sec = 15000
+description = "LLVM codegen throughput"
+critical = false
+
+# Incremental compilation (changed file only)
+[compilation.incremental]
+target_ms = 50
+max_ms = 100
+description = "Incremental recompilation latency"
+critical = false
+
+# =============================================================================
+# Runtime Performance
+# =============================================================================
+# Target: 0.85-0.95x native C performance
+
+[runtime]
+# Overall runtime vs native C
+[runtime.vs_native_c]
+target_ratio = 0.90
+min_ratio = 0.85
+max_ratio = 1.00
+description = "Runtime performance vs native C (ratio)"
+critical = true
+
+# Arithmetic operations overhead
+[runtime.arithmetic_overhead]
+target_percent = 0
+max_percent = 5
+description = "Arithmetic operations overhead vs native"
+critical = false
+
+# Function call overhead
+[runtime.function_call_overhead]
+target_ns = 2
+max_ns = 5
+description = "Function call overhead vs native"
+critical = false
+
+# Closure overhead
+[runtime.closure_overhead]
+target_ns = 5
+max_ns = 10
+description = "Closure invocation overhead"
+critical = false
+
+# Async task spawn
+[runtime.async_spawn]
+target_us = 1
+max_us = 5
+description = "Async task spawn latency"
+critical = false
+
+# Context switch
+[runtime.context_switch]
+target_ns = 100
+max_ns = 200
+description = "Context switch latency"
+critical = false
+
+# =============================================================================
+# Memory Overhead
+# =============================================================================
+# Target: < 5% overhead
+
+[memory]
+# Overall memory overhead vs native
+[memory.overhead_percent]
+target_percent = 3
+max_percent = 5
+description = "Memory overhead vs native implementation"
+critical = true
+
+# Heap fragmentation
+[memory.fragmentation_percent]
+target_percent = 5
+max_percent = 10
+description = "Heap fragmentation percentage"
+critical = false
+
+# Stack frame size
+[memory.stack_frame_overhead]
+target_percent = 10
+max_percent = 20
+description = "Stack frame overhead vs native"
+critical = false
+
+# GC pause time (if applicable)
+[memory.gc_pause_max]
+target_us = 100
+max_us = 1000
+description = "Maximum GC pause time (if applicable)"
+critical = false
+
+# Allocation rate
+[memory.allocation_rate]
+target_mb_per_sec = 1000
+min_mb_per_sec = 500
+description = "Memory allocation throughput"
+critical = false
+
+# =============================================================================
+# SMT Verification
+# =============================================================================
+
+[smt]
+# Simple refinement verification
+[smt.simple_refinement]
+target_ms = 10
+max_ms = 50
+description = "Simple refinement type verification"
+critical = false
+
+# Complex refinement verification
+[smt.complex_refinement]
+target_ms = 100
+max_ms = 500
+description = "Complex refinement type verification"
+critical = false
+
+# Proof cache hit rate
+[smt.cache_hit_rate]
+target_percent = 90
+min_percent = 80
+description = "SMT proof cache hit rate"
+critical = false
+
+# Timeout rate
+[smt.timeout_rate]
+target_percent = 0
+max_percent = 1
+description = "SMT verification timeout rate"
+critical = true
+
+# =============================================================================
+# Differential Testing
+# =============================================================================
+
+[differential]
+# Equivalence rate (Tier 0 vs Tier 3)
+[differential.equivalence_rate]
+target_percent = 100
+min_percent = 100
+description = "Semantic equivalence rate between tiers"
+critical = true
+
+# Output tolerance for floating-point
+[differential.float_tolerance]
+epsilon = 1e-10
+description = "Floating-point comparison tolerance"
+
+# Memory behavior tolerance
+[differential.memory_tolerance_percent]
+max_percent = 10
+description = "Memory allocation pattern tolerance"
+
+# =============================================================================
+# Test Suite Performance
+# =============================================================================
+
+[test_suite]
+# L0 test execution time
+[test_suite.l0_total]
+target_sec = 30
+max_sec = 60
+description = "L0 test suite total execution time"
+critical = false
+
+# L1 test execution time
+[test_suite.l1_total]
+target_sec = 60
+max_sec = 120
+description = "L1 test suite total execution time"
+critical = false
+
+# L2 test execution time
+[test_suite.l2_total]
+target_sec = 120
+max_sec = 300
+description = "L2 test suite total execution time"
+critical = false
+
+# Full suite execution time
+[test_suite.full_total]
+target_min = 10
+max_min = 30
+description = "Full test suite execution time"
+critical = false
+
+# =============================================================================
+# Regression Alert Configuration
+# =============================================================================
+
+[alerts]
+# Slack webhook configuration
+slack_webhook_env = "SLACK_WEBHOOK_URL"
+slack_channel = "#verum-ci"
+
+# Discord webhook configuration
+discord_webhook_env = "DISCORD_WEBHOOK_URL"
+
+# Email configuration
+email_recipients = ["team@example.com"]
+email_on_regression = true
+email_on_improvement = false
+
+# GitHub issue creation
+create_issue_on_regression = true
+issue_labels = ["performance", "regression", "ci"]
+issue_assignees = []  # Auto-assign based on CODEOWNERS
+
+# Alert thresholds
+[alerts.thresholds]
+# Percentage regression to trigger alert
+regression_alert_percent = 10
+# Percentage improvement to trigger notification
+improvement_notify_percent = 5
+# Number of consecutive regressions before critical alert
+consecutive_regression_alert = 3

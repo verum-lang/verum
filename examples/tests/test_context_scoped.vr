@@ -1,0 +1,21 @@
+// Test 4: Scoped context provision
+context Environment {
+    fn get_var(self, name: Text) -> Text
+}
+
+fn check_env() using Environment {
+    let path = Environment.get_var("PATH");
+}
+
+type TestEnv is { vars: Map<Text, Text> };
+type ProdEnv is { vars: Map<Text, Text> };
+
+fn main() {
+    // First scope
+    provide Environment = TestEnv { vars: Map.new() };
+    check_env();
+
+    // Second scope (should override)
+    provide Environment = ProdEnv { vars: Map.new() };
+    check_env();
+}

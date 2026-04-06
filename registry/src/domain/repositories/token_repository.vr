@@ -1,0 +1,293 @@
+// API Token Repository Protocol
+//
+// Defines the TokenRepository protocol for persisting and retrieving ApiToken entities.
+// This protocol is separated from UserRepository to follow the Single Responsibility
+// Principle and because tokens have different lifecycle and query patterns.
+//
+// Design Principles:
+// - Token management is security-critical and requires special handling
+// - Tokens should never be stored in plain text (hashing is infrastructure concern)
+// - Token validation is high-frequency, requiring efficient lookups
+// - Token expiration and revocation must be atomic operations
+//
+// Security Considerations:
+// - Token values should be hashed before storage (implementation concern)
+// - Expired tokens should be periodically cleaned up
+// - Failed validation attempts should be rate-limited
+// - Last used timestamp helps detect compromised tokens
+//
+// All methods are async for non-blocking I/O and return Result<T, RegistryError>
+// for explicit error handling.
+
+mount core.base.{Text, Int, Bool, Result, Maybe, List};
+mount super.super.user.ApiToken;
+mount super.super.errors.RegistryError;
+mount super.super.refinements.{EntityId, TokenValue, QueryOffset, QueryLimit};
+
+/// TokenRepository protocol defines the contract for ApiToken persistence
+///
+/// Implementations must provide thread-safe, async database operations for:
+/// - Token CRUD operations (Create, Read, Delete - tokens are immutable)
+/// - Token authentication (validation, lookup)
+/// - Token lifecycle management (expiration, revocation)
+/// - User token management (list, count)
+///
+/// Example Usage:
+/// ```verum
+/// using [TokenRepository] async fn authenticate_request(
+///     token_value: TokenValue
+/// ) -> Result<ApiToken, RegistryError> {
+///     // Look up token
+///     let maybe_token = TokenRepository.get_by_value(token_value).await?;
+///
+///     match maybe_token {
+///         Maybe.Some(token) => {
+///             // Check if token is valid (active and not expired)
+///             let now = unix_timestamp();
+///             if !token.is_valid(now) {
+///                 return Result.Err(RegistryError.invalid_token("Token expired or inactive"));
+///             }
+///
+///             // Update last used timestamp
+///             TokenRepository.update_last_used(token.id, now).await?;
+///
+///             Result.Ok(token)
+///         },
+///         Maybe.None => {
+///             Result.Err(RegistryError.invalid_token("Token not found"))
+///         }
+///     }
+/// }
+/// ```
+pub protocol TokenRepository {
+    /// Retrieve a token by its unique ID
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(token)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_id(id: EntityId) -> Result<Maybe<ApiToken>, RegistryError>;
+
+    /// Retrieve a token by its value (hashed)
+    ///
+    /// This is the primary authentication lookup. The token value should be
+    /// hashed using the same algorithm as storage before comparison.
+    ///
+    /// Parameters:
+    /// - token_value: The token string to look up (should be hashed by implementation)
+    ///
+    /// Returns:
+    /// - Ok(Maybe.Some(token)) if found
+    /// - Ok(Maybe.None) if not found
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_value(token_value: TokenValue) -> Result<Maybe<ApiToken>, RegistryError>;
+
+    /// Persist a token (insert only - tokens are immutable once created)
+    ///
+    /// Token values should be hashed before storage for security.
+    ///
+    /// Parameters:
+    /// - token: The ApiToken to persist
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on persistence failure
+    /// - Err(RegistryError.ValidationError) if token data is invalid
+    async fn save(token: ApiToken) -> Result<(), RegistryError>;
+
+    /// Delete a token by ID (revoke)
+    ///
+    /// Permanently removes the token. This is irreversible.
+    ///
+    /// Parameters:
+    /// - id: The token ID to delete
+    ///
+    /// Returns:
+    /// - Ok(()) if token was deleted or didn't exist (idempotent)
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete(id: EntityId) -> Result<(), RegistryError>;
+
+    /// Check if a token exists by ID
+    ///
+    /// More efficient than get_by_id when only existence needs to be checked.
+    ///
+    /// Parameters:
+    /// - id: The token ID to check
+    ///
+    /// Returns:
+    /// - Ok(true) if token exists
+    /// - Ok(false) if token does not exist
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn exists(id: EntityId) -> Result<Bool, RegistryError>;
+
+    /// Get all tokens belonging to a user
+    ///
+    /// Returns tokens in descending order by creation date (newest first).
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user who owns the tokens
+    ///
+    /// Returns:
+    /// - Ok(List<ApiToken>) with user's tokens (empty list if none)
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_by_user(user_id: EntityId) -> Result<List<ApiToken>, RegistryError>;
+
+    /// Count tokens belonging to a user
+    ///
+    /// Useful for enforcing token limits per user.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user
+    ///
+    /// Returns:
+    /// - Ok(count) with number of tokens
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count_by_user(user_id: EntityId) -> Result<Int, RegistryError>;
+
+    /// Update the last used timestamp for a token
+    ///
+    /// Should be called on every successful authentication.
+    /// Helps detect compromised or abandoned tokens.
+    ///
+    /// Parameters:
+    /// - token_id: ID of the token
+    /// - timestamp: Unix timestamp of last use
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn update_last_used(token_id: EntityId, timestamp: Int) -> Result<(), RegistryError>;
+
+    /// Deactivate a token (soft delete)
+    ///
+    /// Sets is_active to false, preventing authentication without data loss.
+    /// Token can be reactivated later.
+    ///
+    /// Parameters:
+    /// - token_id: ID of the token to deactivate
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn deactivate(token_id: EntityId) -> Result<(), RegistryError>;
+
+    /// Reactivate a token
+    ///
+    /// Sets is_active to true, restoring authentication capability.
+    ///
+    /// Parameters:
+    /// - token_id: ID of the token to reactivate
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn activate(token_id: EntityId) -> Result<(), RegistryError>;
+
+    /// Delete all tokens for a user
+    ///
+    /// Useful for account deletion or security incidents.
+    /// This is a destructive operation.
+    ///
+    /// Parameters:
+    /// - user_id: ID of the user whose tokens should be deleted
+    ///
+    /// Returns:
+    /// - Ok(count) with number of tokens deleted
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete_all_for_user(user_id: EntityId) -> Result<Int, RegistryError>;
+
+    /// Get all expired tokens
+    ///
+    /// Useful for cleanup jobs. A token is expired if:
+    /// - expires_at > 0 AND expires_at < current_time
+    ///
+    /// Parameters:
+    /// - current_time: Unix timestamp to compare against
+    ///
+    /// Returns:
+    /// - Ok(List<ApiToken>) with expired tokens
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_expired(current_time: Int) -> Result<List<ApiToken>, RegistryError>;
+
+    /// Delete expired tokens
+    ///
+    /// Cleanup operation to remove expired tokens.
+    /// Should be run periodically (daily/weekly).
+    ///
+    /// Parameters:
+    /// - current_time: Unix timestamp to compare against
+    ///
+    /// Returns:
+    /// - Ok(count) with number of tokens deleted
+    /// - Err(RegistryError.DatabaseError) on deletion failure
+    async fn delete_expired(current_time: Int) -> Result<Int, RegistryError>;
+
+    /// Get tokens not used recently
+    ///
+    /// Helps identify potentially compromised or abandoned tokens.
+    ///
+    /// Parameters:
+    /// - days_inactive: Number of days since last use
+    ///
+    /// Returns:
+    /// - Ok(List<ApiToken>) with inactive tokens
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn get_inactive(days_inactive: Int) -> Result<List<ApiToken>, RegistryError>;
+
+    /// List all tokens with pagination
+    ///
+    /// Admin operation for auditing and management.
+    ///
+    /// Parameters:
+    /// - offset: Number of tokens to skip (for pagination)
+    /// - limit: Maximum number of tokens to return
+    ///
+    /// Returns:
+    /// - Ok(List<ApiToken>) with requested page
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn list_all(offset: QueryOffset, limit: QueryLimit) -> Result<List<ApiToken>, RegistryError>;
+
+    /// Count total number of tokens
+    ///
+    /// Useful for statistics and monitoring.
+    ///
+    /// Returns:
+    /// - Ok(count) with total token count
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count() -> Result<Int, RegistryError>;
+
+    /// Count active tokens
+    ///
+    /// Excludes expired and deactivated tokens.
+    ///
+    /// Parameters:
+    /// - current_time: Unix timestamp to check expiration
+    ///
+    /// Returns:
+    /// - Ok(count) with active token count
+    /// - Err(RegistryError.DatabaseError) on query failure
+    async fn count_active(current_time: Int) -> Result<Int, RegistryError>;
+
+    /// Update token scopes
+    ///
+    /// Modifies the permissions granted by a token.
+    ///
+    /// Parameters:
+    /// - token_id: ID of the token
+    /// - new_scopes: New list of scope strings
+    ///
+    /// Returns:
+    /// - Ok(()) on success
+    /// - Err(RegistryError.DatabaseError) on update failure
+    async fn update_scopes(token_id: EntityId, new_scopes: List<Text>) -> Result<(), RegistryError>;
+
+    /// Get next available token ID
+    ///
+    /// Helper for generating unique IDs. Implementation may use auto-increment,
+    /// UUID, or other strategies.
+    ///
+    /// Returns:
+    /// - Ok(id) with next available ID
+    /// - Err(RegistryError.DatabaseError) on failure
+    async fn next_id() -> Result<EntityId, RegistryError>;
+}

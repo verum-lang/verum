@@ -1,0 +1,116 @@
+// State Machine Application
+// Demonstrates: variant types, pattern matching, state transitions
+
+type TrafficLight is Red | Yellow | Green;
+type DoorState is Open | Closed | Locked;
+type ConnectionState is Disconnected | Connecting | Connected | Error(Text);
+
+// Traffic light transitions
+fn next_light(current: TrafficLight) -> TrafficLight {
+    match current {
+        Red => Green,
+        Green => Yellow,
+        Yellow => Red
+    }
+}
+
+fn light_name(light: TrafficLight) -> Text {
+    match light {
+        Red => "RED",
+        Yellow => "YELLOW",
+        Green => "GREEN"
+    }
+}
+
+fn light_action(light: TrafficLight) -> Text {
+    match light {
+        Red => "STOP",
+        Yellow => "CAUTION",
+        Green => "GO"
+    }
+}
+
+// Door state machine
+fn can_open(state: DoorState) -> Bool {
+    match state {
+        Open => false,      // Already open
+        Closed => true,     // Can open
+        Locked => false     // Must unlock first
+    }
+}
+
+fn can_lock(state: DoorState) -> Bool {
+    match state {
+        Open => false,      // Must close first
+        Closed => true,     // Can lock
+        Locked => false     // Already locked
+    }
+}
+
+fn door_name(state: DoorState) -> Text {
+    match state {
+        Open => "OPEN",
+        Closed => "CLOSED",
+        Locked => "LOCKED"
+    }
+}
+
+// Connection state machine
+fn connection_status(state: ConnectionState) -> Text {
+    match state {
+        Disconnected => "Not connected",
+        Connecting => "Attempting connection...",
+        Connected => "Connection established",
+        Error(msg) => f"Connection error: {msg}"
+    }
+}
+
+fn is_connected(state: ConnectionState) -> Bool {
+    match state {
+        Connected => true,
+        Disconnected => false,
+        Connecting => false,
+        Error(_) => false
+    }
+}
+
+fn main() {
+    let _ = print("=== State Machine Demo ===");
+    let _ = print("");
+
+    // Traffic light simulation
+    let _ = print("Traffic Light Simulation:");
+    let mut light: TrafficLight = Red;
+    let _ = print(f"  Light: {light_name(light)} -> {light_action(light)}");
+    light = next_light(light);
+    let _ = print(f"  Light: {light_name(light)} -> {light_action(light)}");
+    light = next_light(light);
+    let _ = print(f"  Light: {light_name(light)} -> {light_action(light)}");
+    light = next_light(light);
+    let _ = print(f"  Light: {light_name(light)} -> {light_action(light)}");
+    let _ = print("");
+
+    // Door state
+    let _ = print("Door State Machine:");
+    let door1: DoorState = Closed;
+    let door2: DoorState = Locked;
+    let door3: DoorState = Open;
+    let _ = print(f"  Door 1 ({door_name(door1)}): Can open? {can_open(door1)}, Can lock? {can_lock(door1)}");
+    let _ = print(f"  Door 2 ({door_name(door2)}): Can open? {can_open(door2)}, Can lock? {can_lock(door2)}");
+    let _ = print(f"  Door 3 ({door_name(door3)}): Can open? {can_open(door3)}, Can lock? {can_lock(door3)}");
+    let _ = print("");
+
+    // Connection states
+    let _ = print("Connection State Machine:");
+    let conn1: ConnectionState = Disconnected;
+    let conn2: ConnectionState = Connecting;
+    let conn3: ConnectionState = Connected;
+    let conn4: ConnectionState = Error("Timeout");
+    let _ = print(f"  State 1: {connection_status(conn1)}");
+    let _ = print(f"  State 2: {connection_status(conn2)}");
+    let _ = print(f"  State 3: {connection_status(conn3)}");
+    let _ = print(f"  State 4: {connection_status(conn4)}");
+
+    let _ = print("");
+    let _ = print("=== Done ===");
+}

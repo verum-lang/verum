@@ -1,0 +1,201 @@
+// Test Case 3: Context Group Usage
+// Tests: using WebContext = [Logger, Metrics, Config]
+
+context Logger {
+    fn log(msg: Text)
+    fn info(msg: Text)
+}
+
+context Metrics {
+    fn increment(name: Text)
+    fn record(name: Text, value: Float)
+}
+
+context Config {
+    fn get(key: Text) -> Text
+}
+
+context Database {
+    fn query(sql: Text) -> Int
+}
+
+context Cache {
+    fn get(key: Text) -> Text
+    fn set(key: Text, value: Text)
+}
+
+// Test 3a: Define a simple context group
+using AppContext = [Logger, Metrics];
+
+// Test 3b: Define a context group with three contexts
+using WebContext = [Logger, Metrics, Config];
+
+// Test 3c: Define a data layer context group
+using DataContext = [Database, Cache, Logger];
+
+// Test 3d: Use a context group in a function
+fn app_operation(name: Text) using AppContext {
+    Logger.info(f"App operation: {name}");
+    Metrics.increment("app.operations");
+}
+
+// Test 3e: Use WebContext group
+fn web_request(path: Text) using WebContext {
+    Logger.info(f"Handling request: {path}");
+    let base_url = Config.get("base_url");
+    Logger.log(f"Base URL: {base_url}");
+    Metrics.increment("requests.total");
+    Metrics.record("request.path_length", path.length() as Float);
+}
+
+// Test 3f: Use DataContext group
+fn fetch_data(key: Text) -> Int using DataContext {
+    Logger.info(f"Fetching data for: {key}");
+
+    // Try cache first
+    let cached = Cache.get(key);
+    Logger.log(f"Cache result: {cached}");
+
+    if cached != "" {
+        Logger.info("Cache hit");
+        1
+    } else {
+        Logger.info("Cache miss, querying database");
+        let result = Database.query(f"SELECT * FROM data WHERE key = '{key}'");
+        Cache.set(key, f"value_{result}");
+        result
+    }
+}
+
+// Test 3g: Combine context group with additional contexts
+fn extended_operation() using [AppContext, Database] {
+    Logger.info("Extended operation starting");
+    Metrics.increment("extended.operations");
+
+    let count = Database.query("SELECT COUNT(*)");
+    Logger.log(f"Count: {count}");
+    Metrics.record("database.count", count as Float);
+}
+
+// Test 3h: Nested context groups (if supported)
+using FullStack = [WebContext, Database, Cache];
+
+fn full_stack_operation(id: Int) using FullStack {
+    let app_name = Config.get("app_name");
+    Logger.info(f"Full stack operation in {app_name}");
+
+    let cached = Cache.get(f"item_{id}");
+    if cached == "" {
+        Logger.log("Not in cache, querying database");
+        let count = Database.query(f"SELECT * FROM items WHERE id = {id}");
+        Cache.set(f"item_{id}", f"{count}");
+        Metrics.increment("cache.misses");
+    } else {
+        Logger.log("Found in cache");
+        Metrics.increment("cache.hits");
+    }
+
+    Metrics.record("fullstack.operations", 1.0);
+}
+
+// Test 3i: Multiple independent context groups
+using ReadContext = [Database, Cache];
+using WriteContext = [Database, Logger];
+
+fn read_operation(key: Text) using ReadContext {
+    let cached = Cache.get(key);
+    if cached == "" {
+        Database.query(f"SELECT * WHERE key = '{key}'");
+    }
+}
+
+fn write_operation(key: Text, value: Text) using WriteContext {
+    Logger.info(f"Writing {key} = {value}");
+    Database.query(f"INSERT INTO data VALUES ('{key}', '{value}')");
+}
+
+fn main() {
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║           Test Case 3: Context Groups Usage               ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+    print("");
+
+    // Provide all contexts
+    print("📦 Providing contexts...");
+
+    provide Logger = Logger {
+        log: fn(msg: Text) { print(f"[LOG] {msg}"); },
+        info: fn(msg: Text) { print(f"[INFO] {msg}"); }
+    };
+
+    provide Metrics = Metrics {
+        increment: fn(name: Text) { print(f"[METRIC] {name} += 1"); },
+        record: fn(name: Text, value: Float) { print(f"[METRIC] {name} = {value}"); }
+    };
+
+    provide Config = Config {
+        get: fn(key: Text) -> Text { f"<{key}_value>" }
+    };
+
+    provide Database = Database {
+        query: fn(sql: Text) -> Int {
+            print(f"[DB] {sql}");
+            42
+        }
+    };
+
+    provide Cache = Cache {
+        get: fn(key: Text) -> Text {
+            print(f"[CACHE GET] {key}");
+            if key == "item_1" { "cached_value" } else { "" }
+        },
+        set: fn(key: Text, value: Text) {
+            print(f"[CACHE SET] {key} = {value}");
+        }
+    };
+    print("");
+
+    // Test 3a-3b: Simple context groups
+    print("Test 3a: AppContext [Logger, Metrics]");
+    print("─────────────────────────────────────────");
+    app_operation("test_app");
+    print("");
+
+    // Test 3c: WebContext group
+    print("Test 3b: WebContext [Logger, Metrics, Config]");
+    print("─────────────────────────────────────────");
+    web_request("/api/users");
+    print("");
+
+    // Test 3d: DataContext group
+    print("Test 3c: DataContext [Database, Cache, Logger]");
+    print("─────────────────────────────────────────");
+    let data1 = fetch_data("user_123");
+    print(f"Fetched: {data1}");
+    print("");
+
+    // Test 3e: Extended operation (group + context)
+    print("Test 3d: Extended operation [AppContext, Database]");
+    print("─────────────────────────────────────────");
+    extended_operation();
+    print("");
+
+    // Test 3f: Full stack (nested groups)
+    print("Test 3e: FullStack [WebContext, Database, Cache]");
+    print("─────────────────────────────────────────");
+    full_stack_operation(1);
+    print("");
+    full_stack_operation(2);
+    print("");
+
+    // Test 3g: Independent context groups
+    print("Test 3f: Independent context groups");
+    print("─────────────────────────────────────────");
+    read_operation("key1");
+    write_operation("key2", "value2");
+    print("");
+
+    print("╔════════════════════════════════════════════════════════════╗");
+    print("║             Context Groups Tests Complete                  ║");
+    print("╚════════════════════════════════════════════════════════════╝");
+}

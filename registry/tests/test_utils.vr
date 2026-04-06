@@ -1,0 +1,406 @@
+// Verum Registry - Test Utilities
+//
+// Shared utilities and fixtures for integration tests
+// Provides helpers for test setup, assertions, and common operations
+
+mount core.collections.{List};
+mount core.base.{Result, Maybe, Text, Int, Bool};
+
+// Import domain types
+mount super.src.domain.user.{User, UserRole};
+mount super.src.domain.package.{Package};
+mount super.src.domain.errors.{RegistryError};
+
+// Import DTOs
+mount super.src.dto.user_dto.{RegisterRequestDto, LoginRequestDto};
+mount super.src.dto.package_dto.{PublishRequestDto};
+
+// Import handlers
+mount super.src.handlers.users.{register_user, login_user};
+mount super.src.handlers.packages.{publish_package};
+
+// ============================================================================
+// Test Database Management
+// ============================================================================
+
+/// Setup test database with clean state
+///
+/// This should be called at the start of each test.
+/// Creates a fresh test database or clears existing one.
+pub fn setup_test_db() {
+    // In production, would:
+    // 1. Create test database connection
+    // 2. Run migrations
+    // 3. Clear all tables
+    // 4. Insert test fixtures if needed
+
+    print("[TEST] Setting up test database");
+}
+
+/// Cleanup test database after test
+///
+/// This should be called at the end of each test.
+/// Removes test data and closes connections.
+pub fn cleanup_test_db() {
+    // In production, would:
+    // 1. Drop all test data
+    // 2. Close database connections
+    // 3. Clean up temp files
+
+    print("[TEST] Cleaning up test database");
+}
+
+// ============================================================================
+// User Test Fixtures
+// ============================================================================
+
+/// Create a test user with default values
+///
+/// Example:
+/// ```
+/// let user = create_test_user("alice");
+/// ```
+pub fn create_test_user(username: Text) -> User {
+    User {
+        id: generate_test_id(),
+        username: username,
+        email: username + "@test.example.com",
+        role: UserRole.Regular,
+        created_at: test_timestamp(),
+        api_tokens: List.new(),
+        owned_packages: List.new(),
+        is_active: true,
+    }
+}
+
+/// Create an admin user for testing
+///
+/// Returns authentication token for the admin user.
+pub fn create_admin_user(username: Text, email: Text) -> Text {
+    // Register admin user
+    register_user(RegisterRequestDto {
+        username: username.clone(),
+        email: email,
+        password: "admin123",
+        confirm_password: "admin123",
+    }).await;
+
+    // In production, would elevate user to admin role
+    // For now, return login token
+
+    login_user(LoginRequestDto {
+        username: username,
+        password: "admin123",
+    }).await.unwrap().token
+}
+
+/// Login a test user and return authentication token
+///
+/// Example:
+/// ```
+/// let token = login_test_user("alice", "password123");
+/// ```
+pub fn login_test_user(username: Text, password: Text) -> Text {
+    let login_req = LoginRequestDto {
+        username: username,
+        password: password,
+    };
+
+    login_user(login_req).await.unwrap().token
+}
+
+// ============================================================================
+// Package Test Fixtures
+// ============================================================================
+
+/// Create a test package with default values
+pub fn create_test_package(name: Text, owner: Text) -> Package {
+    Package {
+        name: name,
+        description: "Test package",
+        owner: owner,
+        created_at: test_timestamp(),
+        updated_at: test_timestamp(),
+        versions: List.new(),
+        downloads: 0,
+        repository_url: "https://github.com/test/repo",
+        homepage_url: "https://example.com",
+        license: "MIT",
+        keywords: List.new(),
+    }
+}
+
+/// Publish a test package with minimal required fields
+///
+/// Returns the published package version.
+pub async fn publish_test_package(
+    name: Text,
+    version: Text,
+    auth_token: Text
+) -> PublishResponseDto {
+    let req = PublishRequestDto {
+        name: name,
+        version: version,
+        description: "Test package for integration tests",
+        license: "MIT",
+        tarball: generate_test_tarball(),
+        dependencies: List.new(),
+        dev_dependencies: List.new(),
+        keywords: List.new(),
+        categories: List.new(),
+        homepage: "https://example.com",
+        repository: "https://github.com/test/repo",
+    };
+
+    publish_package(req, auth_token).await.unwrap()
+}
+
+/// Generate a test tarball (simulated binary data)
+pub fn generate_test_tarball() -> List<Int> {
+    // In production, would generate actual tarball bytes
+    // For now, return placeholder bytes
+    let mut tarball = List.new();
+    for i in 0..100 {
+        tarball.push(i % 256);
+    }
+    tarball
+}
+
+// ============================================================================
+// Assertion Helpers
+// ============================================================================
+
+/// Assert that a Result is Ok
+///
+/// Example:
+/// ```
+/// assert_ok(&result);
+/// ```
+pub fn assert_ok<T, E>(result: &Result<T, E>) {
+    match result {
+        Result.Ok(_) => {
+            // Success
+        },
+        Result.Err(_) => {
+            panic("Expected Ok, got Err");
+        }
+    }
+}
+
+/// Assert that a Result is Err
+///
+/// Example:
+/// ```
+/// assert_err(&result);
+/// ```
+pub fn assert_err<T, E>(result: &Result<T, E>) {
+    match result {
+        Result.Ok(_) => {
+            panic("Expected Err, got Ok");
+        },
+        Result.Err(_) => {
+            // Success
+        }
+    }
+}
+
+/// Assert that two values are equal
+///
+/// Example:
+/// ```
+/// assert_eq(&actual, &expected);
+/// ```
+pub fn assert_eq<T: Eq>(actual: &T, expected: &T) {
+    if actual != expected {
+        panic(f"Assertion failed: {actual} != {expected}");
+    }
+}
+
+/// Assert that two values are not equal
+///
+/// Example:
+/// ```
+/// assert_ne(&actual, &unexpected);
+/// ```
+pub fn assert_ne<T: Eq>(actual: &T, unexpected: &T) {
+    if actual == unexpected {
+        panic(f"Assertion failed: {actual} == {unexpected}");
+    }
+}
+
+/// Assert that a boolean is true
+///
+/// Example:
+/// ```
+/// assert(&condition);
+/// ```
+pub fn assert(condition: &Bool) {
+    if !condition {
+        panic("Assertion failed: expected true, got false");
+    }
+}
+
+/// Assert that a boolean is false
+pub fn assert_false(condition: &Bool) {
+    if condition {
+        panic("Assertion failed: expected false, got true");
+    }
+}
+
+// ============================================================================
+// Test Data Generation
+// ============================================================================
+
+/// Generate a unique test ID
+fn generate_test_id() -> Int {
+    // In production, would use UUID or atomic counter
+    // For now, return sequential ID
+    test_id_counter()
+}
+
+fn test_id_counter() -> Int {
+    // Placeholder - would maintain counter state
+    1
+}
+
+/// Get current test timestamp
+fn test_timestamp() -> Int {
+    // In production, would use std.time.unix_timestamp()
+    // For now, return fixed timestamp
+    1700000000
+}
+
+/// Generate random string of specified length
+pub fn random_string(length: Int) -> Text {
+    // In production, would generate cryptographically secure random string
+    // For now, return placeholder
+    "random" + f"{length}"
+}
+
+/// Generate random email
+pub fn random_email() -> Text {
+    random_string(8) + "@test.example.com"
+}
+
+/// Generate random package name
+pub fn random_package_name() -> Text {
+    "test-pkg-" + random_string(6)
+}
+
+// ============================================================================
+// Failure Simulation (for resilience tests)
+// ============================================================================
+
+/// Simulate database failure for resilience testing
+pub fn simulate_database_failure(should_fail: Bool) {
+    // In production, would set flag that makes DB operations fail
+    print(f"[TEST] Simulating database failure: {should_fail}");
+}
+
+/// Simulate slow operation for timeout testing
+pub fn simulate_slow_operation(delay_ms: Int) {
+    // In production, would inject delay into operations
+    print(f"[TEST] Simulating slow operation: {delay_ms}ms");
+}
+
+/// Reset failure simulations
+pub fn reset_failure_simulation() {
+    // In production, would clear all failure flags
+    print("[TEST] Resetting failure simulations");
+}
+
+/// Sleep for specified milliseconds (for testing)
+pub fn sleep(ms: Int) {
+    // In production, would actually sleep
+    // For now, no-op
+    print(f"[TEST] Sleep {ms}ms");
+}
+
+// ============================================================================
+// Test Context Management
+// ============================================================================
+
+/// Test context holds shared state for a test
+pub type TestContext is {
+    db_connection: Maybe<Text>,
+    auth_token: Maybe<Text>,
+    temp_files: List<Text>,
+};
+
+implement TestContext {
+    pub fn new() -> TestContext {
+        TestContext {
+            db_connection: Maybe.None,
+            auth_token: Maybe.None,
+            temp_files: List.new(),
+        }
+    }
+
+    pub fn cleanup(self) {
+        // Clean up resources
+        for file in self.temp_files {
+            // Delete temp file
+            print(f"[TEST] Cleaning up temp file: {file}");
+        }
+    }
+}
+
+// ============================================================================
+// HTTP Test Helpers
+// ============================================================================
+
+/// Create test HTTP headers with authentication
+pub fn auth_headers(token: Text) -> List<(Text, Text)> {
+    let mut headers = List.new();
+    headers.push(("Authorization", f"Bearer {token}"));
+    headers.push(("Content-Type", "application/json"));
+    headers
+}
+
+/// Parse JSON response (simplified)
+pub fn parse_json_response(body: Text) -> Maybe<Text> {
+    // In production, would parse JSON
+    // For now, return body as-is
+    Maybe.Some(body)
+}
+
+// ============================================================================
+// Comparison Helpers
+// ============================================================================
+
+/// Check if string contains substring
+pub fn contains(text: &Text, substring: &Text) -> Bool {
+    text.contains(substring)
+}
+
+/// Check if list contains element
+pub fn list_contains<T: Eq>(list: &List<T>, element: &T) -> Bool {
+    for item in list {
+        if item == element {
+            return true;
+        }
+    }
+    false
+}
+
+// ============================================================================
+// Pretty Printing for Tests
+// ============================================================================
+
+/// Print test separator
+pub fn print_test_separator() {
+    print("========================================");
+}
+
+/// Print test header
+pub fn print_test_header(name: Text) {
+    print_test_separator();
+    print(f"TEST: {name}");
+    print_test_separator();
+}
+
+/// Print test result
+pub fn print_test_result(name: Text, passed: Bool) {
+    let status = if passed { "PASSED" } else { "FAILED" };
+    print(f"[{status}] {name}");
+}

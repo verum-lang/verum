@@ -1,0 +1,470 @@
+module sys.mmio;
+
+/// Verum Standard Library: Memory-Mapped I/O
+///
+/// This module provides type-safe memory-mapped I/O (MMIO) abstractions for
+/// systems programming. Unlike C's simple `volatile` or Rust's external crates,
+/// Verum MMIO provides:
+/// - Type-safe register access with compile-time verification
+/// - Access mode tracking (ReadOnly, WriteOnly, ReadWrite, etc.)
+/// - Memory barrier integration for hardware protocols
+/// - Zero-cost abstractions (all operations inline)
+///
+/// # Core Concepts
+///
+/// ## Volatile Pointer Type
+/// The `*volatile T` pointer type is used for MMIO addresses. Unlike regular
+/// pointers, volatile pointers:
+/// - Prevent load/store elimination by the optimizer
+/// - Prevent reordering with respect to other volatile operations
+/// - Compile to single memory access instructions
+///
+/// ## Access Modes
+/// Hardware registers often have specific access requirements:
+/// - ReadOnly: Can only be read (status registers)
+/// - WriteOnly: Can only be written (command registers)
+/// - ReadWrite: Can be read and written (configuration registers)
+/// - WriteOneToClear: Write 1 to clear bits (interrupt status)
+/// - WriteOneToSet: Write 1 to set bits (interrupt enable)
+///
+/// # Examples
+///
+/// ```verum
+/// // Define a peripheral register block
+/// type UartRegisters is RegisterBlock<0x4001_0000> {
+///     data: Register<UInt8, ReadWrite>,
+///     status: Register<UInt8, ReadOnly>,
+///     control: Register<UInt8, ReadWrite>,
+/// };
+///
+/// // Access registers
+/// let uart = UartRegisters.instance();
+/// let status = uart.status.read();
+/// uart.data.write(0x55);
+/// ```
+///
+/// Implementation Reference: docs/architecture/low-level-features.md Section 3
+
+// =============================================================================
+// ACCESS MODE TYPES
+// =============================================================================
+
+/// Register access mode - determines allowed operations.
+///
+/// Access modes are phantom types (unit types) used as compile-time
+/// type parameters to enforce correct usage patterns at the type level.
+/// Each mode is a distinct type, enabling the type system to select
+/// the correct implement block for each Register specialization.
+
+/// Can only read (e.g., status registers).
+public type ReadOnly is ();
+
+/// Can only write (e.g., command registers).
+public type WriteOnly is ();
+
+/// Can read and write (e.g., config registers).
+public type ReadWrite is ();
+
+/// Write clears on read (rare).
+public type ReadWriteOnce is ();
+
+/// Write 1 to clear bits (e.g., interrupt status).
+public type WriteOneToClear is ();
+
+/// Write 1 to set bits (e.g., interrupt enable).
+public type WriteOneToSet is ();
+
+/// Union of all access mode types (for documentation/constraint purposes).
+public type AccessMode is ReadOnly | WriteOnly | ReadWrite | ReadWriteOnce | WriteOneToClear | WriteOneToSet;
+
+// =============================================================================
+// VOLATILE INTRINSICS
+// =============================================================================
+
+/// Read from volatile memory location.
+///
+/// This is the primitive operation for MMIO reads. It:
+/// - Prevents load elimination
+/// - Emits a single memory read instruction
+/// - Does NOT provide memory ordering (use with barriers if needed)
+@inline(always)
+@intrinsic("volatile_load")
+public fn volatile_load<T: Copy>(ptr: *volatile T) -> T;
+
+/// Write to volatile memory location.
+///
+/// This is the primitive operation for MMIO writes. It:
+/// - Prevents store elimination
+/// - Emits a single memory write instruction
+/// - Does NOT provide memory ordering (use with barriers if needed)
+@inline(always)
+@intrinsic("volatile_store")
+public fn volatile_store<T: Copy>(ptr: *volatile mut T, value: T);
+
+/// Read with acquire semantics.
+///
+/// Ensures all subsequent reads and writes happen after this read.
+/// Use for acquiring locks or reading synchronization flags.
+@inline(always)
+@intrinsic("volatile_load_acquire")
+public fn volatile_load_acquire<T: Copy>(ptr: *volatile T) -> T;
+
+/// Write with release semantics.
+///
+/// Ensures all previous reads and writes happen before this write.
+/// Use for releasing locks or signaling completion.
+@inline(always)
+@intrinsic("volatile_store_release")
+public fn volatile_store_release<T: Copy>(ptr: *volatile mut T, value: T);
+
+// =============================================================================
+// MEMORY BARRIERS
+// =============================================================================
+
+/// Memory barrier types for explicit ordering control.
+public type BarrierKind is
+    | Compiler    // Prevent compiler reordering only
+    | Acquire     // Load barrier (loads before this cannot move after)
+    | Release     // Store barrier (stores after this cannot move before)
+    | AcqRel      // Both acquire and release
+    | SeqCst;     // Full sequential consistency
+
+/// Insert a memory barrier.
+///
+/// Use barriers to enforce ordering between memory operations:
+/// - Compiler: Prevents compiler reordering, no CPU fence
+/// - Acquire: Ensures loads before are visible before loads/stores after
+/// - Release: Ensures stores after are visible after loads/stores before
+/// - AcqRel: Both acquire and release semantics
+/// - SeqCst: Full sequential consistency (most expensive)
+@inline(always)
+@intrinsic("memory_barrier")
+public fn barrier(kind: BarrierKind);
+
+/// Compiler-only barrier (prevents optimization across this point).
+@inline(always)
+public fn compiler_barrier() {
+    barrier(BarrierKind.Compiler);
+}
+
+/// Data memory barrier (ARM terminology).
+@inline(always)
+public fn dmb() {
+    barrier(BarrierKind.AcqRel);
+}
+
+/// Data synchronization barrier (ARM terminology).
+@inline(always)
+@intrinsic("dsb")
+public fn dsb();
+
+/// Instruction synchronization barrier (ARM terminology).
+@inline(always)
+@intrinsic("isb")
+public fn isb();
+
+// =============================================================================
+// REGISTER TYPE
+// =============================================================================
+
+/// Type-safe register wrapper.
+///
+/// Wraps a volatile pointer with access mode enforcement. The MODE
+/// parameter is a compile-time (meta) type that determines which
+/// operations are available.
+///
+/// # Type Parameters
+/// - `T`: The data type of the register (must be Copy)
+/// - `MODE`: Access mode (ReadOnly, WriteOnly, ReadWrite, etc.)
+@repr(transparent)
+public type Register<T: Copy, MODE> is {
+    addr: *volatile T
+};
+
+/// Create a register at a fixed address.
+///
+/// This is a compile-time operation that creates a register wrapper
+/// for a known hardware address.
+implement<T: Copy, MODE> Register<T, MODE> {
+    /// Create register at compile-time known address.
+    @const
+    public fn at(addr: USize) -> Register<T, MODE> {
+        Register { addr: addr as *volatile T }
+    }
+
+    /// Get the raw address of this register.
+    @inline(always)
+    public fn address(&self) -> USize {
+        self.addr as USize
+    }
+}
+
+// =============================================================================
+// READ OPERATIONS (for readable modes)
+// =============================================================================
+
+/// Read operations for ReadOnly registers.
+implement<T: Copy> Register<T, ReadOnly> {
+    /// Read the register value.
+    @inline(always)
+    public fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+}
+
+/// Read operations for ReadWrite registers.
+implement<T: Copy> Register<T, ReadWrite> {
+    /// Read the register value.
+    @inline(always)
+    public fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+}
+
+/// Read operations for WriteOneToClear registers.
+implement<T: Copy> Register<T, WriteOneToClear> {
+    /// Read the register value.
+    @inline(always)
+    public fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+}
+
+/// Read operations for WriteOneToSet registers.
+implement<T: Copy> Register<T, WriteOneToSet> {
+    /// Read the register value.
+    @inline(always)
+    public fn read(&self) -> T {
+        volatile_load(self.addr)
+    }
+}
+
+// =============================================================================
+// WRITE OPERATIONS (for writable modes)
+// =============================================================================
+
+/// Write operations for WriteOnly registers.
+implement<T: Copy> Register<T, WriteOnly> {
+    /// Write a value to the register.
+    @inline(always)
+    public fn write(&self, value: T) {
+        volatile_store(self.addr, value);
+    }
+}
+
+/// Write operations for ReadWrite registers.
+implement<T: Copy> Register<T, ReadWrite> {
+    /// Write a value to the register.
+    @inline(always)
+    public fn write(&self, value: T) {
+        volatile_store(self.addr, value);
+    }
+
+    /// Modify the register using a function.
+    ///
+    /// Reads the current value, applies the function, and writes back.
+    /// NOT atomic - use with critical section if needed.
+    @inline(always)
+    public fn modify<F: Fn(T) -> T>(&self, f: F) {
+        let value = volatile_load(self.addr);
+        volatile_store(self.addr, f(value));
+    }
+}
+
+// =============================================================================
+// BIT MANIPULATION (for integer register types)
+// =============================================================================
+
+/// Bit manipulation for ReadWrite UInt32 registers.
+implement Register<UInt32, ReadWrite> {
+    /// Set bits using a mask (read-modify-write).
+    @inline(always)
+    public fn set_bits(&self, mask: UInt32) {
+        let value = volatile_load(self.addr);
+        volatile_store(self.addr, value | mask);
+    }
+
+    /// Clear bits using a mask (read-modify-write).
+    @inline(always)
+    public fn clear_bits(&self, mask: UInt32) {
+        let value = volatile_load(self.addr);
+        volatile_store(self.addr, value & ~mask);
+    }
+
+    /// Toggle bits using a mask (read-modify-write).
+    @inline(always)
+    public fn toggle_bits(&self, mask: UInt32) {
+        let value = volatile_load(self.addr);
+        volatile_store(self.addr, value ^ mask);
+    }
+
+    /// Check if any bits in mask are set.
+    @inline(always)
+    public fn any_set(&self, mask: UInt32) -> Bool {
+        (volatile_load(self.addr) & mask) != 0
+    }
+
+    /// Check if all bits in mask are set.
+    @inline(always)
+    public fn all_set(&self, mask: UInt32) -> Bool {
+        (volatile_load(self.addr) & mask) == mask
+    }
+}
+
+/// Write-one-to-clear operations (e.g., interrupt status).
+implement Register<UInt32, WriteOneToClear> {
+    /// Clear specific bits by writing 1s.
+    @inline(always)
+    public fn clear(&self, bits: UInt32) {
+        volatile_store(self.addr, bits);
+    }
+
+    /// Clear all pending bits.
+    @inline(always)
+    public fn clear_all(&self) {
+        volatile_store(self.addr, 0xFFFF_FFFF);
+    }
+}
+
+/// Write-one-to-set operations (e.g., interrupt enable).
+implement Register<UInt32, WriteOneToSet> {
+    /// Set specific bits by writing 1s.
+    @inline(always)
+    public fn set(&self, bits: UInt32) {
+        volatile_store(self.addr, bits);
+    }
+}
+
+// =============================================================================
+// REGISTER BLOCK
+// =============================================================================
+
+/// Protocol for register blocks (peripheral register structures).
+///
+/// A register block is a group of related registers at contiguous
+/// addresses, typically representing a hardware peripheral.
+public type RegisterBlock is protocol {
+    /// Base address of this register block.
+    const BASE_ADDRESS: USize;
+
+    /// Get the singleton instance at the base address.
+    fn instance() -> &'static Self;
+};
+
+/// Macro-like attribute for defining register blocks.
+///
+/// ```verum
+/// @register_block(0x4001_0000)
+/// type UartRegisters is {
+///     @offset(0x00) data: Register<UInt8, ReadWrite>,
+///     @offset(0x04) status: Register<UInt8, ReadOnly>,
+///     @offset(0x08) control: Register<UInt8, ReadWrite>,
+/// };
+/// ```
+///
+/// The compiler generates:
+/// - Correct field offsets matching hardware layout
+/// - Singleton accessor at BASE_ADDRESS
+/// - Debug printing with register names
+
+// =============================================================================
+// MEMORY REGION TYPES
+// =============================================================================
+
+/// Memory region descriptor for linker-defined sections.
+public type MemoryRegion is {
+    start: *const (),
+    size: USize,
+    flags: MemoryFlags,
+};
+
+/// Memory region flags (bitfield).
+///
+/// Usage: `MemoryFlags.READ | MemoryFlags.WRITE`
+public type MemoryFlags is (UInt32);
+
+implement MemoryFlags {
+    /// Read permission
+    public const READ: MemoryFlags  = MemoryFlags(0b0001);
+    /// Write permission
+    public const WRITE: MemoryFlags = MemoryFlags(0b0010);
+    /// Execute permission
+    public const EXEC: MemoryFlags  = MemoryFlags(0b0100);
+    /// DMA access permission
+    public const DMA: MemoryFlags   = MemoryFlags(0b1000);
+}
+
+implement MemoryRegion {
+    /// Check if an address is within this region.
+    @inline(always)
+    public fn contains(&self, addr: USize) -> Bool {
+        let start = self.start as USize;
+        addr >= start && addr < start + self.size
+    }
+
+    /// Get end address (exclusive).
+    @inline(always)
+    public fn end(&self) -> USize {
+        self.start as USize + self.size
+    }
+}
+
+// =============================================================================
+// VERIFICATION SUPPORT
+// =============================================================================
+
+/// Ghost state for formal verification of register protocols.
+///
+/// These types are erased at runtime but enable SMT verification
+/// of correct register access sequences.
+
+/// Verified register with ghost state tracking.
+///
+/// Use @verify(formal) to enable SMT verification of register protocols.
+@verify(formal)
+public type VerifiedRegister<T: Copy, MODE> is {
+    reg: Register<T, MODE>,
+
+    /// Ghost state: last value written (for WriteOnly verification)
+    @ghost last_write: Maybe<T>,
+
+    /// Ghost state: write count (for sequencing verification)
+    @ghost write_count: USize,
+};
+
+implement<T: Copy> VerifiedRegister<T, WriteOnly> {
+    /// Verified write - proves no read occurred.
+    @ensures(self.write_count == old(self.write_count) + 1)
+    @ensures(self.last_write == Some(value))
+    public fn write(&mut self, value: T) {
+        self.reg.write(value);
+    }
+}
+
+// =============================================================================
+// LINKER SYMBOL ACCESS
+// =============================================================================
+
+/// Access linker-defined symbols for memory layout.
+///
+/// ```verum
+/// // Declare linker symbols
+/// @link_symbol
+/// extern {
+///     static __text_start: USize;
+///     static __text_end: USize;
+///     static __data_start: USize;
+///     static __data_end: USize;
+///     static __bss_start: USize;
+///     static __bss_end: USize;
+/// }
+///
+/// // Use in code
+/// fn text_region() -> MemoryRegion {
+///     MemoryRegion {
+///         start: &__text_start as *const _,
+///         size: &__text_end - &__text_start,
+///         flags: MemoryFlags.READ | MemoryFlags.EXEC,
+///     }
+/// }
+/// ```
