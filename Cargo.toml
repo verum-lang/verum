@@ -165,7 +165,7 @@ similar = "2.7"
 
 # Hashing
 blake3 = "1.5"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 # File watching

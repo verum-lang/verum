@@ -30,7 +30,7 @@ walkdir = "2.5"
 notify = "8.2.0"
 semver = "1.0"
 tempfile = "3.14"
-sha2 = "0.10"
+sha2 = "0.11"
 blake3 = { workspace = true }
 bincode = "2.0.1"
 crossbeam-channel = "0.5"
@@ -88,7 +88,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [build-dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 serde_json = "1.0"
 
 [dev-dependencies]
