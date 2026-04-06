@@ -128,7 +128,7 @@ pretty_assertions = "1.4"
 
 # Additional serialization
 serde_yaml = "0.9"
-toml = "0.9"
+toml = "1.1"
 
 # Async utilities
 tokio-stream = "0.1.18"
