@@ -202,7 +202,7 @@ pub struct Cog {
 }
 
 // Language profile configuration
-// Profiles (systems, application, scripting) determine available features,
+// Profiles (application, systems, research) determine available features,
 // default verification level, and compilation tier
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageConfig {

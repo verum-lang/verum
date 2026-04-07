@@ -1,43 +1,34 @@
 // Initialize a new Verum project in the current directory.
-// Creates verum.toml manifest, src/ directory with main.vr, and optional git init.
+// Creates verum.toml manifest, src/ directory with template files.
 
 use colored::Colorize;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 
 use crate::config::{LanguageProfile, create_default_manifest};
 use crate::error::{CliError, Result};
 use crate::templates;
 use crate::ui;
 
-/// Execute the `verum init` command
+/// Execute the `verum init` command.
 /// Initialize project in current directory. Requires a language profile
-/// (systems, application, or scripting) to set default compilation settings.
-pub fn execute(profile: &str, lib: bool, force: bool) -> Result<()> {
+/// (application, systems, or research) to set default compilation settings.
+pub fn execute(
+    profile: &str,
+    template: &str,
+    force: bool,
+    name_override: Option<&str>,
+) -> Result<()> {
     let current_dir = env::current_dir()?;
-    let dir_name = current_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("my_project");
+    let dir_name = name_override.unwrap_or_else(|| {
+        current_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("my_project")
+    });
 
-    ui::step(&format!(
-        "Initializing Verum project in current directory: {}",
-        current_dir.display().to_string().cyan()
-    ));
-
-    // Parse language profile (REQUIRED by spec)
-    let lang_profile = match profile {
-        "application" => LanguageProfile::Application,
-        "systems" => LanguageProfile::Systems,
-        "research" => LanguageProfile::Research,
-        _ => {
-            return Err(CliError::InvalidArgument(format!(
-                "Invalid language profile '{}'. Must be: application, systems, or research",
-                profile
-            )));
-        }
-    };
+    // Parse language profile
+    let lang_profile = parse_profile(profile)?;
 
     // Check if verum.toml already exists
     let verum_toml = current_dir.join("verum.toml");
@@ -49,90 +40,77 @@ pub fn execute(profile: &str, lib: bool, force: bool) -> Result<()> {
         ));
     }
 
-    // Create directories if they don't exist
+    ui::step(&format!(
+        "Initializing {} project in: {}",
+        template.cyan(),
+        current_dir.display().to_string().cyan()
+    ));
+
+    // Create directories
     fs::create_dir_all(current_dir.join("src"))?;
     fs::create_dir_all(current_dir.join("tests"))?;
 
     // Create verum.toml
-    let manifest = create_default_manifest(dir_name, lib, lang_profile);
+    let is_library = template == "library";
+    let manifest = create_default_manifest(dir_name, is_library, lang_profile);
     manifest.to_file(&verum_toml)?;
 
     // Create source files based on template
-    let template = if lib { "library" } else { "binary" };
-    match template {
-        "binary" => {
-            templates::binary::create(&current_dir, dir_name)?;
-        }
-        "library" => {
-            templates::library::create(&current_dir, dir_name)?;
-        }
-        _ => unreachable!(),
-    }
+    create_template_files(&current_dir, dir_name, template, lang_profile)?;
 
     // Create .gitignore if it doesn't exist
     let gitignore = current_dir.join(".gitignore");
     if !gitignore.exists() {
-        create_gitignore(&current_dir)?;
+        super::new::create_gitignore_file(&current_dir)?;
     }
 
     // Print success message
-    println!();
-    ui::success("Initialized Verum project");
-    println!();
-    println!("{}", "Project Configuration:".bold());
-    println!(
-        "  Language profile: {}",
-        format!("{:?}", lang_profile).cyan()
-    );
-    println!("  Project type: {}", template.cyan());
-    println!("  Default tier: {} (fast iteration)", "Tier 0".cyan());
-    println!("  Verification: {} (safe by default)", "Runtime".cyan());
-    println!();
-    println!("{}", "Next steps:".bold());
-    println!("  {} {}", "verum".cyan(), "build".cyan());
-    println!("  {} {}", "verum".cyan(), "run".cyan());
-    println!();
+    print_success(dir_name, template, lang_profile);
 
     Ok(())
 }
 
-fn create_gitignore(dir: &PathBuf) -> Result<()> {
-    let content = r#"# Verum Build artifacts
-/target/
-*.ll
-*.bc
-*.o
-*.so
-*.dylib
-*.dll
-*.exe
+fn parse_profile(profile: &str) -> Result<LanguageProfile> {
+    match profile {
+        "application" => Ok(LanguageProfile::Application),
+        "systems" => Ok(LanguageProfile::Systems),
+        "research" => Ok(LanguageProfile::Research),
+        _ => Err(CliError::InvalidArgument(format!(
+            "Invalid language profile '{}'. Valid profiles: application, systems, research",
+            profile
+        ))),
+    }
+}
 
-# Tier-specific outputs
-/target/tier0/
-/target/tier1/
-/target/tier2/
-/target/tier3/
-/target/cbgr-profile/
-/target/verify-cache/
-
-# Cache
-.verum_cache/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Lock file (commit for libraries, ignore for binaries)
-# verum.lock
-"#;
-
-    fs::write(dir.join(".gitignore"), content)?;
+fn create_template_files(
+    dir: &std::path::Path,
+    name: &str,
+    template: &str,
+    profile: LanguageProfile,
+) -> Result<()> {
+    match template {
+        "binary" | "application" => templates::binary::create(dir, name, profile)?,
+        "library" => templates::library::create(dir, name, profile)?,
+        "web-api" => templates::web_api::create(dir, name, profile)?,
+        "cli-app" => templates::cli_app::create(dir, name, profile)?,
+        _ => {
+            return Err(CliError::TemplateNotFound(template.into()));
+        }
+    }
     Ok(())
+}
+
+fn print_success(name: &str, template: &str, profile: LanguageProfile) {
+    println!();
+    ui::success(&format!("Initialized {} project", name.green().bold()));
+    println!();
+    println!("{}", "Project configuration:".bold());
+    println!("  Language profile: {}", format!("{:?}", profile).cyan());
+    println!("  Profile details:  {}", profile.description().dimmed());
+    println!("  Template:         {}", template.cyan());
+    println!();
+    println!("{}", "Next steps:".bold());
+    println!("  {} {}", "verum".cyan(), "build");
+    println!("  {} {}", "verum".cyan(), "run");
+    println!();
 }

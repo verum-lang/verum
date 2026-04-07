@@ -31,7 +31,7 @@ use error::{CliError, Result};
     about = "The Verum language toolchain \u{2014} semantic honesty, cost transparency, zero-cost safety",
     after_help = "\
 QUICK START:
-  verum new my_project --type app   Create a new project
+  verum new my_project --profile application   Create a new project
   verum build                       Build the current project
   verum run                         Build and run the current project
   verum run file.vr                 Run a single file (AOT by default)
@@ -57,27 +57,72 @@ struct Cli {
 enum Commands {
     /// Create a new Verum project
     New {
-        name: Text,
-        #[clap(long, value_name = "PROFILE")]
-        r#type: Option<Text>,
-        #[clap(long, default_value = "binary")]
-        template: Text,
+        /// Project name (used as directory name and cog name)
+        name: String,
+
+        /// Language profile controlling available features
+        #[clap(
+            short, long,
+            value_name = "PROFILE",
+            value_parser = ["application", "systems", "research"],
+        )]
+        profile: Option<String>,
+
+        /// Project template to scaffold
+        #[clap(
+            short, long,
+            default_value = "binary",
+            value_parser = ["binary", "library", "web-api", "cli-app"],
+        )]
+        template: String,
+
+        /// Create a library project (shorthand for --template library)
         #[clap(long)]
         lib: bool,
-        #[clap(long, default_value = "git")]
-        vcs: Text,
-        #[clap(long)]
-        path: Option<Text>,
+
+        /// Version control system to initialize
+        #[clap(
+            long,
+            default_value = "git",
+            value_parser = ["git", "none"],
+        )]
+        vcs: String,
+
+        /// Create project at a custom path instead of ./<name>
+        #[clap(long, value_name = "DIR")]
+        path: Option<String>,
     },
 
-    /// Initialize project in current directory
+    /// Initialize a Verum project in the current directory
     Init {
-        #[clap(long, value_name = "PROFILE", required = true)]
-        r#type: Text,
+        /// Language profile controlling available features (required)
+        #[clap(
+            short, long,
+            value_name = "PROFILE",
+            required = true,
+            value_parser = ["application", "systems", "research"],
+        )]
+        profile: String,
+
+        /// Project template to scaffold
+        #[clap(
+            short, long,
+            default_value = "binary",
+            value_parser = ["binary", "library", "web-api", "cli-app"],
+        )]
+        template: String,
+
+        /// Create a library project (shorthand for --template library)
         #[clap(long)]
         lib: bool,
+
+        /// Overwrite existing verum.toml
         #[clap(long)]
         force: bool,
+
+        /// Override project name (default: current directory name)
+        #[clap(long, value_name = "NAME")]
+        name: Option<String>,
     },
 
     /// Build the project (always AOT compilation)
@@ -671,7 +716,7 @@ fn run_command(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::New {
             name,
-            r#type,
+            profile,
             template,
             lib,
             vcs,
@@ -681,14 +726,26 @@ fn run_command(cli: Cli) -> Result<()> {
             let git = vcs == "git";
             commands::new::execute(
                 name.as_str(),
-                r#type.as_ref().map(|t| t.as_str()),
+                profile.as_ref().map(|t| t.as_str()),
                 final_template,
                 git,
                 path.as_ref().map(|p| p.as_str()),
             )
         }
-        Commands::Init { r#type, lib, force } => {
-            commands::init::execute(r#type.as_str(), lib, force)
+        Commands::Init {
+            profile,
+            template,
+            lib,
+            force,
+            name,
+        } => {
+            let final_template: &str = if lib { "library" } else { template.as_str() };
+            commands::init::execute(
+                profile.as_str(),
+                final_template,
+                force,
+                name.as_ref().map(|n| n.as_str()),
+            )
         }
         Commands::Build {
             path,

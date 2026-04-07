@@ -1,7 +1,9 @@
-// Project templates for Verum
-// Uses semantic types from verum_common (List, Text, Map, Set, Maybe)
-// Provides scaffolding for different project types
+// Project templates for Verum.
+// Uses correct Verum syntax: `mount` (not import), `@test` (not #[test]),
+// `type X is { ... }` (not struct), `implement` (not impl).
+// Templates are profile-aware: application, systems, research.
 
+use crate::config::LanguageProfile;
 use crate::error::Result;
 use std::fs;
 use std::path::Path;
@@ -9,32 +11,97 @@ use std::path::Path;
 pub mod binary {
     use super::*;
 
-    pub fn create(dir: &Path, _name: &str) -> Result<()> {
-        let main_content = r#"// Verum application
-// Spec: v6.0-BALANCED - Use semantic types from verum_std
+    pub fn create(dir: &Path, name: &str, profile: LanguageProfile) -> Result<()> {
+        let main_content = match profile {
+            LanguageProfile::Application => format!(
+                r#"// {name} — Verum application
+// Profile: application (safe by default, no @unsafe)
 
-// Imports use dots (.) not double colons (::)
-import std.io.stdio.println;
-import core.base.list.List;
-import core.base.text.Text;
+mount core.base.{{List, Text, Maybe}};
 
-fn main() {
-    print(f"Hello, Verum!");
-    print(f"Semantic honesty: CBGR overhead ~15ns per reference check");
-    print(f"Tier 0: Instant compilation, interpreted execution");
-}
-"#;
+fn main() {{
+    let greeting: Text = "Hello from {name}!";
+    print(greeting);
+
+    // Semantic types: List (not Vec), Text (not String), Maybe (not Option)
+    let items: List<Int> = [1, 2, 3, 4, 5];
+    let sum = items.fold(0, fn(acc, x) => acc + x);
+    print(f"Sum: {{sum}}");
+}}
+"#,
+                name = name
+            ),
+            LanguageProfile::Systems => format!(
+                r#"// {name} — Verum systems application
+// Profile: systems (full language, @unsafe allowed)
+
+mount core.base.{{List, Text, Maybe}};
+mount core.mem.{{Heap, allocator}};
+
+fn main() {{
+    let greeting: Text = "Hello from {name}!";
+    print(greeting);
+
+    // Systems profile: manual memory control available
+    let data = Heap(List.from([1, 2, 3, 4, 5]));
+    let sum = data.fold(0, fn(acc, x) => acc + x);
+    print(f"Sum: {{sum}}");
+
+    // Three-tier references:
+    //   &T         — managed (~15ns CBGR check)
+    //   &checked T — compiler-proven (0ns)
+    //   &unsafe T  — manual proof (0ns, requires @unsafe)
+}}
+"#,
+                name = name
+            ),
+            LanguageProfile::Research => format!(
+                r#"// {name} — Verum research application
+// Profile: research (dependent types, formal proofs)
+
+mount core.base.{{List, Text, Maybe}};
+
+// Refinement type: Nat is Int where value >= 0
+type Nat is Int where self >= 0;
+
+// Function with refinement-typed parameter
+fn factorial(n: Nat) -> Nat {{
+    if n == 0 {{
+        1
+    }} else {{
+        n * factorial(n - 1)
+    }}
+}}
+
+fn main() {{
+    let result = factorial(10);
+    print(f"10! = {{result}}");
+}}
+"#,
+                name = name
+            ),
+        };
 
         fs::write(dir.join("src/main.vr"), main_content)?;
 
-        let test_content = r#"// Tests for main
-import std.test.*;
+        let test_content = format!(
+            r#"// Tests for {name}
 
-#[test]
-fn test_example() {
-    assert(true, "Example test always passes");
-}
-"#;
+mount core.base.{{List, Text}};
+
+@test
+fn test_example() {{
+    assert(true, "Example test");
+}}
+
+@test
+fn test_semantic_types() {{
+    let items: List<Int> = [1, 2, 3];
+    assert_eq(items.len(), 3, "List should have 3 elements");
+}}
+"#,
+            name = name
+        );
 
         fs::write(dir.join("tests/main_test.vr"), test_content)?;
         Ok(())
@@ -44,48 +111,39 @@ fn test_example() {
 pub mod library {
     use super::*;
 
-    pub fn create(dir: &Path, name: &str) -> Result<()> {
-        let lib_content = format!(
-            r#"// {name} library
-// Spec: v6.0-BALANCED - Semantic types: List, Text, Map, Set, Maybe
+    pub fn create(dir: &Path, name: &str, profile: LanguageProfile) -> Result<()> {
+        let lib_content = match profile {
+            LanguageProfile::Application | LanguageProfile::Systems => format!(
+                r#"// {name} library
+// Semantic types: List (not Vec), Text (not String), Maybe (not Option)
 
-// Imports use dots (.) not double colons (::)
-import core.base.list.List;
-import core.base.text.Text;
-import core.base.maybe.Maybe;
+mount core.base.{{List, Text, Maybe}};
 
-/// Example function that adds two numbers
-/// Time complexity: O(1)
-/// CBGR overhead: 0ns (no references)
+/// Add two integers.
 pub fn add(a: Int, b: Int) -> Int {{
     a + b
 }}
 
-/// Example type demonstrating semantic types
-/// Use 'type X is {{ ... }}' syntax (not 'struct')
+/// A 2D point using record syntax (`type X is {{ ... }}`).
 pub type Point is {{
     x: Float,
     y: Float,
 }};
 
-/// Implementation block uses 'implement' keyword (not 'impl')
+/// Implementation block uses `implement` keyword (not `impl`).
 implement Point {{
-    /// Create a new point
-    /// CBGR overhead: ~15ns (managed reference return)
     pub fn new(x: Float, y: Float) -> Point {{
         Point {{ x, y }}
     }}
 
-    /// Calculate distance between two points
-    /// CBGR overhead: ~30ns (2 managed references)
-    pub fn distance(self: &Self, other: &Point) -> Float {{
+    pub fn distance(&self, other: &Point) -> Float {{
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         (dx * dx + dy * dy).sqrt()
     }}
 }}
 
-/// Example using semantic List type (NOT Vec!)
+/// A path made of points, using semantic `List` type.
 pub type Path is {{
     points: List<Point>,
 }};
@@ -95,80 +153,109 @@ implement Path {{
         Path {{ points: List.new() }}
     }}
 
-    pub fn add_point(self: &mut Self, point: Point) {{
+    pub fn add_point(&mut self, point: Point) {{
         self.points.push(point);
     }}
 
-    /// Calculate total path length
-    pub fn total_length(self: &Self) -> Float {{
+    pub fn total_length(&self) -> Float {{
         let mut total = 0.0;
         for i in 0..self.points.len() - 1 {{
-            let p1 = &self.points[i];
-            let p2 = &self.points[i + 1];
-            total += p1.distance(p2);
+            total += self.points[i].distance(&self.points[i + 1]);
         }}
         total
     }}
 }}
 
-/// Example using Maybe type (NOT Option!)
+/// Find a point by x-coordinate, returning `Maybe` (not `Option`).
 pub fn find_point_by_x(points: &List<Point>, x: Float) -> Maybe<&Point> {{
     for point in points {{
         if point.x == x {{
-            return Maybe.Some(point);
+            return Some(point);
         }}
     }}
-    Maybe.None
+    None
 }}
 "#,
-            name = name
-        );
+                name = name
+            ),
+            LanguageProfile::Research => format!(
+                r#"// {name} library — with refinement types and verification
+// Profile: research
+
+mount core.base.{{List, Text, Maybe}};
+
+/// A non-empty list — compile-time guarantee via refinement type.
+pub type NonEmptyList<T> is List<T> where self.len() > 0;
+
+/// Safe head function — guaranteed non-empty input.
+pub fn head<T>(list: &NonEmptyList<T>) -> &T {{
+    &list[0]
+}}
+
+/// A positive integer.
+pub type Positive is Int where self > 0;
+
+/// Division that cannot fail — denominator is always > 0.
+pub fn safe_div(a: Int, b: Positive) -> Int {{
+    a / b
+}}
+
+/// Standard point type.
+pub type Point is {{
+    x: Float,
+    y: Float,
+}};
+
+implement Point {{
+    pub fn new(x: Float, y: Float) -> Point {{
+        Point {{ x, y }}
+    }}
+
+    pub fn distance(&self, other: &Point) -> Float {{
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }}
+}}
+"#,
+                name = name
+            ),
+        };
 
         fs::write(dir.join("src/lib.vr"), lib_content)?;
 
-        let test_content = r#"// Library tests
-import std.test.*;
-import core.base.list.List;
-import core.base.maybe.Maybe;
+        let test_content = format!(
+            r#"// Tests for {name}
 
-#[test]
-fn test_add() {
+mount core.base.{{List, Maybe}};
+
+@test
+fn test_add() {{
     let result = add(2, 3);
     assert_eq(result, 5, "2 + 3 should equal 5");
-}
+}}
 
-#[test]
-fn test_point_distance() {
+@test
+fn test_point_distance() {{
     let p1 = Point.new(0.0, 0.0);
     let p2 = Point.new(3.0, 4.0);
-    let dist = p1.distance(&p2);
-    assert_eq(dist, 5.0, "Distance should be 5.0");
-}
+    assert_eq(p1.distance(&p2), 5.0, "Distance should be 5.0");
+}}
 
-#[test]
-fn test_path_length() {
-    let mut path = Path.new();
-    path.add_point(Point.new(0.0, 0.0));
-    path.add_point(Point.new(3.0, 4.0));
-    path.add_point(Point.new(6.0, 8.0));
-
-    let length = path.total_length();
-    assert_eq(length, 10.0, "Total path length should be 10.0");
-}
-
-#[test]
-fn test_maybe_type() {
+@test
+fn test_find_point() {{
     let mut points = List.new();
     points.push(Point.new(1.0, 2.0));
     points.push(Point.new(3.0, 4.0));
 
-    let found = find_point_by_x(&points, 1.0);
-    match found {
-        Maybe.Some(p) => assert_eq(p.x, 1.0, "Found point should have x=1.0"),
-        Maybe.None => panic("Point should be found"),
-    }
-}
-"#;
+    match find_point_by_x(&points, 1.0) {{
+        Some(p) => assert_eq(p.x, 1.0, "Found point should have x=1.0"),
+        None => panic("Point should be found"),
+    }}
+}}
+"#,
+            name = name
+        );
 
         fs::write(dir.join("tests/lib_test.vr"), test_content)?;
         Ok(())
@@ -178,57 +265,43 @@ fn test_maybe_type() {
 pub mod web_api {
     use super::*;
 
-    pub fn create(dir: &Path, _name: &str) -> Result<()> {
+    pub fn create(dir: &Path, _name: &str, _profile: LanguageProfile) -> Result<()> {
         fs::create_dir_all(dir.join("src/routes"))?;
 
         let main_content = r#"// Web API server
-// Spec: v6.0-BALANCED - Use semantic types
 
-// Imports use dots (.) not double colons (::)
-import std.io.stdio.println;
-import core.base.text.Text;
-import core.base.map.Map;
-import std.network.http2.*;
+mount core.base.{Text, Map};
+mount core.net.http.{Server, Request, Response};
 
-// Module declaration (not 'mod')
 module routes;
 
 fn main() {
-    let server = Server.new("127.0.0.1:8080");
+    let server = Server.bind("127.0.0.1:8080");
 
     server.route("/", routes.index);
     server.route("/api/hello", routes.hello);
 
-    print(f"Server running on http://127.0.0.1:8080");
-    print(f"Performance: Tier 2 AOT, 85-95% native speed");
-    print(f"CBGR overhead: ~15ns per request reference");
-
+    print("Listening on http://127.0.0.1:8080");
     server.run();
 }
 "#;
 
         fs::write(dir.join("src/main.vr"), main_content)?;
 
-        let routes_content = r#"// API routes
-// Spec: v6.0-BALANCED - Use Text and Map (NOT String and HashMap!)
+        let routes_content = r#"// API route handlers
 
-// Imports use dots (.) not double colons (::)
-import std.network.http2.*;
-import core.base.text.Text;
-import core.base.map.Map;
+mount core.base.{Text, Map};
+mount core.net.http.{Request, Response};
 
-pub fn index(req: Request) -> Response {
+pub fn index(req: &Request) -> Response {
     Response.ok("Welcome to Verum API")
 }
 
-pub fn hello(req: Request) -> Response {
+pub fn hello(req: &Request) -> Response {
     let name = req.query("name").unwrap_or("World");
 
-    // Use Map, not HashMap!
-    let mut data = Map.new();
+    let mut data: Map<Text, Text> = Map.new();
     data.insert("message", f"Hello, {name}!");
-    data.insert("cbgr_overhead", "~15ns per check");
-    data.insert("tier", "2 (AOT)");
 
     Response.json(data)
 }
@@ -237,21 +310,21 @@ pub fn hello(req: Request) -> Response {
         fs::write(dir.join("src/routes/mod.vr"), routes_content)?;
 
         let test_content = r#"// API tests
-import std.test.*;
-import std.network.http2.*;
 
-#[test]
+mount core.net.http.{Request, Response};
+
+@test
 fn test_index_route() {
     let req = Request.get("/");
-    let res = routes.index(req);
-    assert_eq(res.status(), 200, "Index should return 200 OK");
+    let res = routes.index(&req);
+    assert_eq(res.status(), 200, "Index should return 200");
 }
 
-#[test]
+@test
 fn test_hello_route() {
     let req = Request.get("/api/hello?name=Verum");
-    let res = routes.hello(req);
-    assert(res.body().contains("Hello, Verum!"), "Response should contain greeting");
+    let res = routes.hello(&req);
+    assert(res.body().contains("Hello, Verum!"), "Should contain greeting");
 }
 "#;
 
@@ -263,38 +336,30 @@ fn test_hello_route() {
 pub mod cli_app {
     use super::*;
 
-    pub fn create(dir: &Path, name: &str) -> Result<()> {
+    pub fn create(dir: &Path, name: &str, _profile: LanguageProfile) -> Result<()> {
         let main_content = format!(
-            r#"// Command-line application
-// Spec: v6.0-BALANCED - Use semantic types
+            r#"// {name} — command-line application
 
-// Imports use dots (.) not double colons (::)
-import core.base.text.Text;
-import core.base.list.List;
-import core.base.maybe.Maybe;
-import std.io.*;
-import std.env;
+mount core.base.{{Text, List, Maybe}};
+mount core.sys.env;
 
-// Type definition uses 'type X is {{ ... }}'
 type Cli is {{
     verbose: Bool,
     input: Maybe<Text>,
 }};
 
-// Implementation uses 'implement' keyword
 implement Cli {{
-    fn parse_args() -> Cli {{
-        let args: List<Text> = env.args();
+    fn parse(args: &List<Text>) -> Cli {{
         let mut verbose = false;
-        let mut input = Maybe.None;
+        let mut input: Maybe<Text> = None;
+        let mut i = 1;  // skip program name
 
-        let mut i = 0;
         while i < args.len() {{
             match args[i].as_str() {{
                 "--verbose" | "-v" => verbose = true,
-                "--input" => {{
+                "--input" | "-i" => {{
                     if i + 1 < args.len() {{
-                        input = Maybe.Some(args[i + 1].clone());
+                        input = Some(args[i + 1].clone());
                         i += 1;
                     }}
                 }}
@@ -308,27 +373,22 @@ implement Cli {{
 }}
 
 fn main() {{
-    let cli = Cli.parse_args();
+    let cli = Cli.parse(&env.args());
 
     if cli.verbose {{
-        print(f"{name} v1.0.0");
-        print(f"Language: Verum v6.0-BALANCED");
-        print(f"CBGR overhead: ~15ns per check");
+        print("{name} v0.1.0");
     }}
 
     match cli.input {{
-        Maybe.Some(file) => process_file(&file),
-        Maybe.None => {{
-            print(f"Usage: {name} [OPTIONS]");
-            print(f"  --verbose, -v    Enable verbose output");
-            print(f"  --input FILE     Input file to process");
+        Some(file) => {{
+            print(f"Processing: {{file}}");
+        }}
+        None => {{
+            print("Usage: {name} [OPTIONS]");
+            print("  -v, --verbose    Verbose output");
+            print("  -i, --input FILE Input file");
         }}
     }}
-}}
-
-fn process_file(path: &Text) {{
-    print(f"Processing: {{path}}");
-    // Implementation here
 }}
 "#,
             name = name
@@ -336,17 +396,27 @@ fn process_file(path: &Text) {{
 
         fs::write(dir.join("src/main.vr"), main_content)?;
 
-        let test_content = r#"// CLI tests
-import std.test.*;
-import core.base.list.List;
-import core.base.text.Text;
+        let test_content = format!(
+            r#"// Tests for {name} CLI
 
-#[test]
-fn test_cli_parsing() {
-    // Test CLI argument parsing
-    assert(true, "CLI parsing works");
-}
-"#;
+mount core.base.{{List, Text}};
+
+@test
+fn test_cli_parse_verbose() {{
+    let args: List<Text> = ["{name}", "--verbose"];
+    let cli = Cli.parse(&args);
+    assert(cli.verbose, "Should parse --verbose flag");
+}}
+
+@test
+fn test_cli_parse_input() {{
+    let args: List<Text> = ["{name}", "--input", "file.txt"];
+    let cli = Cli.parse(&args);
+    assert_eq(cli.input, Some("file.txt"), "Should parse --input");
+}}
+"#,
+            name = name
+        );
 
         fs::write(dir.join("tests/cli_test.vr"), test_content)?;
         Ok(())
