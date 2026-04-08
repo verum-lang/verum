@@ -13,17 +13,17 @@ pub enum DiagnosticSeverity {
     Warning,
 }
 
-impl TryFrom<u32> for DiagnosticSeverity {
+impl TryFrom<i32> for DiagnosticSeverity {
     type Error = Error;
 
-    fn try_from(severity: u32) -> Result<Self, Error> {
+    fn try_from(severity: i32) -> Result<Self, Error> {
         #[allow(non_upper_case_globals)]
         Ok(match severity {
             MlirDiagnosticSeverity_MlirDiagnosticError => Self::Error,
             MlirDiagnosticSeverity_MlirDiagnosticNote => Self::Note,
             MlirDiagnosticSeverity_MlirDiagnosticRemark => Self::Remark,
             MlirDiagnosticSeverity_MlirDiagnosticWarning => Self::Warning,
-            _ => return Err(Error::UnknownDiagnosticSeverity(severity)),
+            _ => return Err(Error::UnknownDiagnosticSeverity(severity as u32)),
         })
     }
 }

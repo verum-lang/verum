@@ -194,3 +194,65 @@ fn read_from_fd(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
         Ok(n)
     }
 }
+
+// =============================================================================
+// Windows I/O helpers
+// =============================================================================
+
+/// Write a string to a file descriptor on Windows using Console API.
+@cfg(target_os = "windows")
+fn write_to_fd(fd: FileDesc, s: &Text) -> IoResult<()> {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, WriteFile, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    };
+
+    let handle = if fd.0 == 1 {
+        GetStdHandle(STD_OUTPUT_HANDLE)
+    } else if fd.0 == 2 {
+        GetStdHandle(STD_ERROR_HANDLE)
+    } else {
+        return Err(StreamError.new(IoErrorKind.InvalidInput, "unsupported fd"));
+    };
+
+    let bytes = s.as_bytes();
+    let mut written: UInt32 = 0;
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let chunk = (bytes.len() - offset) as UInt32;
+        let ok = WriteFile(
+            handle,
+            &bytes[offset] as &unsafe Byte,
+            chunk,
+            &mut written,
+            0 as &mut core.sys.windows.kernel32.Overlapped,
+        );
+        if !ok {
+            return Err(StreamError.new(IoErrorKind.Other, "WriteFile failed"));
+        }
+        offset = offset + written as Int;
+    }
+    Ok(())
+}
+
+/// Read bytes from stdin on Windows using Console API.
+@cfg(target_os = "windows")
+fn read_from_fd(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, ReadFile, STD_INPUT_HANDLE,
+    };
+
+    let handle = GetStdHandle(STD_INPUT_HANDLE);
+    let mut bytes_read: UInt32 = 0;
+    let ok = ReadFile(
+        handle,
+        buf as &unsafe mut Byte,
+        buf.len() as UInt32,
+        &mut bytes_read,
+        0 as &mut core.sys.windows.kernel32.Overlapped,
+    );
+    if ok {
+        Ok(bytes_read as Int)
+    } else {
+        Err(StreamError.new(IoErrorKind.Other, "ReadFile failed"))
+    }
+}

@@ -51,6 +51,9 @@ public module thread;
 /// Time and clock operations
 public module time;
 
+/// Winsock2 networking (ws2_32.dll)
+public module winsock2;
+
 // =============================================================================
 // NT Status Re-exports
 // =============================================================================
@@ -214,6 +217,11 @@ public mount kernel32.{
     SleepConditionVariableSRW,
     WakeConditionVariable,
     WakeAllConditionVariable,
+
+    // Address-based waiting (futex equivalent)
+    WaitOnAddress,
+    WakeByAddressSingle,
+    WakeByAddressAll,
 
     // IOCP functions
     CreateIoCompletionPort,
@@ -433,4 +441,42 @@ public mount time.{
     sleep_us,
     get_perf_freq,
     perf_counter_to_nanos,
+};
+
+// =============================================================================
+// Winsock2 Re-exports
+// =============================================================================
+
+public mount winsock2.{
+    // Socket operations (POSIX-compatible names)
+    socket, connect, bind, listen, accept, accept4,
+    send, recv, sendto, recvfrom,
+    shutdown, close, read, write,
+    getsockname, getpeername, fcntl,
+
+    // Socket options
+    setsockopt_int, getsockopt_error,
+    set_nonblocking, set_reuseaddr, set_reuseport,
+    set_tcp_nodelay, set_keepalive, set_broadcast,
+    set_send_buffer_size, set_recv_buffer_size,
+    set_socket_timeout,
+
+    // Multicast
+    join_multicast_v4, leave_multicast_v4,
+    set_multicast_ttl_v4, set_multicast_loop_v4,
+
+    // Peek / non-blocking
+    peek, recv_nonblock, send_nonblock,
+
+    // Types
+    SockaddrIn, SockaddrIn6,
+
+    // Constants
+    AF_INET, AF_INET6,
+    SOCK_STREAM, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_CLOEXEC,
+    IPPROTO_TCP, IPPROTO_UDP,
+    SOL_SOCKET, SOL_TCP, SO_ERROR,
+    SHUT_RD, SHUT_WR, SHUT_RDWR,
+    MSG_PEEK, MSG_DONTWAIT,
+    SOCKET_ERROR, INVALID_SOCKET,
 };

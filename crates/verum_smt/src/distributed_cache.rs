@@ -1866,16 +1866,20 @@ mod tests {
 
     #[test]
     fn test_cache_file_path_generation() {
-        let config = DistributedCacheConfig::filesystem_only("/tmp/cache");
+        let base = std::env::temp_dir().join("verum_test_cache_path");
+        let base_str = base.to_string_lossy().to_string();
+        let config = DistributedCacheConfig::filesystem_only(base_str.as_str());
         let cache = DistributedCache::new(config);
 
-        // Test path generation with subdirectory
-        let path = cache.get_cache_file_path("/tmp/cache", "abcdef123456");
-        assert_eq!(path.to_string_lossy(), "/tmp/cache/ab/abcdef123456.json");
+        // Test path generation with subdirectory (cross-platform)
+        let path = cache.get_cache_file_path(base_str.as_str(), "abcdef123456");
+        let expected = base.join("ab").join("abcdef123456.json");
+        assert_eq!(path, expected);
 
         // Test path generation for short key
-        let path2 = cache.get_cache_file_path("/tmp/cache", "x");
-        assert_eq!(path2.to_string_lossy(), "/tmp/cache/00/x.json");
+        let path2 = cache.get_cache_file_path(base_str.as_str(), "x");
+        let expected2 = base.join("00").join("x.json");
+        assert_eq!(path2, expected2);
     }
 
     #[tokio::test]

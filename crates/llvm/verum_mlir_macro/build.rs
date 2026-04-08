@@ -15,7 +15,12 @@ fn main() {
 
     // Find LLVM installation
     let llvm_dir = get_llvm_install_dir();
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
 
     // Get include directory
     let include_dir = run_llvm_config(&llvm_config, "--includedir");
@@ -24,12 +29,17 @@ fn main() {
     println!("cargo:rustc-env=LLVM_INCLUDE_DIRECTORY={}", include_dir);
 }
 
+/// Check if an LLVM installation directory contains llvm-config.
+fn has_llvm_config(dir: &Path) -> bool {
+    dir.join("bin/llvm-config").exists() || dir.join("bin/llvm-config.exe").exists()
+}
+
 /// Find LLVM installation directory
 fn get_llvm_install_dir() -> PathBuf {
     // 1. Check explicit environment variable override
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
         let path = PathBuf::from(&dir);
-        if path.join("bin/llvm-config").exists() {
+        if has_llvm_config(&path) {
             return path;
         }
     }
@@ -45,7 +55,7 @@ fn get_llvm_install_dir() -> PathBuf {
 
     let local_install = workspace_root.join("llvm/install");
 
-    if local_install.join("bin/llvm-config").exists() {
+    if has_llvm_config(&local_install) {
         return local_install;
     }
 

@@ -30,12 +30,18 @@ fn main() {
     // Verify LLVM version
     verify_llvm_version(&llvm_dir);
 
-    // Get LLVM configuration
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    // Get LLVM configuration (llvm-config on Unix, llvm-config.exe on Windows)
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
     if !llvm_config.exists() {
+        let build_cmd = if cfg!(windows) { r#"cd llvm && .\build.bat"# } else { "cd llvm && ./build.sh" };
         panic!(
-            "llvm-config not found at {}. Run: cd llvm && ./build.sh",
-            llvm_config.display()
+            "llvm-config not found at {}. Run: {}",
+            llvm_config.display(), build_cmd
         );
     }
 
@@ -60,12 +66,17 @@ fn main() {
     generate_bindings(&include_dir);
 }
 
+/// Check if an LLVM installation directory contains llvm-config.
+fn has_llvm_config(dir: &Path) -> bool {
+    dir.join("bin/llvm-config").exists() || dir.join("bin/llvm-config.exe").exists()
+}
+
 /// Find LLVM installation directory
 fn get_llvm_install_dir() -> PathBuf {
     // 1. Check explicit environment variable override
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
         let path = PathBuf::from(&dir);
-        if path.join("bin/llvm-config").exists() {
+        if has_llvm_config(&path) {
             return path;
         }
         println!(
@@ -85,7 +96,7 @@ fn get_llvm_install_dir() -> PathBuf {
 
     let local_install = workspace_root.join("llvm/install");
 
-    if local_install.join("bin/llvm-config").exists() {
+    if has_llvm_config(&local_install) {
         return local_install;
     }
 
@@ -126,7 +137,12 @@ Alternatively, set VERUM_LLVM_DIR to override:
 
 /// Verify LLVM version matches expected
 fn verify_llvm_version(llvm_dir: &Path) {
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
 
     let output = Command::new(&llvm_config)
         .arg("--version")
@@ -155,14 +171,10 @@ fn verify_llvm_version(llvm_dir: &Path) {
 fn build_c_library(llvm_config: &Path, include_dir: &Path) {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // Get LLVM compiler flags
+    // Get LLVM compiler flags and pass them explicitly via cc::Build
+    // instead of polluting the CXXFLAGS environment variable, which can
+    // conflict with cc-rs's own flag management on MSVC.
     let cxxflags = run_llvm_config(llvm_config, "--cxxflags");
-    let cflags = run_llvm_config(llvm_config, "--cflags");
-
-    unsafe {
-        env::set_var("CXXFLAGS", &cxxflags);
-        env::set_var("CFLAGS", &cflags);
-    }
 
     // Find all C++ source files
     let lib_dir = manifest_dir.join("cc/lib");
@@ -173,18 +185,48 @@ fn build_c_library(llvm_config: &Path, include_dir: &Path) {
         .filter(|path| path.is_file() && path.extension() == Some(OsStr::new("cpp")))
         .collect();
 
-    cc::Build::new()
+    let mut build = cc::Build::new();
+    build
         .cpp(true)
         .files(cpp_files)
         .include(manifest_dir.join("cc/include"))
         .include(include_dir)
-        .flag(if cfg!(target_env = "msvc") {
-            "/WX"
-        } else {
-            "-Werror"
-        })
-        .std("c++17")
-        .compile("CTableGen");
+        .std("c++20");
+
+    // Forward LLVM-specific defines and flags from llvm-config --cxxflags.
+    // We parse them individually instead of setting CXXFLAGS env to avoid
+    // conflicting with cc-rs's own flag management on MSVC.
+    for flag in cxxflags.split_whitespace() {
+        // Skip include flags (we already pass our own) and -std (we set .std())
+        if flag.starts_with("-I") || flag.starts_with("-std") || flag.starts_with("/std") {
+            continue;
+        }
+        // Skip warning-level flags on MSVC — LLVM headers generate warnings
+        // at -W4 level that block compilation when combined with /WX or strict modes.
+        if cfg!(target_env = "msvc") && (flag == "/WX" || flag.starts_with("-W") || flag.starts_with("/W")) {
+            continue;
+        }
+        // Skip /EH flags — let cc-rs manage exception handling model
+        if cfg!(target_env = "msvc") && flag.starts_with("/EH") {
+            continue;
+        }
+        build.flag(flag);
+    }
+
+    // LLVM Release/MinSizeRel builds define NDEBUG, which disables dump()
+    // methods. We must match this to avoid unresolved externals.
+    // llvm-config doesn't emit NDEBUG in --cxxflags, so detect via build type.
+    if !cxxflags.contains("-UNDEBUG") {
+        build.define("NDEBUG", None);
+    }
+
+    // Treat warnings as errors on Unix but not on MSVC — LLVM 21 headers
+    // generate benign warnings with VS 18 that would block the build.
+    if !cfg!(target_env = "msvc") {
+        build.flag("-Werror");
+    }
+
+    build.compile("CTableGen");
 }
 
 /// Link LLVM libraries
@@ -219,7 +261,12 @@ fn link_llvm_libraries(llvm_config: &Path) {
                 println!("cargo:rustc-link-lib={}", lib_name);
             }
         } else {
-            println!("cargo:rustc-link-lib={}", flag);
+            // Strip .lib/.a suffix — Rust's linker appends the platform extension.
+            let lib_name = flag
+                .strip_suffix(".lib")
+                .or_else(|| flag.strip_suffix(".a"))
+                .unwrap_or(flag);
+            println!("cargo:rustc-link-lib={}", lib_name);
         }
     }
 
@@ -266,6 +313,10 @@ fn get_system_libcpp() -> Option<&'static str> {
 }
 
 fn parse_library_name(name: &str) -> Option<&str> {
+    // Unix: libLLVMCore.a → LLVMCore
+    // Windows: LLVMCore.lib → LLVMCore
     name.strip_prefix("lib")
-        .and_then(|name| name.split('.').next())
+        .and_then(|n| n.split('.').next())
+        .or_else(|| name.strip_suffix(".lib"))
+        .or_else(|| name.split('.').next().filter(|n| !n.is_empty()))
 }

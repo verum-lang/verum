@@ -1099,18 +1099,39 @@ impl CrashOracle {
             }
         }
 
-        let (crash_type, signal) = match exit_code {
-            // Unix signals
-            134 => (CrashType::Abort, Some(6)), // SIGABRT
-            136 => (CrashType::FloatingPointException, Some(8)), // SIGFPE
-            139 => {
-                self.stats.segfaults_detected += 1;
-                (CrashType::Segfault, Some(11)) // SIGSEGV
+        let (crash_type, signal) = if cfg!(windows) {
+            // Windows NTSTATUS exception codes (cast to i32 from u32).
+            // The process exit code carries the raw NTSTATUS on unhandled
+            // structured exceptions.
+            match exit_code as u32 {
+                0xC0000005 => {                                  // STATUS_ACCESS_VIOLATION
+                    self.stats.segfaults_detected += 1;
+                    (CrashType::Segfault, None)
+                }
+                0xC000001D => (CrashType::IllegalInstruction, None), // STATUS_ILLEGAL_INSTRUCTION
+                0xC0000090 | 0xC0000091 | 0xC0000093 | 0xC0000094
+                    => (CrashType::FloatingPointException, None),   // FP exceptions
+                0xC00000FD => (CrashType::StackOverflow, None),     // STATUS_STACK_OVERFLOW
+                0xC0000409 => (CrashType::Abort, None),             // STATUS_STACK_BUFFER_OVERRUN (fast-fail)
+                0x40010004 => (CrashType::Abort, None),             // DBG_TERMINATE_PROCESS (abort())
+                0xC0000602 => (CrashType::Unknown, None),           // fail-fast from CRT
+                _ if (exit_code as u32) >= 0xC0000000 => (CrashType::Unknown, None),
+                _ => (CrashType::Unknown, None),
             }
-            132 => (CrashType::IllegalInstruction, Some(4)), // SIGILL
-            138 => (CrashType::BusError, Some(7)),           // SIGBUS
-            _ if exit_code > 128 => (CrashType::Unknown, Some(exit_code - 128)),
-            _ => (CrashType::Unknown, None),
+        } else {
+            // Unix: exit_code = 128 + signal_number
+            match exit_code {
+                134 => (CrashType::Abort, Some(6)),                  // SIGABRT
+                136 => (CrashType::FloatingPointException, Some(8)), // SIGFPE
+                139 => {
+                    self.stats.segfaults_detected += 1;
+                    (CrashType::Segfault, Some(11))                  // SIGSEGV
+                }
+                132 => (CrashType::IllegalInstruction, Some(4)),     // SIGILL
+                138 => (CrashType::BusError, Some(7)),               // SIGBUS
+                _ if exit_code > 128 => (CrashType::Unknown, Some(exit_code - 128)),
+                _ => (CrashType::Unknown, None),
+            }
         };
 
         self.stats.crashes_detected += 1;

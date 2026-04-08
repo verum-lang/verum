@@ -568,7 +568,7 @@ impl FfiRuntime {
                     // Use ffi_call directly with a return buffer
                     libffi::raw::ffi_call(
                         cif_ptr,
-                        Some(std::mem::transmute::<*const libc::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
+                        Some(std::mem::transmute::<*const std::ffi::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
                         ret_ptr as *mut std::ffi::c_void,
                         arg_ptrs.as_mut_ptr(),
                     );
@@ -790,7 +790,7 @@ impl FfiRuntime {
                 unsafe {
                     libffi::raw::ffi_call(
                         cif_ptr,
-                        Some(std::mem::transmute::<*const libc::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
+                        Some(std::mem::transmute::<*const std::ffi::c_void, unsafe extern "C" fn()>(code_ptr.as_ptr())),
                         ret_ptr as *mut std::ffi::c_void,
                         arg_ptrs.as_mut_ptr(),
                     );

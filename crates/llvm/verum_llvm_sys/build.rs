@@ -30,12 +30,26 @@ fn main() {
     // Verify LLVM version
     verify_llvm_version(&llvm_dir);
 
-    // Get LLVM configuration
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    // Get LLVM configuration (llvm-config on Unix, llvm-config.exe on Windows)
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
     if !llvm_config.exists() {
+        let build_cmd = if cfg!(windows) {
+            r#"cd llvm && .\build.bat"#
+        } else {
+            "cd llvm && ./build.sh"
+        };
         panic!(
-            "llvm-config not found at {}. Run: cd llvm && ./build.sh",
-            llvm_config.display()
+            "llvm-config not found at {}. Run: {}",
+            llvm_config.display(), build_cmd
         );
     }
 
@@ -69,6 +83,11 @@ fn main() {
     link_system_libraries();
 }
 
+/// Check if an LLVM installation directory contains llvm-config.
+fn has_llvm_config(dir: &Path) -> bool {
+    dir.join("bin/llvm-config").exists() || dir.join("bin/llvm-config.exe").exists()
+}
+
 /// Find LLVM installation directory
 ///
 /// Search order:
@@ -80,7 +99,7 @@ fn get_llvm_install_dir() -> PathBuf {
     // 1. Check explicit environment variable override
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
         let path = PathBuf::from(&dir);
-        if path.join("bin/llvm-config").exists() {
+        if has_llvm_config(&path) {
             return path;
         }
         println!("cargo:warning=VERUM_LLVM_DIR={} but llvm-config not found there", dir);
@@ -97,7 +116,7 @@ fn get_llvm_install_dir() -> PathBuf {
 
     let local_install = workspace_root.join("llvm/install");
 
-    if local_install.join("bin/llvm-config").exists() {
+    if has_llvm_config(&local_install) {
         return local_install;
     }
 
@@ -122,42 +141,53 @@ Build typically takes 30-60 minutes.
     }
 
     // No local build found
+    let build_cmd = if cfg!(windows) {
+        r#"cd llvm && .\build.bat"#
+    } else {
+        "cd llvm && ./build.sh"
+    };
+    let lib_ext = if cfg!(windows) { ".lib" } else { ".a" };
+
     panic!(
-        r#"
-Local LLVM installation not found!
-
-verum_llvm_sys requires a local LLVM build for consistency.
-System LLVM (homebrew, apt, etc.) is NOT used.
-
-To build LLVM locally:
-
-  cd llvm && ./build.sh
-
-This will:
-  1. Clone llvm-project (if needed)
-  2. Build LLVM + LLD + MLIR with static libraries
-  3. Install to llvm/install/
-
-Build configuration is in llvm/llvm.toml
-
-Alternatively, set VERUM_LLVM_DIR to override:
-  export VERUM_LLVM_DIR=/path/to/custom/llvm
-
-Expected structure:
-  llvm/
-    install/
-      bin/llvm-config
-      lib/libLLVM*.a
-      lib/libLLD*.a
-      lib/libMLIR*.a
-      include/
-"#
+        "\n\
+Local LLVM installation not found!\n\
+\n\
+verum_llvm_sys requires a local LLVM build for consistency.\n\
+System LLVM (homebrew, apt, etc.) is NOT used.\n\
+\n\
+To build LLVM locally:\n\
+\n\
+  {build_cmd}\n\
+\n\
+This will:\n\
+  1. Clone llvm-project (if needed)\n\
+  2. Build LLVM + LLD + MLIR with static libraries\n\
+  3. Install to llvm/install/\n\
+\n\
+Build configuration is in llvm/llvm.toml\n\
+\n\
+Alternatively, set VERUM_LLVM_DIR to override:\n\
+  export VERUM_LLVM_DIR=/path/to/custom/llvm\n\
+\n\
+Expected structure:\n\
+  llvm/\n\
+    install/\n\
+      bin/llvm-config[.exe]\n\
+      lib/LLVM*{lib_ext}\n\
+      lib/LLD*{lib_ext}\n\
+      lib/MLIR*{lib_ext}\n\
+      include/\n"
     );
 }
 
 /// Verify LLVM version matches expected
 fn verify_llvm_version(llvm_dir: &Path) {
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
 
     let output = Command::new(&llvm_config)
         .arg("--version")
@@ -198,7 +228,9 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
     let libs_output = String::from_utf8_lossy(&output.stdout);
 
     for lib in libs_output.split_whitespace() {
-        // Extract library name from filename (libLLVMCore.a -> LLVMCore)
+        // Extract library name from filename:
+        //   Unix:    libLLVMCore.a   -> LLVMCore
+        //   Windows: LLVMCore.lib    -> LLVMCore
         let lib_name = lib
             .strip_prefix("lib")
             .unwrap_or(lib)
@@ -206,6 +238,7 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
             .or_else(|| lib.strip_suffix(".lib"))
             .unwrap_or(lib);
 
+        if lib_name.is_empty() { continue; }
         println!("cargo:rustc-link-lib=static={}", lib_name);
     }
 
@@ -223,8 +256,10 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
         ];
 
         for lib in lld_libs {
-            let lib_path = lib_dir.join(format!("lib{}.a", lib));
-            if lib_path.exists() {
+            // Check both Unix (lib*.a) and Windows (*.lib) naming
+            let unix_path = lib_dir.join(format!("lib{}.a", lib));
+            let win_path = lib_dir.join(format!("{}.lib", lib));
+            if unix_path.exists() || win_path.exists() {
                 println!("cargo:rustc-link-lib=static={}", lib);
             }
         }
@@ -236,7 +271,7 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
 
 /// Link MLIR static libraries
 fn link_mlir_libraries(lib_dir: &Path) {
-    // Scan for MLIR libraries
+    // Scan for MLIR libraries (lib*.a on Unix, *.lib on Windows)
     if let Ok(entries) = fs::read_dir(lib_dir) {
         let mut mlir_libs: Vec<String> = entries
             .filter_map(|e| e.ok())
@@ -244,12 +279,21 @@ fn link_mlir_libraries(lib_dir: &Path) {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
 
+                // Unix: libMLIR*.a
                 if name_str.starts_with("libMLIR") && name_str.ends_with(".a") {
                     Some(
                         name_str
                             .strip_prefix("lib")
                             .unwrap()
                             .strip_suffix(".a")
+                            .unwrap()
+                            .to_string()
+                    )
+                // Windows: MLIR*.lib
+                } else if name_str.starts_with("MLIR") && name_str.ends_with(".lib") {
+                    Some(
+                        name_str
+                            .strip_suffix(".lib")
                             .unwrap()
                             .to_string()
                     )
@@ -337,12 +381,25 @@ fn compile_lld_wrapper(llvm_dir: &Path) {
     build
         .cpp(true)
         .file(&wrapper_path)
-        .include(&include_dir)
-        .flag_if_supported("-std=c++17")
-        .flag_if_supported("-fno-rtti")
-        .flag_if_supported("-fno-exceptions");
+        .include(&include_dir);
 
-    // Platform-specific flags
+    // Platform-specific C++ flags
+    #[cfg(target_os = "windows")]
+    {
+        build
+            .flag_if_supported("/std:c++17")
+            .flag_if_supported("/GR-")   // Disable RTTI
+            .flag_if_supported("/EHs-c-"); // Disable exceptions
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        build
+            .flag_if_supported("-std=c++17")
+            .flag_if_supported("-fno-rtti")
+            .flag_if_supported("-fno-exceptions");
+    }
+
     #[cfg(target_os = "macos")]
     {
         build.flag("-stdlib=libc++");

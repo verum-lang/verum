@@ -64,9 +64,13 @@ void tableGenRecordValPrint(TableGenRecordValRef rv_ref,
   stream << *unwrap(rv_ref);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void tableGenRecordValDump(TableGenRecordValRef rv_ref) {
   unwrap(rv_ref)->dump();
 }
+#else
+void tableGenRecordValDump(TableGenRecordValRef rv_ref) { (void)rv_ref; }
+#endif
 
 TableGenSourceLocationRef tableGenRecordValGetLoc(TableGenRecordValRef rv_ref) {
   return wrap(new ArrayRef(unwrap(rv_ref)->getLoc()));

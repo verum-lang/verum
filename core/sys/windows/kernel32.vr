@@ -491,6 +491,117 @@ public fn TerminateThread(thread: Handle, exit_code: UInt32) -> Bool;
 @extern("kernel32.dll")
 public fn TerminateProcess(process: Handle, exit_code: UInt32) -> Bool;
 
+/// Get exit code of a process
+@extern("kernel32.dll")
+public fn GetExitCodeProcess(process: Handle, exit_code: &mut UInt32) -> Bool;
+
+// =============================================================================
+// Process Creation
+// =============================================================================
+
+/// Startup info for CreateProcess (ANSI version, 104 bytes on x64)
+public type StartupInfoA is {
+    cb: UInt32,
+    reserved: &unsafe Byte,
+    desktop: &unsafe Byte,
+    title: &unsafe Byte,
+    x: UInt32,
+    y: UInt32,
+    x_size: UInt32,
+    y_size: UInt32,
+    x_count_chars: UInt32,
+    y_count_chars: UInt32,
+    fill_attribute: UInt32,
+    flags: UInt32,
+    show_window: UInt16,
+    cb_reserved2: UInt16,
+    reserved2: &unsafe Byte,
+    std_input: Handle,
+    std_output: Handle,
+    std_error: Handle,
+};
+
+implement StartupInfoA {
+    /// Create a zeroed StartupInfoA with cb set to the struct size.
+    public fn new() -> StartupInfoA {
+        StartupInfoA {
+            cb: 104 as UInt32,  // sizeof(STARTUPINFOA) on x64
+            reserved: 0 as &unsafe Byte,
+            desktop: 0 as &unsafe Byte,
+            title: 0 as &unsafe Byte,
+            x: 0,
+            y: 0,
+            x_size: 0,
+            y_size: 0,
+            x_count_chars: 0,
+            y_count_chars: 0,
+            fill_attribute: 0,
+            flags: 0,
+            show_window: 0,
+            cb_reserved2: 0,
+            reserved2: 0 as &unsafe Byte,
+            std_input: Handle.NULL,
+            std_output: Handle.NULL,
+            std_error: Handle.NULL,
+        }
+    }
+}
+
+/// Process information returned by CreateProcess
+public type ProcessInformation is {
+    process: Handle,
+    thread: Handle,
+    process_id: UInt32,
+    thread_id: UInt32,
+};
+
+/// Create a new process (ANSI version)
+@extern("kernel32.dll")
+public fn CreateProcessA(
+    application_name: &unsafe Byte,
+    command_line: &unsafe Byte,
+    process_attributes: &unsafe Byte,
+    thread_attributes: &unsafe Byte,
+    inherit_handles: Bool,
+    creation_flags: UInt32,
+    environment: &unsafe Byte,
+    current_directory: &unsafe Byte,
+    startup_info: &StartupInfoA,
+    process_information: &mut ProcessInformation,
+) -> Bool;
+
+/// Create an anonymous pipe.
+///
+/// Returns read and write handles. `inherit_handles` in SecurityAttributes
+/// controls whether the handles are inherited by child processes.
+@extern("kernel32.dll")
+public fn CreatePipe(
+    read_pipe: &mut Handle,
+    write_pipe: &mut Handle,
+    pipe_attributes: &SecurityAttributes,
+    size: UInt32,
+) -> Bool;
+
+/// Set handle information (used to control inheritance of pipe handles).
+@extern("kernel32.dll")
+public fn SetHandleInformation(
+    object: Handle,
+    mask: UInt32,
+    flags: UInt32,
+) -> Bool;
+
+/// STARTF_USESTDHANDLES flag — use std_input/std_output/std_error from StartupInfo
+public const STARTF_USESTDHANDLES: UInt32 = 0x00000100;
+
+/// CREATE_NO_WINDOW flag — don't create a console window
+public const CREATE_NO_WINDOW: UInt32 = 0x08000000;
+
+/// HANDLE_FLAG_INHERIT
+public const HANDLE_FLAG_INHERIT: UInt32 = 0x00000001;
+
+/// STILL_ACTIVE — process exit code when still running
+public const STILL_ACTIVE: UInt32 = 259;
+
 /// Wait for single object
 @extern("kernel32.dll")
 public fn WaitForSingleObject(
@@ -594,6 +705,126 @@ public fn CreateMutexW(
 /// Release mutex
 @extern("kernel32.dll")
 public fn ReleaseMutex(mutex: Handle) -> Bool;
+
+// =============================================================================
+// SRW Locks (Slim Reader/Writer)
+// =============================================================================
+
+/// Initialize an SRW lock
+@extern("kernel32.dll")
+public fn InitializeSRWLock(srw_lock: &unsafe Byte);
+
+/// Acquire SRW lock exclusive (write)
+@extern("kernel32.dll")
+public fn AcquireSRWLockExclusive(srw_lock: &unsafe Byte);
+
+/// Release SRW lock exclusive (write)
+@extern("kernel32.dll")
+public fn ReleaseSRWLockExclusive(srw_lock: &unsafe Byte);
+
+/// Acquire SRW lock shared (read)
+@extern("kernel32.dll")
+public fn AcquireSRWLockShared(srw_lock: &unsafe Byte);
+
+/// Release SRW lock shared (read)
+@extern("kernel32.dll")
+public fn ReleaseSRWLockShared(srw_lock: &unsafe Byte);
+
+/// Try to acquire SRW lock exclusive (non-blocking)
+@extern("kernel32.dll")
+public fn TryAcquireSRWLockExclusive(srw_lock: &unsafe Byte) -> Bool;
+
+/// Try to acquire SRW lock shared (non-blocking)
+@extern("kernel32.dll")
+public fn TryAcquireSRWLockShared(srw_lock: &unsafe Byte) -> Bool;
+
+// =============================================================================
+// Condition Variables
+// =============================================================================
+
+/// Initialize a condition variable
+@extern("kernel32.dll")
+public fn InitializeConditionVariable(condition_variable: &unsafe Byte);
+
+/// Sleep on condition variable with critical section
+@extern("kernel32.dll")
+public fn SleepConditionVariableCS(
+    condition_variable: &unsafe Byte,
+    critical_section: &unsafe Byte,
+    timeout_ms: UInt32,
+) -> Bool;
+
+/// Sleep on condition variable with SRW lock
+@extern("kernel32.dll")
+public fn SleepConditionVariableSRW(
+    condition_variable: &unsafe Byte,
+    srw_lock: &unsafe Byte,
+    timeout_ms: UInt32,
+    flags: UInt32,
+) -> Bool;
+
+/// Wake one thread waiting on condition variable
+@extern("kernel32.dll")
+public fn WakeConditionVariable(condition_variable: &unsafe Byte);
+
+/// Wake all threads waiting on condition variable
+@extern("kernel32.dll")
+public fn WakeAllConditionVariable(condition_variable: &unsafe Byte);
+
+// =============================================================================
+// Address-Based Waiting (Windows 8+ futex equivalent)
+// =============================================================================
+
+/// Block until the value at the address changes.
+///
+/// Compares *address with *compare_address (of `address_size` bytes).
+/// If equal, blocks until WakeByAddressSingle/All is called on the address,
+/// or the timeout expires. Returns true if woken, false on timeout/error.
+///
+/// This is the Windows equivalent of Linux futex(FUTEX_WAIT).
+@extern("kernel32.dll")
+public fn WaitOnAddress(
+    address: &unsafe Byte,
+    compare_address: &unsafe Byte,
+    address_size: USize,
+    timeout_ms: UInt32,
+) -> Bool;
+
+/// Wake a single thread waiting on the address.
+///
+/// This is the Windows equivalent of Linux futex(FUTEX_WAKE, 1).
+@extern("kernel32.dll")
+public fn WakeByAddressSingle(address: &unsafe Byte);
+
+/// Wake all threads waiting on the address.
+///
+/// This is the Windows equivalent of Linux futex(FUTEX_WAKE, INT_MAX).
+@extern("kernel32.dll")
+public fn WakeByAddressAll(address: &unsafe Byte);
+
+// =============================================================================
+// Critical Sections
+// =============================================================================
+
+/// Initialize a critical section
+@extern("kernel32.dll")
+public fn InitializeCriticalSection(critical_section: &unsafe Byte);
+
+/// Enter a critical section (blocking)
+@extern("kernel32.dll")
+public fn EnterCriticalSection(critical_section: &unsafe Byte);
+
+/// Try to enter a critical section (non-blocking)
+@extern("kernel32.dll")
+public fn TryEnterCriticalSection(critical_section: &unsafe Byte) -> Bool;
+
+/// Leave a critical section
+@extern("kernel32.dll")
+public fn LeaveCriticalSection(critical_section: &unsafe Byte);
+
+/// Delete a critical section
+@extern("kernel32.dll")
+public fn DeleteCriticalSection(critical_section: &unsafe Byte);
 
 // =============================================================================
 // Thread-Local Storage

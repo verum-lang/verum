@@ -27,12 +27,18 @@ fn main() {
     // Verify LLVM version
     verify_llvm_version(&llvm_dir);
 
-    // Get LLVM configuration
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    // Get LLVM configuration (llvm-config on Unix, llvm-config.exe on Windows)
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
     if !llvm_config.exists() {
+        let build_cmd = if cfg!(windows) { r#"cd llvm && .\build.bat"# } else { "cd llvm && ./build.sh" };
         panic!(
-            "llvm-config not found at {}. Run: cd llvm && ./build.sh",
-            llvm_config.display()
+            "llvm-config not found at {}. Run: {}",
+            llvm_config.display(), build_cmd
         );
     }
 
@@ -51,12 +57,17 @@ fn main() {
     generate_bindings(&include_dir);
 }
 
+/// Check if an LLVM installation directory contains llvm-config.
+fn has_llvm_config(dir: &Path) -> bool {
+    dir.join("bin/llvm-config").exists() || dir.join("bin/llvm-config.exe").exists()
+}
+
 /// Find LLVM installation directory
 fn get_llvm_install_dir() -> PathBuf {
     // 1. Check explicit environment variable override
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
         let path = PathBuf::from(&dir);
-        if path.join("bin/llvm-config").exists() {
+        if has_llvm_config(&path) {
             return path;
         }
         println!(
@@ -76,7 +87,7 @@ fn get_llvm_install_dir() -> PathBuf {
 
     let local_install = workspace_root.join("llvm/install");
 
-    if local_install.join("bin/llvm-config").exists() {
+    if has_llvm_config(&local_install) {
         return local_install;
     }
 
@@ -122,7 +133,12 @@ Alternatively, set VERUM_LLVM_DIR to override:
 
 /// Verify LLVM version matches expected
 fn verify_llvm_version(llvm_dir: &Path) {
-    let llvm_config = llvm_dir.join("bin/llvm-config");
+    let llvm_config = if cfg!(windows) {
+        let exe_path = llvm_dir.join("bin/llvm-config.exe");
+        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+    } else {
+        llvm_dir.join("bin/llvm-config")
+    };
 
     let output = Command::new(&llvm_config)
         .arg("--version")
@@ -206,7 +222,12 @@ fn link_mlir_libraries(llvm_dir: &Path, llvm_config: &Path) {
                 println!("cargo:rustc-link-lib={}", stem.trim_start_matches("lib"));
             }
         } else {
-            println!("cargo:rustc-link-lib={}", flag);
+            // Strip .lib/.a suffix — Rust's linker appends the platform extension.
+            let lib_name = flag
+                .strip_suffix(".lib")
+                .or_else(|| flag.strip_suffix(".a"))
+                .unwrap_or(flag);
+            println!("cargo:rustc-link-lib={}", lib_name);
         }
     }
 

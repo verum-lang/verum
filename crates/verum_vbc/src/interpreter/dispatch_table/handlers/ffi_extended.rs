@@ -1425,23 +1425,36 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
         Some(FfiSubOpcode::SysGetpid) => {
             let dst = read_reg(state)?;
-            // SAFETY: `libc::getpid` takes no pointers and is always safe to
-            // call on supported platforms; it is FFI-unsafe only due to its
-            // `extern "C"` binding.
-            let pid = unsafe { libc::getpid() };
+            let pid = std::process::id();
             state.set_reg(dst, Value::from_i64(pid as i64));
             Ok(DispatchResult::Continue)
         }
 
         Some(FfiSubOpcode::SysGettid) => {
             let dst = read_reg(state)?;
-            let mut tid: u64 = 0;
-            // SAFETY: `tid` is a live stack u64. `pthread_threadid_np` writes
-            // exactly one u64 via the provided pointer when the first arg is
-            // 0 (self). The Apple libc contract is well-defined.
-            unsafe {
-                libc::pthread_threadid_np(0, &mut tid);
-            }
+            #[cfg(unix)]
+            let tid: u64 = {
+                let mut tid: u64 = 0;
+                // SAFETY: `tid` is a live stack u64. `pthread_threadid_np` writes
+                // exactly one u64 via the provided pointer when the first arg is
+                // 0 (self). The Apple libc contract is well-defined.
+                #[cfg(target_os = "macos")]
+                unsafe { libc::pthread_threadid_np(0, &mut tid); }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // On other Unix, use the thread id as a hash of the thread handle
+                    let id = std::thread::current().id();
+                    tid = format!("{:?}", id).chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+                }
+                tid
+            };
+            #[cfg(windows)]
+            let tid: u64 = {
+                // SAFETY: GetCurrentThreadId is always safe and takes no pointer arguments.
+                unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() as u64 }
+            };
+            #[cfg(not(any(unix, windows)))]
+            let tid: u64 = 0;
             state.set_reg(dst, Value::from_i64(tid as i64));
             Ok(DispatchResult::Continue)
         }
@@ -1457,7 +1470,7 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
             let addr = state.get_reg(addr_reg).as_i64();
             let len = state.get_reg(len_reg).as_i64();
-            let offset = state.get_reg(offset_reg).as_i64();
+            let _offset = state.get_reg(offset_reg).as_i64();
 
             // Extract prot flags from MemProt struct object
             // MemProt { read: Bool, write: Bool, exec: Bool }
@@ -1473,32 +1486,66 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let fd_val = state.get_reg(fd_reg);
             let fd = extract_filedesc(state, fd_val);
 
-            // SAFETY: `mmap` is a well-defined kernel syscall. The caller
-            // supplies the same arguments the AOT path would; invalid inputs
-            // return `MAP_FAILED` without corrupting our process state. No
-            // Rust references are dereferenced here.
-            let result = unsafe {
-                libc::mmap(
-                    addr as *mut libc::c_void,
-                    len as libc::size_t,
-                    prot_flags,
-                    map_flags,
-                    fd,
-                    offset as libc::off_t,
-                )
-            };
+            #[cfg(unix)]
+            {
+                let offset = _offset;
+                // SAFETY: `mmap` is a well-defined kernel syscall. The caller
+                // supplies the same arguments the AOT path would; invalid inputs
+                // return `MAP_FAILED` without corrupting our process state. No
+                // Rust references are dereferenced here.
+                let result = unsafe {
+                    libc::mmap(
+                        addr as *mut libc::c_void,
+                        len as libc::size_t,
+                        prot_flags,
+                        map_flags,
+                        fd,
+                        offset as libc::off_t,
+                    )
+                };
 
-            if result == libc::MAP_FAILED {
-                // SAFETY: `__error()` returns a thread-local pointer to errno
-                // that is always valid on macOS. Dereferencing it yields the
-                // current errno value.
-                let errno = unsafe { *libc::__error() };
-                let err_obj = make_oserror_variant(state, errno)?;
-                state.set_reg(dst, err_obj);
-            } else {
-                let ok_obj = make_result_ok_ptr(state, result as i64)?;
-                state.set_reg(dst, ok_obj);
+                if result == libc::MAP_FAILED {
+                    let errno = get_platform_errno();
+                    let err_obj = make_oserror_variant(state, errno)?;
+                    state.set_reg(dst, err_obj);
+                } else {
+                    let ok_obj = make_result_ok_ptr(state, result as i64)?;
+                    state.set_reg(dst, ok_obj);
+                }
             }
+
+            #[cfg(windows)]
+            {
+                let _ = (fd, map_flags);
+                // Translate MemProt flags to Windows page protection constants
+                let win_prot = memprot_to_win_protect(prot_flags);
+                let alloc_type = 0x00001000u32 | 0x00002000u32; // MEM_COMMIT | MEM_RESERVE
+                // SAFETY: VirtualAlloc is a well-defined Win32 API. Invalid inputs
+                // return NULL without corrupting process state.
+                let result = unsafe {
+                    windows_sys::Win32::System::Memory::VirtualAlloc(
+                        if addr == 0 { std::ptr::null() } else { addr as *const core::ffi::c_void },
+                        len as usize,
+                        alloc_type,
+                        win_prot,
+                    )
+                };
+                if result.is_null() {
+                    let errno = get_platform_errno();
+                    let err_obj = make_oserror_variant(state, errno)?;
+                    state.set_reg(dst, err_obj);
+                } else {
+                    let ok_obj = make_result_ok_ptr(state, result as i64)?;
+                    state.set_reg(dst, ok_obj);
+                }
+            }
+
+            #[cfg(not(any(unix, windows)))]
+            {
+                let err_obj = make_oserror_variant_with_msg(state, 38, "mmap not supported on this platform")?;
+                state.set_reg(dst, err_obj);
+            }
+
             Ok(DispatchResult::Continue)
         }
 
@@ -1510,21 +1557,52 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let addr = state.get_reg(addr_reg).as_i64();
             let len = state.get_reg(len_reg).as_i64();
 
-            // SAFETY: `munmap` is a well-defined kernel syscall that fails
-            // with a negative result on invalid inputs. No Rust references
-            // are dereferenced; correctness is the caller's responsibility.
-            let result = unsafe { libc::munmap(addr as *mut libc::c_void, len as libc::size_t) };
+            #[cfg(unix)]
+            {
+                // SAFETY: `munmap` is a well-defined kernel syscall that fails
+                // with a negative result on invalid inputs. No Rust references
+                // are dereferenced; correctness is the caller's responsibility.
+                let result = unsafe { libc::munmap(addr as *mut libc::c_void, len as libc::size_t) };
 
-            if result < 0 {
-                // SAFETY: `__error()` returns a valid thread-local errno
-                // pointer on macOS.
-                let errno = unsafe { *libc::__error() };
-                let err_obj = make_oserror_variant(state, errno)?;
-                state.set_reg(dst, err_obj);
-            } else {
-                let ok_obj = make_result_ok_unit(state)?;
-                state.set_reg(dst, ok_obj);
+                if result < 0 {
+                    let errno = get_platform_errno();
+                    let err_obj = make_oserror_variant(state, errno)?;
+                    state.set_reg(dst, err_obj);
+                } else {
+                    let ok_obj = make_result_ok_unit(state)?;
+                    state.set_reg(dst, ok_obj);
+                }
             }
+
+            #[cfg(windows)]
+            {
+                let _ = len;
+                // SAFETY: VirtualFree with MEM_RELEASE (0x00008000) is well-defined.
+                // The size parameter must be 0 when using MEM_RELEASE.
+                let result = unsafe {
+                    windows_sys::Win32::System::Memory::VirtualFree(
+                        addr as *mut core::ffi::c_void,
+                        0,
+                        0x00008000u32, // MEM_RELEASE
+                    )
+                };
+                if result == 0 {
+                    let errno = get_platform_errno();
+                    let err_obj = make_oserror_variant(state, errno)?;
+                    state.set_reg(dst, err_obj);
+                } else {
+                    let ok_obj = make_result_ok_unit(state)?;
+                    state.set_reg(dst, ok_obj);
+                }
+            }
+
+            #[cfg(not(any(unix, windows)))]
+            {
+                let _ = (addr, len);
+                let err_obj = make_oserror_variant_with_msg(state, 38, "munmap not supported on this platform")?;
+                state.set_reg(dst, err_obj);
+            }
+
             Ok(DispatchResult::Continue)
         }
 
@@ -1534,25 +1612,35 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let len_reg = read_reg(state)?;
             let advice_reg = read_reg(state)?;
 
-            let addr = state.get_reg(addr_reg).as_i64();
-            let len = state.get_reg(len_reg).as_i64();
-            let advice = state.get_reg(advice_reg).as_i64();
+            let _addr = state.get_reg(addr_reg).as_i64();
+            let _len = state.get_reg(len_reg).as_i64();
+            let _advice = state.get_reg(advice_reg).as_i64();
 
-            // SAFETY: `madvise` is a kernel syscall that validates the
-            // supplied address range and returns `-1` on invalid input.
-            let result = unsafe {
-                libc::madvise(addr as *mut libc::c_void, len as libc::size_t, advice as libc::c_int)
-            };
+            #[cfg(unix)]
+            {
+                // SAFETY: `madvise` is a kernel syscall that validates the
+                // supplied address range and returns `-1` on invalid input.
+                let result = unsafe {
+                    libc::madvise(_addr as *mut libc::c_void, _len as libc::size_t, _advice as i32)
+                };
 
-            if result < 0 {
-                // SAFETY: macOS thread-local errno pointer (see above).
-                let errno = unsafe { *libc::__error() };
-                let err_obj = make_oserror_variant(state, errno)?;
-                state.set_reg(dst, err_obj);
-            } else {
+                if result < 0 {
+                    let errno = get_platform_errno();
+                    let err_obj = make_oserror_variant(state, errno)?;
+                    state.set_reg(dst, err_obj);
+                } else {
+                    let ok_obj = make_result_ok_unit(state)?;
+                    state.set_reg(dst, ok_obj);
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                // madvise is advisory-only; no-op on Windows and other platforms
                 let ok_obj = make_result_ok_unit(state)?;
                 state.set_reg(dst, ok_obj);
             }
+
             Ok(DispatchResult::Continue)
         }
 
@@ -1569,17 +1657,38 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
                 let err_obj = make_oserror_variant_with_msg(state, 5, "getentropy: max 256 bytes")?;
                 state.set_reg(dst, err_obj);
             } else {
-                // SAFETY: `len` was bounded to <= 256 above (getentropy's
-                // hard limit). `buf` is an attacker-supplied pointer — the
-                // kernel validates it and returns `-1/EFAULT` on invalid
-                // memory; this is the same contract the AOT path uses.
-                let result = unsafe {
-                    libc::getentropy(buf as *mut libc::c_void, len as libc::size_t)
+                #[cfg(unix)]
+                let result = {
+                    // SAFETY: `len` was bounded to <= 256 above (getentropy's
+                    // hard limit). `buf` is an attacker-supplied pointer — the
+                    // kernel validates it and returns `-1/EFAULT` on invalid
+                    // memory; this is the same contract the AOT path uses.
+                    unsafe {
+                        libc::getentropy(buf as *mut libc::c_void, len as libc::size_t)
+                    }
                 };
 
+                #[cfg(windows)]
+                let result = {
+                    // SAFETY: BCryptGenRandom with BCRYPT_USE_SYSTEM_PREFERRED_RNG
+                    // (flag 0x00000002) fills the buffer with cryptographic random bytes.
+                    // `buf` is an address provided by the caller; `len` is bounded to <= 256.
+                    let status = unsafe {
+                        windows_sys::Win32::Security::Cryptography::BCryptGenRandom(
+                            std::ptr::null_mut(), // BCRYPT_USE_SYSTEM_PREFERRED_RNG requires null handle
+                            buf as *mut u8,
+                            len as u32,
+                            0x00000002u32, // BCRYPT_USE_SYSTEM_PREFERRED_RNG
+                        )
+                    };
+                    if status == 0 { 0i32 } else { -1i32 }
+                };
+
+                #[cfg(not(any(unix, windows)))]
+                let result: i32 = -1;
+
                 if result < 0 {
-                    // SAFETY: macOS thread-local errno pointer.
-                    let errno = unsafe { *libc::__error() };
+                    let errno = get_platform_errno();
                     let err_obj = make_oserror_variant(state, errno)?;
                     state.set_reg(dst, err_obj);
                 } else {
@@ -2120,10 +2229,19 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 // System Call Helper Functions
 // ==============================================================
 
-/// Extract MemProt unix flags from a struct object.
+/// Extract MemProt flags from a struct object.
 /// MemProt layout: ObjectHeader + [read: Bool, write: Bool, exec: Bool]
-pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Value) -> libc::c_int {
-    let mut flags: libc::c_int = 0;
+///
+/// On Unix, returns POSIX PROT_* flags. On other platforms, returns a
+/// platform-neutral bitmask (read=1, write=2, exec=4) that callers
+/// translate to platform-specific constants.
+pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Value) -> i32 {
+    // Platform-neutral protection flag constants (match POSIX values)
+    const PROT_READ: i32 = 1;
+    const PROT_WRITE: i32 = 2;
+    const PROT_EXEC: i32 = 4;
+
+    let mut flags: i32 = 0;
     if val.is_ptr() && !val.is_nil() {
         let ptr = val.as_ptr::<u8>();
         if !ptr.is_null() {
@@ -2138,7 +2256,7 @@ pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Va
             // Scan for Bool fields in declaration order.
             // MemProt fields: read, write, exec (all Bool, interned consecutively).
             // Fields are stored at their globally-interned indices, so we scan all slots.
-            let flag_map: &[libc::c_int] = &[libc::PROT_READ, libc::PROT_WRITE, libc::PROT_EXEC];
+            let flag_map: &[i32] = &[PROT_READ, PROT_WRITE, PROT_EXEC];
             let mut bool_idx = 0;
             for i in 0..slot_count {
                 // SAFETY: `i < slot_count`, and `slot_count = header.size /
@@ -2156,15 +2274,29 @@ pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Va
         }
     } else {
         // Scalar: treat as raw int flags
-        flags = val.as_i64() as libc::c_int;
+        flags = val.as_i64() as i32;
     }
     flags
 }
 
-/// Extract MapFlags unix flags from a struct object.
+/// Extract MapFlags flags from a struct object.
 /// MapFlags layout: ObjectHeader + [shared: Bool, is_private: Bool, anonymous: Bool, fixed: Bool]
-pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) -> libc::c_int {
-    let mut flags: libc::c_int = 0;
+///
+/// Returns platform-neutral bitmask flags. On Unix, these match POSIX MAP_*
+/// constants. Callers on other platforms translate as needed.
+pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) -> i32 {
+    // Platform-neutral map flag constants (match POSIX values on Linux)
+    const MAP_SHARED: i32 = 0x01;
+    const MAP_PRIVATE: i32 = 0x02;
+    #[cfg(target_os = "linux")]
+    const MAP_ANON: i32 = 0x20;
+    #[cfg(target_os = "macos")]
+    const MAP_ANON: i32 = 0x1000;
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    const MAP_ANON: i32 = 0x20; // Default to Linux value
+    const MAP_FIXED: i32 = 0x10;
+
+    let mut flags: i32 = 0;
     if val.is_ptr() && !val.is_nil() {
         let ptr = val.as_ptr::<u8>();
         if !ptr.is_null() {
@@ -2176,7 +2308,7 @@ pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) 
 
             // Scan for Bool fields in declaration order.
             // MapFlags fields: shared, is_private, anonymous, fixed (all Bool).
-            let flag_map: &[libc::c_int] = &[libc::MAP_SHARED, libc::MAP_PRIVATE, libc::MAP_ANON, libc::MAP_FIXED];
+            let flag_map: &[i32] = &[MAP_SHARED, MAP_PRIVATE, MAP_ANON, MAP_FIXED];
             let mut bool_idx = 0;
             for i in 0..slot_count {
                 // SAFETY: See extract_memprot_flags — in bounds, aligned.
@@ -2191,14 +2323,14 @@ pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) 
         }
     } else {
         // Scalar: treat as raw int flags
-        flags = val.as_i64() as libc::c_int;
+        flags = val.as_i64() as i32;
     }
     flags
 }
 
 /// Extract file descriptor integer from a FileDesc newtype or variant.
 /// FileDesc is a newtype (Int) — may be stored as a variant with tag or directly as Int.
-pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -> libc::c_int {
+pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -> i32 {
     let _ = state;
     if val.is_ptr() && !val.is_nil() {
         let ptr = val.as_ptr::<u8>();
@@ -2216,17 +2348,17 @@ pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -
                 // payload...] — the payload lies at `header_size + 8` and
                 // the first Value is initialized at construction time.
                 let inner = unsafe { *(ptr.add(payload_offset) as *const Value) };
-                return inner.as_i64() as libc::c_int;
+                return inner.as_i64() as i32;
             }
             // Record: field 0 is the inner Int
             // SAFETY: Records place their first field immediately after the
             // header; field 0 is always present for a FileDesc newtype.
             let inner = unsafe { *(ptr.add(header_size) as *const Value) };
-            return inner.as_i64() as libc::c_int;
+            return inner.as_i64() as i32;
         }
     }
     // Scalar int
-    val.as_i64() as libc::c_int
+    val.as_i64() as i32
 }
 
 #[cfg(feature = "ffi")]
@@ -2322,13 +2454,13 @@ fn read_errno(state: &mut InterpreterState) -> i32 {
 /// Construct a Result::Err(OSError { code, message }) variant.
 /// Result::Err has tag=1, field_count=1 (the OSError).
 /// OSError is a record with fields: code: Int, message: Text.
-pub(in super::super) fn make_oserror_variant(state: &mut InterpreterState, errno: libc::c_int) -> InterpreterResult<Value> {
+pub(in super::super) fn make_oserror_variant(state: &mut InterpreterState, errno: i32) -> InterpreterResult<Value> {
     let msg = errno_to_string(errno);
     make_oserror_variant_with_msg(state, errno, &msg)
 }
 
 /// Construct a Result::Err(OSError { code, message }) variant with custom message.
-pub(in super::super) fn make_oserror_variant_with_msg(state: &mut InterpreterState, code: libc::c_int, msg: &str) -> InterpreterResult<Value> {
+pub(in super::super) fn make_oserror_variant_with_msg(state: &mut InterpreterState, code: i32, msg: &str) -> InterpreterResult<Value> {
     use crate::types::TypeId;
 
     // Create the message string value first (before borrowing heap in alloc_with_init)
@@ -2463,21 +2595,65 @@ pub(in super::super) fn make_result_ok_unit(state: &mut InterpreterState) -> Int
 }
 
 /// Convert errno to a human-readable string.
-pub(in super::super) fn errno_to_string(errno: libc::c_int) -> String {
-    // SAFETY: `strerror` returns either a null pointer or a pointer to a
-    // static (or thread-local) NUL-terminated string owned by libc. The
-    // returned pointer is valid until the next call to `strerror` on the
-    // same thread, which cannot happen before the `CStr::from_ptr` read
-    // below.
-    let cstr = unsafe { libc::strerror(errno) };
-    if cstr.is_null() {
-        format!("errno {}", errno)
-    } else {
-        // SAFETY: Null was checked immediately above; libc guarantees the
-        // pointer is a NUL-terminated C string valid for reads on this
-        // thread. `to_string_lossy().into_owned()` immediately copies the
-        // bytes, so the string is owned before libc can reuse the buffer.
-        let c_str = unsafe { std::ffi::CStr::from_ptr(cstr) };
-        c_str.to_string_lossy().into_owned()
+pub(in super::super) fn errno_to_string(errno: i32) -> String {
+    #[cfg(unix)]
+    {
+        // SAFETY: `strerror` returns either a null pointer or a pointer to a
+        // static (or thread-local) NUL-terminated string owned by libc. The
+        // returned pointer is valid until the next call to `strerror` on the
+        // same thread, which cannot happen before the `CStr::from_ptr` read
+        // below.
+        let cstr = unsafe { libc::strerror(errno) };
+        if cstr.is_null() {
+            format!("errno {}", errno)
+        } else {
+            // SAFETY: Null was checked immediately above; libc guarantees the
+            // pointer is a NUL-terminated C string valid for reads on this
+            // thread. `to_string_lossy().into_owned()` immediately copies the
+            // bytes, so the string is owned before libc can reuse the buffer.
+            let c_str = unsafe { std::ffi::CStr::from_ptr(cstr) };
+            c_str.to_string_lossy().into_owned()
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // On Windows and other platforms, provide a generic message
+        // since strerror is not available from libc.
+        format!("OS error {}", errno)
+    }
+}
+
+/// Get the current platform errno/last-error code.
+#[inline]
+fn get_platform_errno() -> i32 {
+    #[cfg(unix)]
+    {
+        // Use std::io::Error::last_os_error() which is cross-platform within Unix
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: GetLastError is always safe to call.
+        unsafe { windows_sys::Win32::Foundation::GetLastError() as i32 }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        0
+    }
+}
+
+/// Convert platform-neutral MemProt flags (read=1, write=2, exec=4) to
+/// Windows page protection constants.
+#[cfg(windows)]
+fn memprot_to_win_protect(prot_flags: i32) -> u32 {
+    let read = prot_flags & 1 != 0;
+    let write = prot_flags & 2 != 0;
+    let exec = prot_flags & 4 != 0;
+    match (read, write, exec) {
+        (_, _, true) if write => 0x40, // PAGE_EXECUTE_READWRITE
+        (_, _, true) => 0x20,          // PAGE_EXECUTE_READ
+        (_, true, _) => 0x04,          // PAGE_READWRITE
+        (true, _, _) => 0x02,          // PAGE_READONLY
+        _ => 0x01,                     // PAGE_NOACCESS
     }
 }

@@ -4,6 +4,11 @@
 #![allow(unexpected_cfgs)]
 #![allow(unused_imports)]
 
+// Force LLVM static libraries to be available at link time.
+// On MSVC, transitive static lib dependencies are resolved in single-pass
+// order — this direct reference ensures symbols remain available.
+extern crate verum_llvm_sys;
+
 // Main entry point for the Verum language toolchain
 
 use clap::{Parser, Subcommand};
@@ -622,6 +627,17 @@ enum WorkspaceCommands {
 }
 
 fn main() {
+    // Windows default stack is 1 MB — insufficient for deep recursive
+    // compiler data structures. Spawn on a thread with 16 MB stack.
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+    let builder = std::thread::Builder::new().stack_size(STACK_SIZE);
+    let handler = builder.spawn(main_inner).expect("failed to spawn main thread");
+    if let Err(e) = handler.join() {
+        std::panic::resume_unwind(e);
+    }
+}
+
+fn main_inner() {
     let cli = Cli::parse();
 
     if let Err(e) = ui::init(cli.verbose, cli.quiet, cli.color.as_str()) {

@@ -31,7 +31,7 @@ const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: DWORD = 0x00001000;
 
 // External Windows API functions
 #[link(name = "kernel32")]
-extern "system" {
+unsafe extern "system" {
     fn LoadLibraryW(lpLibFileName: LPCWSTR) -> HMODULE;
     fn LoadLibraryExW(lpLibFileName: LPCWSTR, hFile: HMODULE, dwFlags: DWORD) -> HMODULE;
     fn FreeLibrary(hLibModule: HMODULE) -> BOOL;
@@ -52,7 +52,7 @@ extern "system" {
 }
 
 #[link(name = "ucrt")]
-extern "C" {
+unsafe extern "C" {
     fn _errno() -> *mut i32;
 }
 
@@ -276,7 +276,7 @@ impl FfiPlatform for WindowsPlatform {
         );
 
         if ptr.is_null() {
-            let error_code = GetLastError();
+            let error_code = unsafe { GetLastError() };
             Err(FfiPlatformError::AllocationFailed {
                 size,
                 reason: Self::get_error_message(error_code),

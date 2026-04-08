@@ -67,6 +67,10 @@ void tableGenRecordPrint(TableGenRecordRef record_ref,
   stream << *unwrap(record_ref);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void tableGenRecordDump(TableGenRecordRef record_ref) {
   unwrap(record_ref)->dump();
 }
+#else
+void tableGenRecordDump(TableGenRecordRef record_ref) { (void)record_ref; }
+#endif

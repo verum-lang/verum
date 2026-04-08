@@ -58,6 +58,10 @@ impl<'ctx> PlatformIR<'ctx> {
         // Entry point — LLVM IR main() wraps user's verum_main.
         self.emit_main_entry(module)?;
 
+        // Windows PE entry point — mainCRTStartup → main() → ExitProcess()
+        #[cfg(target_os = "windows")]
+        self.emit_windows_entry(module)?;
+
         // Exception handling declarations (setjmp/longjmp)
         self.emit_exception_handling(module)?;
 
@@ -488,7 +492,10 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
 
     /// verum_os_alloc(size: i64) -> ptr
-    /// Calls mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
+    ///
+    /// Platform-specific memory allocation without libc:
+    ///   Unix:    mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
+    ///   Windows: VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
     fn emit_verum_os_alloc(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_alloc").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -504,66 +511,99 @@ impl<'ctx> PlatformIR<'ctx> {
         );
         if func.count_basic_blocks() > 0 { return Ok(()); }
 
-        // mmap may be pre-declared by VBC (from core/sys FFI) with all-i64 args,
-        // or by emit_macos_declarations with ptr first arg. We must adapt to whichever
-        // exists. Use i64 for our local declaration to match VBC's Verum ABI.
-        let mmap_fn = module.get_function("mmap").unwrap_or_else(|| {
-            let mmap_type = i64_type.fn_type(&[
-                i64_type.into(), i64_type.into(), i64_type.into(),
-                i64_type.into(), i64_type.into(), i64_type.into(),
-            ], false);
-            module.add_function("mmap", mmap_type, None)
-        });
-
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
 
         let size = func.get_first_param().or_internal("missing first param")?.into_int_value();
-        // mmap(NULL, size, PROT_READ|PROT_WRITE=3, MAP_PRIVATE|MAP_ANON=0x1002, -1, 0)
-        // macOS: MAP_PRIVATE=0x0002, MAP_ANON=0x1000 → 0x1002
-        // Linux: MAP_PRIVATE=0x0002, MAP_ANONYMOUS=0x0020 → 0x0022
-        #[cfg(target_os = "macos")]
-        let map_flags = i64_type.const_int(0x1002, false); // MAP_PRIVATE | MAP_ANON
-        #[cfg(target_os = "linux")]
-        let map_flags = i64_type.const_int(0x0022, false); // MAP_PRIVATE | MAP_ANONYMOUS
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let map_flags = i64_type.const_int(0x1002, false); // fallback
 
-        // Check if mmap's first param is ptr or i64 and adapt the addr argument
-        let mmap_param0_is_ptr = mmap_fn.get_type().get_param_types().first()
-            .map_or(false, |t| t.is_pointer_type());
-        let addr_arg: BasicMetadataValueEnum = if mmap_param0_is_ptr {
-            ptr_type.const_null().into()
-        } else {
-            i64_type.const_zero().into()
-        };
+        #[cfg(target_os = "windows")]
+        {
+            // VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE=0x3000, PAGE_READWRITE=0x04)
+            let virtual_alloc = module.get_function("VirtualAlloc").unwrap_or_else(|| {
+                let va_type = ptr_type.fn_type(&[
+                    ptr_type.into(),  // lpAddress
+                    i64_type.into(),  // dwSize
+                    i32_type.into(),  // flAllocationType
+                    i32_type.into(),  // flProtect
+                ], false);
+                let f = module.add_function("VirtualAlloc", va_type, None);
+                // Mark as dllimport from kernel32.dll
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
 
-        let call_result = builder.build_call(mmap_fn, &[
-            addr_arg,                                       // addr = NULL
-            size.into(),                                    // length = size
-            i64_type.const_int(3, false).into(),           // prot = PROT_READ|PROT_WRITE
-            map_flags.into(),                               // flags
-            i64_type.const_all_ones().into(),               // fd = -1
-            i64_type.const_int(0, false).into(),           // offset = 0
-        ], "mmap_result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?;
+            let result = builder.build_call(virtual_alloc, &[
+                ptr_type.const_null().into(),                    // lpAddress = NULL
+                size.into(),                                      // dwSize = size
+                i32_type.const_int(0x3000, false).into(),        // MEM_COMMIT | MEM_RESERVE
+                i32_type.const_int(0x04, false).into(),          // PAGE_READWRITE
+            ], "va_result").or_llvm_err()?
+                .try_as_basic_value().basic().or_internal("expected basic value")?;
 
-        // mmap may return ptr or i64 depending on which declaration was registered first
-        let result = match call_result {
-            BasicValueEnum::PointerValue(p) => p,
-            BasicValueEnum::IntValue(i) => {
-                builder.build_int_to_ptr(i, ptr_type, "mmap_ptr").or_llvm_err()?
-            }
-            _ => ptr_type.const_null(),
-        };
+            let result_ptr = match result {
+                BasicValueEnum::PointerValue(p) => p,
+                _ => ptr_type.const_null(),
+            };
+            builder.build_return(Some(&result_ptr)).or_llvm_err()?;
+        }
 
-        builder.build_return(Some(&result)).or_llvm_err()?;
+        #[cfg(not(target_os = "windows"))]
+        {
+            // mmap may be pre-declared by VBC (from core/sys FFI) with all-i64 args,
+            // or by emit_macos_declarations with ptr first arg. Adapt to whichever exists.
+            let mmap_fn = module.get_function("mmap").unwrap_or_else(|| {
+                let mmap_type = i64_type.fn_type(&[
+                    i64_type.into(), i64_type.into(), i64_type.into(),
+                    i64_type.into(), i64_type.into(), i64_type.into(),
+                ], false);
+                module.add_function("mmap", mmap_type, None)
+            });
+
+            #[cfg(target_os = "macos")]
+            let map_flags = i64_type.const_int(0x1002, false); // MAP_PRIVATE | MAP_ANON
+            #[cfg(target_os = "linux")]
+            let map_flags = i64_type.const_int(0x0022, false); // MAP_PRIVATE | MAP_ANONYMOUS
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            let map_flags = i64_type.const_int(0x1002, false); // fallback
+
+            let mmap_param0_is_ptr = mmap_fn.get_type().get_param_types().first()
+                .map_or(false, |t| t.is_pointer_type());
+            let addr_arg: BasicMetadataValueEnum = if mmap_param0_is_ptr {
+                ptr_type.const_null().into()
+            } else {
+                i64_type.const_zero().into()
+            };
+
+            let call_result = builder.build_call(mmap_fn, &[
+                addr_arg,
+                size.into(),
+                i64_type.const_int(3, false).into(),           // PROT_READ|PROT_WRITE
+                map_flags.into(),
+                i64_type.const_all_ones().into(),               // fd = -1
+                i64_type.const_int(0, false).into(),           // offset = 0
+            ], "mmap_result").or_llvm_err()?
+                .try_as_basic_value().basic().or_internal("expected basic value")?;
+
+            let result = match call_result {
+                BasicValueEnum::PointerValue(p) => p,
+                BasicValueEnum::IntValue(i) => {
+                    builder.build_int_to_ptr(i, ptr_type, "mmap_ptr").or_llvm_err()?
+                }
+                _ => ptr_type.const_null(),
+            };
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        }
+
         Ok(())
     }
 
     /// verum_os_free(ptr: ptr, size: i64) -> void
-    /// Calls munmap(ptr, size)
+    ///
+    /// Platform-specific memory deallocation without libc:
+    ///   Unix:    munmap(ptr, size)
+    ///   Windows: VirtualFree(ptr, 0, MEM_RELEASE)
     fn emit_verum_os_free(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_free").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -580,40 +620,68 @@ impl<'ctx> PlatformIR<'ctx> {
         );
         if func.count_basic_blocks() > 0 { return Ok(()); }
 
-        // munmap may be pre-declared by VBC (all i64) or emit_macos_declarations (ptr, i64).
-        // Use i64 for our local declaration to match VBC's Verum ABI.
-        let munmap_fn = module.get_function("munmap").unwrap_or_else(|| {
-            let munmap_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("munmap", munmap_type, None)
-        });
-
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
 
         let ptr_param = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
-        let size_param = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
-        // Check if munmap's first param is ptr or i64 and adapt accordingly
-        let munmap_param0_is_ptr = munmap_fn.get_type().get_param_types().first()
-            .map_or(false, |t| t.is_pointer_type());
-        let addr_arg: BasicMetadataValueEnum = if munmap_param0_is_ptr {
-            ptr_param.into()
-        } else {
-            builder.build_ptr_to_int(ptr_param, i64_type, "ptr_i64").or_llvm_err()?.into()
-        };
-        builder.build_call(munmap_fn, &[addr_arg, size_param.into()], "").or_llvm_err()?;
+        let _size_param = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
+
+        #[cfg(target_os = "windows")]
+        {
+            // VirtualFree(ptr, 0, MEM_RELEASE=0x8000)
+            let virtual_free = module.get_function("VirtualFree").unwrap_or_else(|| {
+                let vf_type = i32_type.fn_type(&[
+                    ptr_type.into(),  // lpAddress
+                    i64_type.into(),  // dwSize (must be 0 for MEM_RELEASE)
+                    i32_type.into(),  // dwFreeType
+                ], false);
+                let f = module.add_function("VirtualFree", vf_type, None);
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
+
+            builder.build_call(virtual_free, &[
+                ptr_param.into(),
+                i64_type.const_zero().into(),                    // dwSize = 0 (required for MEM_RELEASE)
+                i32_type.const_int(0x8000, false).into(),       // MEM_RELEASE
+            ], "").or_llvm_err()?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let munmap_fn = module.get_function("munmap").unwrap_or_else(|| {
+                let munmap_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                module.add_function("munmap", munmap_type, None)
+            });
+
+            let munmap_param0_is_ptr = munmap_fn.get_type().get_param_types().first()
+                .map_or(false, |t| t.is_pointer_type());
+            let addr_arg: BasicMetadataValueEnum = if munmap_param0_is_ptr {
+                ptr_param.into()
+            } else {
+                builder.build_ptr_to_int(ptr_param, i64_type, "ptr_i64").or_llvm_err()?.into()
+            };
+            builder.build_call(munmap_fn, &[addr_arg, _size_param.into()], "").or_llvm_err()?;
+        }
+
         builder.build_return(None).or_llvm_err()?;
         Ok(())
     }
 
     /// verum_os_write(fd: i64, buf: ptr, count: i64) -> i64
-    /// Calls write(fd, buf, count) — all i64 Verum ABI
+    ///
+    /// Platform-specific write without libc:
+    ///   Unix:    write(fd, buf, count) syscall
+    ///   Windows: WriteFile(GetStdHandle(fd_to_handle), buf, count, &written, NULL)
     fn emit_verum_os_write(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_write").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
         }
         let ctx = self.context;
         let i64_type = ctx.i64_type();
+        let i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
@@ -622,11 +690,6 @@ impl<'ctx> PlatformIR<'ctx> {
         );
         if func.count_basic_blocks() > 0 { return Ok(()); }
 
-        let write_fn = module.get_function("write").unwrap_or_else(|| {
-            let write_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
-            module.add_function("write", write_type, None)
-        });
-
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
@@ -634,14 +697,86 @@ impl<'ctx> PlatformIR<'ctx> {
         let fd = func.get_nth_param(0).or_internal("missing param 0")?;
         let buf = func.get_nth_param(1).or_internal("missing param 1")?;
         let count = func.get_nth_param(2).or_internal("missing param 2")?;
-        let result = builder.build_call(write_fn, &[fd.into(), buf.into(), count.into()], "written").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?;
-        builder.build_return(Some(&result)).or_llvm_err()?;
+
+        #[cfg(target_os = "windows")]
+        {
+            // GetStdHandle(nStdHandle) -> HANDLE
+            //   STD_OUTPUT_HANDLE = -11 (0xFFFFFFF5)
+            //   STD_ERROR_HANDLE  = -12 (0xFFFFFFF4)
+            // Map fd: 1→stdout, 2→stderr
+            let get_std_handle = module.get_function("GetStdHandle").unwrap_or_else(|| {
+                let gsh_type = ptr_type.fn_type(&[i32_type.into()], false);
+                let f = module.add_function("GetStdHandle", gsh_type, None);
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
+
+            // WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped) -> BOOL
+            let write_file = module.get_function("WriteFile").unwrap_or_else(|| {
+                let wf_type = i32_type.fn_type(&[
+                    ptr_type.into(),  // hFile
+                    ptr_type.into(),  // lpBuffer
+                    i32_type.into(),  // nNumberOfBytesToWrite
+                    ptr_type.into(),  // lpNumberOfBytesWritten
+                    ptr_type.into(),  // lpOverlapped
+                ], false);
+                let f = module.add_function("WriteFile", wf_type, None);
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
+
+            // Convert fd (1=stdout, 2=stderr) to STD_*_HANDLE constant
+            // STD_OUTPUT_HANDLE = (DWORD)-11, STD_ERROR_HANDLE = (DWORD)-12
+            // fd=1 → -11, fd=2 → -12 → formula: -(fd + 10)
+            let fd_i32 = builder.build_int_truncate(fd.into_int_value(), i32_type, "fd32").or_llvm_err()?;
+            let ten = i32_type.const_int(10, false);
+            let fd_plus_10 = builder.build_int_add(fd_i32, ten, "fd10").or_llvm_err()?;
+            let neg_handle = builder.build_int_neg(fd_plus_10, "neg").or_llvm_err()?;
+
+            let handle = builder.build_call(get_std_handle, &[neg_handle.into()], "handle").or_llvm_err()?
+                .try_as_basic_value().basic().or_internal("expected basic value")?;
+
+            // Stack-allocate bytes_written
+            let written_ptr = builder.build_alloca(i32_type, "written").or_llvm_err()?;
+            builder.build_store(written_ptr, i32_type.const_zero()).or_llvm_err()?;
+
+            let count_i32 = builder.build_int_truncate(count.into_int_value(), i32_type, "cnt32").or_llvm_err()?;
+
+            builder.build_call(write_file, &[
+                handle.into(),
+                buf.into(),
+                count_i32.into(),
+                written_ptr.into(),
+                ptr_type.const_null().into(),  // lpOverlapped = NULL
+            ], "").or_llvm_err()?;
+
+            let written_val = builder.build_load(i32_type, written_ptr, "wr").or_llvm_err()?;
+            let result = builder.build_int_z_extend(written_val.into_int_value(), i64_type, "wr64").or_llvm_err()?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let write_fn = module.get_function("write").unwrap_or_else(|| {
+                let write_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+                module.add_function("write", write_type, None)
+            });
+
+            let result = builder.build_call(write_fn, &[fd.into(), buf.into(), count.into()], "written").or_llvm_err()?
+                .try_as_basic_value().basic().or_internal("expected basic value")?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        }
+
         Ok(())
     }
 
     /// verum_os_exit(code: i32) -> noreturn
-    /// Calls _exit(code)
+    ///
+    /// Platform-specific process exit without libc:
+    ///   Unix:    _exit(code) syscall
+    ///   Windows: ExitProcess(code) from kernel32.dll
     fn emit_verum_os_exit(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("verum_os_exit").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
@@ -658,20 +793,42 @@ impl<'ctx> PlatformIR<'ctx> {
         if func.count_basic_blocks() > 0 { return Ok(()); }
         func.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
 
-        let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
-            let exit_type = void_type.fn_type(&[i64_type.into()], false);
-            let f = module.add_function("_exit", exit_type, None);
-            f.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
-            f
-        });
-
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
         builder.position_at_end(entry);
 
         let code = func.get_first_param().or_internal("missing first param")?.into_int_value();
-        let code64 = builder.build_int_s_extend(code, i64_type, "c64").or_llvm_err()?;
-        builder.build_call(exit_fn, &[code64.into()], "").or_llvm_err()?;
+
+        #[cfg(target_os = "windows")]
+        {
+            // ExitProcess(uExitCode: UINT) -> ! from kernel32.dll
+            let exit_process = module.get_function("ExitProcess").unwrap_or_else(|| {
+                let ep_type = void_type.fn_type(&[i32_type.into()], false);
+                let f = module.add_function("ExitProcess", ep_type, None);
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("noreturn", ""));
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
+
+            let code_u32 = builder.build_int_cast(code, i32_type, "code32").or_llvm_err()?;
+            builder.build_call(exit_process, &[code_u32.into()], "").or_llvm_err()?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+                let exit_type = void_type.fn_type(&[i64_type.into()], false);
+                let f = module.add_function("_exit", exit_type, None);
+                f.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
+                f
+            });
+
+            let code64 = builder.build_int_s_extend(code, i64_type, "c64").or_llvm_err()?;
+            builder.build_call(exit_fn, &[code64.into()], "").or_llvm_err()?;
+        }
+
         builder.build_unreachable().or_llvm_err()?;
         Ok(())
     }
@@ -753,6 +910,75 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(no_main);
         builder.build_return(Some(&i32_type.const_int(1, false))).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// On Windows without CRT, emit `mainCRTStartup` as the PE entry point.
+    ///
+    /// Unlike Unix `_start`, Windows entry point receives no argc/argv on the
+    /// stack. We call `GetCommandLineW` + `CommandLineToArgvW` to obtain them,
+    /// then forward to `main(argc, argv)`.
+    ///
+    /// For the initial V-LLSI implementation we emit a minimal entry that
+    /// passes argc=0, argv=NULL — command-line parsing is handled by the
+    /// Verum runtime (`verum_store_args` reads `GetCommandLineW` directly).
+    #[cfg(target_os = "windows")]
+    fn emit_windows_entry(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        if module.get_function("mainCRTStartup").map_or(false, |f| f.count_basic_blocks() > 0) {
+            return Ok(());
+        }
+        let ctx = self.context;
+        let i32_type = ctx.i32_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let void_type = ctx.void_type();
+
+        // mainCRTStartup() -> void (noreturn)
+        let fn_type = void_type.fn_type(&[], false);
+        let entry_fn = module.get_function("mainCRTStartup").unwrap_or_else(||
+            module.add_function("mainCRTStartup", fn_type, None)
+        );
+        if entry_fn.count_basic_blocks() > 0 { return Ok(()); }
+        entry_fn.add_attribute(AttributeLoc::Function,
+            ctx.create_string_attribute("noreturn", ""));
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(entry_fn, "entry");
+        builder.position_at_end(entry);
+
+        // Call main(0, NULL) — Verum runtime reads command line via Win32 API
+        if let Some(main_fn) = module.get_function("main") {
+            let result = builder.build_call(main_fn, &[
+                i32_type.const_zero().into(),
+                ptr_type.const_null().into(),
+            ], "exit_code").or_llvm_err()?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i32_type.const_zero().into());
+
+            // ExitProcess(exit_code)
+            let exit_process = module.get_function("ExitProcess").unwrap_or_else(|| {
+                let ep_type = void_type.fn_type(&[i32_type.into()], false);
+                let f = module.add_function("ExitProcess", ep_type, None);
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("noreturn", ""));
+                f.add_attribute(AttributeLoc::Function,
+                    ctx.create_string_attribute("dllimport", ""));
+                f
+            });
+
+            let exit_code = match result {
+                BasicValueEnum::IntValue(i) => {
+                    if i.get_type().get_bit_width() != 32 {
+                        builder.build_int_truncate(i, i32_type, "ec32").or_llvm_err()?
+                    } else {
+                        i
+                    }
+                }
+                _ => i32_type.const_zero(),
+            };
+            builder.build_call(exit_process, &[exit_code.into()], "").or_llvm_err()?;
+        }
+
+        builder.build_unreachable().or_llvm_err()?;
         Ok(())
     }
 

@@ -50,6 +50,9 @@ mount super.kernel32.{
     ReleaseMutex,
     CreateSemaphoreW,
     ReleaseSemaphore,
+    WaitOnAddress,
+    WakeByAddressSingle,
+    WakeByAddressAll,
     INFINITE,
     WAIT_OBJECT_0,
     WAIT_ABANDONED,
@@ -696,4 +699,95 @@ implement Drop for Win32Semaphore {
             self.initialized = false;
         }
     }
+}
+
+// =============================================================================
+// Futex-Compatible Interface (WaitOnAddress-based)
+// =============================================================================
+//
+// These functions provide the same interface as Linux futex_wait/futex_wake
+// and macOS __ulock_wait/__ulock_wake, enabling cross-platform sync primitives
+// in core/sync/ to work on Windows without platform-specific branching in
+// their implementation logic.
+//
+// Performance characteristics:
+// - WaitOnAddress: ~50ns uncontended (compare + return), kernel-assisted sleep
+// - WakeByAddressSingle: ~30ns to wake one waiter
+// - WakeByAddressAll: ~30ns + O(n) waiter wakeup
+//
+// These are available on Windows 8+ (NT 6.2+). For Windows 7 compatibility,
+// a fallback using keyed events (NtWaitForKeyedEvent) would be needed, but
+// Windows 7 is EOL and not a supported target.
+// =============================================================================
+
+/// Block the calling thread until the 32-bit value at `addr` changes from `expected`.
+///
+/// If *addr != expected at the time of the call, returns immediately (spurious-safe).
+/// If `timeout` is Some(ns), the wait expires after the given nanoseconds.
+/// If `timeout` is None, waits indefinitely.
+///
+/// Returns Ok(()) on wake (including spurious), Err(OSError) on timeout or failure.
+///
+/// This is the Windows equivalent of `futex(addr, FUTEX_WAIT, expected, timeout)`.
+public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Result<(), OSError> {
+    // Convert nanosecond timeout to milliseconds for WaitOnAddress.
+    // Round up to avoid premature timeout (1ns → 1ms, not 0ms).
+    let timeout_ms: UInt32 = match timeout {
+        None => INFINITE,
+        Some(ns) => {
+            if ns == 0 {
+                0 as UInt32
+            } else {
+                // Ceiling division: (ns + 999_999) / 1_000_000
+                let ms = (ns + 999_999) / 1_000_000;
+                if ms > 0xFFFFFFFE {
+                    // Cap at INFINITE - 1 to distinguish from true INFINITE
+                    0xFFFFFFFE as UInt32
+                } else {
+                    ms as UInt32
+                }
+            }
+        }
+    };
+
+    let expected_val: Int = expected;
+
+    let ok = WaitOnAddress(
+        addr as &unsafe Byte,
+        &expected_val as &unsafe Byte,
+        @size_of(Int),
+        timeout_ms,
+    );
+
+    if ok {
+        Ok(())
+    } else {
+        let err = GetLastError();
+        if err == 1460 {
+            // ERROR_TIMEOUT (0x5B4) — wait expired
+            Err(OSError.Timeout)
+        } else {
+            // Treat as spurious wakeup — return Ok like Linux futex does
+            Ok(())
+        }
+    }
+}
+
+/// Wake `count` threads waiting on the address.
+///
+/// If count == 1, wakes a single waiter (most common case for mutex/condvar).
+/// If count > 1, wakes all waiters (used by notify_all / broadcast).
+///
+/// Returns Ok(n) where n is an estimate of woken threads (may be 0 if no waiters).
+///
+/// This is the Windows equivalent of `futex(addr, FUTEX_WAKE, count)`.
+public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
+    if count <= 1 {
+        WakeByAddressSingle(addr as &unsafe Byte);
+    } else {
+        WakeByAddressAll(addr as &unsafe Byte);
+    }
+    // WaitOnAddress wake functions are void — no error return.
+    // Return 0 as we cannot know how many threads were actually woken.
+    Ok(0)
 }

@@ -70,6 +70,12 @@ mount sys.darwin.thread.{
     futex_wake as sys_futex_wake,
 };
 
+@cfg(target_os = "windows")
+mount sys.windows.thread.{
+    futex_wait as sys_futex_wait,
+    futex_wake as sys_futex_wake,
+};
+
 // =============================================================================
 // Memory Ordering
 // =============================================================================
@@ -1217,10 +1223,10 @@ implement FutexLock {
                 let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
             }
 
-            // Windows: use spin-wait with yield as fallback (TODO: WaitOnAddress)
+            // Windows: kernel-assisted sleep via WaitOnAddress
             @cfg(target_os = "windows")
             {
-                spin_hint();
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
             }
         }
     }
@@ -1232,11 +1238,13 @@ implement FutexLock {
 
         if old == FUTEX_LOCKED_CONTENDED {
             // There were waiters, wake one
-            // Linux: SYS_futex syscall, macOS: __ulock_wake
             @cfg(target_os = "linux") {
                 let _ = sys_futex_wake(&self.state.value, 1);
             };
             @cfg(target_os = "macos") {
+                let _ = sys_futex_wake(&self.state.value, 1);
+            };
+            @cfg(target_os = "windows") {
                 let _ = sys_futex_wake(&self.state.value, 1);
             };
         }

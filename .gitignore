@@ -26,6 +26,10 @@ vcs/**/Cargo.lock
 vcs/proof_stability/Cargo.lock
 vcs/testlibs/**/Cargo.lock
 
+# Z3 (prebuilt, downloaded by setup script)
+z3/*
+!z3/setup.ps1
+
 # Environment
 .env
 .env.*

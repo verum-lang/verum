@@ -145,13 +145,29 @@ pub struct IsolationConfig {
 
 impl Default for IsolationConfig {
     fn default() -> Self {
-        let inherit: List<Text> = vec![
-            "PATH".to_string().into(),
-            "HOME".to_string().into(),
-            "USER".to_string().into(),
-            "LANG".to_string().into(),
-            "LC_ALL".to_string().into(),
-        ].into();
+        let inherit: List<Text> = if cfg!(windows) {
+            vec![
+                "PATH".to_string().into(),
+                "USERPROFILE".to_string().into(),
+                "USERNAME".to_string().into(),
+                "SYSTEMROOT".to_string().into(),
+                "TEMP".to_string().into(),
+                "TMP".to_string().into(),
+                "COMSPEC".to_string().into(),
+                // Propagate MSVC toolchain environment
+                "INCLUDE".to_string().into(),
+                "LIB".to_string().into(),
+                "LIBPATH".to_string().into(),
+            ].into()
+        } else {
+            vec![
+                "PATH".to_string().into(),
+                "HOME".to_string().into(),
+                "USER".to_string().into(),
+                "LANG".to_string().into(),
+                "LC_ALL".to_string().into(),
+            ].into()
+        };
         Self {
             level: IsolationLevel::Process,
             temp_base: std::env::temp_dir().join("vtest"),

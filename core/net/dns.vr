@@ -69,6 +69,19 @@ mount sys.darwin.libsystem.{
 @cfg(target_os = "macos")
 mount sys.common.{FileDesc, OSError};
 
+// Windows: Use GetNetworkParams from iphlpapi.dll to read system DNS servers.
+// No file-based resolv.conf on Windows — DNS config is in the registry,
+// but iphlpapi provides a clean API to retrieve it.
+@cfg(target_os = "windows")
+@extern("iphlpapi.dll")
+fn GetNetworkParams(fixed_info: &unsafe Byte, out_buf_len: &mut UInt32) -> UInt32;
+
+// Windows error codes for GetNetworkParams
+@cfg(target_os = "windows")
+const ERROR_SUCCESS: UInt32 = 0;
+@cfg(target_os = "windows")
+const ERROR_BUFFER_OVERFLOW: UInt32 = 111;
+
 // =============================================================================
 // DNS Protocol Constants (RFC 1035)
 // =============================================================================
@@ -703,7 +716,25 @@ implement DnsRecordType {
 // System Configuration
 // =============================================================================
 
-/// Read system nameservers from /etc/resolv.conf.
+/// Read a native-width pointer from a byte buffer at the given offset (little-endian, x64).
+@cfg(target_os = "windows")
+fn read_ptr_at(buf: &List<Byte>, offset: Int) -> UInt64 {
+    if offset + 8 > buf.len() {
+        return 0;
+    }
+    let b0 = buf[offset] as UInt64;
+    let b1 = buf[offset + 1] as UInt64;
+    let b2 = buf[offset + 2] as UInt64;
+    let b3 = buf[offset + 3] as UInt64;
+    let b4 = buf[offset + 4] as UInt64;
+    let b5 = buf[offset + 5] as UInt64;
+    let b6 = buf[offset + 6] as UInt64;
+    let b7 = buf[offset + 7] as UInt64;
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+       | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56)
+}
+
+/// Read system nameservers from /etc/resolv.conf (Unix) or GetNetworkParams (Windows).
 fn read_system_nameservers() -> List<Ipv4Addr> {
     let mut nameservers = List.new();
 
@@ -770,6 +801,84 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
                             nameservers.push(ip);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    @cfg(target_os = "windows")
+    {
+        // Query system DNS servers via GetNetworkParams (iphlpapi.dll).
+        // The FIXED_INFO structure contains a linked list of DNS server addresses.
+        //
+        // FIXED_INFO layout (partial, for DNS extraction):
+        //   offset 0:    HostName[132]
+        //   offset 132:  DomainName[132]
+        //   offset 264:  *CurrentDnsServer (pointer)
+        //   offset 272:  DnsServerList (IP_ADDR_STRING, inline)
+        //     IP_ADDR_STRING layout:
+        //       offset 0: *Next (pointer to next entry)
+        //       offset 8: IpAddress.String[16] (null-terminated ASCII)
+        //       offset 24: IpMask.String[16]
+        //       offset 40: Context (DWORD)
+        //   (total IP_ADDR_STRING = 48 bytes on x64)
+        //
+        // Strategy: allocate buffer, call GetNetworkParams, walk the linked list.
+
+        let mut buf_size: UInt32 = 0;
+
+        // First call to determine required buffer size
+        let _ = GetNetworkParams(0 as &unsafe Byte, &mut buf_size);
+
+        if buf_size > 0 && buf_size <= 65536 {
+            let mut buf = List.with_capacity(buf_size as Int);
+            buf.resize(buf_size as Int, 0);
+
+            let result = GetNetworkParams(buf.as_mut_ptr() as &unsafe Byte, &mut buf_size);
+
+            if result == ERROR_SUCCESS {
+                // DnsServerList starts at offset 272 in FIXED_INFO (x64)
+                let dns_list_offset: Int = 272;
+
+                // Walk the IP_ADDR_STRING linked list
+                let mut current_offset = dns_list_offset;
+
+                while current_offset > 0 && current_offset + 48 <= buf.len() {
+                    // Read the IP address string at current_offset + 8
+                    let ip_str_offset = current_offset + 8;
+                    let mut ip_end = ip_str_offset;
+
+                    // Find null terminator (max 16 bytes)
+                    while ip_end < ip_str_offset + 16 && ip_end < buf.len() && buf[ip_end] != 0 {
+                        ip_end += 1;
+                    }
+
+                    if ip_end > ip_str_offset {
+                        let ip_bytes = &buf[ip_str_offset..ip_end];
+                        let ip_str = Text.from_utf8_lossy(ip_bytes);
+
+                        if let Ok(ip) = Ipv4Addr.parse(&ip_str) {
+                            nameservers.push(ip);
+                        }
+                    }
+
+                    // Follow the Next pointer at current_offset + 0
+                    // Read 8-byte pointer (x64)
+                    let next_ptr = read_ptr_at(&buf, current_offset);
+
+                    if next_ptr == 0 {
+                        break;
+                    }
+
+                    // The Next pointer is absolute; convert to buffer-relative offset
+                    let buf_base = buf.as_ptr() as Int;
+                    let next_offset = (next_ptr as Int) - buf_base;
+
+                    if next_offset <= 0 || next_offset + 48 > buf.len() {
+                        break;
+                    }
+
+                    current_offset = next_offset;
                 }
             }
         }

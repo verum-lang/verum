@@ -177,14 +177,9 @@ impl Default for RunnerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PathsConfig {
-    /// Path to verum interpreter
-    pub interpreter: PathBuf,
-    /// Path to JIT compiler (baseline)
-    pub jit_base: PathBuf,
-    /// Path to JIT compiler (optimized)
-    pub jit_opt: PathBuf,
-    /// Path to AOT compiler
-    pub aot: PathBuf,
+    /// Path to the single `verum` CLI binary.
+    /// All execution tiers are dispatched through `verum run --interp|--aot`.
+    pub verum_bin: PathBuf,
     /// Working directory
     pub work_dir: PathBuf,
     /// Test directories
@@ -193,44 +188,17 @@ pub struct PathsConfig {
 
 impl Default for PathsConfig {
     fn default() -> Self {
-        // Try to find binaries in vcs/bin relative to current directory
-        // This allows vtest to work from the project root
-        let bin_dir = Self::find_bin_dir();
+        let verum_bin = ExecutorConfig::find_verum_cli()
+            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "verum.exe" } else { "verum" }));
 
         Self {
-            interpreter: bin_dir.join("verum-interpreter"),
-            jit_base: bin_dir.join("verum-jit"),
-            jit_opt: bin_dir.join("verum-jit"),
-            aot: bin_dir.join("verum-aot"),
+            verum_bin,
             work_dir: PathBuf::from("."),
             test_dirs: vec![PathBuf::from("vcs/specs")].into(),
         }
     }
 }
 
-impl PathsConfig {
-    /// Find the vcs/bin directory by searching up from the current directory.
-    fn find_bin_dir() -> PathBuf {
-        // First try relative to current working directory
-        let cwd_bin = PathBuf::from("vcs/bin");
-        if cwd_bin.exists() {
-            return cwd_bin;
-        }
-
-        // Try to find by searching up the directory tree
-        if let Ok(cwd) = std::env::current_dir() {
-            for ancestor in cwd.ancestors() {
-                let bin_dir = ancestor.join("vcs").join("bin");
-                if bin_dir.exists() {
-                    return bin_dir;
-                }
-            }
-        }
-
-        // Fall back to system PATH lookup
-        PathBuf::new()
-    }
-}
 
 /// Report configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -519,10 +487,7 @@ impl VTestConfig {
         }
 
         ExecutorConfig {
-            interpreter_path: self.paths.interpreter.clone(),
-            jit_base_path: self.paths.jit_base.clone(),
-            jit_opt_path: self.paths.jit_opt.clone(),
-            aot_path: self.paths.aot.clone(),
+            verum_bin: self.paths.verum_bin.clone(),
             work_dir: self.paths.work_dir.clone(),
             default_timeout_ms: self.runner.timeout,
             env,

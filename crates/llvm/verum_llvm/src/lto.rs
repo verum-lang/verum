@@ -2,8 +2,10 @@
 //!
 //! Provides ThinLTO and Full LTO with incremental caching.
 
+// On MSVC, the linker processes static libraries in single-pass order.
+// Force it to resolve LTO symbols from LLVMLTO.lib.
 use verum_llvm_sys::lto::*;
-use std::ffi::CStr;
+use std::ffi::{CStr, c_char};
 use std::path::{Path, PathBuf};
 
 use crate::error::{LlvmError, LlvmResult};
@@ -12,8 +14,8 @@ use crate::support::to_c_str;
 /// Mirror of LTOObjectBuffer with accessible fields
 #[repr(C)]
 struct ObjectBuffer {
-    buffer: *const libc::c_char,
-    size: libc::size_t,
+    buffer: *const c_char,
+    size: usize,
 }
 
 /// LTO mode
@@ -204,8 +206,8 @@ impl ThinLtoCodegen {
             thinlto_codegen_add_module(
                 self.codegen,
                 name_c.as_ptr(),
-                data.as_ptr() as *const libc::c_char,
-                data.len() as libc::c_int,
+                data.as_ptr() as *const c_char,
+                data.len() as std::ffi::c_int,
             );
         }
     }
@@ -231,7 +233,7 @@ impl ThinLtoCodegen {
     /// Set cache pruning interval
     pub fn set_cache_pruning_interval(&self, seconds: u32) {
         unsafe {
-            thinlto_codegen_set_cache_pruning_interval(self.codegen, seconds as libc::c_int);
+            thinlto_codegen_set_cache_pruning_interval(self.codegen, seconds as std::ffi::c_int);
         }
     }
 
@@ -356,7 +358,7 @@ impl FullLtoCodegen {
         // Create LTO module from memory
         let module = unsafe {
             lto_module_create_from_memory(
-                data.as_ptr() as *const libc::c_void,
+                data.as_ptr() as *const std::ffi::c_void,
                 data.len(),
             )
         };

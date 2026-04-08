@@ -146,3 +146,42 @@ public fn has_data(fd: FileDesc) -> Bool {
     let result = poll(&mut pfd, 1, 0);
     result > 0 && (pfd.revents & POLLIN) != 0
 }
+
+// =============================================================================
+// Windows: blocking_read and has_data
+// =============================================================================
+
+/// Read at least one byte from stdin, blocking indefinitely.
+@cfg(target_os = "windows")
+public fn blocking_read(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, STD_INPUT_HANDLE, ReadFile,
+    };
+
+    let handle = GetStdHandle(STD_INPUT_HANDLE);
+    let mut bytes_read: UInt32 = 0;
+    let ok = ReadFile(
+        handle,
+        buf as &unsafe mut Byte,
+        buf.len() as UInt32,
+        &mut bytes_read,
+        0 as &mut core.sys.windows.kernel32.Overlapped,
+    );
+    if ok {
+        Ok(bytes_read as Int)
+    } else {
+        Err(StreamError.new(IoErrorKind.Other, "ReadFile failed"))
+    }
+}
+
+/// Check if console input data is available (non-blocking).
+/// Uses WaitForSingleObject with a zero timeout.
+@cfg(target_os = "windows")
+public fn has_data(fd: FileDesc) -> Bool {
+    mount core.sys.windows.kernel32.{
+        GetStdHandle, STD_INPUT_HANDLE, WaitForSingleObject, WAIT_OBJECT_0,
+    };
+
+    let handle = GetStdHandle(STD_INPUT_HANDLE);
+    WaitForSingleObject(handle, 0) == WAIT_OBJECT_0
+}

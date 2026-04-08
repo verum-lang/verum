@@ -81,3 +81,28 @@ LLVMBool LLVM_InitializeNativeAsmPrinter(void) {
 LLVMBool LLVM_InitializeNativeDisassembler(void) {
     return LLVMInitializeNativeDisassembler();
 }
+
+/* ========================================================================
+ * Shims for LLVM-C constant expression APIs removed in LLVM 17+.
+ *
+ * LLVMConstMul, LLVMConstNSWMul, LLVMConstNUWMul were removed because
+ * LLVM no longer supports arbitrary constant expressions. These shims
+ * compute the result at compile time using the LLVM-C integer API.
+ * ======================================================================== */
+#include <llvm-c/Core.h>
+
+LLVMValueRef LLVMConstMul(LLVMValueRef LHS, LLVMValueRef RHS) {
+    /* Both operands must be constant integers of the same type */
+    unsigned long long lhs_val = LLVMConstIntGetZExtValue(LHS);
+    unsigned long long rhs_val = LLVMConstIntGetZExtValue(RHS);
+    LLVMTypeRef ty = LLVMTypeOf(LHS);
+    return LLVMConstInt(ty, lhs_val * rhs_val, 0);
+}
+
+LLVMValueRef LLVMConstNSWMul(LLVMValueRef LHS, LLVMValueRef RHS) {
+    return LLVMConstMul(LHS, RHS);
+}
+
+LLVMValueRef LLVMConstNUWMul(LLVMValueRef LHS, LLVMValueRef RHS) {
+    return LLVMConstMul(LHS, RHS);
+}

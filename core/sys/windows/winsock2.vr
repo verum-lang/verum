@@ -1,0 +1,605 @@
+module sys.windows.winsock2;
+
+// =============================================================================
+// sys/windows/winsock2.vr - Winsock2 API FFI + POSIX-Compatible Wrappers
+// =============================================================================
+// Layer: 0 (Core)
+// Dependencies: sys/windows/kernel32, sys/common
+// Platform: Windows (x86_64)
+// =============================================================================
+//
+// This module provides:
+// 1. Raw Winsock2 FFI declarations via @extern("ws2_32.dll")
+// 2. POSIX-compatible wrapper functions with identical signatures to
+//    sys/linux/syscall, enabling core/net/ modules to share code paths
+//    across Linux and Windows via @cfg(any(target_os = "linux", target_os = "windows"))
+//
+// Architecture:
+// - WSA initialization is handled lazily via Once guard on first socket call
+// - All wrappers return Result<T, OSError> matching the Linux syscall interface
+// - Socket handles are wrapped as FileDesc for cross-platform compatibility
+// - closesocket() is mapped to close(), ioctlsocket() to set_nonblocking(), etc.
+//
+// Performance:
+// - WSA init: ~50us one-time cost, amortized to 0
+// - Socket ops: same as raw Winsock2 (no overhead beyond error translation)
+// - IOCP integration available via sys/windows/io.vr for async I/O
+//
+// Spec: docs/architecture/new-arch-spec.md Section 5.4
+// =============================================================================
+
+@cfg(target_os = "windows")
+
+mount sys.common.{FileDesc, OSError};
+mount super.kernel32.{GetLastError, CloseHandle};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.intrinsics.spin_hint;
+
+// =============================================================================
+// Constants (POSIX-compatible names)
+// =============================================================================
+
+/// Address families
+public const AF_INET: Int = 2;
+public const AF_INET6: Int = 23;    // Windows AF_INET6
+
+/// Socket types
+public const SOCK_STREAM: Int = 1;
+public const SOCK_DGRAM: Int = 2;
+
+/// For API compatibility with Linux (no-ops on Windows, handled differently)
+public const SOCK_NONBLOCK: Int = 0;
+public const SOCK_CLOEXEC: Int = 0;
+
+/// Protocols
+public const IPPROTO_TCP: Int = 6;
+public const IPPROTO_UDP: Int = 17;
+
+/// Socket option levels
+public const SOL_SOCKET: Int = 0xFFFF;
+public const SOL_TCP: Int = 6;         // IPPROTO_TCP
+
+/// Socket options
+public const SO_REUSEADDR: Int = 4;
+public const SO_KEEPALIVE: Int = 8;
+public const SO_BROADCAST: Int = 32;
+public const SO_RCVTIMEO: Int = 0x1006;
+public const SO_SNDTIMEO: Int = 0x1005;
+public const SO_ERROR: Int = 0x1007;
+public const SO_RCVBUF: Int = 0x1002;
+public const SO_SNDBUF: Int = 0x1001;
+public const TCP_NODELAY: Int = 1;
+
+/// Shutdown modes
+public const SHUT_RD: Int = 0;   // SD_RECEIVE
+public const SHUT_WR: Int = 1;   // SD_SEND
+public const SHUT_RDWR: Int = 2; // SD_BOTH
+
+/// Message flags
+public const MSG_PEEK: Int = 2;
+public const MSG_DONTWAIT: Int = 0;  // Not used on Windows; non-blocking via ioctlsocket
+
+/// Error sentinel
+public const SOCKET_ERROR: Int = -1;
+public const INVALID_SOCKET: UInt64 = 0xFFFFFFFFFFFFFFFF;
+
+/// ioctlsocket commands
+const FIONBIO: UInt32 = 0x8004667E;
+
+// =============================================================================
+// Winsock2 Types
+// =============================================================================
+
+/// WSADATA structure (400 bytes on x64)
+type WSADATA is {
+    version: UInt16,
+    high_version: UInt16,
+    max_sockets: UInt16,
+    max_udp_dg: UInt16,
+    vendor_info: &unsafe Byte,
+    description: List<Byte>,   // [u8; 257]
+    system_status: List<Byte>, // [u8; 129]
+};
+
+/// Socket address (IPv4) — binary compatible with struct sockaddr_in
+public type SockaddrIn is {
+    family: UInt16,   // AF_INET
+    port: UInt16,     // Network byte order
+    addr: UInt32,     // Network byte order
+    zero: UInt64,     // Padding
+};
+
+/// Socket address (IPv6) — binary compatible with struct sockaddr_in6
+public type SockaddrIn6 is {
+    family: UInt16,
+    port: UInt16,
+    flowinfo: UInt32,
+    addr: List<Byte>,  // 16 bytes
+    scope_id: UInt32,
+};
+
+// =============================================================================
+// Raw Winsock2 FFI Declarations
+// =============================================================================
+
+@extern("ws2_32.dll")
+fn WSAStartup(version_requested: UInt16, wsa_data: &unsafe Byte) -> Int;
+
+@extern("ws2_32.dll")
+fn WSACleanup() -> Int;
+
+@extern("ws2_32.dll")
+fn WSAGetLastError() -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_socket(af: Int, sock_type: Int, protocol: Int) -> UInt64;
+
+@extern("ws2_32.dll")
+fn ws2_connect(s: UInt64, name: &unsafe Byte, namelen: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_bind(s: UInt64, name: &unsafe Byte, namelen: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_listen(s: UInt64, backlog: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_accept(s: UInt64, addr: &unsafe Byte, addrlen: &mut Int) -> UInt64;
+
+@extern("ws2_32.dll")
+fn ws2_send(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_recv(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_sendto(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int, to: &unsafe Byte, tolen: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_recvfrom(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int, from: &unsafe Byte, fromlen: &mut Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_shutdown(s: UInt64, how: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_closesocket(s: UInt64) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_setsockopt(s: UInt64, level: Int, optname: Int, optval: &unsafe Byte, optlen: Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_getsockopt(s: UInt64, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_getsockname(s: UInt64, name: &unsafe Byte, namelen: &mut Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_getpeername(s: UInt64, name: &unsafe Byte, namelen: &mut Int) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_ioctlsocket(s: UInt64, cmd: UInt32, argp: &mut UInt32) -> Int;
+
+@extern("ws2_32.dll")
+fn ws2_select(nfds: Int, readfds: &unsafe Byte, writefds: &unsafe Byte, exceptfds: &unsafe Byte, timeout: &unsafe Byte) -> Int;
+
+// =============================================================================
+// WSA Initialization (Once-guarded)
+// =============================================================================
+
+/// WSA initialization state: 0=not started, 1=in progress, 2=done
+let wsa_state: AtomicInt = AtomicInt.new(0);
+
+/// Initialize Winsock2 subsystem. Called automatically on first socket operation.
+/// Thread-safe via atomic CAS — only the first caller performs initialization.
+fn wsa_ensure_init() {
+    // Fast path: already initialized
+    if wsa_state.load(MemoryOrdering.Acquire) == 2 {
+        return;
+    }
+
+    // Try to become the initializer
+    match wsa_state.compare_exchange(0, 1, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+        Ok(_) => {
+            // We are the initializer — request Winsock 2.2
+            let mut wsadata_buf: List<Byte> = List.with_capacity(512);
+            wsadata_buf.resize(512, 0);
+
+            let version: UInt16 = 0x0202;  // MAKEWORD(2, 2)
+            let result = WSAStartup(version, wsadata_buf.as_mut_ptr() as &unsafe Byte);
+
+            if result != 0 {
+                // WSAStartup failed — reset state so another thread can retry
+                wsa_state.store(0, MemoryOrdering.Release);
+                panic(f"WSAStartup failed with error {result}");
+            }
+
+            wsa_state.store(2, MemoryOrdering.Release);
+        }
+        Err(current) => {
+            // Another thread is initializing — spin until done
+            while wsa_state.load(MemoryOrdering.Acquire) != 2 {
+                spin_hint();
+            }
+        }
+    }
+}
+
+/// Translate WSAGetLastError() to OSError.
+fn wsa_error() -> OSError {
+    let code = WSAGetLastError();
+    OSError.from_raw(code)
+}
+
+// =============================================================================
+// POSIX-Compatible Wrapper Functions
+// =============================================================================
+//
+// These wrappers provide the same interface as sys/linux/syscall, allowing
+// core/net/ modules to use @cfg(any(target_os = "linux", target_os = "windows"))
+// for shared code paths.
+// =============================================================================
+
+/// Create a socket. Returns file descriptor on success.
+public fn socket(domain: Int, sock_type: Int, protocol: Int) -> Result<FileDesc, OSError> {
+    wsa_ensure_init();
+
+    // Strip Linux-specific flags (SOCK_NONBLOCK, SOCK_CLOEXEC) that are no-ops on Windows
+    let actual_type = sock_type & 0xFF;
+
+    let s = ws2_socket(domain, actual_type, protocol);
+    if s == INVALID_SOCKET {
+        Err(wsa_error())
+    } else {
+        Ok(FileDesc(s as Int))
+    }
+}
+
+/// Connect socket to remote address.
+public fn connect(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Result<(), OSError> {
+    let result = ws2_connect(fd.0 as UInt64, addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Bind socket to local address.
+public fn bind(fd: FileDesc, addr: &unsafe Byte, addrlen: Int) -> Result<(), OSError> {
+    let result = ws2_bind(fd.0 as UInt64, addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Start listening for incoming connections.
+public fn listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
+    let result = ws2_listen(fd.0 as UInt64, backlog);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Accept an incoming connection.
+public fn accept(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<FileDesc, OSError> {
+    let s = ws2_accept(fd.0 as UInt64, addr, addrlen);
+    if s == INVALID_SOCKET {
+        Err(wsa_error())
+    } else {
+        Ok(FileDesc(s as Int))
+    }
+}
+
+/// Accept with flags (Linux accept4 equivalent). Flags ignored on Windows.
+public fn accept4(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int, flags: Int) -> Result<FileDesc, OSError> {
+    // Windows doesn't have accept4; accept then set flags manually
+    let new_fd = accept(fd, addr, addrlen)?;
+
+    // If SOCK_NONBLOCK was requested, set non-blocking
+    if (flags & 0x800) != 0 {  // SOCK_NONBLOCK on Linux
+        let _ = set_nonblocking(new_fd, true);
+    }
+
+    Ok(new_fd)
+}
+
+/// Send data on a connected socket.
+public fn send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSError> {
+    let result = ws2_send(fd.0 as UInt64, buf.as_ptr() as &unsafe Byte, buf.len() as Int, flags);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(result)
+    }
+}
+
+/// Receive data from a connected socket.
+public fn recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
+    let result = ws2_recv(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int, flags);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(result)
+    }
+}
+
+/// Send data to a specific address (UDP).
+public fn sendto(fd: FileDesc, buf: &[Byte], flags: Int, dest_addr: &unsafe Byte, addrlen: Int) -> Result<Int, OSError> {
+    let result = ws2_sendto(fd.0 as UInt64, buf.as_ptr() as &unsafe Byte, buf.len() as Int, flags, dest_addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(result)
+    }
+}
+
+/// Receive data with source address (UDP).
+public fn recvfrom(fd: FileDesc, buf: &mut [Byte], flags: Int, src_addr: &unsafe Byte, addrlen: &mut Int) -> Result<Int, OSError> {
+    let result = ws2_recvfrom(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int, flags, src_addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(result)
+    }
+}
+
+/// Shutdown socket (stop send/receive).
+public fn shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
+    let result = ws2_shutdown(fd.0 as UInt64, how);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Close a socket. Maps to closesocket() on Windows.
+public fn close(fd: FileDesc) -> Result<(), OSError> {
+    let result = ws2_closesocket(fd.0 as UInt64);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Read from socket (alias for recv with no flags). POSIX read() compatibility.
+public fn read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    recv(fd, buf, 0)
+}
+
+/// Write to socket (alias for send with no flags). POSIX write() compatibility.
+public fn write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    send(fd, buf, 0)
+}
+
+/// Stub for fcntl (not applicable on Windows, use ioctlsocket).
+/// Provided for API compatibility — returns Ok(0).
+public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
+    // fcntl is not used directly on Windows; non-blocking is handled by ioctlsocket
+    Ok(0)
+}
+
+// =============================================================================
+// Socket Option Wrappers
+// =============================================================================
+
+/// Set an integer socket option.
+public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> Result<(), OSError> {
+    let val: Int = value;
+    let result = ws2_setsockopt(
+        fd.0 as UInt64,
+        level,
+        optname,
+        &val as &unsafe Byte,
+        @size_of(Int) as Int,
+    );
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Get socket error status.
+public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
+    let mut val: Int = 0;
+    let mut len: Int = @size_of(Int) as Int;
+    let result = ws2_getsockopt(
+        fd.0 as UInt64,
+        SOL_SOCKET,
+        SO_ERROR,
+        &mut val as &unsafe Byte,
+        &mut len,
+    );
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(val)
+    }
+}
+
+/// Get local socket address.
+public fn getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<(), OSError> {
+    let result = ws2_getsockname(fd.0 as UInt64, addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Get peer socket address.
+public fn getpeername(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<(), OSError> {
+    let result = ws2_getpeername(fd.0 as UInt64, addr, addrlen);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Set socket to non-blocking mode via ioctlsocket(FIONBIO).
+public fn set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError> {
+    let mut mode: UInt32 = if nonblocking { 1 } else { 0 };
+    let result = ws2_ioctlsocket(fd.0 as UInt64, FIONBIO, &mut mode);
+    if result == SOCKET_ERROR {
+        Err(wsa_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Enable/disable SO_REUSEADDR.
+public fn set_reuseaddr(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_REUSEADDR, if enable { 1 } else { 0 })
+}
+
+/// Enable/disable SO_REUSEPORT. Not available on Windows — no-op for compatibility.
+public fn set_reuseport(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    // Windows does not have SO_REUSEPORT; SO_REUSEADDR provides similar behavior
+    // (allows multiple sockets to bind to the same port).
+    Ok(())
+}
+
+/// Enable/disable TCP_NODELAY (Nagle's algorithm).
+public fn set_tcp_nodelay(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_TCP, TCP_NODELAY, if enable { 1 } else { 0 })
+}
+
+/// Enable/disable SO_KEEPALIVE.
+public fn set_keepalive(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_KEEPALIVE, if enable { 1 } else { 0 })
+}
+
+/// Enable/disable SO_BROADCAST (UDP).
+public fn set_broadcast(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_BROADCAST, if enable { 1 } else { 0 })
+}
+
+/// Set send buffer size.
+public fn set_send_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_SNDBUF, size)
+}
+
+/// Set receive buffer size.
+public fn set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
+}
+
+/// Set socket send/receive timeout in milliseconds.
+/// On Windows, SO_RCVTIMEO/SO_SNDTIMEO take DWORD milliseconds (not struct timeval).
+public fn set_socket_timeout(fd: FileDesc, send_ms: Int, recv_ms: Int) -> Result<(), OSError> {
+    if send_ms > 0 {
+        let send_timeout: UInt32 = send_ms as UInt32;
+        let r = ws2_setsockopt(
+            fd.0 as UInt64,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &send_timeout as &unsafe Byte,
+            @size_of(UInt32) as Int,
+        );
+        if r == SOCKET_ERROR {
+            return Err(wsa_error());
+        }
+    }
+
+    if recv_ms > 0 {
+        let recv_timeout: UInt32 = recv_ms as UInt32;
+        let r = ws2_setsockopt(
+            fd.0 as UInt64,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &recv_timeout as &unsafe Byte,
+            @size_of(UInt32) as Int,
+        );
+        if r == SOCKET_ERROR {
+            return Err(wsa_error());
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Multicast Support
+// =============================================================================
+
+/// IP multicast request structure (ip_mreq equivalent)
+type IpMreq is {
+    multiaddr: UInt32,   // Multicast group address
+    interface_addr: UInt32, // Local interface address
+};
+
+const IP_ADD_MEMBERSHIP: Int = 12;
+const IP_DROP_MEMBERSHIP: Int = 13;
+const IP_MULTICAST_TTL: Int = 10;
+const IP_MULTICAST_LOOP: Int = 11;
+const IPPROTO_IP: Int = 0;
+
+/// Join a multicast group on a specific interface.
+public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        multiaddr: multiaddr,
+        interface_addr: interface_addr,
+    };
+    let result = ws2_setsockopt(
+        fd.0 as UInt64,
+        IPPROTO_IP,
+        IP_ADD_MEMBERSHIP,
+        &mreq as &unsafe Byte,
+        @size_of(IpMreq) as Int,
+    );
+    if result == SOCKET_ERROR { Err(wsa_error()) } else { Ok(()) }
+}
+
+/// Leave a multicast group.
+public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UInt32) -> Result<(), OSError> {
+    let mreq = IpMreq {
+        multiaddr: multiaddr,
+        interface_addr: interface_addr,
+    };
+    let result = ws2_setsockopt(
+        fd.0 as UInt64,
+        IPPROTO_IP,
+        IP_DROP_MEMBERSHIP,
+        &mreq as &unsafe Byte,
+        @size_of(IpMreq) as Int,
+    );
+    if result == SOCKET_ERROR { Err(wsa_error()) } else { Ok(()) }
+}
+
+/// Set multicast TTL.
+public fn set_multicast_ttl_v4(fd: FileDesc, ttl: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IP, IP_MULTICAST_TTL, ttl)
+}
+
+/// Enable/disable multicast loopback.
+public fn set_multicast_loop_v4(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IP, IP_MULTICAST_LOOP, if enable { 1 } else { 0 })
+}
+
+// =============================================================================
+// Peek / Non-blocking Recv/Send (POSIX compatibility)
+// =============================================================================
+
+/// Peek at incoming data without consuming it.
+public fn peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    recv(fd, buf, MSG_PEEK)
+}
+
+/// Non-blocking receive. Returns Err(EWOULDBLOCK) if no data available.
+public fn recv_nonblock(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
+    // On Windows, non-blocking behavior is set on the socket, not per-call.
+    // This function assumes the socket is already in non-blocking mode.
+    recv(fd, buf, 0)
+}
+
+/// Non-blocking send. Returns Err(EWOULDBLOCK) if buffer full.
+public fn send_nonblock(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
+    send(fd, buf, 0)
+}

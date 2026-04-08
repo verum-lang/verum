@@ -61,7 +61,7 @@ pub(in super::super) fn handle_syscall(state: &mut InterpreterState) -> Interpre
         let _ = (dst, num, a1, a2, a3, a4, a5, a6);
         Err(InterpreterError::NotImplemented {
             feature: "syscall: platform not supported",
-            opcode: Some(0xE0),
+            opcode: Some(crate::instruction::Opcode::SyscallLinux),
         })
     }
 }

@@ -25,7 +25,7 @@ use super::{
 
 /// Order in which to traverse an operation tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum WalkOrder {
     /// Visit the operation before its nested regions.
     PreOrder = MlirWalkOrder_MlirWalkPreOrder,
@@ -35,7 +35,7 @@ pub enum WalkOrder {
 
 /// Control flow action returned by the walk callback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum WalkResult {
     /// Continue into this operation’s children.
     Advance = MlirWalkResult_MlirWalkResultAdvance,

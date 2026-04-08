@@ -193,17 +193,33 @@ impl Linker {
 
     /// Add a library search path
     pub fn add_library_path(self, path: impl AsRef<Path>) -> Self {
-        self.arg("-L").arg(path.as_ref().to_string_lossy())
+        match self.flavor {
+            LinkerFlavor::Coff => self.arg(format!("/LIBPATH:{}", path.as_ref().display())),
+            _ => self.arg("-L").arg(path.as_ref().to_string_lossy()),
+        }
     }
 
     /// Link against a library by name
     pub fn add_library(self, name: impl AsRef<str>) -> Self {
-        self.arg(format!("-l{}", name.as_ref()))
+        match self.flavor {
+            LinkerFlavor::Coff => {
+                let name = name.as_ref();
+                if name.ends_with(".lib") {
+                    self.arg(name)
+                } else {
+                    self.arg(format!("{}.lib", name))
+                }
+            }
+            _ => self.arg(format!("-l{}", name.as_ref())),
+        }
     }
 
     /// Set output file path
     pub fn output(self, path: impl AsRef<Path>) -> Self {
-        self.arg("-o").arg(path.as_ref().to_string_lossy())
+        match self.flavor {
+            LinkerFlavor::Coff => self.arg(format!("/OUT:{}", path.as_ref().display())),
+            _ => self.arg("-o").arg(path.as_ref().to_string_lossy()),
+        }
     }
 
     /// Create a shared library
@@ -237,7 +253,10 @@ impl Linker {
 
     /// Strip debug info only
     pub fn strip_debug(self) -> Self {
-        self.arg("-Wl,--strip-debug")
+        match self.flavor {
+            LinkerFlavor::Coff => self.arg("/DEBUG:NONE"),
+            _ => self.arg("-Wl,--strip-debug"),
+        }
     }
 
     /// Set entry point

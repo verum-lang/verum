@@ -278,8 +278,20 @@ impl NoLibcConfig {
             flags: vec![
                 "/NODEFAULTLIB".to_string(),
                 "/ENTRY:mainCRTStartup".to_string(),
+                "/SUBSYSTEM:CONSOLE".to_string(),
+                // Dead-code elimination for smaller binaries
+                "/OPT:REF".to_string(),
+                "/OPT:ICF".to_string(),
             ],
         }
+    }
+
+    /// Create Windows linking configuration for GUI (no console window).
+    pub fn windows_gui() -> Self {
+        let mut cfg = Self::windows();
+        cfg.flags.retain(|f| !f.starts_with("/SUBSYSTEM:"));
+        cfg.flags.push("/SUBSYSTEM:WINDOWS".to_string());
+        cfg
     }
 
     /// Create FreeBSD no-libc linking configuration.
@@ -796,8 +808,13 @@ impl PreparedLink {
               self.config.inputs.len(),
               self.config.output.display());
 
+        #[cfg(not(target_env = "msvc"))]
         if self.config.lto.is_some() {
             return self.link_with_lto();
+        }
+        #[cfg(target_env = "msvc")]
+        if self.config.lto.is_some() {
+            warn!("LTO not available on MSVC target — falling back to standard linking");
         }
 
         self.link_with_lld()
@@ -927,7 +944,8 @@ impl PreparedLink {
         }
     }
 
-    /// Link with LTO
+    /// Link with LTO (not available on MSVC due to static library symbol resolution)
+    #[cfg(not(target_env = "msvc"))]
     fn link_with_lto(self) -> LinkResult<LinkOutput> {
         use verum_llvm::lto::lto_compile;
 

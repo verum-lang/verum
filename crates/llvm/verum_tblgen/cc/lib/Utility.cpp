@@ -149,7 +149,11 @@ void tableGenInitPrint(TableGenTypedInitRef ti, TableGenStringCallback callback,
   stream << *unwrap(ti);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void tableGenInitDump(TableGenTypedInitRef ti) { unwrap(ti)->dump(); }
+#else
+void tableGenInitDump(TableGenTypedInitRef ti) { (void)ti; }
+#endif
 
 TableGenBool tableGenPrintError(TableGenParserRef ref,
                                 TableGenSourceLocationRef loc_ref,

@@ -101,7 +101,7 @@ use crate::module::{
 use crate::types::{StringId, TypeDescriptor, TypeId, TypeRef};
 
 use verum_ast::decl::{ExternBlockDecl, MountDecl, MountTree, MountTreeKind, TypeDeclBody, VariantData};
-use verum_ast::ffi::FFIBoundary;
+use verum_ast::ffi::{FFIBoundary, CallingConvention as AstCallingConvention};
 use verum_ast::ty::PathSegment;
 use verum_ast::{Block, FunctionBody, FunctionDecl, Item, ItemKind, Module, StmtKind};
 use verum_ast::bitfield::ByteOrder;
@@ -4135,11 +4135,12 @@ impl VbcCodegen {
             let (error_protocol, error_sentinel) = Self::map_ast_error_protocol(&ffi_func.error_protocol);
             let memory_effects = Self::map_ast_memory_effects(&ffi_func.memory_effects);
             let ownership = Self::map_ast_ownership(&ffi_func.ownership);
+            let convention = Self::map_ast_calling_convention(&ffi_func.signature.calling_convention);
             let symbol_id = FfiSymbolId(self.ffi_symbols.len() as u32);
             self.ffi_symbols.push(FfiSymbol {
                 name: StringId(0),
                 library_idx: -1,
-                convention: FfiCallingConvention::C,
+                convention,
                 signature,
                 memory_effects,
                 error_protocol,
@@ -4229,6 +4230,48 @@ impl VbcCodegen {
                 Some(0)
             }
             _ => None,
+        }
+    }
+
+    /// Map AST calling convention to VBC calling convention.
+    fn map_ast_calling_convention(cc: &AstCallingConvention) -> FfiCallingConvention {
+        match cc {
+            AstCallingConvention::C => FfiCallingConvention::C,
+            AstCallingConvention::StdCall => FfiCallingConvention::Stdcall,
+            AstCallingConvention::FastCall => FfiCallingConvention::Fastcall,
+            AstCallingConvention::SysV64 => FfiCallingConvention::SysV64,
+            AstCallingConvention::Interrupt => FfiCallingConvention::C, // No direct VBC equivalent
+            AstCallingConvention::Naked => FfiCallingConvention::C,    // No direct VBC equivalent
+            AstCallingConvention::System => {
+                // System = stdcall on Windows, C elsewhere
+                #[cfg(target_os = "windows")]
+                { FfiCallingConvention::Stdcall }
+                #[cfg(not(target_os = "windows"))]
+                { FfiCallingConvention::C }
+            }
+        }
+    }
+
+    /// Derive calling convention from a FunctionDecl's `extern_abi` field.
+    ///
+    /// `extern_abi` is a freeform string like `"C"`, `"stdcall"`, `"system"`.
+    /// Absent means C ABI (the default for extern blocks).
+    fn extern_abi_to_convention(abi: &verum_common::Maybe<verum_common::Text>) -> FfiCallingConvention {
+        match abi {
+            verum_common::Maybe::Some(s) => match s.as_str() {
+                "C" | "c" | "cdecl" => FfiCallingConvention::C,
+                "stdcall" | "Stdcall" | "StdCall" => FfiCallingConvention::Stdcall,
+                "fastcall" | "FastCall" => FfiCallingConvention::Fastcall,
+                "sysv64" | "SysV64" => FfiCallingConvention::SysV64,
+                "system" | "System" => {
+                    #[cfg(target_os = "windows")]
+                    { FfiCallingConvention::Stdcall }
+                    #[cfg(not(target_os = "windows"))]
+                    { FfiCallingConvention::C }
+                }
+                _ => FfiCallingConvention::C,
+            },
+            verum_common::Maybe::None => FfiCallingConvention::C,
         }
     }
 
@@ -4332,13 +4375,16 @@ impl VbcCodegen {
 
             // Create FFI signature from function parameters and return type
             let signature = self.create_ffi_signature(func);
+            // FunctionDecl uses extern_abi (e.g., "C", "stdcall") — map to convention.
+            // Defaults to C calling convention for extern blocks.
+            let convention = Self::extern_abi_to_convention(&func.extern_abi);
 
             // Create FFI symbol entry
             let symbol_id = FfiSymbolId(self.ffi_symbols.len() as u32);
             self.ffi_symbols.push(FfiSymbol {
                 name: StringId(0), // Will be remapped in build_module
                 library_idx,
-                convention: FfiCallingConvention::C,
+                convention,
                 signature,
                 memory_effects: MemoryEffects::default(), // PURE by default
                 error_protocol: ErrorProtocol::None,
@@ -4676,13 +4722,14 @@ impl VbcCodegen {
 
         // Create FFI signature from function parameters and return type
         let signature = self.create_ffi_signature(func);
+        let convention = Self::extern_abi_to_convention(&func.extern_abi);
 
         // Create FFI symbol entry
         let symbol_id = FfiSymbolId(self.ffi_symbols.len() as u32);
         self.ffi_symbols.push(FfiSymbol {
             name: StringId(0), // Will be remapped in build_module
             library_idx,
-            convention: FfiCallingConvention::C,
+            convention,
             signature,
             memory_effects: MemoryEffects::default(), // PURE by default
             error_protocol: ErrorProtocol::None,
