@@ -10,3 +10,7 @@
 [target.x86_64-pc-windows-msvc]
 linker = "lld-link"
 rustflags = ["-C", "link-arg=/libpath:llvm/install/lib"]
+
+# Static CRT for the verum binary only (proc-macros are DLLs and need dynamic CRT).
+# Set via RUSTFLAGS or profile override; cargo config applies to all crate types.
+# Use: RUSTFLAGS="-C target-feature=+crt-static" cargo build --release -p verum_cli
